@@ -41,10 +41,17 @@ jobs:
       - name: Build APK
         working-directory: android
         run: ./gradlew assembleDebug
-
       # 7. Upload generated APK
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: outfit-app-debug-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
+
+      # 8. Create GitHub Release
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: OV App Build ${{ github.run_number }}
+          files: android/app/build/outputs/apk/debug/app-debug.apk
