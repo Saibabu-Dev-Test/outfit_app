@@ -1,0 +1,49 @@
+name: React Native Android CI
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Get the latest source code
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 2. Setup Node.js
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # 3. Install Java/JDK
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      # 4. Install JavaScript dependencies
+      - name: Install dependencies
+        run: npm install
+
+      # 5. Make Gradle executable
+      - name: Make Gradlew executable
+        run: chmod +x android/gradlew
+
+      # 6. Build Android Debug APK
+      - name: Build APK
+        working-directory: android
+        run: ./gradlew assembleDebug
+
+      # 7. Upload generated APK
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: outfit-app-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
