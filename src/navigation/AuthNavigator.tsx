@@ -21,7 +21,9 @@ export default function AuthNavigator({ onLoginSuccess }: AuthNavigatorProps) {
         headerShown: false,
         contentStyle: { backgroundColor: '#FAF9FC' },
       }}>
-      <Stack.Screen name="Login" component={LoginScreen} />
+      <Stack.Screen name="Login">
+        {(props) => <LoginScreen {...props} onLoginSuccess={onLoginSuccess} />}
+      </Stack.Screen>
       <Stack.Screen name="Otp">
         {(props) => <OtpScreen {...props} onLoginSuccess={onLoginSuccess} />}
       </Stack.Screen>

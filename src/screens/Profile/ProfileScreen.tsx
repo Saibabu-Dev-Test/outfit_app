@@ -6,6 +6,7 @@ import {
   StyleSheet,
   TouchableOpacity,
   StatusBar,
+  Platform,
   Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -15,17 +16,17 @@ const stats = [
   { label: 'Outfits', value: '48' },
   { label: 'Votes', value: '1.2K' },
   { label: 'Circles', value: '7' },
+  { label: 'Followers', value: '1.5K' },
+  { label: 'Following', value: '2.5K' },
 ];
 
 const menuItems = [
   { id: '1', icon: '🎨', label: 'Style Preferences', hasArrow: true },
-  { id: '2', icon: '📏', label: 'My Measurements', hasArrow: true },
-  { id: '3', icon: '🏆', label: 'Achievements', hasArrow: true },
-  { id: '4', icon: '🔔', label: 'Notifications', hasToggle: true },
-  { id: '5', icon: '🌙', label: 'Dark Mode', hasToggle: true },
-  { id: '6', icon: '🔒', label: 'Privacy Settings', hasArrow: true },
-  { id: '7', icon: '❓', label: 'Help & Support', hasArrow: true },
-  { id: '8', icon: '📋', label: 'Terms & Privacy', hasArrow: true },
+  { id: '2', icon: '🏆', label: 'Achievements', hasArrow: true },
+  { id: '3', icon: '🔔', label: 'Notifications', hasToggle: true },
+  { id: '4', icon: '🌙', label: 'Dark Mode', hasToggle: true },
+  { id: '5', icon: '❓', label: 'Help & Support', hasArrow: true },
+  { id: '6', icon: '📋', label: 'Terms & Conditions', hasArrow: true },
 ];
 
 export default function ProfileScreen() {
@@ -34,7 +35,10 @@ export default function ProfileScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
-      <StatusBar barStyle="dark-content" backgroundColor={colors.background} />
+      <StatusBar
+        barStyle="dark-content"
+        {...(Platform.OS === 'android' ? { backgroundColor: colors.background } : {})}
+      />
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
@@ -60,8 +64,8 @@ export default function ProfileScreen() {
               </View>
             </View>
             <Text style={styles.profileName}>Dinesh Veera</Text>
-            <Text style={styles.profileHandle}>@dineshveera</Text>
-            <Text style={styles.profileBio}>Fashion enthusiast • Minimal style lover</Text>
+            <Text style={styles.profileHandle}>8374330906</Text>
+            <Text style={styles.profileBio}>Fashion enthusiast • megha rasi</Text>
           </View>
 
           {/* Stats */}
@@ -80,7 +84,7 @@ export default function ProfileScreen() {
 
         {/* Style DNA */}
         <View style={styles.styleDnaCard}>
-          <Text style={styles.styleDnaTitle}>✦ Style DNA</Text>
+          <Text style={styles.styleDnaTitle}>Outfit Style</Text>
           <View style={styles.dnaRow}>
             {['Minimal', 'Classic', 'Casual'].map(tag => (
               <View key={tag} style={styles.dnaTag}>
