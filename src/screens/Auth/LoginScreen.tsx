@@ -20,8 +20,9 @@ import {
 
 interface LoginScreenProps {
   navigation: any;
-  onLoginSuccess?: () => void;
+  onLoginSuccess?: (user?: any) => void;
 }
+
 
 const COUNTRY_CODES = [
   { code: '+91', country: 'IN', flag: '🇮🇳' },

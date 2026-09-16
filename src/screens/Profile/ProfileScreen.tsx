@@ -13,11 +13,14 @@ import {
   Modal,
   TextInput,
   KeyboardAvoidingView,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { launchImageLibrary, launchCamera, ImagePickerResponse } from 'react-native-image-picker';
 import { colors, fontSize, fontWeight, spacing, borderRadius } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
-import { getUserProfile, updateUserProfile, UserProfile } from '../../services/authApi';
+import { getUserProfile, updateUserProfile, uploadProfileAvatar, UserProfile } from '../../services/authApi';
+
 
 const menuItems = [
   { id: '1', icon: '🎨', label: 'Style Preferences', hasArrow: true },
@@ -47,6 +50,72 @@ export default function ProfileScreen() {
   const [editGender, setEditGender] = useState<string>('');
   const [editBio, setEditBio] = useState<string>('');
   const [savingProfile, setSavingProfile] = useState<boolean>(false);
+  const [uploadingAvatar, setUploadingAvatar] = useState<boolean>(false);
+
+
+  const handleUploadImage = async (response: ImagePickerResponse) => {
+    if (response.didCancel) return;
+    if (response.errorCode || response.errorMessage) {
+      Alert.alert('Image Error', response.errorMessage || 'Failed to select image');
+      return;
+    }
+
+    const asset = response.assets && response.assets[0];
+    if (!asset || (!asset.uri && !asset.base64)) return;
+
+    try {
+      setUploadingAvatar(true);
+      const res = await uploadProfileAvatar(profileData?.id || authUser?.id, {
+        uri: asset.uri || '',
+        name: asset.fileName || 'avatar.jpg',
+        type: asset.type || 'image/jpeg',
+        base64: asset.base64 || undefined,
+      });
+
+      if (res?.avatarUrl) {
+        setProfileData(prev =>
+          prev
+            ? { ...prev, avatarUrl: res.avatarUrl }
+            : ({ avatarUrl: res.avatarUrl, phoneNumber: authUser?.phoneNumber || '' } as UserProfile)
+        );
+        updateUserData({ avatarUrl: res.avatarUrl });
+        Alert.alert('Success', 'Profile photo updated successfully!');
+      }
+    } catch (err: any) {
+      Alert.alert('Upload Failed', err?.message || 'Failed to upload profile photo to AWS S3.');
+    } finally {
+      setUploadingAvatar(false);
+    }
+  };
+
+  const handleSelectAvatarSource = () => {
+    Alert.alert(
+      'Change Profile Photo',
+      'Choose an option to update your profile photo',
+      [
+        {
+          text: 'Take Photo',
+          onPress: () => {
+            launchCamera(
+              { mediaType: 'photo', quality: 0.8, includeBase64: true },
+              handleUploadImage
+            );
+          },
+        },
+        {
+          text: 'Choose from Library',
+          onPress: () => {
+            launchImageLibrary(
+              { mediaType: 'photo', quality: 0.8, includeBase64: true },
+              handleUploadImage
+            );
+          },
+        },
+        { text: 'Cancel', style: 'cancel' },
+      ]
+    );
+  };
+
 
   const fetchProfile = async () => {
     try {
@@ -145,14 +214,32 @@ export default function ProfileScreen() {
         {/* Main Profile Card */}
         <View style={styles.profileCard}>
           <View style={styles.profileGradient}>
-            <View style={styles.avatarContainer}>
+            <TouchableOpacity
+              style={styles.avatarContainer}
+              onPress={handleSelectAvatarSource}
+              disabled={uploadingAvatar}
+              activeOpacity={0.8}>
               <View style={styles.avatar}>
-                <Text style={styles.avatarText}>👤</Text>
+                {profileData?.avatarUrl ? (
+                  <Image
+                    source={{ uri: profileData.avatarUrl }}
+                    style={styles.avatarImage}
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <Text style={styles.avatarText}>👤</Text>
+                )}
+                {uploadingAvatar && (
+                  <View style={styles.avatarLoadingOverlay}>
+                    <ActivityIndicator color="#FFFFFF" size="small" />
+                  </View>
+                )}
               </View>
-              <View style={styles.verifiedBadge}>
-                <Text style={styles.verifiedText}>✓</Text>
+              <View style={styles.cameraBadge}>
+                <Text style={styles.cameraIconText}>📷</Text>
               </View>
-            </View>
+            </TouchableOpacity>
+
 
             {loading && !profileData ? (
               <ActivityIndicator color="#FFFFFF" style={{ marginVertical: spacing.sm }} />
@@ -296,8 +383,41 @@ export default function ProfileScreen() {
             </View>
 
             <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              {/* Profile Photo Section */}
+              <View style={styles.modalAvatarSection}>
+                <TouchableOpacity
+                  style={styles.modalAvatarContainer}
+                  onPress={handleSelectAvatarSource}
+                  disabled={uploadingAvatar}
+                  activeOpacity={0.8}>
+                  <View style={styles.modalAvatar}>
+                    {profileData?.avatarUrl ? (
+                      <Image
+                        source={{ uri: profileData.avatarUrl }}
+                        style={styles.modalAvatarImage}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <Text style={styles.modalAvatarText}>👤</Text>
+                    )}
+                    {uploadingAvatar && (
+                      <View style={styles.avatarLoadingOverlay}>
+                        <ActivityIndicator color="#FFFFFF" size="small" />
+                      </View>
+                    )}
+                  </View>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.modalChangePhotoBtn}
+                  onPress={handleSelectAvatarSource}
+                  disabled={uploadingAvatar}>
+                  <Text style={styles.modalChangePhotoText}>📷 Upload Profile Photo</Text>
+                </TouchableOpacity>
+              </View>
+
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>Full Name</Text>
+
                 <TextInput
                   style={styles.modalInput}
                   placeholder="Enter your full name"
@@ -468,8 +588,39 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.4)',
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  avatarImage: {
+    width: 74,
+    height: 74,
+    borderRadius: 37,
   },
   avatarText: { fontSize: 40 },
+  avatarLoadingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  cameraBadge: {
+    position: 'absolute',
+    bottom: 0,
+    right: -2,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: colors.primary,
+  },
+  cameraIconText: { fontSize: 13 },
   verifiedBadge: {
     position: 'absolute',
     bottom: 2,
@@ -484,6 +635,44 @@ const styles = StyleSheet.create({
     borderColor: colors.primary,
   },
   verifiedText: { color: colors.textInverse, fontSize: 11, fontWeight: fontWeight.bold },
+  modalAvatarSection: {
+    alignItems: 'center',
+    marginBottom: spacing.base,
+  },
+  modalAvatarContainer: {
+    marginBottom: spacing.xs,
+  },
+  modalAvatar: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: colors.background,
+    borderWidth: 2,
+    borderColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  modalAvatarImage: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+  },
+  modalAvatarText: { fontSize: 36 },
+  modalChangePhotoBtn: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  modalChangePhotoText: {
+    fontSize: fontSize.xs,
+    fontWeight: fontWeight.bold,
+    color: colors.primary,
+  },
+
   profileName: { fontSize: fontSize.lg, fontWeight: fontWeight.bold, color: colors.textInverse, marginBottom: 2 },
   profileHandle: { fontSize: fontSize.sm, color: colors.accentLight, marginBottom: spacing.xs },
   profileBio: { fontSize: fontSize.sm, color: 'rgba(255,255,255,0.85)', textAlign: 'center', paddingHorizontal: spacing.md, marginTop: 2 },

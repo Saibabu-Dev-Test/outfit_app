@@ -234,4 +234,90 @@ export const updateUserProfile = async (
   throw lastError || new Error('Unable to connect to backend server to update profile details.');
 };
 
+export interface AvatarUploadResponse {
+  message: string;
+  avatarUrl: string;
+  user?: UserProfile;
+}
+
+export interface ImageFileParam {
+  uri: string;
+  name?: string;
+  type?: string;
+  base64?: string;
+}
+
+export const uploadProfileAvatar = async (
+  userId?: number | string,
+  imageFile?: ImageFileParam
+): Promise<AvatarUploadResponse> => {
+  const urls = getAuthBaseUrls();
+  let lastError: Error | null = null;
+
+  for (const baseUrl of urls) {
+    try {
+      const endpoint = userId
+        ? `${baseUrl}/api/user/profile/${userId}/avatar`
+        : `${baseUrl}/api/user/profile/avatar`;
+
+      let body: any;
+      let headers: Record<string, string> = {
+        ...(userId ? { 'x-user-id': String(userId) } : {}),
+      };
+
+      if (imageFile?.base64) {
+        headers['Content-Type'] = 'application/json';
+        body = JSON.stringify({
+          imageBase64: imageFile.base64,
+          fileName: imageFile.name || 'avatar.jpg',
+          userId,
+        });
+      } else if (imageFile?.uri) {
+        const formData = new FormData();
+        formData.append('avatar', {
+          uri: imageFile.uri,
+          name: imageFile.name || 'avatar.jpg',
+          type: imageFile.type || 'image/jpeg',
+        } as any);
+        if (userId) formData.append('userId', String(userId));
+        body = formData;
+      } else {
+        throw new Error('No image file or base64 data provided for upload');
+      }
+
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers,
+        body,
+      });
+
+      const responseText = await response.text();
+      let data: any;
+      try {
+        data = JSON.parse(responseText);
+      } catch (jsonErr) {
+        const cleanMsg = responseText.replace(/<[^>]*>?/gm, '').trim();
+        throw new Error(
+          `Server response (${response.status}): ${cleanMsg.slice(0, 150) || 'Invalid server response'}`
+        );
+      }
+
+      if (!response.ok) {
+        throw new Error(data.message || 'Failed to upload profile photo');
+      }
+
+      return data;
+
+    } catch (err: any) {
+      lastError = err;
+      if (err.message && err.message !== 'Failed to fetch' && !err.message.includes('Network request failed')) {
+        throw err;
+      }
+    }
+  }
+
+  throw lastError || new Error('Unable to connect to backend server to upload profile photo.');
+};
+
+
 
