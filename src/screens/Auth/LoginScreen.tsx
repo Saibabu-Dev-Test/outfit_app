@@ -97,7 +97,7 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
 
         setLoading(false);
         if (onLoginSuccess) {
-          onLoginSuccess();
+          onLoginSuccess(loginRes.user);
         } else {
           navigation.reset({
             index: 0,
@@ -114,7 +114,7 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
         setLoading(false);
 
         if (onLoginSuccess) {
-          onLoginSuccess();
+          onLoginSuccess(loginRes.user);
         } else {
           navigation.reset({
             index: 0,

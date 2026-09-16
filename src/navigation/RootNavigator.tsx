@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import BottomTabNavigator from './BottomTabNavigator';
 import AuthNavigator from './AuthNavigator';
+import { AuthProvider, useAuth } from '../context/AuthContext';
 
 export type RootStackParamList = {
   Auth: undefined;
@@ -11,8 +12,8 @@ export type RootStackParamList = {
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
-export default function RootNavigator() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+function NavigationContent() {
+  const { isAuthenticated, login } = useAuth();
 
   return (
     <NavigationContainer>
@@ -22,7 +23,7 @@ export default function RootNavigator() {
             {(props) => (
               <AuthNavigator
                 {...props}
-                onLoginSuccess={() => setIsAuthenticated(true)}
+                onLoginSuccess={(userData) => login(userData)}
               />
             )}
           </Stack.Screen>
@@ -33,3 +34,12 @@ export default function RootNavigator() {
     </NavigationContainer>
   );
 }
+
+export default function RootNavigator() {
+  return (
+    <AuthProvider>
+      <NavigationContent />
+    </AuthProvider>
+  );
+}
+
