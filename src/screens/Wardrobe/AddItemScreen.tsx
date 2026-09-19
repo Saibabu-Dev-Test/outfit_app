@@ -11,10 +11,13 @@ import {
   Image,
   Alert,
   ActionSheetIOS,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { launchCamera, launchImageLibrary } from 'react-native-image-picker';
 import { colors, fontSize, fontWeight, spacing, borderRadius } from '../../theme';
+import { useAuth } from '../../context/AuthContext';
+import { addWardrobeItem as apiAddWardrobeItem } from '../../services/wardrobeApi';
 
 const CATEGORIES = [
   { id: '1', icon: '👔', label: 'Tops' },
@@ -47,6 +50,40 @@ const COLOR_SWATCHES = [
 
 const FABRIC_TYPES = ['Body Con', 'Formal', 'Casual', 'Party', 'Ethnic', 'Sports'];
 
+// Gender-aware item name suggestions per category
+const ITEM_SUGGESTIONS: Record<string, Record<string, string[]>> = {
+  male: {
+    Tops:       ['Oxford Shirt', 'Polo Shirt', 'Graphic Tee', 'Henley Shirt', 'Linen Shirt', 'Flannel Shirt', 'Tank Top', 'Turtleneck', 'Hoodie', 'Sweatshirt'],
+    Dresses:    ['Kurta', 'Sherwani', 'Dhoti Kurta', 'Angarkha'],
+    Bottoms:    ['Slim Chinos', 'Cargo Pants', 'Jogger Pants', 'Formal Trousers', 'Denim Jeans', 'Shorts', 'Track Pants', 'Linen Trousers'],
+    Outerwear:  ['Blazer', 'Denim Jacket', 'Leather Jacket', 'Bomber Jacket', 'Overcoat', 'Trench Coat', 'Parka', 'Windbreaker'],
+    Sneakers:   ['Running Shoes', 'Canvas Sneakers', 'High-Top Sneakers', 'Slip-Ons', 'Loafers', 'Chelsea Boots', 'Derby Shoes', 'Monk Straps'],
+    Heels:      ['Formal Oxfords', 'Block Heels', 'Dress Heels'],
+    Bags:       ['Backpack', 'Messenger Bag', 'Tote Bag', 'Laptop Bag', 'Duffle Bag', 'Crossbody Bag'],
+    Accessories:['Watch', 'Belt', 'Sunglasses', 'Bracelet', 'Cap', 'Beanie', 'Tie', 'Pocket Square', 'Cufflinks'],
+  },
+  female: {
+    Tops:       ['Crop Top', 'Blouse', 'Peplum Top', 'Off-Shoulder Top', 'Spaghetti Top', 'Camisole', 'Wrap Top', 'Corset Top', 'Halter Top', 'Tunic'],
+    Dresses:    ['Midi Dress', 'Maxi Dress', 'Mini Dress', 'Wrap Dress', 'A-Line Dress', 'Bodycon Dress', 'Shirt Dress', 'Floral Dress', 'Sundress', 'Slip Dress'],
+    Bottoms:    ['Mini Skirt', 'Midi Skirt', 'Pencil Skirt', 'Pleated Skirt', 'Palazzo Pants', 'Mom Jeans', 'Skinny Jeans', 'Flare Pants', 'Culottes', 'Leggings'],
+    Outerwear:  ['Trench Coat', 'Blazer', 'Cardigan', 'Denim Jacket', 'Faux Fur Coat', 'Puffer Jacket', 'Shrug', 'Cape'],
+    Sneakers:   ['Canvas Sneakers', 'Platform Sneakers', 'Slip-Ons', 'Running Shoes', 'Ballet Flats', 'Loafers', 'Mules'],
+    Heels:      ['Stiletto Heels', 'Block Heels', 'Wedge Heels', 'Kitten Heels', 'Ankle Strap Heels', 'Peep-Toe Heels', 'Platform Heels'],
+    Bags:       ['Handbag', 'Clutch', 'Tote Bag', 'Crossbody Bag', 'Shoulder Bag', 'Mini Bag', 'Satchel', 'Bucket Bag'],
+    Accessories:['Necklace', 'Earrings', 'Bracelet', 'Ring', 'Scrunchie', 'Headband', 'Sunglasses', 'Belt', 'Hair Clip', 'Anklet'],
+  },
+  other: {
+    Tops:       ['T-Shirt', 'Shirt', 'Top', 'Crop Top', 'Hoodie', 'Sweatshirt', 'Blouse', 'Tank Top'],
+    Dresses:    ['Dress', 'Kurta', 'Midi Dress', 'Maxi Dress'],
+    Bottoms:    ['Jeans', 'Trousers', 'Shorts', 'Skirt', 'Leggings', 'Track Pants'],
+    Outerwear:  ['Jacket', 'Blazer', 'Coat', 'Cardigan', 'Hoodie'],
+    Sneakers:   ['Sneakers', 'Running Shoes', 'Loafers', 'Slip-Ons', 'Boots'],
+    Heels:      ['Heels', 'Platform Shoes', 'Wedges'],
+    Bags:       ['Backpack', 'Tote Bag', 'Crossbody Bag', 'Handbag'],
+    Accessories:['Watch', 'Sunglasses', 'Belt', 'Ring', 'Necklace'],
+  },
+};
+
 interface AddItemScreenProps {
   navigation: any;
   onSave?: (item: {
@@ -59,13 +96,35 @@ interface AddItemScreenProps {
 }
 
 export default function AddItemScreen({ navigation, onSave }: AddItemScreenProps) {
+  const { user } = useAuth();
+
+  // Resolve gender key for suggestions
+  const genderKey = (() => {
+    const g = (user?.gender || '').toLowerCase();
+    if (g === 'male' || g === 'm') return 'male';
+    if (g === 'female' || g === 'f') return 'female';
+    return 'other';
+  })();
+
   const [imageUri, setImageUri]               = useState<string | null>(null);
   const [itemName, setItemName]               = useState('');
+  const [dropdownOpen, setDropdownOpen]       = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [selectedColor, setSelectedColor]       = useState<string | null>(null);
   const [selectedFabric, setSelectedFabric]     = useState<string | null>(null);
   const [nameError, setNameError]               = useState('');
   const [catError, setCatError]                 = useState(false);
+  const [saving, setSaving]                     = useState(false);
+
+  // Current suggestions based on gender + category
+  const suggestions: string[] = selectedCategory
+    ? (ITEM_SUGGESTIONS[genderKey]?.[selectedCategory] ||
+       ITEM_SUGGESTIONS.other[selectedCategory] || [])
+    : [];
+
+  const filteredSuggestions = itemName.trim()
+    ? suggestions.filter(s => s.toLowerCase().includes(itemName.toLowerCase()))
+    : suggestions;
 
   // ── Image picker ────────────────────────────────────────────────────────
   const openCamera = () => {
@@ -124,22 +183,46 @@ export default function AddItemScreen({ navigation, onSave }: AddItemScreenProps
     }
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     let valid = true;
     if (!itemName.trim()) { setNameError('Please enter an item name'); valid = false; }
     if (!selectedCategory) { setCatError(true); valid = false; }
     if (!valid) return;
 
+    if (!user?.id) {
+      Alert.alert('Error', 'You must be logged in to add items.');
+      return;
+    }
+
     const cat = CATEGORIES.find(c => c.label === selectedCategory)!;
-    navigation?.navigate('WardrobeMain', {
-      savedItem: {
+
+    setSaving(true);
+    try {
+      const savedItem = await apiAddWardrobeItem({
+        userId: user.id,
         name: itemName.trim(),
         category: selectedCategory!,
-        categoryIcon: cat.icon,
-        color: selectedColor || '#F8F8F8',
-        fabric: selectedFabric || '',
-      },
-    });
+        color: selectedColor || undefined,
+        fabric: selectedFabric || undefined,
+        imageUri: imageUri || undefined,
+      });
+
+      navigation?.navigate('WardrobeMain', {
+        savedItem: {
+          name: savedItem.name,
+          category: savedItem.category,
+          categoryIcon: cat.icon,
+          color: savedItem.color || '#F8F8F8',
+          fabric: savedItem.fabric || '',
+          imageUrl: savedItem.imageUrl || null,
+          id: savedItem.id,
+        },
+      });
+    } catch (err: any) {
+      Alert.alert('Upload Failed', err.message || 'Could not save item. Please try again.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const selectedCat = CATEGORIES.find(c => c.label === selectedCategory);
@@ -190,18 +273,6 @@ export default function AddItemScreen({ navigation, onSave }: AddItemScreenProps
           )}
         </TouchableOpacity>
 
-        {/* Item Name */}
-        <Text style={styles.sectionLabel}>ITEM NAME</Text>
-        <TextInput
-          style={[styles.textInput, nameError ? styles.textInputError : null]}
-          placeholder="e.g. White Oxford Shirt"
-          placeholderTextColor="#B0AECB"
-          value={itemName}
-          onChangeText={t => { setItemName(t); setNameError(''); }}
-          returnKeyType="done"
-        />
-        {nameError ? <Text style={styles.errorMsg}>{nameError}</Text> : null}
-
         {/* Category */}
         <Text style={[styles.sectionLabel, catError && styles.sectionLabelError]}>
           {catError ? 'CATEGORY — please select one' : 'CATEGORY'}
@@ -213,7 +284,7 @@ export default function AddItemScreen({ navigation, onSave }: AddItemScreenProps
               <TouchableOpacity
                 key={cat.id}
                 style={[styles.chip, active && styles.chipActive]}
-                onPress={() => { setSelectedCategory(cat.label); setCatError(false); }}
+                onPress={() => { setSelectedCategory(cat.label); setCatError(false); setItemName(''); setDropdownOpen(true); }}
                 activeOpacity={0.8}>
                 <Text style={styles.chipEmoji}>{cat.icon}</Text>
                 <Text style={[styles.chipText, active && styles.chipTextActive]}>{cat.label}</Text>
@@ -221,6 +292,78 @@ export default function AddItemScreen({ navigation, onSave }: AddItemScreenProps
             );
           })}
         </View>
+
+        {/* Item Name — gender-aware dropdown */}
+        <Text style={styles.sectionLabel}>
+          ITEM NAME{genderKey !== 'other' ? `  ·  ${genderKey === 'male' ? '♂ Male' : '♀ Female'} suggestions` : ''}
+        </Text>
+
+        <View style={styles.dropdownWrapper}>
+          {/* Input row */}
+          <View style={[styles.dropdownInput, nameError ? styles.textInputError : null]}>
+            <TextInput
+              style={styles.dropdownTextInput}
+              placeholder={
+                selectedCategory
+                  ? `Search or type ${selectedCategory.toLowerCase()} name…`
+                  : 'Select a category first, then choose…'
+              }
+              placeholderTextColor="#B0AECB"
+              value={itemName}
+              onChangeText={t => { setItemName(t); setNameError(''); setDropdownOpen(true); }}
+              onFocus={() => setDropdownOpen(true)}
+              returnKeyType="done"
+              onSubmitEditing={() => setDropdownOpen(false)}
+            />
+            <TouchableOpacity
+              onPress={() => setDropdownOpen(o => !o)}
+              style={styles.dropdownArrowBtn}
+              activeOpacity={0.7}>
+              <Text style={styles.dropdownArrow}>{dropdownOpen ? '▲' : '▼'}</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Suggestion list */}
+          {dropdownOpen && filteredSuggestions.length > 0 && (
+            <View style={styles.dropdownList}>
+              {filteredSuggestions.map((item, idx) => (
+                <TouchableOpacity
+                  key={item}
+                  style={[
+                    styles.dropdownItem,
+                    idx < filteredSuggestions.length - 1 && styles.dropdownItemBorder,
+                    itemName === item && styles.dropdownItemActive,
+                  ]}
+                  activeOpacity={0.75}
+                  onPress={() => {
+                    setItemName(item);
+                    setNameError('');
+                    setDropdownOpen(false);
+                  }}>
+                  <Text style={[styles.dropdownItemText, itemName === item && styles.dropdownItemTextActive]}>
+                    {item}
+                  </Text>
+                  {itemName === item && <Text style={styles.dropdownCheck}>✓</Text>}
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+
+          {/* No category selected hint */}
+          {dropdownOpen && !selectedCategory && (
+            <View style={styles.dropdownHint}>
+              <Text style={styles.dropdownHintText}>👆 Select a category above to see suggestions</Text>
+            </View>
+          )}
+
+          {/* No match hint */}
+          {dropdownOpen && selectedCategory && filteredSuggestions.length === 0 && itemName.trim() && (
+            <View style={styles.dropdownHint}>
+              <Text style={styles.dropdownHintText}>No match — "{itemName}" will be used as the name</Text>
+            </View>
+          )}
+        </View>
+        {nameError ? <Text style={styles.errorMsg}>{nameError}</Text> : null}
 
         {/* Colour */}
         <Text style={styles.sectionLabel}>COLOUR</Text>
@@ -283,8 +426,16 @@ export default function AddItemScreen({ navigation, onSave }: AddItemScreenProps
         ) : null}
 
         {/* Save Button */}
-        <TouchableOpacity style={styles.saveBtn} activeOpacity={0.85} onPress={handleSave}>
-          <Text style={styles.saveBtnText}>SAVE TO MY WARDROBE</Text>
+        <TouchableOpacity
+          style={[styles.saveBtn, saving && styles.saveBtnDisabled]}
+          activeOpacity={0.85}
+          onPress={handleSave}
+          disabled={saving}>
+          {saving ? (
+            <ActivityIndicator color="#FFFFFF" size="small" />
+          ) : (
+            <Text style={styles.saveBtnText}>SAVE TO MY WARDROBE</Text>
+          )}
         </TouchableOpacity>
 
       </ScrollView>
@@ -402,6 +553,62 @@ const styles = StyleSheet.create({
   textInputError: { borderColor: '#F48FB1' },
   errorMsg: { fontSize: 11, color: '#E91E63', fontWeight: fontWeight.semiBold, marginTop: 4 },
 
+  // Dropdown
+  dropdownWrapper: { position: 'relative', zIndex: 10 },
+  dropdownInput: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: '#E0DBF0',
+    borderRadius: borderRadius.md,
+    backgroundColor: '#FFFFFF',
+    paddingLeft: spacing.md,
+    paddingRight: spacing.sm,
+  },
+  dropdownTextInput: {
+    flex: 1,
+    paddingVertical: 12,
+    fontSize: fontSize.base,
+    color: '#0A1940',
+  },
+  dropdownArrowBtn: { padding: spacing.sm },
+  dropdownArrow: { fontSize: 11, color: '#9E9EBA', fontWeight: fontWeight.bold },
+  dropdownList: {
+    marginTop: 4,
+    borderWidth: 1.5,
+    borderColor: '#E0DBF0',
+    borderRadius: borderRadius.md,
+    backgroundColor: '#FFFFFF',
+    maxHeight: 220,
+    overflow: 'hidden',
+    shadowColor: 'rgba(10,25,64,0.1)',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 1,
+    shadowRadius: 10,
+    elevation: 6,
+  },
+  dropdownItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.md,
+    paddingVertical: 11,
+  },
+  dropdownItemBorder: { borderBottomWidth: 1, borderBottomColor: '#F0EDF8' },
+  dropdownItemActive: { backgroundColor: '#FDF2F7' },
+  dropdownItemText: { fontSize: fontSize.sm, color: '#2C2C4A', fontWeight: fontWeight.medium },
+  dropdownItemTextActive: { color: '#E91E63', fontWeight: fontWeight.bold },
+  dropdownCheck: { fontSize: 13, color: '#E91E63', fontWeight: fontWeight.bold },
+  dropdownHint: {
+    marginTop: 4,
+    backgroundColor: '#F8F6FF',
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: '#E0DBF0',
+  },
+  dropdownHintText: { fontSize: 12, color: '#8E8EA8', textAlign: 'center' },
+
   chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: {
     flexDirection: 'row',
@@ -459,4 +666,5 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
   saveBtnText: { color: '#FFFFFF', fontSize: 14, fontWeight: fontWeight.bold, letterSpacing: 1.2 },
+  saveBtnDisabled: { opacity: 0.65 },
 });

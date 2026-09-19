@@ -52,6 +52,77 @@ export default function ProfileScreen() {
   const [savingProfile, setSavingProfile] = useState<boolean>(false);
   const [uploadingAvatar, setUploadingAvatar] = useState<boolean>(false);
 
+  // Gender dropdown state
+  const [isGenderDropdownOpen, setIsGenderDropdownOpen] = useState<boolean>(false);
+
+  // Calendar picker state for DOB
+  const [isCalendarVisible, setIsCalendarVisible] = useState<boolean>(false);
+  const [calYear, setCalYear] = useState<number>(1998);
+  const [calMonth, setCalMonth] = useState<number>(7);
+  const [selectedDay, setSelectedDay] = useState<number>(15);
+  const [isYearPickerOpen, setIsYearPickerOpen] = useState<boolean>(false);
+
+  const GENDER_OPTIONS = [
+    { label: 'Male', icon: '👨', value: 'Male' },
+    { label: 'Female', icon: '👩', value: 'Female' },
+    { label: 'Other', icon: '🧑', value: 'Other' },
+  ];
+
+  const MONTH_NAMES = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+  ];
+
+  const DAY_HEADINGS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const YEAR_LIST = Array.from({ length: 2026 - 1940 + 1 }, (_, i) => 2026 - i);
+
+  const handleOpenCalendar = () => {
+    if (editDob) {
+      const parts = editDob.split('-');
+      if (parts.length === 3) {
+        const y = parseInt(parts[0], 10);
+        const m = parseInt(parts[1], 10) - 1;
+        const d = parseInt(parts[2], 10);
+        if (!isNaN(y) && !isNaN(m) && !isNaN(d)) {
+          setCalYear(y);
+          setCalMonth(m);
+          setSelectedDay(d);
+        }
+      }
+    } else {
+      setCalYear(1998);
+      setCalMonth(7);
+      setSelectedDay(15);
+    }
+    setIsYearPickerOpen(false);
+    setIsCalendarVisible(true);
+  };
+
+  const handleConfirmCalendarDate = () => {
+    const mm = String(calMonth + 1).padStart(2, '0');
+    const dd = String(selectedDay).padStart(2, '0');
+    setEditDob(`${calYear}-${mm}-${dd}`);
+    setIsCalendarVisible(false);
+  };
+
+  const handlePrevMonth = () => {
+    if (calMonth === 0) {
+      setCalMonth(11);
+      setCalYear(y => y - 1);
+    } else {
+      setCalMonth(m => m - 1);
+    }
+  };
+
+  const handleNextMonth = () => {
+    if (calMonth === 11) {
+      setCalMonth(0);
+      setCalYear(y => y + 1);
+    } else {
+      setCalMonth(m => m + 1);
+    }
+  };
+
 
   const handleUploadImage = async (response: ImagePickerResponse) => {
     if (response.didCancel) return;
@@ -145,6 +216,7 @@ export default function ProfileScreen() {
     setEditLanguage(profileData?.language || '');
     setEditGender(profileData?.gender || '');
     setEditBio(profileData?.bio || '');
+    setIsGenderDropdownOpen(false);
     setIsEditModalVisible(true);
   };
 
@@ -442,13 +514,15 @@ export default function ProfileScreen() {
               <View style={styles.formRow}>
                 <View style={[styles.inputGroup, { flex: 1 }]}>
                   <Text style={styles.inputLabel}>Date of Birth</Text>
-                  <TextInput
-                    style={styles.modalInput}
-                    placeholder="e.g. 1998-08-15"
-                    placeholderTextColor="#9E9EBA"
-                    value={editDob}
-                    onChangeText={setEditDob}
-                  />
+                  <TouchableOpacity
+                    style={styles.modalInputTouchable}
+                    onPress={handleOpenCalendar}
+                    activeOpacity={0.85}>
+                    <Text style={editDob ? styles.modalInputValueText : styles.modalInputPlaceholderText}>
+                      {editDob || 'Select DOB'}
+                    </Text>
+                    <Text style={styles.inputCalendarIcon}>📅</Text>
+                  </TouchableOpacity>
                 </View>
 
                 <View style={[styles.inputGroup, { flex: 1 }]}>
@@ -489,13 +563,45 @@ export default function ProfileScreen() {
 
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>Gender</Text>
-                <TextInput
-                  style={styles.modalInput}
-                  placeholder="e.g. Male / Female / Other"
-                  placeholderTextColor="#9E9EBA"
-                  value={editGender}
-                  onChangeText={setEditGender}
-                />
+                <TouchableOpacity
+                  style={styles.modalInputTouchable}
+                  onPress={() => setIsGenderDropdownOpen(o => !o)}
+                  activeOpacity={0.85}>
+                  <Text style={editGender ? styles.modalInputValueText : styles.modalInputPlaceholderText}>
+                    {editGender
+                      ? (() => {
+                          const matched = GENDER_OPTIONS.find(
+                            g => g.value.toLowerCase() === editGender.toLowerCase()
+                          );
+                          return matched ? `${matched.icon}  ${matched.label}` : editGender;
+                        })()
+                      : 'Select Gender'}
+                  </Text>
+                  <Text style={styles.dropdownArrowIcon}>{isGenderDropdownOpen ? '▲' : '▼'}</Text>
+                </TouchableOpacity>
+
+                {isGenderDropdownOpen && (
+                  <View style={styles.genderDropdownMenu}>
+                    {GENDER_OPTIONS.map(opt => {
+                      const isActive = editGender?.toLowerCase() === opt.value.toLowerCase();
+                      return (
+                        <TouchableOpacity
+                          key={opt.value}
+                          style={[styles.genderOptionItem, isActive && styles.genderOptionActive]}
+                          onPress={() => {
+                            setEditGender(opt.value);
+                            setIsGenderDropdownOpen(false);
+                          }}
+                          activeOpacity={0.8}>
+                          <Text style={[styles.genderOptionText, isActive && styles.genderOptionTextActive]}>
+                            {opt.icon}   {opt.label}
+                          </Text>
+                          {isActive && <Text style={styles.genderOptionCheck}>✓</Text>}
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                )}
               </View>
 
               <View style={styles.inputGroup}>
@@ -533,6 +639,115 @@ export default function ProfileScreen() {
             </View>
           </View>
         </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Calendar Picker Modal */}
+      <Modal
+        visible={isCalendarVisible}
+        animationType="fade"
+        transparent={true}
+        onRequestClose={() => setIsCalendarVisible(false)}>
+        <View style={styles.calendarOverlay}>
+          <TouchableOpacity
+            style={styles.backdropPressable}
+            activeOpacity={1}
+            onPress={() => setIsCalendarVisible(false)}
+          />
+          <View style={styles.calendarCard}>
+            {/* Header */}
+            <View style={styles.calendarCardHeader}>
+              <Text style={styles.calendarCardSub}>SELECT DATE OF BIRTH</Text>
+              <Text style={styles.calendarCardTitle}>
+                {MONTH_NAMES[calMonth]} {selectedDay}, {calYear}
+              </Text>
+            </View>
+
+            {/* Navigation Bar */}
+            <View style={styles.monthYearBar}>
+              <TouchableOpacity style={styles.calNavBtn} onPress={handlePrevMonth}>
+                <Text style={styles.calNavText}>◀</Text>
+              </TouchableOpacity>
+
+              <View style={styles.monthYearLabelRow}>
+                <Text style={styles.monthYearText}>{MONTH_NAMES[calMonth]}</Text>
+                <TouchableOpacity
+                  style={styles.yearSelectChip}
+                  onPress={() => setIsYearPickerOpen(o => !o)}
+                  activeOpacity={0.8}>
+                  <Text style={styles.yearSelectText}>{calYear} {isYearPickerOpen ? '▲' : '▼'}</Text>
+                </TouchableOpacity>
+              </View>
+
+              <TouchableOpacity style={styles.calNavBtn} onPress={handleNextMonth}>
+                <Text style={styles.calNavText}>▶</Text>
+              </TouchableOpacity>
+            </View>
+
+            {isYearPickerOpen ? (
+              <ScrollView style={styles.yearListScroll} contentContainerStyle={styles.yearListGrid} showsVerticalScrollIndicator={true}>
+                {YEAR_LIST.map(y => (
+                  <TouchableOpacity
+                    key={y}
+                    style={[styles.yearItem, y === calYear && styles.yearItemActive]}
+                    onPress={() => {
+                      setCalYear(y);
+                      setIsYearPickerOpen(false);
+                    }}>
+                    <Text style={[styles.yearItemText, y === calYear && styles.yearItemTextActive]}>
+                      {y}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            ) : (
+              <>
+                {/* Days of Week */}
+                <View style={styles.dayHeadingsRow}>
+                  {DAY_HEADINGS.map(dh => (
+                    <Text key={dh} style={styles.dayHeadingText}>{dh}</Text>
+                  ))}
+                </View>
+
+                {/* Day Grid */}
+                <View style={styles.daysGrid}>
+                  {Array.from({ length: new Date(calYear, calMonth, 1).getDay() }).map((_, i) => (
+                    <View key={`blank-${i}`} style={styles.dayCellEmpty} />
+                  ))}
+                  {Array.from({ length: new Date(calYear, calMonth + 1, 0).getDate() }).map((_, i) => {
+                    const dayNum = i + 1;
+                    const isSelected = dayNum === selectedDay;
+                    return (
+                      <TouchableOpacity
+                        key={`day-${dayNum}`}
+                        style={[styles.dayCell, isSelected && styles.dayCellSelected]}
+                        onPress={() => setSelectedDay(dayNum)}
+                        activeOpacity={0.7}>
+                        <Text style={[styles.dayCellText, isSelected && styles.dayCellTextSelected]}>
+                          {dayNum}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </>
+            )}
+
+            {/* Calendar Actions */}
+            <View style={styles.calendarActions}>
+              <TouchableOpacity
+                style={styles.calCancelBtn}
+                onPress={() => setIsCalendarVisible(false)}>
+                <Text style={styles.calCancelText}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.calConfirmBtn}
+                onPress={handleConfirmCalendarDate}>
+                <Text style={styles.calConfirmText}>Set Date</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
       </Modal>
     </SafeAreaView>
   );
@@ -884,5 +1099,253 @@ const styles = StyleSheet.create({
     color: colors.textInverse,
     fontWeight: fontWeight.bold,
     fontSize: fontSize.base,
+  },
+  // Touchable input & Dropdown styles
+  modalInputTouchable: {
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.background,
+    paddingHorizontal: spacing.md,
+    height: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  modalInputValueText: {
+    fontSize: fontSize.base,
+    color: colors.textPrimary,
+    fontWeight: fontWeight.medium,
+  },
+  modalInputPlaceholderText: {
+    fontSize: fontSize.base,
+    color: '#9E9EBA',
+    fontWeight: fontWeight.regular,
+  },
+  inputCalendarIcon: {
+    fontSize: 18,
+  },
+  dropdownArrowIcon: {
+    fontSize: 12,
+    color: colors.textMuted,
+  },
+  genderDropdownMenu: {
+    marginTop: 6,
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.md,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  genderOptionItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  genderOptionActive: {
+    backgroundColor: '#F0F7FF',
+  },
+  genderOptionText: {
+    fontSize: fontSize.base,
+    color: colors.textPrimary,
+    fontWeight: fontWeight.medium,
+  },
+  genderOptionTextActive: {
+    color: colors.primary,
+    fontWeight: fontWeight.bold,
+  },
+  genderOptionCheck: {
+    color: colors.primary,
+    fontWeight: fontWeight.bold,
+    fontSize: 16,
+  },
+
+  // Calendar Modal styles
+  calendarOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(10, 25, 64, 0.65)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: spacing.md,
+  },
+  calendarCard: {
+    width: '92%',
+    maxWidth: 360,
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.xl,
+    padding: spacing.lg,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.25,
+    shadowRadius: 20,
+    elevation: 12,
+  },
+  calendarCardHeader: {
+    backgroundColor: colors.primary,
+    borderRadius: borderRadius.lg,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+  },
+  calendarCardSub: {
+    fontSize: fontSize.xs,
+    color: 'rgba(255,255,255,0.7)',
+    fontWeight: fontWeight.bold,
+    letterSpacing: 1,
+  },
+  calendarCardTitle: {
+    fontSize: fontSize.lg,
+    color: '#FFFFFF',
+    fontWeight: fontWeight.bold,
+    marginTop: 2,
+  },
+  monthYearBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing.md,
+  },
+  calNavBtn: {
+    padding: spacing.xs + 2,
+  },
+  calNavText: {
+    fontSize: 16,
+    color: colors.primary,
+  },
+  monthYearLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs + 2,
+  },
+  monthYearText: {
+    fontSize: fontSize.base,
+    fontWeight: fontWeight.bold,
+    color: colors.textPrimary,
+  },
+  yearSelectChip: {
+    backgroundColor: colors.background,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    borderRadius: borderRadius.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  yearSelectText: {
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.bold,
+    color: colors.primary,
+  },
+  yearListScroll: {
+    maxHeight: 200,
+    marginVertical: spacing.xs,
+  },
+  yearListGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    justifyContent: 'center',
+    paddingVertical: spacing.xs,
+  },
+  yearItem: {
+    width: '28%',
+    paddingVertical: spacing.xs + 2,
+    borderRadius: borderRadius.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center',
+    backgroundColor: colors.background,
+  },
+  yearItemActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  yearItemText: {
+    fontSize: fontSize.sm,
+    color: colors.textPrimary,
+    fontWeight: fontWeight.medium,
+  },
+  yearItemTextActive: {
+    color: '#FFFFFF',
+    fontWeight: fontWeight.bold,
+  },
+  dayHeadingsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: spacing.xs,
+  },
+  dayHeadingText: {
+    width: '14.28%',
+    textAlign: 'center',
+    fontSize: fontSize.xs,
+    fontWeight: fontWeight.bold,
+    color: colors.textMuted,
+  },
+  daysGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginBottom: spacing.md,
+  },
+  dayCellEmpty: {
+    width: '14.28%',
+    height: 36,
+  },
+  dayCell: {
+    width: '14.28%',
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 18,
+  },
+  dayCellSelected: {
+    backgroundColor: colors.primary,
+  },
+  dayCellText: {
+    fontSize: fontSize.sm,
+    color: colors.textPrimary,
+    fontWeight: fontWeight.medium,
+  },
+  dayCellTextSelected: {
+    color: '#FFFFFF',
+    fontWeight: fontWeight.bold,
+  },
+  calendarActions: {
+    flexDirection: 'row',
+    gap: spacing.md,
+    marginTop: spacing.xs,
+  },
+  calCancelBtn: {
+    flex: 1,
+    height: 42,
+    borderRadius: borderRadius.md,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  calCancelText: {
+    color: colors.textSecondary,
+    fontWeight: fontWeight.bold,
+    fontSize: fontSize.sm,
+  },
+  calConfirmBtn: {
+    flex: 1,
+    height: 42,
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  calConfirmText: {
+    color: '#FFFFFF',
+    fontWeight: fontWeight.bold,
+    fontSize: fontSize.sm,
   },
 });

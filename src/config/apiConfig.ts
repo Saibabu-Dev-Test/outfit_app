@@ -1,6 +1,6 @@
 import { Platform } from 'react-native';
 
-export const BACKEND_IP = '54.167.113.100';
+export const BACKEND_IP = '192.168.0.109';
 export const BACKEND_PORT = '3000';
 
 export const getAuthBaseUrls = (): string[] => {
