@@ -265,25 +265,29 @@ export const uploadProfileAvatar = async (
         ...(userId ? { 'x-user-id': String(userId) } : {}),
       };
 
-      if (imageFile?.base64) {
-        headers['Content-Type'] = 'application/json';
-        body = JSON.stringify({
-          imageBase64: imageFile.base64,
-          fileName: imageFile.name || 'avatar.jpg',
-          userId,
-        });
-      } else if (imageFile?.uri) {
-        const formData = new FormData();
-        formData.append('avatar', {
-          uri: imageFile.uri,
-          name: imageFile.name || 'avatar.jpg',
-          type: imageFile.type || 'image/jpeg',
-        } as any);
-        if (userId) formData.append('userId', String(userId));
-        body = formData;
-      } else {
-        throw new Error('No image file or base64 data provided for upload');
-      }
+    if (imageFile?.uri) {
+  const formData = new FormData();
+
+  formData.append('avatar', {
+    uri: imageFile.uri,
+    name: imageFile.name || 'avatar.jpg',
+    type: imageFile.type || 'image/jpeg',
+  } as any);
+
+  if (userId) {
+    formData.append('userId', String(userId));
+  }
+
+  body = formData;
+     } else if (imageFile?.base64) {
+  headers['Content-Type'] = 'application/json';
+
+  body = JSON.stringify({
+    imageBase64: imageFile.base64,
+    fileName: imageFile.name || 'avatar.jpg',
+    userId,
+  });
+}
 
       const response = await fetch(endpoint, {
         method: 'POST',
