@@ -22,19 +22,22 @@ import { getWardrobeItems, deleteWardrobeItem, WardrobeItemResponse } from '../.
 const BASE_CATEGORIES = [
   { id: '1', icon: '👔', label: 'Tops' },
   { id: '2', icon: '👖', label: 'Bottoms' },
-  { id: '3', icon: '👟', label: 'Shoes' },
-  { id: '4', icon: '🧥', label: 'Outerwear' },
-  { id: '5', icon: '👜', label: 'Bags' },
-  { id: '6', icon: '💍', label: 'Accessories' },
+  { id: '3', icon: '👗', label: 'One-Piece' },
+  { id: '4', icon: '👟', label: 'Footwear' },
+  { id: '5', icon: '💍', label: 'Accessories' },
 ];
 
 const CATEGORY_ICONS: Record<string, string> = {
   'Tops': '👔',
+  'TOPS': '👔',
   'Bottoms': '👖',
-  'Shoes': '👟',
-  'Outerwear': '🧥',
-  'Bags': '👜',
+  'BOTTOMS': '👖',
+  'One-Piece': '👗',
+  'ONE-PIECE': '👗',
+  'Footwear': '👟',
+  'FOOTWEAR': '👟',
   'Accessories': '💍',
+  'ACCESSORIES': '💍',
 };
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -208,7 +211,7 @@ export default function WardrobeScreen({ navigation }: { navigation: any }) {
                   <View style={styles.recentItemInfo}>
                     <Text style={styles.recentItemName}>{item.name}</Text>
                     <Text style={styles.recentItemCategory}>
-                      {item.category}{item.fabric ? ` · ${item.fabric}` : ''}
+                      {item.category}{item.subCategory ? ` · ${item.subCategory}` : ''}{item.wearType ? ` · ${item.wearType}` : ''}{item.fabric ? ` · ${item.fabric}` : ''}
                     </Text>
                   </View>
                   <TouchableOpacity

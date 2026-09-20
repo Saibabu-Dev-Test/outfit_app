@@ -19,16 +19,80 @@ import { colors, fontSize, fontWeight, spacing, borderRadius } from '../../theme
 import { useAuth } from '../../context/AuthContext';
 import { addWardrobeItem as apiAddWardrobeItem } from '../../services/wardrobeApi';
 
-const CATEGORIES = [
-  { id: '1', icon: '👔', label: 'Tops' },
-  { id: '2', icon: '👗', label: 'Dresses' },
-  { id: '3', icon: '👖', label: 'Bottoms' },
-  { id: '4', icon: '🧥', label: 'Outerwear' },
-  { id: '5', icon: '👟', label: 'Sneakers' },
-  { id: '6', icon: '👠', label: 'Heels' },
-  { id: '7', icon: '👜', label: 'Bags' },
-  { id: '8', icon: '💍', label: 'Accessories' },
+interface CategoryItem {
+  id: string;
+  icon: string;
+  label: string;
+}
+
+interface CategoryGroup {
+  id: string;
+  title: string;
+  items: CategoryItem[];
+}
+
+const CATEGORY_GROUPS: CategoryGroup[] = [
+  {
+    id: 'tops',
+    title: 'TOPS',
+    items: [
+      { id: 'shirts', icon: '👔', label: 'Shirts' },
+      { id: 'tshirts', icon: '👕', label: 'T-Shirts' },
+      { id: 'polos', icon: '👕', label: 'Polos' },
+      { id: 'kurtas', icon: '👔', label: 'Kurtas' },
+      { id: 'hoodies', icon: '🧥', label: 'Hoodies' },
+      { id: 'sweaters', icon: '🧶', label: 'Sweaters' },
+      { id: 'jackets', icon: '🧥', label: 'Jackets' },
+      { id: 'blazers', icon: '🧥', label: 'Blazers' },
+      { id: 'coats', icon: '🧥', label: 'Coats' },
+    ],
+  },
+  {
+    id: 'bottoms',
+    title: 'BOTTOMS',
+    items: [
+      { id: 'pants', icon: '👖', label: 'Pants' },
+      { id: 'jeans', icon: '👖', label: 'Jeans' },
+      { id: 'trousers', icon: '👖', label: 'Trousers' },
+      { id: 'chinos', icon: '👖', label: 'Chinos' },
+      { id: 'shorts', icon: '🩳', label: 'Shorts' },
+      { id: 'trackpants', icon: '👖', label: 'Track Pants' },
+    ],
+  },
+  {
+    id: 'onepiece',
+    title: 'ONE-PIECE',
+    items: [
+      { id: 'jumpsuits', icon: '👗', label: 'Jumpsuits' },
+    ],
+  },
+  {
+    id: 'footwear',
+    title: 'FOOTWEAR',
+    items: [
+      { id: 'shoes', icon: '👟', label: 'Shoes' },
+      { id: 'sandals', icon: '👡', label: 'Sandals' },
+      { id: 'boots', icon: '🥾', label: 'Boots' },
+      { id: 'sportsshoes', icon: '👟', label: 'Sports Shoes' },
+      { id: 'slippers', icon: '🥿', label: 'Slippers' },
+    ],
+  },
+  {
+    id: 'accessories',
+    title: 'ACCESSORIES',
+    items: [
+      { id: 'watches', icon: '⌚', label: 'Watches' },
+      { id: 'belts', icon: '🥋', label: 'Belts' },
+      { id: 'caps', icon: '🧢', label: 'Caps' },
+      { id: 'sunglasses', icon: '🕶️', label: 'Sunglasses' },
+      { id: 'bags', icon: '👜', label: 'Bags' },
+      { id: 'wallets', icon: '👛', label: 'Wallets' },
+      { id: 'acc_other', icon: '💍', label: 'Accessories' },
+    ],
+  },
 ];
+
+const WEAR_TYPES = ['Daily Wear', 'Formal', 'Casual'];
 
 const COLOR_SWATCHES = [
   { label: 'White',   hex: '#FFFFFF', border: '#D0CBDF' },
@@ -50,45 +114,13 @@ const COLOR_SWATCHES = [
 
 const FABRIC_TYPES = ['Body Con', 'Formal', 'Casual', 'Party', 'Ethnic', 'Sports'];
 
-// Gender-aware item name suggestions per category
-const ITEM_SUGGESTIONS: Record<string, Record<string, string[]>> = {
-  male: {
-    Tops:       ['Oxford Shirt', 'Polo Shirt', 'Graphic Tee', 'Henley Shirt', 'Linen Shirt', 'Flannel Shirt', 'Tank Top', 'Turtleneck', 'Hoodie', 'Sweatshirt'],
-    Dresses:    ['Kurta', 'Sherwani', 'Dhoti Kurta', 'Angarkha'],
-    Bottoms:    ['Slim Chinos', 'Cargo Pants', 'Jogger Pants', 'Formal Trousers', 'Denim Jeans', 'Shorts', 'Track Pants', 'Linen Trousers'],
-    Outerwear:  ['Blazer', 'Denim Jacket', 'Leather Jacket', 'Bomber Jacket', 'Overcoat', 'Trench Coat', 'Parka', 'Windbreaker'],
-    Sneakers:   ['Running Shoes', 'Canvas Sneakers', 'High-Top Sneakers', 'Slip-Ons', 'Loafers', 'Chelsea Boots', 'Derby Shoes', 'Monk Straps'],
-    Heels:      ['Formal Oxfords', 'Block Heels', 'Dress Heels'],
-    Bags:       ['Backpack', 'Messenger Bag', 'Tote Bag', 'Laptop Bag', 'Duffle Bag', 'Crossbody Bag'],
-    Accessories:['Watch', 'Belt', 'Sunglasses', 'Bracelet', 'Cap', 'Beanie', 'Tie', 'Pocket Square', 'Cufflinks'],
-  },
-  female: {
-    Tops:       ['Crop Top', 'Blouse', 'Peplum Top', 'Off-Shoulder Top', 'Spaghetti Top', 'Camisole', 'Wrap Top', 'Corset Top', 'Halter Top', 'Tunic'],
-    Dresses:    ['Midi Dress', 'Maxi Dress', 'Mini Dress', 'Wrap Dress', 'A-Line Dress', 'Bodycon Dress', 'Shirt Dress', 'Floral Dress', 'Sundress', 'Slip Dress'],
-    Bottoms:    ['Mini Skirt', 'Midi Skirt', 'Pencil Skirt', 'Pleated Skirt', 'Palazzo Pants', 'Mom Jeans', 'Skinny Jeans', 'Flare Pants', 'Culottes', 'Leggings'],
-    Outerwear:  ['Trench Coat', 'Blazer', 'Cardigan', 'Denim Jacket', 'Faux Fur Coat', 'Puffer Jacket', 'Shrug', 'Cape'],
-    Sneakers:   ['Canvas Sneakers', 'Platform Sneakers', 'Slip-Ons', 'Running Shoes', 'Ballet Flats', 'Loafers', 'Mules'],
-    Heels:      ['Stiletto Heels', 'Block Heels', 'Wedge Heels', 'Kitten Heels', 'Ankle Strap Heels', 'Peep-Toe Heels', 'Platform Heels'],
-    Bags:       ['Handbag', 'Clutch', 'Tote Bag', 'Crossbody Bag', 'Shoulder Bag', 'Mini Bag', 'Satchel', 'Bucket Bag'],
-    Accessories:['Necklace', 'Earrings', 'Bracelet', 'Ring', 'Scrunchie', 'Headband', 'Sunglasses', 'Belt', 'Hair Clip', 'Anklet'],
-  },
-  other: {
-    Tops:       ['T-Shirt', 'Shirt', 'Top', 'Crop Top', 'Hoodie', 'Sweatshirt', 'Blouse', 'Tank Top'],
-    Dresses:    ['Dress', 'Kurta', 'Midi Dress', 'Maxi Dress'],
-    Bottoms:    ['Jeans', 'Trousers', 'Shorts', 'Skirt', 'Leggings', 'Track Pants'],
-    Outerwear:  ['Jacket', 'Blazer', 'Coat', 'Cardigan', 'Hoodie'],
-    Sneakers:   ['Sneakers', 'Running Shoes', 'Loafers', 'Slip-Ons', 'Boots'],
-    Heels:      ['Heels', 'Platform Shoes', 'Wedges'],
-    Bags:       ['Backpack', 'Tote Bag', 'Crossbody Bag', 'Handbag'],
-    Accessories:['Watch', 'Sunglasses', 'Belt', 'Ring', 'Necklace'],
-  },
-};
-
 interface AddItemScreenProps {
   navigation: any;
   onSave?: (item: {
     name: string;
     category: string;
+    subCategory?: string;
+    wearType?: string;
     categoryIcon: string;
     color: string;
     fabric: string;
@@ -98,33 +130,26 @@ interface AddItemScreenProps {
 export default function AddItemScreen({ navigation, onSave }: AddItemScreenProps) {
   const { user } = useAuth();
 
-  // Resolve gender key for suggestions
-  const genderKey = (() => {
-    const g = (user?.gender || '').toLowerCase();
-    if (g === 'male' || g === 'm') return 'male';
-    if (g === 'female' || g === 'f') return 'female';
-    return 'other';
-  })();
-
   const [imageUri, setImageUri]               = useState<string | null>(null);
   const [itemName, setItemName]               = useState('');
-  const [dropdownOpen, setDropdownOpen]       = useState(false);
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [selectedCategory, setSelectedCategory]   = useState<string | null>(null);
+  const [selectedSubCategory, setSelectedSubCategory] = useState<string | null>(null);
+  const [selectedWearType, setSelectedWearType]   = useState<string>('Daily Wear');
   const [selectedColor, setSelectedColor]       = useState<string | null>(null);
   const [selectedFabric, setSelectedFabric]     = useState<string | null>(null);
   const [nameError, setNameError]               = useState('');
   const [catError, setCatError]                 = useState(false);
   const [saving, setSaving]                     = useState(false);
 
-  // Current suggestions based on gender + category
-  const suggestions: string[] = selectedCategory
-    ? (ITEM_SUGGESTIONS[genderKey]?.[selectedCategory] ||
-       ITEM_SUGGESTIONS.other[selectedCategory] || [])
-    : [];
-
-  const filteredSuggestions = itemName.trim()
-    ? suggestions.filter(s => s.toLowerCase().includes(itemName.toLowerCase()))
-    : suggestions;
+  // Helper to find selected item icon
+  const getSelectedIcon = () => {
+    if (!selectedSubCategory) return '👕';
+    for (const grp of CATEGORY_GROUPS) {
+      const found = grp.items.find(i => i.label === selectedSubCategory);
+      if (found) return found.icon;
+    }
+    return '👕';
+  };
 
   // ── Image picker ────────────────────────────────────────────────────────
   const openCamera = () => {
@@ -184,8 +209,9 @@ export default function AddItemScreen({ navigation, onSave }: AddItemScreenProps
   };
 
   const handleSave = async () => {
+    const finalName = itemName.trim() || selectedSubCategory || '';
     let valid = true;
-    if (!itemName.trim()) { setNameError('Please enter an item name'); valid = false; }
+    if (!finalName) { setNameError('Please select or enter an item name'); valid = false; }
     if (!selectedCategory) { setCatError(true); valid = false; }
     if (!valid) return;
 
@@ -194,24 +220,40 @@ export default function AddItemScreen({ navigation, onSave }: AddItemScreenProps
       return;
     }
 
-    const cat = CATEGORIES.find(c => c.label === selectedCategory)!;
+    const icon = getSelectedIcon();
 
     setSaving(true);
     try {
       const savedItem = await apiAddWardrobeItem({
         userId: user.id,
-        name: itemName.trim(),
+        name: finalName,
         category: selectedCategory!,
+        subCategory: selectedSubCategory || undefined,
+        wearType: selectedWearType || undefined,
         color: selectedColor || undefined,
         fabric: selectedFabric || undefined,
         imageUri: imageUri || undefined,
       });
 
+      if (onSave) {
+        onSave({
+          name: savedItem.name,
+          category: savedItem.category,
+          subCategory: savedItem.subCategory || undefined,
+          wearType: savedItem.wearType || undefined,
+          categoryIcon: icon,
+          color: savedItem.color || '#F8F8F8',
+          fabric: savedItem.fabric || '',
+        });
+      }
+
       navigation?.navigate('WardrobeMain', {
         savedItem: {
           name: savedItem.name,
           category: savedItem.category,
-          categoryIcon: cat.icon,
+          subCategory: savedItem.subCategory,
+          wearType: savedItem.wearType,
+          categoryIcon: icon,
           color: savedItem.color || '#F8F8F8',
           fabric: savedItem.fabric || '',
           imageUrl: savedItem.imageUrl || null,
@@ -224,8 +266,6 @@ export default function AddItemScreen({ navigation, onSave }: AddItemScreenProps
       setSaving(false);
     }
   };
-
-  const selectedCat = CATEGORIES.find(c => c.label === selectedCategory);
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -250,7 +290,7 @@ export default function AddItemScreen({ navigation, onSave }: AddItemScreenProps
         keyboardShouldPersistTaps="handled">
 
         <Text style={styles.introText}>
-          Upload a photo and fill in the details to add this item to your wardrobe. All fields are available below.
+          Upload a photo and choose a category, item name, and wear type to add to your wardrobe.
         </Text>
 
         {/* Image Upload Zone */}
@@ -273,100 +313,77 @@ export default function AddItemScreen({ navigation, onSave }: AddItemScreenProps
           )}
         </TouchableOpacity>
 
-        {/* Category */}
-        <Text style={[styles.sectionLabel, catError && styles.sectionLabelError]}>
-          {catError ? 'CATEGORY — please select one' : 'CATEGORY'}
+        {/* CATEGORY Section */}
+        <Text style={[styles.mainSectionTitle, catError && styles.sectionLabelError]}>
+          {catError ? 'CATEGORY — please select one item' : 'CATEGORY'}
         </Text>
-        <View style={styles.chipWrap}>
-          {CATEGORIES.map(cat => {
-            const active = selectedCategory === cat.label;
+
+        {CATEGORY_GROUPS.map(group => (
+          <View key={group.id} style={styles.groupCard}>
+            <Text style={styles.groupHeaderTitle}>{group.title}</Text>
+            <View style={styles.chipGrid}>
+              {group.items.map(item => {
+                const isSelected = selectedSubCategory === item.label;
+                return (
+                  <TouchableOpacity
+                    key={item.id}
+                    style={[styles.itemChip, isSelected && styles.itemChipSelected]}
+                    onPress={() => {
+                      setSelectedCategory(group.title);
+                      setSelectedSubCategory(item.label);
+                      setCatError(false);
+                      if (!itemName.trim() || CATEGORY_GROUPS.some(g => g.items.some(i => i.label === itemName))) {
+                        setItemName(item.label);
+                      }
+                      setNameError('');
+                    }}
+                    activeOpacity={0.75}>
+                    <Text style={styles.chipEmoji}>{item.icon}</Text>
+                    <Text style={[styles.itemChipText, isSelected && styles.itemChipTextSelected]}>
+                      {item.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+        ))}
+
+        {/* WEAR TYPE Section */}
+        <Text style={styles.mainSectionTitle}>WEAR TYPE</Text>
+        <View style={styles.wearTypeWrap}>
+          {WEAR_TYPES.map(type => {
+            const isSelected = selectedWearType === type;
             return (
               <TouchableOpacity
-                key={cat.id}
-                style={[styles.chip, active && styles.chipActive]}
-                onPress={() => { setSelectedCategory(cat.label); setCatError(false); setItemName(''); setDropdownOpen(true); }}
+                key={type}
+                style={[styles.wearTypeChip, isSelected && styles.wearTypeChipSelected]}
+                onPress={() => setSelectedWearType(type)}
                 activeOpacity={0.8}>
-                <Text style={styles.chipEmoji}>{cat.icon}</Text>
-                <Text style={[styles.chipText, active && styles.chipTextActive]}>{cat.label}</Text>
+                <Text style={[styles.wearTypeText, isSelected && styles.wearTypeTextSelected]}>
+                  {type}
+                </Text>
               </TouchableOpacity>
             );
           })}
         </View>
 
-        {/* Item Name — gender-aware dropdown */}
-        <Text style={styles.sectionLabel}>
-          ITEM NAME{genderKey !== 'other' ? `  ·  ${genderKey === 'male' ? '♂ Male' : '♀ Female'} suggestions` : ''}
-        </Text>
-
-        <View style={styles.dropdownWrapper}>
-          {/* Input row */}
-          <View style={[styles.dropdownInput, nameError ? styles.textInputError : null]}>
-            <TextInput
-              style={styles.dropdownTextInput}
-              placeholder={
-                selectedCategory
-                  ? `Search or type ${selectedCategory.toLowerCase()} name…`
-                  : 'Select a category first, then choose…'
-              }
-              placeholderTextColor="#B0AECB"
-              value={itemName}
-              onChangeText={t => { setItemName(t); setNameError(''); setDropdownOpen(true); }}
-              onFocus={() => setDropdownOpen(true)}
-              returnKeyType="done"
-              onSubmitEditing={() => setDropdownOpen(false)}
-            />
-            <TouchableOpacity
-              onPress={() => setDropdownOpen(o => !o)}
-              style={styles.dropdownArrowBtn}
-              activeOpacity={0.7}>
-              <Text style={styles.dropdownArrow}>{dropdownOpen ? '▲' : '▼'}</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Suggestion list */}
-          {dropdownOpen && filteredSuggestions.length > 0 && (
-            <View style={styles.dropdownList}>
-              {filteredSuggestions.map((item, idx) => (
-                <TouchableOpacity
-                  key={item}
-                  style={[
-                    styles.dropdownItem,
-                    idx < filteredSuggestions.length - 1 && styles.dropdownItemBorder,
-                    itemName === item && styles.dropdownItemActive,
-                  ]}
-                  activeOpacity={0.75}
-                  onPress={() => {
-                    setItemName(item);
-                    setNameError('');
-                    setDropdownOpen(false);
-                  }}>
-                  <Text style={[styles.dropdownItemText, itemName === item && styles.dropdownItemTextActive]}>
-                    {item}
-                  </Text>
-                  {itemName === item && <Text style={styles.dropdownCheck}>✓</Text>}
-                </TouchableOpacity>
-              ))}
-            </View>
-          )}
-
-          {/* No category selected hint */}
-          {dropdownOpen && !selectedCategory && (
-            <View style={styles.dropdownHint}>
-              <Text style={styles.dropdownHintText}>👆 Select a category above to see suggestions</Text>
-            </View>
-          )}
-
-          {/* No match hint */}
-          {dropdownOpen && selectedCategory && filteredSuggestions.length === 0 && itemName.trim() && (
-            <View style={styles.dropdownHint}>
-              <Text style={styles.dropdownHintText}>No match — "{itemName}" will be used as the name</Text>
-            </View>
-          )}
+        {/* Item Name Input (Optional custom display name) */}
+        <Text style={styles.mainSectionTitle}>CUSTOM ITEM NAME (OPTIONAL)</Text>
+        <View style={[styles.textInputWrap, nameError ? styles.textInputError : null]}>
+          <TextInput
+            style={styles.textInput}
+            placeholder={selectedSubCategory ? `Name e.g. "My favorite ${selectedSubCategory}"` : 'Enter custom item name…'}
+            placeholderTextColor="#B0AECB"
+            value={itemName}
+            onChangeText={t => { setItemName(t); setNameError(''); }}
+            returnKeyType="done"
+          />
         </View>
         {nameError ? <Text style={styles.errorMsg}>{nameError}</Text> : null}
 
         {/* Colour */}
-        <Text style={styles.sectionLabel}>COLOUR</Text>
+        <Text style={styles.mainSectionTitle}>COLOUR</Text>
         <View style={styles.swatchGrid}>
           {COLOR_SWATCHES.map(sw => {
             const active = selectedColor === sw.hex;
@@ -391,32 +408,33 @@ export default function AddItemScreen({ navigation, onSave }: AddItemScreenProps
         ) : null}
 
         {/* Fabric Type */}
-        <Text style={styles.sectionLabel}>FABRIC TYPE</Text>
-        <View style={styles.chipWrap}>
+        <Text style={styles.mainSectionTitle}>FABRIC TYPE</Text>
+        <View style={styles.fabricWrap}>
           {FABRIC_TYPES.map(fab => {
             const active = selectedFabric === fab;
             return (
               <TouchableOpacity
                 key={fab}
-                style={[styles.chip, active && styles.chipActive]}
+                style={[styles.fabricChip, active && styles.fabricChipActive]}
                 onPress={() => setSelectedFabric(active ? null : fab)}
                 activeOpacity={0.8}>
-                <Text style={[styles.chipText, active && styles.chipTextActive]}>{fab}</Text>
+                <Text style={[styles.fabricChipText, active && styles.fabricChipTextActive]}>{fab}</Text>
               </TouchableOpacity>
             );
           })}
         </View>
 
         {/* Live Preview */}
-        {itemName.trim() && selectedCategory ? (
+        {(selectedSubCategory || itemName.trim()) && selectedCategory ? (
           <View style={styles.previewCard}>
             <View style={[styles.previewThumb, { backgroundColor: selectedColor || '#F5F0FF' }]}>
-              <Text style={styles.previewEmoji}>{selectedCat?.icon}</Text>
+              <Text style={styles.previewEmoji}>{getSelectedIcon()}</Text>
             </View>
             <View style={styles.previewInfo}>
-              <Text style={styles.previewName}>{itemName.trim()}</Text>
+              <Text style={styles.previewName}>{itemName.trim() || selectedSubCategory}</Text>
               <Text style={styles.previewMeta}>
-                {selectedCategory}{selectedFabric ? ` · ${selectedFabric}` : ''}
+                {selectedCategory} · {selectedSubCategory || 'Item'} · {selectedWearType}
+                {selectedFabric ? ` · ${selectedFabric}` : ''}
               </Text>
             </View>
             {selectedColor ? (
@@ -529,107 +547,129 @@ const styles = StyleSheet.create({
     fontWeight: fontWeight.bold,
   },
 
-  sectionLabel: {
-    fontSize: 10,
-    fontWeight: fontWeight.bold,
-    color: '#6B6B8A',
+  mainSectionTitle: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#4A4A6A',
     letterSpacing: 1.2,
     textTransform: 'uppercase',
-    marginBottom: 10,
     marginTop: spacing.lg,
+    marginBottom: 10,
   },
   sectionLabelError: { color: '#E91E63' },
 
-  textInput: {
+  groupCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#EAEAEA',
+    shadowColor: 'rgba(0,0,0,0.02)',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 1,
+    shadowRadius: 4,
+    elevation: 1,
+  },
+  groupHeaderTitle: {
+    fontSize: 12,
+    fontWeight: '900',
+    color: '#000000',
+    letterSpacing: 0.6,
+    marginBottom: 12,
+  },
+  chipGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  itemChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: '#E2E8F0',
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  itemChipSelected: {
+    backgroundColor: '#E91E63',
+    borderColor: '#E91E63',
+  },
+  chipEmoji: {
+    fontSize: 14,
+  },
+  itemChipText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#000000',
+  },
+  itemChipTextSelected: {
+    color: '#FFFFFF',
+  },
+
+  wearTypeWrap: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: spacing.md,
+  },
+  wearTypeChip: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: '#E2E8F0',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  wearTypeChipSelected: {
+    backgroundColor: '#0D0D0D',
+    borderColor: '#0D0D0D',
+  },
+  wearTypeText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#1A1A1A',
+  },
+  wearTypeTextSelected: {
+    color: '#FFFFFF',
+  },
+
+  textInputWrap: {
     borderWidth: 1.5,
     borderColor: '#E0DBF0',
     borderRadius: borderRadius.md,
+    backgroundColor: '#FFFFFF',
     paddingHorizontal: spacing.md,
+  },
+  textInput: {
     paddingVertical: 12,
     fontSize: fontSize.base,
     color: '#0A1940',
-    backgroundColor: '#FFFFFF',
   },
   textInputError: { borderColor: '#F48FB1' },
   errorMsg: { fontSize: 11, color: '#E91E63', fontWeight: fontWeight.semiBold, marginTop: 4 },
-
-  // Dropdown
-  dropdownWrapper: { position: 'relative', zIndex: 10 },
-  dropdownInput: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1.5,
-    borderColor: '#E0DBF0',
-    borderRadius: borderRadius.md,
-    backgroundColor: '#FFFFFF',
-    paddingLeft: spacing.md,
-    paddingRight: spacing.sm,
-  },
-  dropdownTextInput: {
-    flex: 1,
-    paddingVertical: 12,
-    fontSize: fontSize.base,
-    color: '#0A1940',
-  },
-  dropdownArrowBtn: { padding: spacing.sm },
-  dropdownArrow: { fontSize: 11, color: '#9E9EBA', fontWeight: fontWeight.bold },
-  dropdownList: {
-    marginTop: 4,
-    borderWidth: 1.5,
-    borderColor: '#E0DBF0',
-    borderRadius: borderRadius.md,
-    backgroundColor: '#FFFFFF',
-    maxHeight: 220,
-    overflow: 'hidden',
-    shadowColor: 'rgba(10,25,64,0.1)',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 1,
-    shadowRadius: 10,
-    elevation: 6,
-  },
-  dropdownItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: spacing.md,
-    paddingVertical: 11,
-  },
-  dropdownItemBorder: { borderBottomWidth: 1, borderBottomColor: '#F0EDF8' },
-  dropdownItemActive: { backgroundColor: '#FDF2F7' },
-  dropdownItemText: { fontSize: fontSize.sm, color: '#2C2C4A', fontWeight: fontWeight.medium },
-  dropdownItemTextActive: { color: '#E91E63', fontWeight: fontWeight.bold },
-  dropdownCheck: { fontSize: 13, color: '#E91E63', fontWeight: fontWeight.bold },
-  dropdownHint: {
-    marginTop: 4,
-    backgroundColor: '#F8F6FF',
-    borderRadius: borderRadius.md,
-    padding: spacing.md,
-    borderWidth: 1,
-    borderColor: '#E0DBF0',
-  },
-  dropdownHintText: { fontSize: 12, color: '#8E8EA8', textAlign: 'center' },
-
-  chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 20,
-    borderWidth: 1.5,
-    borderColor: '#E0DBF0',
-    backgroundColor: '#FFFFFF',
-  },
-  chipActive: { backgroundColor: '#E91E63', borderColor: '#E91E63' },
-  chipEmoji: { fontSize: 13 },
-  chipText: { fontSize: 12, fontWeight: fontWeight.semiBold, color: '#4A4A6A' },
-  chipTextActive: { color: '#FFFFFF' },
 
   swatchGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 6 },
   swatch: { width: 32, height: 32, borderRadius: 16, borderWidth: 2 },
   swatchActive: { borderWidth: 3, borderColor: colors.primary, transform: [{ scale: 1.2 }] },
   colorName: { fontSize: 11, color: '#6B6B8A', fontWeight: fontWeight.semiBold, marginBottom: spacing.sm },
+
+  fabricWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  fabricChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1.5,
+    borderColor: '#E0DBF0',
+    backgroundColor: '#FFFFFF',
+  },
+  fabricChipActive: { backgroundColor: '#E91E63', borderColor: '#E91E63' },
+  fabricChipText: { fontSize: 12, fontWeight: fontWeight.semiBold, color: '#4A4A6A' },
+  fabricChipTextActive: { color: '#FFFFFF' },
 
   previewCard: {
     flexDirection: 'row',

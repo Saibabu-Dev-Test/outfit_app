@@ -6,6 +6,8 @@ export interface WardrobeItemPayload {
   userId: number | string;
   name: string;
   category: string;
+  subCategory?: string;
+  wearType?: string;
   color?: string;
   fabric?: string;
   imageUri?: string | null; // local file URI from image picker
@@ -16,6 +18,8 @@ export interface WardrobeItemResponse {
   userId: number;
   name: string;
   category: string;
+  subCategory?: string | null;
+  wearType?: string | null;
   color: string | null;
   fabric: string | null;
   imageUrl: string | null;
@@ -31,6 +35,8 @@ export const addWardrobeItem = async (
   formData.append('userId', String(payload.userId));
   formData.append('name', payload.name);
   formData.append('category', payload.category);
+  if (payload.subCategory) formData.append('subCategory', payload.subCategory);
+  if (payload.wearType) formData.append('wearType', payload.wearType);
   if (payload.color) formData.append('color', payload.color);
   if (payload.fabric) formData.append('fabric', payload.fabric);
 
