@@ -112,7 +112,7 @@ const COLOR_SWATCHES = [
   { label: 'Multi',   hex: '#E8E8E8', border: '#D0CBDF' },
 ];
 
-const FABRIC_TYPES = ['Body Con', 'Formal', 'Casual', 'Party', 'Ethnic', 'Sports'];
+const FABRIC_TYPES = [ 'Formal', 'Casual', 'Party', 'Ethnic', 'Sports'];
 
 interface AddItemScreenProps {
   navigation: any;
@@ -321,7 +321,10 @@ export default function AddItemScreen({ navigation, onSave }: AddItemScreenProps
         {CATEGORY_GROUPS.map(group => (
           <View key={group.id} style={styles.groupCard}>
             <Text style={styles.groupHeaderTitle}>{group.title}</Text>
-            <View style={styles.chipGrid}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.chipScrollContainer}>
               {group.items.map(item => {
                 const isSelected = selectedSubCategory === item.label;
                 return (
@@ -345,7 +348,7 @@ export default function AddItemScreen({ navigation, onSave }: AddItemScreenProps
                   </TouchableOpacity>
                 );
               })}
-            </View>
+            </ScrollView>
           </View>
         ))}
 
@@ -578,10 +581,11 @@ const styles = StyleSheet.create({
     letterSpacing: 0.6,
     marginBottom: 12,
   },
-  chipGrid: {
+  chipScrollContainer: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
+    alignItems: 'center',
     gap: 8,
+    paddingRight: 4,
   },
   itemChip: {
     flexDirection: 'row',
