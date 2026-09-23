@@ -12,6 +12,7 @@ import {
   Alert,
   ActionSheetIOS,
   ActivityIndicator,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { launchCamera, launchImageLibrary } from 'react-native-image-picker';
@@ -131,6 +132,7 @@ export default function AddItemScreen({ navigation, onSave }: AddItemScreenProps
   const { user } = useAuth();
 
   const [imageUri, setImageUri]               = useState<string | null>(null);
+  const [isPreviewVisible, setIsPreviewVisible] = useState(false);
   const [itemName, setItemName]               = useState('');
   const [selectedCategory, setSelectedCategory]   = useState<string | null>(null);
   const [selectedSubCategory, setSelectedSubCategory] = useState<string | null>(null);
@@ -283,35 +285,51 @@ export default function AddItemScreen({ navigation, onSave }: AddItemScreenProps
         <View style={{ width: 36 }} />
       </View>
 
+      {/* Fixed Image Upload Block (stays fixed while form below scrolls) */}
+      <View style={styles.fixedTopSection}>
+        <Text style={styles.introText}>
+          Upload a photo and choose a category, item name, and wear type to add to your wardrobe.
+        </Text>
+
+        <View style={styles.uploadZone}>
+          {imageUri ? (
+            <>
+              <TouchableOpacity
+                style={styles.imagePreviewTouch}
+                activeOpacity={0.9}
+                onPress={() => setIsPreviewVisible(true)}>
+                <Image source={{ uri: imageUri }} style={styles.uploadedImage} resizeMode="cover" />
+              </TouchableOpacity>
+              <View style={styles.photoOverlayBar}>
+                <TouchableOpacity style={styles.overlayBtn} activeOpacity={0.8} onPress={handlePickImage}>
+                  <Text style={styles.overlayBtnText}>📷 Change Photo</Text>
+                </TouchableOpacity>
+                <View style={styles.overlayDivider} />
+                <TouchableOpacity style={styles.overlayBtn} activeOpacity={0.8} onPress={() => setIsPreviewVisible(true)}>
+                  <Text style={styles.overlayBtnText}>🔍 Fullscreen Preview</Text>
+                </TouchableOpacity>
+              </View>
+            </>
+          ) : (
+            <TouchableOpacity style={styles.uploadPlaceholderTouch} activeOpacity={0.8} onPress={handlePickImage}>
+              <View style={styles.uploadPlaceholder}>
+                <View style={styles.uploadIconCircle}>
+                  <Text style={styles.uploadIcon}>📷</Text>
+                </View>
+                <Text style={styles.uploadTitle}>Upload Clothing Photo</Text>
+                <Text style={styles.uploadSubtitle}>Tap to take a photo or choose from gallery</Text>
+              </View>
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+
+      {/* Scrollable Form Fields */}
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled">
-
-        <Text style={styles.introText}>
-          Upload a photo and choose a category, item name, and wear type to add to your wardrobe.
-        </Text>
-
-        {/* Image Upload Zone */}
-        <TouchableOpacity style={styles.uploadZone} activeOpacity={0.8} onPress={handlePickImage}>
-          {imageUri ? (
-            <>
-              <Image source={{ uri: imageUri }} style={styles.uploadedImage} resizeMode="cover" />
-              <View style={styles.changePhotoOverlay}>
-                <Text style={styles.changePhotoText}>📷  Change Photo</Text>
-              </View>
-            </>
-          ) : (
-            <View style={styles.uploadPlaceholder}>
-              <View style={styles.uploadIconCircle}>
-                <Text style={styles.uploadIcon}>📷</Text>
-              </View>
-              <Text style={styles.uploadTitle}>Upload Clothing Photo</Text>
-              <Text style={styles.uploadSubtitle}>Tap to take a photo or choose from gallery</Text>
-            </View>
-          )}
-        </TouchableOpacity>
 
         {/* CATEGORY Section */}
         <Text style={[styles.mainSectionTitle, catError && styles.sectionLabelError]}>
@@ -458,8 +476,39 @@ export default function AddItemScreen({ navigation, onSave }: AddItemScreenProps
             <Text style={styles.saveBtnText}>SAVE TO MY WARDROBE</Text>
           )}
         </TouchableOpacity>
-
       </ScrollView>
+
+      {/* Full Screen Image Preview Modal */}
+      <Modal
+        visible={isPreviewVisible}
+        transparent={false}
+        animationType="fade"
+        onRequestClose={() => setIsPreviewVisible(false)}>
+        <SafeAreaView style={styles.modalContainer}>
+          <StatusBar
+            barStyle="light-content"
+            {...(Platform.OS === 'android' ? { backgroundColor: '#000000' } : {})}
+          />
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Image Preview</Text>
+            <TouchableOpacity
+              style={styles.modalCloseBtn}
+              onPress={() => setIsPreviewVisible(false)}
+              activeOpacity={0.7}>
+              <Text style={styles.modalCloseText}>✕</Text>
+            </TouchableOpacity>
+          </View>
+          <View style={styles.modalImageWrapper}>
+            {imageUri ? (
+              <Image
+                source={{ uri: imageUri }}
+                style={styles.modalImage}
+                resizeMode="contain"
+              />
+            ) : null}
+          </View>
+        </SafeAreaView>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -496,12 +545,19 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
   },
 
+  fixedTopSection: {
+    paddingHorizontal: spacing.base,
+    backgroundColor: '#FAFAFA',
+    borderBottomWidth: 1,
+    borderBottomColor: '#EBE9F3',
+    paddingBottom: spacing.xs,
+  },
   introText: {
     fontSize: 12,
     color: '#8E8EA8',
     lineHeight: 18,
-    marginTop: spacing.md,
-    marginBottom: spacing.md,
+    marginTop: spacing.sm,
+    marginBottom: spacing.xs,
   },
 
   uploadZone: {
@@ -509,45 +565,107 @@ const styles = StyleSheet.create({
     borderColor: '#C8C0E8',
     borderStyle: 'dashed',
     borderRadius: 16,
-    height: 180,
+    height: 160,
+    backgroundColor: '#F8F6FF',
+    marginBottom: spacing.xs,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  uploadPlaceholderTouch: {
+    flex: 1,
+    width: '100%',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#F8F6FF',
-    marginBottom: spacing.md,
-    overflow: 'hidden',
   },
-  uploadPlaceholder: { alignItems: 'center', gap: 8 },
+  uploadPlaceholder: { alignItems: 'center', gap: 6 },
   uploadIconCircle: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: '#EDE8FF',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 4,
   },
-  uploadIcon: { fontSize: 24 },
+  uploadIcon: { fontSize: 20 },
   uploadTitle: { fontSize: fontSize.sm, fontWeight: fontWeight.bold, color: '#3D3070' },
   uploadSubtitle: { fontSize: 11, color: '#9E9EBA' },
 
+  imagePreviewTouch: {
+    width: '100%',
+    height: '100%',
+  },
   uploadedImage: {
     width: '100%',
     height: '100%',
     borderRadius: 14,
   },
-  changePhotoOverlay: {
+  photoOverlayBar: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: 'rgba(0,0,0,0.42)',
-    paddingVertical: 10,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-around',
+    paddingVertical: 8,
   },
-  changePhotoText: {
+  overlayBtn: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 4,
+  },
+  overlayBtnText: {
     color: '#FFFFFF',
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: fontWeight.bold,
+  },
+  overlayDivider: {
+    width: 1,
+    height: 16,
+    backgroundColor: 'rgba(255,255,255,0.3)',
+  },
+
+  modalContainer: {
+    flex: 1,
+    backgroundColor: '#000000',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#222222',
+  },
+  modalTitle: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: fontWeight.bold,
+  },
+  modalCloseBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#222222',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalCloseText: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: fontWeight.bold,
+  },
+  modalImageWrapper: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 12,
+  },
+  modalImage: {
+    width: '100%',
+    height: '100%',
   },
 
   mainSectionTitle: {
