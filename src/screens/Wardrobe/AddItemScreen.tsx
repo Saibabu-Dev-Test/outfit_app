@@ -18,7 +18,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { launchCamera, launchImageLibrary } from 'react-native-image-picker';
 import { colors, fontSize, fontWeight, spacing, borderRadius } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
-import { addWardrobeItem as apiAddWardrobeItem } from '../../services/wardrobeApi';
+import {
+  addWardrobeItem as apiAddWardrobeItem,
+  updateWardrobeItem as apiUpdateWardrobeItem,
+  analyzeClothingPhoto,
+} from '../../services/wardrobeApi';
 
 interface CategoryItem {
   id: string;
@@ -117,6 +121,7 @@ const FABRIC_TYPES = [ 'Formal', 'Casual', 'Party', 'Ethnic', 'Sports'];
 
 interface AddItemScreenProps {
   navigation: any;
+  route?: any;
   onSave?: (item: {
     name: string;
     category: string;
@@ -128,20 +133,24 @@ interface AddItemScreenProps {
   }) => void;
 }
 
-export default function AddItemScreen({ navigation, onSave }: AddItemScreenProps) {
+export default function AddItemScreen({ navigation, route, onSave }: AddItemScreenProps) {
   const { user } = useAuth();
+  const itemToEdit = route?.params?.itemToEdit;
+  const isEditing = Boolean(itemToEdit?.id);
 
-  const [imageUri, setImageUri]               = useState<string | null>(null);
+  const [imageUri, setImageUri]               = useState<string | null>(itemToEdit?.imageUrl || null);
   const [isPreviewVisible, setIsPreviewVisible] = useState(false);
-  const [itemName, setItemName]               = useState('');
-  const [selectedCategory, setSelectedCategory]   = useState<string | null>(null);
-  const [selectedSubCategory, setSelectedSubCategory] = useState<string | null>(null);
-  const [selectedWearType, setSelectedWearType]   = useState<string>('Daily Wear');
-  const [selectedColor, setSelectedColor]       = useState<string | null>(null);
-  const [selectedFabric, setSelectedFabric]     = useState<string | null>(null);
+  const [itemName, setItemName]               = useState(itemToEdit?.name || '');
+  const [selectedCategory, setSelectedCategory]   = useState<string | null>(itemToEdit?.category || null);
+  const [selectedSubCategory, setSelectedSubCategory] = useState<string | null>(itemToEdit?.subCategory || null);
+  const [selectedWearType, setSelectedWearType]   = useState<string>(itemToEdit?.wearType || 'Daily Wear');
+  const [selectedColor, setSelectedColor]       = useState<string | null>(itemToEdit?.color || null);
+  const [selectedFabric, setSelectedFabric]     = useState<string | null>(itemToEdit?.fabric || null);
   const [nameError, setNameError]               = useState('');
   const [catError, setCatError]                 = useState(false);
   const [saving, setSaving]                     = useState(false);
+  const [isAnalyzingAI, setIsAnalyzingAI]     = useState(false);
+  const [aiStatusMsg, setAiStatusMsg]         = useState<string | null>(null);
 
   // Helper to find selected item icon
   const getSelectedIcon = () => {
@@ -151,6 +160,32 @@ export default function AddItemScreen({ navigation, onSave }: AddItemScreenProps
       if (found) return found.icon;
     }
     return '👕';
+  };
+
+  // Trigger AI vision analysis to automatically set options
+  const triggerAIAnalysis = async (uri: string) => {
+    setIsAnalyzingAI(true);
+    setAiStatusMsg(null);
+    try {
+      const result = await analyzeClothingPhoto(uri);
+      if (result) {
+        if (result.category) setSelectedCategory(result.category);
+        if (result.subCategory) setSelectedSubCategory(result.subCategory);
+        if (result.wearType) setSelectedWearType(result.wearType);
+        if (result.color) setSelectedColor(result.color);
+        if (result.fabric) setSelectedFabric(result.fabric);
+        if (result.name) {
+          setItemName(result.name);
+          setNameError('');
+        }
+        setCatError(false);
+        setAiStatusMsg(`✨ AI auto-selected options: ${result.category} › ${result.subCategory}`);
+      }
+    } catch (err) {
+      console.log('AI Analysis error', err);
+    } finally {
+      setIsAnalyzingAI(false);
+    }
   };
 
   // ── Image picker ────────────────────────────────────────────────────────
@@ -164,7 +199,10 @@ export default function AddItemScreen({ navigation, onSave }: AddItemScreenProps
           return;
         }
         const uri = res.assets?.[0]?.uri;
-        if (uri) setImageUri(uri);
+        if (uri) {
+          setImageUri(uri);
+          triggerAIAnalysis(uri);
+        }
       },
     );
   };
@@ -179,7 +217,10 @@ export default function AddItemScreen({ navigation, onSave }: AddItemScreenProps
           return;
         }
         const uri = res.assets?.[0]?.uri;
-        if (uri) setImageUri(uri);
+        if (uri) {
+          setImageUri(uri);
+          triggerAIAnalysis(uri);
+        }
       },
     );
   };
@@ -218,7 +259,7 @@ export default function AddItemScreen({ navigation, onSave }: AddItemScreenProps
     if (!valid) return;
 
     if (!user?.id) {
-      Alert.alert('Error', 'You must be logged in to add items.');
+      Alert.alert('Error', 'You must be logged in to save items.');
       return;
     }
 
@@ -226,7 +267,7 @@ export default function AddItemScreen({ navigation, onSave }: AddItemScreenProps
 
     setSaving(true);
     try {
-      const savedItem = await apiAddWardrobeItem({
+      const payload = {
         userId: user.id,
         name: finalName,
         category: selectedCategory!,
@@ -235,7 +276,11 @@ export default function AddItemScreen({ navigation, onSave }: AddItemScreenProps
         color: selectedColor || undefined,
         fabric: selectedFabric || undefined,
         imageUri: imageUri || undefined,
-      });
+      };
+
+      const savedItem = isEditing && itemToEdit?.id
+        ? await apiUpdateWardrobeItem(itemToEdit.id, payload)
+        : await apiAddWardrobeItem(payload);
 
       if (onSave) {
         onSave({
@@ -263,7 +308,7 @@ export default function AddItemScreen({ navigation, onSave }: AddItemScreenProps
         },
       });
     } catch (err: any) {
-      Alert.alert('Upload Failed', err.message || 'Could not save item. Please try again.');
+      Alert.alert(isEditing ? 'Update Failed' : 'Upload Failed', err.message || 'Could not save item. Please try again.');
     } finally {
       setSaving(false);
     }
@@ -281,14 +326,14 @@ export default function AddItemScreen({ navigation, onSave }: AddItemScreenProps
         <TouchableOpacity style={styles.backBtn} onPress={() => navigation?.goBack()} activeOpacity={0.7}>
           <Text style={styles.backIcon}>←</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Upload Clothing</Text>
+        <Text style={styles.headerTitle}>{isEditing ? 'Edit Clothing' : 'Upload Clothing'}</Text>
         <View style={{ width: 36 }} />
       </View>
 
       {/* Fixed Image Upload Block (stays fixed while form below scrolls) */}
       <View style={styles.fixedTopSection}>
         <Text style={styles.introText}>
-          Upload a photo and choose a category, item name, and wear type to add to your wardrobe.
+          Upload a photo and AI will automatically analyze it to detect and set the category, item options, and color!
         </Text>
 
         <View style={styles.uploadZone}>
@@ -300,28 +345,60 @@ export default function AddItemScreen({ navigation, onSave }: AddItemScreenProps
                 onPress={() => setIsPreviewVisible(true)}>
                 <Image source={{ uri: imageUri }} style={styles.uploadedImage} resizeMode="cover" />
               </TouchableOpacity>
+
+              {/* AI Analyzing Loading Overlay */}
+              {isAnalyzingAI ? (
+                <View style={styles.aiAnalyzingOverlay}>
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                  <Text style={styles.aiAnalyzingText}>✨ AI is analyzing your photo...</Text>
+                  <Text style={styles.aiAnalyzingSubtext}>Auto-setting category, item name & color</Text>
+                </View>
+              ) : null}
+
               <View style={styles.photoOverlayBar}>
                 <TouchableOpacity style={styles.overlayBtn} activeOpacity={0.8} onPress={handlePickImage}>
                   <Text style={styles.overlayBtnText}>📷 Change Photo</Text>
                 </TouchableOpacity>
                 <View style={styles.overlayDivider} />
+                <TouchableOpacity
+                  style={styles.overlayBtn}
+                  activeOpacity={0.8}
+                  onPress={() => imageUri && triggerAIAnalysis(imageUri)}>
+                  <Text style={styles.overlayBtnText}>✨ AI Re-Analyze</Text>
+                </TouchableOpacity>
+                <View style={styles.overlayDivider} />
                 <TouchableOpacity style={styles.overlayBtn} activeOpacity={0.8} onPress={() => setIsPreviewVisible(true)}>
-                  <Text style={styles.overlayBtnText}>🔍 Fullscreen Preview</Text>
+                  <Text style={styles.overlayBtnText}>🔍 Preview</Text>
                 </TouchableOpacity>
               </View>
             </>
           ) : (
             <TouchableOpacity style={styles.uploadPlaceholderTouch} activeOpacity={0.8} onPress={handlePickImage}>
-              <View style={styles.uploadPlaceholder}>
-                <View style={styles.uploadIconCircle}>
-                  <Text style={styles.uploadIcon}>📷</Text>
+              {isAnalyzingAI ? (
+                <View style={styles.uploadPlaceholder}>
+                  <ActivityIndicator size="large" color="#6C5CE7" />
+                  <Text style={styles.uploadTitle}>✨ AI Analyzing Photo…</Text>
+                  <Text style={styles.uploadSubtitle}>Extracting categories, wear type & colors</Text>
                 </View>
-                <Text style={styles.uploadTitle}>Upload Clothing Photo</Text>
-                <Text style={styles.uploadSubtitle}>Tap to take a photo or choose from gallery</Text>
-              </View>
+              ) : (
+                <View style={styles.uploadPlaceholder}>
+                  <View style={styles.uploadIconCircle}>
+                    <Text style={styles.uploadIcon}>📷</Text>
+                  </View>
+                  <Text style={styles.uploadTitle}>Upload Clothing Photo</Text>
+                  <Text style={styles.uploadSubtitle}>Tap to take a photo or pick from gallery</Text>
+                </View>
+              )}
             </TouchableOpacity>
           )}
         </View>
+
+        {/* AI Status Badge */}
+        {aiStatusMsg ? (
+          <View style={styles.aiBadgeContainer}>
+            <Text style={styles.aiBadgeText}>{aiStatusMsg}</Text>
+          </View>
+        ) : null}
       </View>
 
       {/* Scrollable Form Fields */}
@@ -473,7 +550,7 @@ export default function AddItemScreen({ navigation, onSave }: AddItemScreenProps
           {saving ? (
             <ActivityIndicator color="#FFFFFF" size="small" />
           ) : (
-            <Text style={styles.saveBtnText}>SAVE TO MY WARDROBE</Text>
+            <Text style={styles.saveBtnText}>{isEditing ? 'UPDATE WARDROBE ITEM' : 'SAVE TO MY WARDROBE'}</Text>
           )}
         </TouchableOpacity>
       </ScrollView>
@@ -598,6 +675,42 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
     borderRadius: 14,
+  },
+  aiAnalyzingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 40,
+    backgroundColor: 'rgba(24, 18, 51, 0.78)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 12,
+    gap: 6,
+  },
+  aiAnalyzingText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: fontWeight.bold,
+  },
+  aiAnalyzingSubtext: {
+    color: '#D1C4E9',
+    fontSize: 11,
+  },
+  aiBadgeContainer: {
+    backgroundColor: '#F0EBFF',
+    borderColor: '#D1C4E9',
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    marginBottom: 8,
+    alignItems: 'center',
+  },
+  aiBadgeText: {
+    color: '#5E35B1',
+    fontSize: 12,
+    fontWeight: fontWeight.bold,
   },
   photoOverlayBar: {
     position: 'absolute',

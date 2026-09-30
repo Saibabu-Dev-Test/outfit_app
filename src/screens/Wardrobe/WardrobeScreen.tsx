@@ -214,13 +214,22 @@ export default function WardrobeScreen({ navigation }: { navigation: any }) {
                       {item.category}{item.subCategory ? ` · ${item.subCategory}` : ''}{item.wearType ? ` · ${item.wearType}` : ''}{item.fabric ? ` · ${item.fabric}` : ''}
                     </Text>
                   </View>
-                  <TouchableOpacity
-                    style={styles.moreBtn}
-                    onPress={() => handleDeleteItem(item)}
-                    activeOpacity={0.7}
-                    hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
-                    <Text style={styles.deleteIconText}>🗑️</Text>
-                  </TouchableOpacity>
+                  <View style={styles.actionRow}>
+                    <TouchableOpacity
+                      style={styles.actionBtn}
+                      onPress={() => navigation.navigate('AddItem', { itemToEdit: item })}
+                      activeOpacity={0.7}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                      <Text style={styles.actionIconText}>✏️</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.actionBtn}
+                      onPress={() => handleDeleteItem(item)}
+                      activeOpacity={0.7}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                      <Text style={styles.actionIconText}>🗑️</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
               );
             })}
@@ -330,8 +339,19 @@ const styles = StyleSheet.create({
   recentItemInfo: { flex: 1, marginLeft: spacing.md },
   recentItemName: { fontSize: fontSize.base, fontWeight: fontWeight.semiBold, color: colors.textPrimary },
   recentItemCategory: { fontSize: fontSize.sm, color: colors.textSecondary, marginTop: 2 },
-  moreBtn: { padding: spacing.sm },
-  deleteIconText: { fontSize: 18 },
+  actionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  actionBtn: {
+    padding: 8,
+    borderRadius: 10,
+    backgroundColor: '#F3F0FA',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  actionIconText: { fontSize: 16 },
 
   loadingContainer: {
     paddingVertical: spacing.xl,
