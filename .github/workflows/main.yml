@@ -47,6 +47,7 @@ jobs:
         with:
           name: outfit-app-debug-apk
           path: android/app/build/outputs/apk/release/app-release.apk
+          retention-days: 3
 
       # 8. Create GitHub Release
       - name: Create GitHub Release
