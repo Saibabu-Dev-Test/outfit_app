@@ -9,9 +9,13 @@ import {
   StatusBar,
   Platform,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, fontSize, fontWeight, spacing, borderRadius } from '../../theme';
+import { useAuth } from '../../context/AuthContext';
+import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { auth, db } from '../../config/firebaseConfig';
 
 const lindaAvatar = require('../../assets/linda_avatar.jpg');
 const outfitA = require('../../assets/outfit_a.jpg');
@@ -81,8 +85,36 @@ const TOP_COLOURS = [
 ];
 
 export default function HomeScreen() {
+  const { user } = useAuth(); // <-- 1. ఈ లైన్ పెట్టు
+  const [votedRank, setVotedRank] = useState<number | null>(null);
   const [dailyStyle, setDailyStyle] = useState<DailyColorResponse | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
+
+  const handleVoteColor = async (rank: number) => {
+    if (!user) return Alert.alert("Please login to vote!");
+    
+    const item = TOP_COLOURS.find(c => c.rank === rank);
+    if (!item) return;
+
+    const today = new Date().toISOString().split('T')[0]; 
+    const voteId = `top_colors_${today}_${user.uid}`;
+
+    try {
+      await setDoc(doc(db, 'votes', voteId), {
+        systemId: 'top_colors',
+        color: item.name,
+        userId: user.uid,
+        date: today,
+        timestamp: serverTimestamp()
+      }, { merge: true });
+
+      setVotedRank(rank);
+      Alert.alert("✅ Vote Recorded!", `You voted for ${item.name}!`);
+    } catch (error) {
+      console.error("Voting error:", error);
+      Alert.alert("Failed to cast vote.");
+    }
+  };
 
   useEffect(() => {
     let isMounted = true;
@@ -172,7 +204,11 @@ export default function HomeScreen() {
             showsVerticalScrollIndicator={true}>
             {TOP_COLOURS.map((item, index) => (
               <React.Fragment key={item.rank}>
-                <View style={styles.colorRow}>
+                <TouchableOpacity
+                  style={[styles.colorRow, votedRank === item.rank && styles.colorRowVoted]}
+                  activeOpacity={0.7}
+                  onPress={() => handleVoteColor(item.rank)}
+                >
                   <Text style={styles.colorRank}>{item.rank}</Text>
                   <View style={[styles.colorCircle, { backgroundColor: item.hex }]} />
                   <View style={styles.colorDetails}>
@@ -185,7 +221,7 @@ export default function HomeScreen() {
                     </View>
                   </View>
                   <Text style={styles.colorPercentage}>{item.percentage}</Text>
-                </View>
+                </TouchableOpacity>
                 {index < TOP_COLOURS.length - 1 && <View style={styles.rowDivider} />}
               </React.Fragment>
             ))}
