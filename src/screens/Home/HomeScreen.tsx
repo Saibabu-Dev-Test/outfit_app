@@ -14,7 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, fontSize, fontWeight, spacing, borderRadius } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
-import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, serverTimestamp, collection, query, where, getDocs } from 'firebase/firestore';
 import { auth, db } from '../../config/firebaseConfig';
 
 const lindaAvatar = require('../../assets/linda_avatar.jpg');
@@ -73,27 +73,18 @@ const getColorHex = (colorName: string): string => {
   return '#0D47A1';
 };
 
-const TOP_COLOURS = [
-  { rank: 1, name: 'Blue', hex: '#1D92F3', votes: '22,545 votes', men: '45%', women: '55%', percentage: '22.8%' },
-  { rank: 2, name: 'Green', hex: '#3FA73F', votes: '18,263 votes', men: '42%', women: '58%', percentage: '18.5%' },
-  { rank: 3, name: 'Purple', hex: '#8E24AA', votes: '15,274 votes', men: '38%', women: '62%', percentage: '15.5%' },
-  { rank: 4, name: 'Pink', hex: '#E91E63', votes: '12,840 votes', men: '30%', women: '70%', percentage: '13.0%' },
-  { rank: 5, name: 'Yellow', hex: '#FBC02D', votes: '9,450 votes', men: '50%', women: '50%', percentage: '9.6%' },
-  { rank: 6, name: 'Orange', hex: '#F57C00', votes: '7,120 votes', men: '48%', women: '52%', percentage: '7.2%' },
-  { rank: 7, name: 'Red', hex: '#D32F2F', votes: '5,300 votes', men: '52%', women: '48%', percentage: '5.4%' },
-  { rank: 8, name: 'Black', hex: '#212121', votes: '4,100 votes', men: '60%', women: '40%', percentage: '4.1%' },
-];
 
 export default function HomeScreen() {
   const { user } = useAuth(); // <-- 1. ఈ లైన్ పెట్టు
   const [votedRank, setVotedRank] = useState<number | null>(null);
   const [dailyStyle, setDailyStyle] = useState<DailyColorResponse | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
+  const [topColours, setTopColours] = useState<any[]>([]);
 
   const handleVoteColor = async (rank: number) => {
     if (!user) return Alert.alert("Please login to vote!");
     
-    const item = TOP_COLOURS.find(c => c.rank === rank);
+    const item = topColours.find(c => c.rank === rank);  
     if (!item) return;
 
     const today = new Date().toISOString().split('T')[0]; 
@@ -110,14 +101,63 @@ export default function HomeScreen() {
 
       setVotedRank(rank);
       Alert.alert("✅ Vote Recorded!", `You voted for ${item.name}!`);
+      fetchRealVotes();
     } catch (error) {
       console.error("Voting error:", error);
       Alert.alert("Failed to cast vote.");
     }
   };
 
+  const fetchRealVotes = async () => {
+    try {
+          // UI లో ఉన్న కలర్స్ లిస్ట్ (Fixed List)
+    const fixedColors = [
+      { name: 'Blue', hex: '#1D92F3' },
+      { name: 'Green', hex: '#3FA73F' },
+      { name: 'Purple', hex: '#8E24AA' },
+      { name: 'Pink', hex: '#E91E63' },
+      { name: 'Yellow', hex: '#FBC02D' },
+      { name: 'Orange', hex: '#F57C00' },
+      { name: 'Red', hex: '#D32F2F' },
+      { name: 'Black', hex: '#212121' },
+      { name: 'Brown', hex: '#8B4513' },
+      { name: 'White', hex: '#EEEEEE' }
+    ];
+
+      const results = await Promise.all(
+        fixedColors.map(async (color) => {
+          const q = query(
+            collection(db, 'votes'),
+            where('systemId', '==', 'top_colors'),
+            where('color', '==', color.name)
+          );
+          const snapshot = await getDocs(q);
+          
+          return {
+            rank: 0, 
+            name: color.name,
+            hex: color.hex,
+            votes: snapshot.size,
+            men: '0%',
+            women: '0%',
+            percentage: '0%',
+          };
+        })
+      );
+
+      results.sort((a, b) => b.votes - a.votes);
+      results.forEach((item, idx) => item.rank = idx + 1);
+
+      setTopColours(results);
+    } catch (error) {
+      console.error("Error fetching votes:", error);
+    }
+  };
+
   useEffect(() => {
     let isMounted = true;
+    
+    fetchRealVotes();
 
     const fetchDailyColor = async () => {
       setLoading(true);
@@ -202,7 +242,7 @@ export default function HomeScreen() {
             style={styles.topColoursScroll}
             nestedScrollEnabled={true}
             showsVerticalScrollIndicator={true}>
-            {TOP_COLOURS.map((item, index) => (
+            {topColours.map((item, index) => (
               <React.Fragment key={item.rank}>
                 <TouchableOpacity
                   style={[styles.colorRow, votedRank === item.rank && styles.colorRowVoted]}
@@ -213,7 +253,7 @@ export default function HomeScreen() {
                   <View style={[styles.colorCircle, { backgroundColor: item.hex }]} />
                   <View style={styles.colorDetails}>
                     <Text style={styles.colorName}>{item.name}</Text>
-                    <Text style={styles.votesCountText}>{item.votes}</Text>
+                    <Text style={styles.votesCountText}>{item.votes.toLocaleString()} votes</Text>
                     <View style={styles.genderRow}>
                       <Text style={styles.genderText}>🧍‍♂️ Men: {item.men}</Text>
                       <View style={styles.genderDivider} />
@@ -222,7 +262,7 @@ export default function HomeScreen() {
                   </View>
                   <Text style={styles.colorPercentage}>{item.percentage}</Text>
                 </TouchableOpacity>
-                {index < TOP_COLOURS.length - 1 && <View style={styles.rowDivider} />}
+                {index < topColours.length - 1 && <View style={styles.rowDivider} />}
               </React.Fragment>
             ))}
           </ScrollView>
