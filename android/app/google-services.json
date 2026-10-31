@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "791853722614",
+    "project_id": "outfit-vote-9edca",
+    "storage_bucket": "outfit-vote-9edca.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:791853722614:android:a4f1f478c577bf6f49b5d7",
+        "android_client_info": {
+          "package_name": "com.outfit"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "791853722614-o1h6cd69kp84opf0c7nlcv6sc0hehfpb.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAUd8LJ3Cl5-vmEOYSlHS6CS2CfVfatjcU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "791853722614-o1h6cd69kp84opf0c7nlcv6sc0hehfpb.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
