@@ -49,13 +49,20 @@ export const loginWithPhoneAndPassword = async ({
       }
     };
   } catch (error: any) {
+    console.error("Firebase Login Error:", error.code, error.message);
+    
     let msg = 'Login failed';
     if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
       msg = 'Invalid mobile number or password';
     } else if (error.code === 'auth/invalid-email') {
       msg = 'Invalid mobile number format';
+    } else if (error.code === 'auth/network-request-failed') {
+      msg = 'Network error. Please check your internet connection';
     }
-    throw new Error(msg);
+    
+    // 🔥 CRITICAL FIX: Throw cheyakunda, error object return cheyi
+    // Idi app crash avvadam stop chesthundi
+    return { message: msg }; 
   }
 };
 
@@ -91,13 +98,17 @@ export const registerWithPhoneAndPassword = async ({
       }
     };
   } catch (error: any) {
+    console.error("Firebase Register Error:", error.code, error.message);
+    
     let msg = 'Registration failed';
     if (error.code === 'auth/email-already-in-use') {
       msg = 'This mobile number is already registered';
     } else if (error.code === 'auth/weak-password') {
       msg = 'Password should be at least 6 characters';
     }
-    throw new Error(msg);
+    
+    // 🔥 CRITICAL FIX: Throw cheyakunda, error object return cheyi
+    return { message: msg }; 
   }
 };
 
@@ -136,6 +147,7 @@ export const logoutUser = async (): Promise<{ message: string; success: boolean 
     return { message: 'Logged out locally', success: true };
   }
 };
+
 export interface UpdateProfilePayload {
   userId?: number | string;
   name?: string;
@@ -148,6 +160,3 @@ export interface UpdateProfilePayload {
   phoneNumber?: string;
   avatarUrl?: string | null;
 }
-
-
-
