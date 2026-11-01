@@ -45,7 +45,7 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
 
-    const handlePhonePasswordAuth = async () => {
+  const handlePhonePasswordAuth = async () => {
     setError('');
     setSuccessMsg('');
     const cleanedNumber = phoneNumber.trim();
@@ -65,12 +65,10 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
         setError('Password must be at least 6 characters long');
         return;
       }
-
       if (!confirmPassword) {
         setError('Please confirm your password');
         return;
       }
-
       if (password !== confirmPassword) {
         setError('Passwords do not match');
         return;
@@ -79,22 +77,19 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
 
     setLoading(true);
 
-    // ✅ KOTHA CHANGE IDI: Phone number ni Email ga convert cheyyadam
     const formattedPhone = `${selectedCountry.code}${cleanedNumber}`;
     const emailForFirebase = `${cleanedNumber}@outfit.app`; 
 
     try {
       if (authMode === 'register') {
-        // Register appudu kuda Email format lo ne create cheyyali
         const regRes = await registerWithPhoneAndPassword({
-          phoneNumber: formattedPhone, // UI display kosam original number
+          phoneNumber: formattedPhone,
           password,
-          email: emailForFirebase,     // Firebase Auth kosam email
+          email: emailForFirebase,
         });
 
         setSuccessMsg('Account created successfully! Logging you in...');
 
-        // Auto login after successful registration
         const loginRes = await loginWithPhoneAndPassword({
           phoneNumber: formattedPhone,
           password,
@@ -105,13 +100,9 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
         if (onLoginSuccess) {
           onLoginSuccess(loginRes.user);
         } else {
-          navigation.reset({
-            index: 0,
-            routes: [{ name: 'MainApp' }],
-          });
+          navigation.reset({ index: 0, routes: [{ name: 'MainApp' }] });
         }
       } else {
-        // Login appudu Email format lo call cheyyali
         const loginRes = await loginWithPhoneAndPassword({
           phoneNumber: formattedPhone,
           password,
@@ -124,58 +115,15 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
         if (onLoginSuccess) {
           onLoginSuccess(loginRes.user);
         } else {
-          navigation.reset({
-            index: 0,
-            routes: [{ name: 'MainApp' }],
-          });
+          navigation.reset({ index: 0, routes: [{ name: 'MainApp' }] });
         }
       }
-    } catch (err: any) {
+    } catch (err: any) { // ✅ Ikkada 'any' type undali
       setLoading(false);
       setError(err.message || 'An error occurred during authentication');
     }
-  };
+  }; // ✅ Function end bracket ikkade undali
 
-        setSuccessMsg('Account created successfully! Logging you in...');
-
-        // Auto login after successful registration
-        const loginRes = await loginWithPhoneAndPassword({
-          phoneNumber: formattedPhone,
-          password,
-        });
-
-        setLoading(false);
-        if (onLoginSuccess) {
-          onLoginSuccess(loginRes.user);
-        } else {
-          navigation.reset({
-            index: 0,
-            routes: [{ name: 'MainApp' }],
-          });
-        }
-      } else {
-        const loginRes = await loginWithPhoneAndPassword({
-          phoneNumber: formattedPhone,
-          password,
-        });
-
-        setSuccessMsg(loginRes.message || 'Login successful!');
-        setLoading(false);
-
-        if (onLoginSuccess) {
-          onLoginSuccess(loginRes.user);
-        } else {
-          navigation.reset({
-            index: 0,
-            routes: [{ name: 'MainApp' }],
-          });
-        }
-      }
-    } catch (err: any) {
-      setLoading(false);
-      setError(err.message || 'An error occurred during authentication');
-    }
-  };
 
   const handleSendOtp = () => {
     setError('');
