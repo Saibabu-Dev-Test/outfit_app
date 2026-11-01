@@ -246,26 +246,13 @@ const fetchProfile = async () => {
     setLoading(false);
   }
  };
+
+  // ✅ ONLY ONE useEffect (removed duplicate)
   useEffect(() => {
     fetchProfile();
   }, [authUser?.id]);
 
-  const handleOpenEditModal = () => {
-    setEditName(profileData?.name || '');
-    setEditPhone(profileData?.phoneNumber || '');
-    setEditDob(profileData?.dob || '');
-    setEditTimeOfBirth(profileData?.timeOfBirth || '');
-    setEditRashi(profileData?.rashi || '');
-    setEditLanguage(profileData?.language || '');
-    setEditGender(profileData?.gender || '');
-    setEditBio(profileData?.bio || '');
-    setIsGenderDropdownOpen(false);
-    setIsEditModalVisible(true);
-  };
-  useEffect(() => {
-    fetchProfile();
-  }, [authUser?.id]);
-
+  // ✅ ONLY ONE handleOpenEditModal (removed duplicate)
   const handleOpenEditModal = () => {
     setEditName(profileData?.name || '');
     setEditPhone(profileData?.phoneNumber || '');
@@ -324,6 +311,7 @@ const fetchProfile = async () => {
     setSavingProfile(false);
   }
 };
+
   const handleSignOut = async () => {
     try {
       setLoggingOut(true);
