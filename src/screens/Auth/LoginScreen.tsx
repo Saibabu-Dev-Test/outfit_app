@@ -45,7 +45,7 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
 
-  const handlePhonePasswordAuth = async () => {
+    const handlePhonePasswordAuth = async () => {
     setError('');
     setSuccessMsg('');
     const cleanedNumber = phoneNumber.trim();
@@ -79,14 +79,62 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
 
     setLoading(true);
 
+    // ✅ KOTHA CHANGE IDI: Phone number ni Email ga convert cheyyadam
     const formattedPhone = `${selectedCountry.code}${cleanedNumber}`;
+    const emailForFirebase = `${cleanedNumber}@outfit.app`; 
 
     try {
       if (authMode === 'register') {
+        // Register appudu kuda Email format lo ne create cheyyali
         const regRes = await registerWithPhoneAndPassword({
+          phoneNumber: formattedPhone, // UI display kosam original number
+          password,
+          email: emailForFirebase,     // Firebase Auth kosam email
+        });
+
+        setSuccessMsg('Account created successfully! Logging you in...');
+
+        // Auto login after successful registration
+        const loginRes = await loginWithPhoneAndPassword({
           phoneNumber: formattedPhone,
           password,
+          email: emailForFirebase,
         });
+
+        setLoading(false);
+        if (onLoginSuccess) {
+          onLoginSuccess(loginRes.user);
+        } else {
+          navigation.reset({
+            index: 0,
+            routes: [{ name: 'MainApp' }],
+          });
+        }
+      } else {
+        // Login appudu Email format lo call cheyyali
+        const loginRes = await loginWithPhoneAndPassword({
+          phoneNumber: formattedPhone,
+          password,
+          email: emailForFirebase,
+        });
+
+        setSuccessMsg(loginRes.message || 'Login successful!');
+        setLoading(false);
+
+        if (onLoginSuccess) {
+          onLoginSuccess(loginRes.user);
+        } else {
+          navigation.reset({
+            index: 0,
+            routes: [{ name: 'MainApp' }],
+          });
+        }
+      }
+    } catch (err: any) {
+      setLoading(false);
+      setError(err.message || 'An error occurred during authentication');
+    }
+  };
 
         setSuccessMsg('Account created successfully! Logging you in...');
 
