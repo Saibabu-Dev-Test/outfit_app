@@ -85,7 +85,6 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
         const regRes = await registerWithPhoneAndPassword({
           phoneNumber: formattedPhone,
           password,
-          email: emailForFirebase,
         });
 
         setSuccessMsg('Account created successfully! Logging you in...');
