@@ -95,6 +95,12 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
           password,
         });
 
+        // 🔥 CRITICAL FIX: User data unda ani check cheyali
+        if (!loginRes.user) {
+          setError(loginRes.message || 'Login failed after registration.');
+          return;
+        }
+
         if (onLoginSuccess) {
           onLoginSuccess(loginRes.user);
         } else {
@@ -107,6 +113,12 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
           password,
         });
 
+        // 🔥 CRITICAL FIX: User data unda ani check cheyali
+        if (!loginRes.user) {
+          setError(loginRes.message || 'Invalid mobile number or password');
+          return;
+        }
+
         setSuccessMsg(loginRes.message || 'Login successful!');
 
         if (onLoginSuccess) {
@@ -117,8 +129,8 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
       }
     } catch (err: any) {
       console.error("Auth Error:", err);
-      // ✅ Error ni user ki chupinchali, app kill avvakuunda
-      setError(err.message || 'Authentication failed. Please try again.');
+      // ✅ Safety net: Emanna unexpected error vasthe
+      setError('Authentication failed. Please try again.');
     } finally {
       setLoading(false);
     }
