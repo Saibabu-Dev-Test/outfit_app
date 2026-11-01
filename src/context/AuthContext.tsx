@@ -30,13 +30,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const logout = async () => {
     try {
-      if (user?.id) {
-        await logoutUser(user.id);
-      } else {
-        await logoutUser();
-      }
+      // ✅ Direct ga call cheyi, params avasaram ledu
+      await logoutUser();
     } catch (e) {
-      // Ignored
+      console.log("Logout error:", e);
     } finally {
       setUser(null);
       setIsAuthenticated(false);
@@ -44,7 +41,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const updateUserData = (userData: Partial<UserProfile>) => {
-    setUser(prev => (prev ? { ...prev, ...userData } : (userData as UserProfile)));
+    setUser(prev =>
+      prev ? { ...prev, ...userData } : (userData as UserProfile)
+    );
   };
 
   return (
