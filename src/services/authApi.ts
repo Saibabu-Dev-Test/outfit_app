@@ -3,6 +3,7 @@ import { getAuthBaseUrls } from '../config/apiConfig';
 export interface LoginPayload {
   phoneNumber: string;
   password: string;
+  email?: string;
 }
 
 export interface AuthResponse {
@@ -22,12 +23,18 @@ export const loginWithPhoneAndPassword = async (
 
   for (const baseUrl of urls) {
     try {
+      const cleanNum = payload.phoneNumber.replace('+91', '').replace(/\s/g, '');
+      const emailToSend = payload.email || `${cleanNum}@outfit.app`;
       const response = await fetch(`${baseUrl}/api/auth/login`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          phoneNumber: payload.phoneNumber,
+          password: payload.password,
+          email: emailToSend,
+       }),
       });
 
       const data = await response.json();
@@ -56,12 +63,18 @@ export const registerWithPhoneAndPassword = async (
 
   for (const baseUrl of urls) {
     try {
+      const cleanNum = payload.phoneNumber.replace('+91', '').replace(/\s/g, '');
+      const emailToSend = payload.email || `${cleanNum}@outfit.app`;
       const response = await fetch(`${baseUrl}/api/auth/register`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          phoneNumber: payload.phoneNumber,
+          password: payload.password,
+          email: emailToSend,
+        }),
       });
 
       const data = await response.json();
