@@ -19,8 +19,21 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { launchImageLibrary, launchCamera, ImagePickerResponse } from 'react-native-image-picker';
 import { colors, fontSize, fontWeight, spacing, borderRadius } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
-import { getUserProfile, updateUserProfile, uploadProfileAvatar, UserProfile } from '../../services/authApi';
 
+interface UserProfile {
+  id?: string;
+  phoneNumber?: string;
+  name?: string;
+  dob?: string;
+  timeOfBirth?: string;
+  rashi?: string;
+  language?: string;
+  gender?: string;
+  bio?: string;
+  avatarUrl?: string | null;
+  createdAt?: any;
+  updatedAt?: any;
+}
 
 const menuItems = [
   { id: '1', icon: '🎨', label: 'Style Preferences', hasArrow: true },
@@ -125,39 +138,44 @@ export default function ProfileScreen() {
 
 
   const handleUploadImage = async (response: ImagePickerResponse) => {
-    if (response.didCancel) return;
-    if (response.errorCode || response.errorMessage) {
-      Alert.alert('Image Error', response.errorMessage || 'Failed to select image');
-      return;
+  if (response.didCancel) return;
+  if (response.errorCode || response.errorMessage) {
+    Alert.alert('Image Error', response.errorMessage || 'Failed to select image');
+    return;
+  }
+
+  const asset = response.assets && response.assets[0];
+  if (!asset || (!asset.uri && !asset.base64)) return;
+
+  try {
+    setUploadingAvatar(true);
+    
+    // 🔥 TEMPORARY FIX: AWS Upload తీసేశాం 🔥
+    // ప్రస్తుతానికి Firebase Storage use చేయడం లేదు. 
+    // కేవలం Local URI ని మాత్రమే set చేస్తున్నాం (App crash కాకుండా).
+    console.log("Image selected:", asset.uri);
+    
+    // Local state update only (No backend call)
+    setProfileData(prev => 
+      prev 
+        ? { ...prev, avatarUrl: asset.uri } 
+        : ({ avatarUrl: asset.uri, phoneNumber: authUser?.phoneNumber || '' } as UserProfile)
+    );
+    
+    // Global context update (optional)
+    if (updateUserData) {
+      updateUserData({ avatarUrl: asset.uri });
     }
 
-    const asset = response.assets && response.assets[0];
-    if (!asset || (!asset.uri && !asset.base64)) return;
+    Alert.alert('Success', 'Profile photo updated locally! (Firebase upload pending)');
 
-    try {
-      setUploadingAvatar(true);
-      const res = await uploadProfileAvatar(profileData?.id || authUser?.id, {
-        uri: asset.uri || '',
-        name: asset.fileName || 'avatar.jpg',
-        type: asset.type || 'image/jpeg',
-        base64: asset.base64 || undefined,
-      });
-
-      if (res?.avatarUrl) {
-        setProfileData(prev =>
-          prev
-            ? { ...prev, avatarUrl: res.avatarUrl }
-            : ({ avatarUrl: res.avatarUrl, phoneNumber: authUser?.phoneNumber || '' } as UserProfile)
-        );
-        updateUserData({ avatarUrl: res.avatarUrl });
-        Alert.alert('Success', 'Profile photo updated successfully!');
-      }
-    } catch (err: any) {
-      Alert.alert('Upload Failed', err?.message || 'Failed to upload profile photo to AWS S3.');
-    } finally {
-      setUploadingAvatar(false);
-    }
-  };
+  } catch (err: any) {
+    console.error("Upload Error:", err.message);
+    Alert.alert('Upload Failed', 'Unable to update photo right now.');
+  } finally {
+    setUploadingAvatar(false);
+  }
+};
 
   const handleSelectAvatarSource = () => {
     Alert.alert(
@@ -188,21 +206,43 @@ export default function ProfileScreen() {
   };
 
 
-  const fetchProfile = async () => {
-    try {
-      setLoading(true);
-      const res = await getUserProfile(authUser?.id);
-      if (res?.user) {
-        setProfileData(res.user);
-        updateUserData(res.user);
-      }
-    } catch (err: any) {
-      console.warn('Failed to load profile details from backend:', err?.message);
-    } finally {
-      setLoading(false);
-    }
-  };
+const fetchProfile = async () => {
+  try {
+    setLoading(true);
+    
+    // 🔥 FIREBASE SAFE CHECK 🔥
+    // AWS call తీసేశాం. ఇప్పుడు కేవలం Firebase Auth User ని మాత్రమే వాడుతున్నాం.
+    if (authUser) {
+      console.log("Firebase User Found:", authUser.uid);
+      
+      // Profile data ని Firebase Auth నుండే set చేస్తున్నాం (Temporary fix to stop crash)
+      const firebaseProfile: UserProfile = {
+        id: authUser.uid,
+        name: authUser.displayName || "User",
+        phoneNumber: authUser.phoneNumber || "",
+        avatarUrl: authUser.photoURL || null,
+        // మిగిలిన fields (dob, rashi etc) ప్రస్తుతానికి empty గా ఉంచుతున్నాం
+        dob: profileData?.dob || "", 
+        rashi: profileData?.rashi || "",
+        gender: profileData?.gender || "",
+        bio: profileData?.bio || "",
+        language: profileData?.language || "",
+        timeOfBirth: profileData?.timeOfBirth || "",
+      };
 
+      setProfileData(firebaseProfile);
+      // updateUserData(firebaseProfile); // ఇది global context అయితే uncomment చేయండి
+    } else {
+      console.warn("No user logged in");
+    }
+
+  } catch (err: any) {
+    // Error వచ్చినా App Crash కాకుండా ఇక్కడ handle చేస్తున్నాం
+    console.error("Fetch Profile Error:", err.message);
+  } finally {
+    setLoading(false);
+  }
+};
   useEffect(() => {
     fetchProfile();
   }, [authUser?.id]);
@@ -220,39 +260,51 @@ export default function ProfileScreen() {
     setIsEditModalVisible(true);
   };
 
-  const handleSaveProfile = async () => {
-    if (!editPhone.trim()) {
-      Alert.alert('Validation Error', 'Phone number cannot be empty.');
-      return;
+ const handleSaveProfile = async () => {
+  if (!editPhone.trim()) {
+    Alert.alert('Validation Error', 'Phone number cannot be empty.');
+    return;
+  }
+
+  try {
+    setSavingProfile(true);
+    
+    // 🔥 TEMPORARY FIX: AWS Update తీసేశాం 🔥
+    // ప్రస్తుతానికి Firebase Firestore use చేయడం లేదు.
+    // కేవలం Local State ని మాత్రమే update చేస్తున్నాం (App crash కాకుండా).
+    console.log("Saving profile locally:", { editName, editPhone, editDob });
+
+    const updatedProfile: UserProfile = {
+      id: profileData?.id || authUser?.uid,
+      name: editName.trim(),
+      phoneNumber: editPhone.trim(),
+      dob: editDob.trim(),
+      timeOfBirth: editTimeOfBirth.trim(),
+      rashi: editRashi.trim(),
+      language: editLanguage.trim(),
+      gender: editGender.trim(),
+      bio: editBio.trim(),
+      avatarUrl: profileData?.avatarUrl || null,
+    };
+
+    // Local state update
+    setProfileData(updatedProfile);
+    
+    // Global context update
+    if (updateUserData) {
+      updateUserData(updatedProfile);
     }
 
-    try {
-      setSavingProfile(true);
-      const res = await updateUserProfile({
-        userId: profileData?.id || authUser?.id,
-        name: editName.trim(),
-        phoneNumber: editPhone.trim(),
-        dob: editDob.trim(),
-        timeOfBirth: editTimeOfBirth.trim(),
-        rashi: editRashi.trim(),
-        language: editLanguage.trim(),
-        gender: editGender.trim(),
-        bio: editBio.trim(),
-      });
+    setIsEditModalVisible(false);
+    Alert.alert('Success', 'Profile details updated locally! (Firebase save pending)');
 
-      if (res?.user) {
-        setProfileData(res.user);
-        updateUserData(res.user);
-        setIsEditModalVisible(false);
-        Alert.alert('Success', 'Profile details updated successfully!');
-      }
-    } catch (error: any) {
-      Alert.alert('Update Failed', error?.message || 'Unable to update profile. Please try again.');
-    } finally {
-      setSavingProfile(false);
-    }
-  };
-
+  } catch (error: any) {
+    console.error("Save Profile Error:", error.message);
+    Alert.alert('Update Failed', 'Unable to update profile right now.');
+  } finally {
+    setSavingProfile(false);
+  }
+};
   const handleSignOut = async () => {
     try {
       setLoggingOut(true);
