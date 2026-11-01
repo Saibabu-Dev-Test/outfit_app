@@ -36,6 +36,13 @@ jobs:
       # 5. Make Gradle executable
       - name: Make Gradlew executable
         run: chmod +x android/gradlew
+        
+      # 5.5. Generate and Display SHA-1 Fingerprint
+      - name: Generate SHA-1 Fingerprint
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew signingReport | grep "SHA1" | head -n 1
 
       # 6. Build Android Debug APK
       - name: Build APK
