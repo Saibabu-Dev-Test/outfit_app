@@ -1,98 +1,104 @@
-import { getAuthBaseUrls } from '../config/apiConfig';
-
-export interface LoginPayload {
-  phoneNumber: string;
-  password: string;
-  email?: string;
-}
+import { 
+  signInWithEmailAndPassword, 
+  createUserWithEmailAndPassword,
+  signOut
+} from 'firebase/auth';
+import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
+import { auth, db } from '../config/firebaseConfig';
 
 export interface AuthResponse {
   message: string;
   user?: {
-    id: number | string;
+    id: string;
     phoneNumber: string;
-    createdAt?: string;
+    email: string;
+    createdAt?: any;
   };
 }
 
-export const loginWithPhoneAndPassword = async (
-  payload: LoginPayload
-): Promise<AuthResponse> => {
-  const urls = getAuthBaseUrls();
-  let lastError: Error | null = null;
+const phoneToEmail = (phone: string): string => {
+  const cleanNum = phone.replace('+91', '').replace(/\s/g, '');
+  return `${cleanNum}@outfit.app`;
+};  
 
-  for (const baseUrl of urls) {
-    try {
-      const cleanNum = payload.phoneNumber.replace('+91', '').replace(/\s/g, '');
-      const emailToSend = payload.email || `${cleanNum}@outfit.app`;
-      const response = await fetch(`${baseUrl}/api/auth/login`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          phoneNumber: payload.phoneNumber,
-          password: payload.password,
-          email: emailToSend,
-       }),
-      });
+export const loginWithPhoneAndPassword = async ({ 
+  phoneNumber, 
+  password 
+}: { 
+  phoneNumber: string; 
+  password: string; 
+}): Promise<AuthResponse> => {
+  try {
+    const email = phoneToEmail(phoneNumber);
+    
+    // Firebase Direct Login
+    const userCredential = await signInWithEmailAndPassword(auth, email, password);
+    const user = userCredential.user;
 
-      const data = await response.json();
+    // Firestore nundi extra details teesukovadam
+    const userDoc = await getDoc(doc(db, 'users', user.uid));
+    const userData = userDoc.exists() ? userDoc.data() : {};
 
-      if (!response.ok) {
-        throw new Error(data.message || 'Login failed');
+    return {
+      message: 'Login successful!',
+      user: {
+        id: user.uid,
+        phoneNumber: userData.phoneNumber || phoneNumber,
+        email: user.email!,
+        createdAt: userData.createdAt
       }
-
-      return data;
-    } catch (err: any) {
-      lastError = err;
-      if (err.message && err.message !== 'Failed to fetch' && !err.message.includes('Network request failed')) {
-        throw err;
-      }
+    };
+  } catch (error: any) {
+    let msg = 'Login failed';
+    if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
+      msg = 'Invalid mobile number or password';
+    } else if (error.code === 'auth/invalid-email') {
+      msg = 'Invalid mobile number format';
     }
+    throw new Error(msg);
   }
-
-  throw lastError || new Error('Unable to connect to authentication server. Please check backend API status.');
 };
 
-export const registerWithPhoneAndPassword = async (
-  payload: LoginPayload
-): Promise<AuthResponse> => {
-  const urls = getAuthBaseUrls();
-  let lastError: Error | null = null;
+export const registerWithPhoneAndPassword = async ({ 
+  phoneNumber, 
+  password 
+}: { 
+  phoneNumber: string; 
+  password: string; 
+}): Promise<AuthResponse> => {
+  try {
+    const email = phoneToEmail(phoneNumber);
+    
+    // Firebase Direct Registration
+    const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+    const user = userCredential.user;
 
-  for (const baseUrl of urls) {
-    try {
-      const cleanNum = payload.phoneNumber.replace('+91', '').replace(/\s/g, '');
-      const emailToSend = payload.email || `${cleanNum}@outfit.app`;
-      const response = await fetch(`${baseUrl}/api/auth/register`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          phoneNumber: payload.phoneNumber,
-          password: payload.password,
-          email: emailToSend,
-        }),
-      });
+    // Firestore lo user data save cheyyadam
+    await setDoc(doc(db, 'users', user.uid), {
+      phoneNumber: phoneNumber,
+      email: email,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Registration failed');
+    return {
+      message: 'Registration successful!',
+      user: {
+        id: user.uid,
+        phoneNumber: phoneNumber,
+        email: email,
+        createdAt: new Date()
       }
-
-      return data;
-    } catch (err: any) {
-      lastError = err;
-      if (err.message && err.message !== 'Failed to fetch' && !err.message.includes('Network request failed')) {
-        throw err;
-      }
+    };
+  } catch (error: any) {
+    let msg = 'Registration failed';
+    if (error.code === 'auth/email-already-in-use') {
+      msg = 'This mobile number is already registered';
+    } else if (error.code === 'auth/weak-password') {
+      msg = 'Password should be at least 6 characters';
     }
+    throw new Error(msg);
   }
-
-  throw lastError || new Error('Unable to connect to authentication server. Please check backend API status.');
 };
 
 export interface ProfileStat {
@@ -160,41 +166,14 @@ export const getUserProfile = async (
   throw lastError || new Error('Unable to connect to backend server to fetch profile details.');
 };
 
-export const logoutUser = async (
-  userId?: number | string
-): Promise<{ message: string; success: boolean }> => {
-  const urls = getAuthBaseUrls();
-  let lastError: Error | null = null;
-
-  for (const baseUrl of urls) {
-    try {
-      const response = await fetch(`${baseUrl}/api/auth/logout`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ userId }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Logout failed');
-      }
-
-      return data;
-    } catch (err: any) {
-      lastError = err;
-      if (err.message && err.message !== 'Failed to fetch' && !err.message.includes('Network request failed')) {
-        throw err;
-      }
-    }
+export const logoutUser = async (): Promise<{ message: string; success: boolean }> => {
+  try {
+    await signOut(auth);
+    return { message: 'Logged out successfully', success: true };
+  } catch (error) {
+    return { message: 'Logged out locally', success: true };
   }
-
-  // Even if backend call fails or network is offline, resolve client logout
-  return { message: 'Logged out locally', success: true };
 };
-
 export interface UpdateProfilePayload {
   userId?: number | string;
   name?: string;
