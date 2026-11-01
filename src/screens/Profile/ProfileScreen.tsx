@@ -19,6 +19,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { launchImageLibrary, launchCamera, ImagePickerResponse } from 'react-native-image-picker';
 import { colors, fontSize, fontWeight, spacing, borderRadius } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
+import { db, storage } from '../../config/firebaseConfig';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 interface UserProfile {
   id?: string;
@@ -242,7 +245,23 @@ const fetchProfile = async () => {
   } finally {
     setLoading(false);
   }
-};
+ };
+  useEffect(() => {
+    fetchProfile();
+  }, [authUser?.id]);
+
+  const handleOpenEditModal = () => {
+    setEditName(profileData?.name || '');
+    setEditPhone(profileData?.phoneNumber || '');
+    setEditDob(profileData?.dob || '');
+    setEditTimeOfBirth(profileData?.timeOfBirth || '');
+    setEditRashi(profileData?.rashi || '');
+    setEditLanguage(profileData?.language || '');
+    setEditGender(profileData?.gender || '');
+    setEditBio(profileData?.bio || '');
+    setIsGenderDropdownOpen(false);
+    setIsEditModalVisible(true);
+  };
   useEffect(() => {
     fetchProfile();
   }, [authUser?.id]);
