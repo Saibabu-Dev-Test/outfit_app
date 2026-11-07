@@ -1,11 +1,11 @@
 import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import LoginScreen from '../screens/Auth/LoginScreen';
-import OtpScreen from '../screens/Auth/OtpScreen';
+import OtpScreen from '../screens/Auth/OtpScreen'; // placeholder, not used in the login flow yet
 
 export type AuthStackParamList = {
   Login: undefined;
-  Otp: { fullPhone: string; phone: string; countryCode: string };
+  Otp: { fullPhone?: string; phone?: string; countryCode?: string };
 };
 
 const Stack = createNativeStackNavigator<AuthStackParamList>();
