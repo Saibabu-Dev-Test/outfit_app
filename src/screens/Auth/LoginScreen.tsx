@@ -165,7 +165,7 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
         {...(Platform.OS === 'android' ? { backgroundColor: '#FAF9FC' } : {})}
       />
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.flexOne}>
         <ScrollView
           contentContainerStyle={styles.scrollContent}

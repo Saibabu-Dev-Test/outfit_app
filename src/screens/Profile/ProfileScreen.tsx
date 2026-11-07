@@ -16,7 +16,11 @@ import {
   Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { launchImageLibrary, launchCamera, ImagePickerResponse } from 'react-native-image-picker';
+import { pickImage } from '../../utils/imagePicker';
+import { getUserProfile, saveUserProfile, uploadAvatar } from '../../services/userApi';
+import { RASHIS } from '../../utils/panchangam';
+import SelectModal from '../../components/SelectModal';
+import TimePickerModal from '../../components/TimePickerModal';
 import { colors, fontSize, fontWeight, spacing, borderRadius } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
 
@@ -31,9 +35,15 @@ interface UserProfile {
   gender?: string;
   bio?: string;
   avatarUrl?: string | null;
+  isPublic?: boolean;
   createdAt?: any;
   updatedAt?: any;
 }
+
+const LANGUAGES = [
+  'Telugu', 'Hindi', 'English', 'Tamil', 'Kannada', 'Malayalam',
+  'Marathi', 'Bengali', 'Gujarati', 'Punjabi', 'Odia', 'Urdu',
+];
 
 const menuItems = [
   { id: '1', icon: '🎨', label: 'Style Preferences', hasArrow: true },
@@ -64,6 +74,11 @@ export default function ProfileScreen() {
   const [editBio, setEditBio] = useState<string>('');
   const [savingProfile, setSavingProfile] = useState<boolean>(false);
   const [uploadingAvatar, setUploadingAvatar] = useState<boolean>(false);
+
+  // Picker modals
+  const [isTimePickerOpen, setIsTimePickerOpen] = useState<boolean>(false);
+  const [isRashiOpen, setIsRashiOpen] = useState<boolean>(false);
+  const [isLanguageOpen, setIsLanguageOpen] = useState<boolean>(false);
 
   // Gender dropdown state
   const [isGenderDropdownOpen, setIsGenderDropdownOpen] = useState<boolean>(false);
@@ -137,69 +152,36 @@ export default function ProfileScreen() {
   };
 
 
-  const handleUploadImage = async (response: ImagePickerResponse) => {
-  if (response.didCancel) return;
-  if (response.errorCode || response.errorMessage) {
-    Alert.alert('Image Error', response.errorMessage || 'Failed to select image');
-    return;
-  }
-
-  const asset = response.assets && response.assets[0];
-  if (!asset || (!asset.uri && !asset.base64)) return;
-
-  try {
-    setUploadingAvatar(true);
-    
-    // 🔥 TEMPORARY FIX: AWS Upload తీసేశాం 🔥
-    // ప్రస్తుతానికి Firebase Storage use చేయడం లేదు. 
-    // కేవలం Local URI ని మాత్రమే set చేస్తున్నాం (App crash కాకుండా).
-    console.log("Image selected:", asset.uri);
-    
-    // Local state update only (No backend call)
-    setProfileData(prev => 
-      prev 
-        ? { ...prev, avatarUrl: asset.uri } 
-        : ({ avatarUrl: asset.uri, phoneNumber: authUser?.phoneNumber || '' } as UserProfile)
-    );
-    
-    // Global context update (optional)
-    if (updateUserData) {
-      updateUserData({ avatarUrl: asset.uri });
+  // Avatar: compressed base64 data URI saved on users/{uid}.avatarUrl (no Firebase Storage)
+  const handlePickAvatar = async (source: 'camera' | 'library') => {
+    const uid = authUser?.id;
+    if (!uid) {
+      Alert.alert('Not signed in', 'Please sign in again to change your photo.');
+      return;
     }
-
-    Alert.alert('Success', 'Profile photo updated locally! (Firebase upload pending)');
-
-  } catch (err: any) {
-    console.error("Upload Error:", err.message);
-    Alert.alert('Upload Failed', 'Unable to update photo right now.');
-  } finally {
-    setUploadingAvatar(false);
-  }
-};
+    try {
+      const picked = await pickImage(source);
+      if (!picked) return;
+      setUploadingAvatar(true);
+      const url = await uploadAvatar(uid, picked.dataUri);
+      setProfileData(prev => (prev ? { ...prev, avatarUrl: url } : { id: uid, avatarUrl: url }));
+      updateUserData({ avatarUrl: url });
+      Alert.alert('Success', 'Profile photo updated!');
+    } catch (err: any) {
+      console.warn('Avatar upload error:', err?.message);
+      Alert.alert('Photo Upload Failed', err?.message || 'Unable to update photo right now.');
+    } finally {
+      setUploadingAvatar(false);
+    }
+  };
 
   const handleSelectAvatarSource = () => {
     Alert.alert(
       'Change Profile Photo',
       'Choose an option to update your profile photo',
       [
-        {
-          text: 'Take Photo',
-          onPress: () => {
-            launchCamera(
-              { mediaType: 'photo', quality: 0.8, includeBase64: true },
-              handleUploadImage
-            );
-          },
-        },
-        {
-          text: 'Choose from Library',
-          onPress: () => {
-            launchImageLibrary(
-              { mediaType: 'photo', quality: 0.8, includeBase64: true },
-              handleUploadImage
-            );
-          },
-        },
+        { text: 'Take Photo', onPress: () => handlePickAvatar('camera') },
+        { text: 'Choose from Library', onPress: () => handlePickAvatar('library') },
         { text: 'Cancel', style: 'cancel' },
       ]
     );
@@ -207,42 +189,35 @@ export default function ProfileScreen() {
 
 
 const fetchProfile = async () => {
+  if (!authUser?.id) {
+    setLoading(false);
+    return;
+  }
   try {
     setLoading(true);
-    
-    // 🔥 FIREBASE SAFE CHECK 🔥
-    // AWS call తీసేశాం. ఇప్పుడు కేవలం Firebase Auth User ని మాత్రమే వాడుతున్నాం.
-    if (authUser) {
-      console.log("Firebase User Found:", authUser.id);
-      
-      // Profile data ని Firebase Auth నుండే set చేస్తున్నాం (Temporary fix to stop crash)
-      const firebaseProfile: UserProfile = {
-        id: authUser.id,
-        name: authUser.name || "User",
-        phoneNumber: authUser.phoneNumber || "",
-        avatarUrl: authUser.avatarUrl || null,
-        // మిగిలిన fields (dob, rashi etc) ప్రస్తుతానికి empty గా ఉంచుతున్నాం
-        dob: profileData?.dob || "", 
-        rashi: profileData?.rashi || "",
-        gender: profileData?.gender || "",
-        bio: profileData?.bio || "",
-        language: profileData?.language || "",
-        timeOfBirth: profileData?.timeOfBirth || "",
-      };
-
-      setProfileData(firebaseProfile);
-      // updateUserData(firebaseProfile); // ఇది global context అయితే uncomment చేయండి
-    } else {
-      console.warn("No user logged in");
-    }
-
+    // Load saved profile from Firestore users/{uid}
+    const stored = await getUserProfile(authUser.id);
+    const merged: UserProfile = {
+      id: authUser.id,
+      phoneNumber: stored.phoneNumber || authUser.phoneNumber || '',
+      name: stored.name || authUser.name || '',
+      avatarUrl: stored.avatarUrl || authUser.avatarUrl || null,
+      dob: stored.dob || '',
+      timeOfBirth: stored.timeOfBirth || '',
+      rashi: stored.rashi || '',
+      language: stored.language || '',
+      gender: stored.gender || '',
+      bio: stored.bio || '',
+      isPublic: stored.isPublic !== false,
+    };
+    setProfileData(merged);
+    updateUserData(merged as any);
   } catch (err: any) {
-    // Error వచ్చినా App Crash కాకుండా ఇక్కడ handle చేస్తున్నాం
-    console.error("Fetch Profile Error:", err.message);
+    console.warn('Fetch Profile Error:', err?.message);
   } finally {
     setLoading(false);
   }
- };
+};
 
   // ✅ ONLY ONE useEffect (removed duplicate)
   useEffect(() => {
@@ -269,42 +244,47 @@ const fetchProfile = async () => {
     Alert.alert('Validation Error', 'Phone number cannot be empty.');
     return;
   }
+  const uid = profileData?.id || authUser?.id;
+  if (!uid) {
+    Alert.alert('Not signed in', 'Please sign in again to save your profile.');
+    return;
+  }
+
+  const updatedProfile: UserProfile = {
+    id: uid,
+    name: editName.trim(),
+    phoneNumber: editPhone.trim(),
+    dob: editDob.trim(),
+    timeOfBirth: editTimeOfBirth.trim(),
+    rashi: editRashi.trim(),
+    language: editLanguage.trim(),
+    gender: editGender.trim(),
+    bio: editBio.trim(),
+    avatarUrl: profileData?.avatarUrl || null,
+    isPublic: profileData?.isPublic !== false,
+  };
 
   try {
     setSavingProfile(true);
-    
-    // 🔥 TEMPORARY FIX: AWS Update తీసేశాం 🔥
-    // ప్రస్తుతానికి Firebase Firestore use చేయడం లేదు.
-    // కేవలం Local State ని మాత్రమే update చేస్తున్నాం (App crash కాకుండా).
-    console.log("Saving profile locally:", { editName, editPhone, editDob });
-
-    const updatedProfile: UserProfile = {
-      id: profileData?.id || authUser?.id,
-      name: editName.trim(),
-      phoneNumber: editPhone.trim(),
-      dob: editDob.trim(),
-      timeOfBirth: editTimeOfBirth.trim(),
-      rashi: editRashi.trim(),
-      language: editLanguage.trim(),
-      gender: editGender.trim(),
-      bio: editBio.trim(),
-      avatarUrl: profileData?.avatarUrl || null,
-    };
-
-    // Local state update
+    // Merge into Firestore users/{uid} (avatar is saved separately)
+    await saveUserProfile(uid, {
+      name: updatedProfile.name,
+      phoneNumber: updatedProfile.phoneNumber,
+      dob: updatedProfile.dob,
+      timeOfBirth: updatedProfile.timeOfBirth,
+      rashi: updatedProfile.rashi,
+      language: updatedProfile.language,
+      gender: updatedProfile.gender,
+      bio: updatedProfile.bio,
+      isPublic: updatedProfile.isPublic,
+    });
     setProfileData(updatedProfile);
-    
-    // Global context update
-    if (updateUserData) {
-      updateUserData(updatedProfile);
-    }
-
+    updateUserData(updatedProfile as any);
     setIsEditModalVisible(false);
-    Alert.alert('Success', 'Profile details updated locally! (Firebase save pending)');
-
+    Alert.alert('Success', 'Profile saved!');
   } catch (error: any) {
-    console.error("Save Profile Error:", error.message);
-    Alert.alert('Update Failed', 'Unable to update profile right now.');
+    console.warn('Save Profile Error:', error?.message);
+    Alert.alert('Update Failed', error?.message || 'Unable to update profile right now.');
   } finally {
     setSavingProfile(false);
   }
@@ -494,7 +474,7 @@ const fetchProfile = async () => {
         transparent={true}
         onRequestClose={() => setIsEditModalVisible(false)}>
         <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={styles.modalOverlay}>
           <TouchableOpacity
             style={styles.backdropPressable}
@@ -584,37 +564,47 @@ const fetchProfile = async () => {
 
                 <View style={[styles.inputGroup, { flex: 1 }]}>
                   <Text style={styles.inputLabel}>Time of Birth</Text>
-                  <TextInput
-                    style={styles.modalInput}
-                    placeholder="e.g. 07:30 AM"
-                    placeholderTextColor="#9E9EBA"
-                    value={editTimeOfBirth}
-                    onChangeText={setEditTimeOfBirth}
-                  />
+                  <TouchableOpacity
+                    style={styles.modalInputTouchable}
+                    onPress={() => setIsTimePickerOpen(true)}
+                    activeOpacity={0.85}>
+                    <Text style={editTimeOfBirth ? styles.modalInputValueText : styles.modalInputPlaceholderText}>
+                      {editTimeOfBirth || 'Select time'}
+                    </Text>
+                    <Text style={styles.inputCalendarIcon}>⏰</Text>
+                  </TouchableOpacity>
                 </View>
               </View>
 
               <View style={styles.formRow}>
                 <View style={[styles.inputGroup, { flex: 1 }]}>
                   <Text style={styles.inputLabel}>Rashi</Text>
-                  <TextInput
-                    style={styles.modalInput}
-                    placeholder="e.g. Megha / Mesha"
-                    placeholderTextColor="#9E9EBA"
-                    value={editRashi}
-                    onChangeText={setEditRashi}
-                  />
+                  <TouchableOpacity
+                    style={styles.modalInputTouchable}
+                    onPress={() => setIsRashiOpen(true)}
+                    activeOpacity={0.85}>
+                    <Text
+                      numberOfLines={1}
+                      style={[editRashi ? styles.modalInputValueText : styles.modalInputPlaceholderText, styles.flexShrink]}>
+                      {editRashi || 'Select Rashi'}
+                    </Text>
+                    <Text style={styles.dropdownArrowIcon}>▼</Text>
+                  </TouchableOpacity>
                 </View>
 
                 <View style={[styles.inputGroup, { flex: 1 }]}>
                   <Text style={styles.inputLabel}>Language</Text>
-                  <TextInput
-                    style={styles.modalInput}
-                    placeholder="e.g. English, Telugu"
-                    placeholderTextColor="#9E9EBA"
-                    value={editLanguage}
-                    onChangeText={setEditLanguage}
-                  />
+                  <TouchableOpacity
+                    style={styles.modalInputTouchable}
+                    onPress={() => setIsLanguageOpen(true)}
+                    activeOpacity={0.85}>
+                    <Text
+                      numberOfLines={1}
+                      style={[editLanguage ? styles.modalInputValueText : styles.modalInputPlaceholderText, styles.flexShrink]}>
+                      {editLanguage || 'Select Language'}
+                    </Text>
+                    <Text style={styles.dropdownArrowIcon}>▼</Text>
+                  </TouchableOpacity>
                 </View>
               </View>
 
@@ -806,11 +796,35 @@ const fetchProfile = async () => {
           </View>
         </View>
       </Modal>
+
+      <TimePickerModal
+        visible={isTimePickerOpen}
+        value={editTimeOfBirth}
+        onConfirm={setEditTimeOfBirth}
+        onClose={() => setIsTimePickerOpen(false)}
+      />
+      <SelectModal
+        visible={isRashiOpen}
+        title="Select Rashi"
+        options={RASHIS}
+        selected={editRashi}
+        onSelect={setEditRashi}
+        onClose={() => setIsRashiOpen(false)}
+      />
+      <SelectModal
+        visible={isLanguageOpen}
+        title="Select Language"
+        options={LANGUAGES}
+        selected={editLanguage}
+        onSelect={setEditLanguage}
+        onClose={() => setIsLanguageOpen(false)}
+      />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  flexShrink: { flexShrink: 1 },
   safeArea: { flex: 1, backgroundColor: colors.background },
   scroll: { flex: 1 },
   scrollContent: { paddingBottom: spacing.xxxl },

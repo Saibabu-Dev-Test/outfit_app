@@ -18,27 +18,10 @@ import { colors, fontSize, fontWeight, spacing, borderRadius } from '../../theme
 import { useAuth } from '../../context/AuthContext';
 import { getWardrobeItems, deleteWardrobeItem, WardrobeItemResponse } from '../../services/wardrobeApi';
 
-// ─── Constants ────────────────────────────────────────────────────────────────
-const BASE_CATEGORIES = [
-  { id: '1', icon: '👔', label: 'Tops' },
-  { id: '2', icon: '👖', label: 'Bottoms' },
-  { id: '3', icon: '👗', label: 'One-Piece' },
-  { id: '4', icon: '👟', label: 'Footwear' },
-  { id: '5', icon: '💍', label: 'Accessories' },
-];
+import { getCategoriesForGender, categoryIcon, colorToHex, WEAR_TYPES } from '../../constants/wardrobe';
 
-const CATEGORY_ICONS: Record<string, string> = {
-  'Tops': '👔',
-  'TOPS': '👔',
-  'Bottoms': '👖',
-  'BOTTOMS': '👖',
-  'One-Piece': '👗',
-  'ONE-PIECE': '👗',
-  'Footwear': '👟',
-  'FOOTWEAR': '👟',
-  'Accessories': '💍',
-  'ACCESSORIES': '💍',
-};
+// "Modes": filter the list by wear type (All / Daily Wear / Formal / Casual)
+const MODES = ['All', ...WEAR_TYPES];
 
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function WardrobeScreen({ navigation }: { navigation: any }) {
@@ -46,6 +29,9 @@ export default function WardrobeScreen({ navigation }: { navigation: any }) {
   const [items, setItems] = useState<WardrobeItemResponse[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [activeCategory, setActiveCategory] = useState<string | null>(null);
+  const [activeMode, setActiveMode] = useState<string>('All');
 
   const fetchItems = async (showLoading = true) => {
     if (!user?.id) {
@@ -57,8 +43,10 @@ export default function WardrobeScreen({ navigation }: { navigation: any }) {
       if (showLoading) setLoading(true);
       const data = await getWardrobeItems(user.id);
       setItems(data || []);
+      setLoadError(null);
     } catch (err: any) {
       console.warn('Failed to fetch wardrobe items:', err?.message);
+      setLoadError(err?.message || 'Could not load your wardrobe.');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -99,11 +87,20 @@ export default function WardrobeScreen({ navigation }: { navigation: any }) {
     );
   };
 
-  // Dynamic category count calculation from actual backend items
-  const categories = BASE_CATEGORIES.map(cat => ({
-    ...cat,
-    count: items.filter(i => i.category.toLowerCase() === cat.label.toLowerCase()).length,
+  // Gender-wise categories (from profile gender; all when not set) + any extra categories in saved items
+  const baseCats = getCategoriesForGender(user?.gender);
+  const extraCats = Array.from(new Set(items.map(i => i.category).filter(c => c && !baseCats.includes(c))));
+  const categories = [...baseCats, ...extraCats].map(label => ({
+    id: label,
+    label,
+    icon: categoryIcon(label),
+    count: items.filter(i => (i.category || '').toLowerCase() === label.toLowerCase()).length,
   }));
+
+  const visibleItems = items.filter(i =>
+    (!activeCategory || (i.category || '').toLowerCase() === activeCategory.toLowerCase()) &&
+    (activeMode === 'All' || i.wearType === activeMode),
+  );
 
   const totalItems = items.length;
 
@@ -161,17 +158,45 @@ export default function WardrobeScreen({ navigation }: { navigation: any }) {
         {/* Categories Grid */}
         <Text style={styles.sectionTitle}>Categories</Text>
         <View style={styles.categoryGrid}>
-          {categories.map(cat => (
-            <View key={cat.id} style={styles.categoryCard}>
-              <Text style={styles.categoryEmoji}>{cat.icon}</Text>
-              <Text style={styles.categoryLabel}>{cat.label}</Text>
-              <Text style={styles.categoryCount}>{cat.count} items</Text>
-            </View>
-          ))}
+          {categories.map(cat => {
+            const active = activeCategory === cat.label;
+            return (
+              <TouchableOpacity
+                key={cat.id}
+                style={[styles.categoryCard, active && styles.categoryCardActive]}
+                onPress={() => setActiveCategory(active ? null : cat.label)}
+                activeOpacity={0.8}>
+                <Text style={styles.categoryEmoji}>{cat.icon}</Text>
+                <Text style={styles.categoryLabel}>{cat.label}</Text>
+                <Text style={styles.categoryCount}>{cat.count} items</Text>
+              </TouchableOpacity>
+            );
+          })}
         </View>
 
+        {/* Modes: wear-type filter */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.modeRow}>
+          {MODES.map(m => {
+            const active = activeMode === m;
+            return (
+              <TouchableOpacity
+                key={m}
+                style={[styles.modeChip, active && styles.modeChipActive]}
+                onPress={() => setActiveMode(m)}
+                activeOpacity={0.8}>
+                <Text style={[styles.modeText, active && styles.modeTextActive]}>{m}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+        {loadError ? <Text style={styles.errorText}>{loadError}</Text> : null}
+
         {/* Recent Items / Backend Data List */}
-        <Text style={styles.sectionTitle}>My Items ({totalItems})</Text>
+        <Text style={styles.sectionTitle}>
+          {activeCategory || activeMode !== 'All'
+            ? `${activeCategory || 'All'}${activeMode !== 'All' ? ` · ${activeMode}` : ''} (${visibleItems.length})`
+            : `My Items (${totalItems})`}
+        </Text>
 
         {loading && items.length === 0 ? (
           <View style={styles.loadingContainer}>
@@ -183,7 +208,7 @@ export default function WardrobeScreen({ navigation }: { navigation: any }) {
             <Text style={styles.emptyIcon}>👕</Text>
             <Text style={styles.emptyTitle}>Your Wardrobe is Empty</Text>
             <Text style={styles.emptySubtitle}>
-              Tap the "+ Add" button above to upload clothing photos and save them to your backend wardrobe.
+              Tap the "+ Add" button above to upload clothing photos and save them to your wardrobe.
             </Text>
             <TouchableOpacity
               style={styles.emptyAddBtn}
@@ -192,10 +217,12 @@ export default function WardrobeScreen({ navigation }: { navigation: any }) {
               <Text style={styles.emptyAddBtnText}>+ Add Your First Item</Text>
             </TouchableOpacity>
           </View>
+        ) : visibleItems.length === 0 ? (
+          <Text style={styles.filterEmpty}>No items match this filter.</Text>
         ) : (
           <View style={styles.recentList}>
-            {items.map(item => {
-              const emoji = CATEGORY_ICONS[item.category] || '👕';
+            {visibleItems.map(item => {
+              const emoji = categoryIcon(item.category);
               return (
                 <View key={item.id} style={styles.recentItem}>
                   {item.imageUrl ? (
@@ -205,14 +232,14 @@ export default function WardrobeScreen({ navigation }: { navigation: any }) {
                       resizeMode="cover"
                     />
                   ) : (
-                    <View style={[styles.recentEmojiBox, { backgroundColor: item.color || '#F3F0FF' }]}>
+                    <View style={[styles.recentEmojiBox, { backgroundColor: colorToHex(item.colorHex || item.color) }]}>
                       <Text style={styles.recentEmoji}>{emoji}</Text>
                     </View>
                   )}
                   <View style={styles.recentItemInfo}>
                     <Text style={styles.recentItemName}>{item.name}</Text>
                     <Text style={styles.recentItemCategory}>
-                      {item.category}{item.subCategory ? ` · ${item.subCategory}` : ''}{item.wearType ? ` · ${item.wearType}` : ''}{item.fabric ? ` · ${item.fabric}` : ''}
+                      {item.category}{item.color ? ` · ${item.color.startsWith('#') ? '' : item.color}` : ''}{item.subCategory ? ` · ${item.subCategory}` : ''}{item.wearType ? ` · ${item.wearType}` : ''}{item.fabric ? ` · ${item.fabric}` : ''}
                     </Text>
                   </View>
                   <View style={styles.actionRow}>
@@ -243,6 +270,22 @@ export default function WardrobeScreen({ navigation }: { navigation: any }) {
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
+  categoryCardActive: { borderWidth: 2, borderColor: colors.primary },
+  modeRow: { paddingHorizontal: spacing.base, paddingBottom: spacing.sm, gap: 8 },
+  modeChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 18,
+    borderWidth: 1.5,
+    borderColor: '#E2E8F0',
+    backgroundColor: '#FFFFFF',
+    marginRight: 8,
+  },
+  modeChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  modeText: { fontSize: 13, fontWeight: '700', color: '#2D2D4A' },
+  modeTextActive: { color: '#FFFFFF' },
+  errorText: { color: colors.error, fontSize: 13, paddingHorizontal: spacing.base, marginBottom: spacing.sm },
+  filterEmpty: { color: colors.textSecondary, fontSize: 14, paddingHorizontal: spacing.base, paddingVertical: spacing.md },
   safeArea: { flex: 1, backgroundColor: colors.background },
   scroll: { flex: 1 },
   scrollContent: { paddingBottom: spacing.xxxl },

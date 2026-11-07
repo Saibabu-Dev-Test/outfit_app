@@ -13,9 +13,10 @@ import {
   ActionSheetIOS,
   ActivityIndicator,
   Modal,
+  KeyboardAvoidingView,
+  Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { launchCamera, launchImageLibrary } from 'react-native-image-picker';
 import { colors, fontSize, fontWeight, spacing, borderRadius } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
 import {
@@ -23,99 +24,14 @@ import {
   updateWardrobeItem as apiUpdateWardrobeItem,
   analyzeClothingPhoto,
 } from '../../services/wardrobeApi';
-
-interface CategoryItem {
-  id: string;
-  icon: string;
-  label: string;
-}
-
-interface CategoryGroup {
-  id: string;
-  title: string;
-  items: CategoryItem[];
-}
-
-const CATEGORY_GROUPS: CategoryGroup[] = [
-  {
-    id: 'tops',
-    title: 'TOPS',
-    items: [
-      { id: 'shirts', icon: '👔', label: 'Shirts' },
-      { id: 'tshirts', icon: '👕', label: 'T-Shirts' },
-      { id: 'polos', icon: '👕', label: 'Polos' },
-      { id: 'kurtas', icon: '👔', label: 'Kurtas' },
-      { id: 'hoodies', icon: '🧥', label: 'Hoodies' },
-      { id: 'sweaters', icon: '🧶', label: 'Sweaters' },
-      { id: 'jackets', icon: '🧥', label: 'Jackets' },
-      { id: 'blazers', icon: '🧥', label: 'Blazers' },
-      { id: 'coats', icon: '🧥', label: 'Coats' },
-    ],
-  },
-  {
-    id: 'bottoms',
-    title: 'BOTTOMS',
-    items: [
-      { id: 'pants', icon: '👖', label: 'Pants' },
-      { id: 'jeans', icon: '👖', label: 'Jeans' },
-      { id: 'trousers', icon: '👖', label: 'Trousers' },
-      { id: 'chinos', icon: '👖', label: 'Chinos' },
-      { id: 'shorts', icon: '🩳', label: 'Shorts' },
-      { id: 'trackpants', icon: '👖', label: 'Track Pants' },
-    ],
-  },
-  {
-    id: 'onepiece',
-    title: 'ONE-PIECE',
-    items: [
-      { id: 'jumpsuits', icon: '👗', label: 'Jumpsuits' },
-    ],
-  },
-  {
-    id: 'footwear',
-    title: 'FOOTWEAR',
-    items: [
-      { id: 'shoes', icon: '👟', label: 'Shoes' },
-      { id: 'sandals', icon: '👡', label: 'Sandals' },
-      { id: 'boots', icon: '🥾', label: 'Boots' },
-      { id: 'sportsshoes', icon: '👟', label: 'Sports Shoes' },
-      { id: 'slippers', icon: '🥿', label: 'Slippers' },
-    ],
-  },
-  {
-    id: 'accessories',
-    title: 'ACCESSORIES',
-    items: [
-      { id: 'watches', icon: '⌚', label: 'Watches' },
-      { id: 'belts', icon: '🥋', label: 'Belts' },
-      { id: 'caps', icon: '🧢', label: 'Caps' },
-      { id: 'sunglasses', icon: '🕶️', label: 'Sunglasses' },
-      { id: 'bags', icon: '👜', label: 'Bags' },
-      { id: 'wallets', icon: '👛', label: 'Wallets' },
-      { id: 'acc_other', icon: '💍', label: 'Accessories' },
-    ],
-  },
-];
-
-const WEAR_TYPES = ['Daily Wear', 'Formal', 'Casual'];
-
-const COLOR_SWATCHES = [
-  { label: 'White',   hex: '#FFFFFF', border: '#D0CBDF' },
-  { label: 'Black',   hex: '#1A1A1A', border: '#1A1A1A' },
-  { label: 'Grey',    hex: '#9E9EA8', border: '#9E9EA8' },
-  { label: 'Beige',   hex: '#D4B896', border: '#D4B896' },
-  { label: 'Brown',   hex: '#8B5E3C', border: '#8B5E3C' },
-  { label: 'Navy',    hex: '#1B2A6B', border: '#1B2A6B' },
-  { label: 'Blue',    hex: '#4A90D9', border: '#4A90D9' },
-  { label: 'Green',   hex: '#4CAF50', border: '#4CAF50' },
-  { label: 'Olive',   hex: '#808000', border: '#808000' },
-  { label: 'Red',     hex: '#E53935', border: '#E53935' },
-  { label: 'Pink',    hex: '#EC407A', border: '#EC407A' },
-  { label: 'Yellow',  hex: '#FDD835', border: '#FDD835' },
-  { label: 'Orange',  hex: '#FF7043', border: '#FF7043' },
-  { label: 'Purple',  hex: '#7B1FA2', border: '#7B1FA2' },
-  { label: 'Multi',   hex: '#E8E8E8', border: '#D0CBDF' },
-];
+import { pickImage } from '../../utils/imagePicker';
+import {
+  getCategoriesForGender,
+  categoryIcon,
+  COLOR_SWATCHES,
+  WEAR_TYPES,
+  colorNameFromHex,
+} from '../../constants/wardrobe';
 
 const FABRIC_TYPES = [ 'Formal', 'Casual', 'Party', 'Ethnic', 'Sports'];
 
@@ -138,13 +54,23 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
   const itemToEdit = route?.params?.itemToEdit;
   const isEditing = Boolean(itemToEdit?.id);
 
+  const categories = getCategoriesForGender(user?.gender);
+  // Old items may hold a hex in color; normalise to a swatch name
+  const initialColor: string | null = itemToEdit?.color
+    ? (String(itemToEdit.color).startsWith('#') ? colorNameFromHex(itemToEdit.color) : itemToEdit.color)
+    : null;
+
+  // imageUri holds a base64 data URI (new photo) or the saved imageData
   const [imageUri, setImageUri]               = useState<string | null>(itemToEdit?.imageUrl || null);
+  const [imageChanged, setImageChanged]       = useState(false);
+  const [isPublic, setIsPublic]               = useState<boolean>(itemToEdit?.isPublic === true);
+  const [colorError, setColorError]           = useState(false);
   const [isPreviewVisible, setIsPreviewVisible] = useState(false);
   const [itemName, setItemName]               = useState(itemToEdit?.name || '');
   const [selectedCategory, setSelectedCategory]   = useState<string | null>(itemToEdit?.category || null);
-  const [selectedSubCategory, setSelectedSubCategory] = useState<string | null>(itemToEdit?.subCategory || null);
+  const [selectedSubCategory] = useState<string | null>(itemToEdit?.subCategory || null);
   const [selectedWearType, setSelectedWearType]   = useState<string>(itemToEdit?.wearType || 'Daily Wear');
-  const [selectedColor, setSelectedColor]       = useState<string | null>(itemToEdit?.color || null);
+  const [selectedColor, setSelectedColor]       = useState<string | null>(initialColor);
   const [selectedFabric, setSelectedFabric]     = useState<string | null>(itemToEdit?.fabric || null);
   const [nameError, setNameError]               = useState('');
   const [catError, setCatError]                 = useState(false);
@@ -152,15 +78,7 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
   const [isAnalyzingAI, setIsAnalyzingAI]     = useState(false);
   const [aiStatusMsg, setAiStatusMsg]         = useState<string | null>(null);
 
-  // Helper to find selected item icon
-  const getSelectedIcon = () => {
-    if (!selectedSubCategory) return '👕';
-    for (const grp of CATEGORY_GROUPS) {
-      const found = grp.items.find(i => i.label === selectedSubCategory);
-      if (found) return found.icon;
-    }
-    return '👕';
-  };
+  const getSelectedIcon = () => categoryIcon(selectedCategory);
 
   // Trigger AI vision analysis to automatically set options
   const triggerAIAnalysis = async (uri: string) => {
@@ -168,19 +86,31 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
     setAiStatusMsg(null);
     try {
       const result = await analyzeClothingPhoto(uri);
-      if (result) {
-        if (result.category) setSelectedCategory(result.category);
-        if (result.subCategory) setSelectedSubCategory(result.subCategory);
-        if (result.wearType) setSelectedWearType(result.wearType);
-        if (result.color) setSelectedColor(result.color);
-        if (result.fabric) setSelectedFabric(result.fabric);
-        if (result.name) {
-          setItemName(result.name);
-          setNameError('');
-        }
-        setCatError(false);
-        setAiStatusMsg(`✨ AI auto-selected options: ${result.category} › ${result.subCategory}`);
+      if (!result) {
+        setAiStatusMsg('Pick a category and colour below.');
+        return;
       }
+      const cat = categories.find(
+        c => c.toLowerCase() === String(result.subCategory || '').toLowerCase()
+          || c.toLowerCase() === String(result.category || '').toLowerCase(),
+      );
+      if (cat) {
+        setSelectedCategory(cat);
+        setCatError(false);
+      }
+      if (result.wearType && WEAR_TYPES.includes(result.wearType)) setSelectedWearType(result.wearType);
+      const col = COLOR_SWATCHES.find(sw => sw.label.toLowerCase() === String(result.colorName || '').toLowerCase())
+        || COLOR_SWATCHES.find(sw => sw.hex.toLowerCase() === String(result.color || '').toLowerCase());
+      if (col) {
+        setSelectedColor(col.label);
+        setColorError(false);
+      }
+      if (result.fabric) setSelectedFabric(result.fabric);
+      if (result.name) {
+        setItemName(result.name);
+        setNameError('');
+      }
+      setAiStatusMsg(`✨ AI suggested: ${cat || result.category}${col ? ` · ${col.label}` : ''}`);
     } catch (err) {
       console.log('AI Analysis error', err);
     } finally {
@@ -188,42 +118,20 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
     }
   };
 
-  // ── Image picker ────────────────────────────────────────────────────────
-  const openCamera = () => {
-    launchCamera(
-      { mediaType: 'photo', quality: 1, saveToPhotos: false, includeBase64: false },
-      res => {
-        if (res.didCancel) return;
-        if (res.errorCode) {
-          Alert.alert('Camera Error', res.errorMessage || `Error: ${res.errorCode}`);
-          return;
-        }
-        const uri = res.assets?.[0]?.uri;
-        if (uri) {
-          setImageUri(uri);
-          triggerAIAnalysis(uri);
-        }
-      },
-    );
+  // ── Image picker (compressed base64, saved in Firestore) ─────────────────
+  const pickFrom = async (source: 'camera' | 'library') => {
+    try {
+      const picked = await pickImage(source);
+      if (!picked) return;
+      setImageUri(picked.dataUri);
+      setImageChanged(true);
+      if (picked.uri) triggerAIAnalysis(picked.uri);
+    } catch (e: any) {
+      Alert.alert('Photo Error', e?.message || 'Could not use this photo.');
+    }
   };
-
-  const openGallery = () => {
-    launchImageLibrary(
-      { mediaType: 'photo', quality: 1, selectionLimit: 1, includeBase64: false },
-      res => {
-        if (res.didCancel) return;
-        if (res.errorCode) {
-          Alert.alert('Gallery Error', res.errorMessage || `Error: ${res.errorCode}`);
-          return;
-        }
-        const uri = res.assets?.[0]?.uri;
-        if (uri) {
-          setImageUri(uri);
-          triggerAIAnalysis(uri);
-        }
-      },
-    );
-  };
+  const openCamera = () => { pickFrom('camera'); };
+  const openGallery = () => { pickFrom('library'); };
 
   const handlePickImage = () => {
     if (Platform.OS === 'ios') {
@@ -252,11 +160,14 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
   };
 
   const handleSave = async () => {
-    const finalName = itemName.trim() || selectedSubCategory || '';
+    const finalName = itemName.trim() || selectedCategory || '';
     let valid = true;
-    if (!finalName) { setNameError('Please select or enter an item name'); valid = false; }
     if (!selectedCategory) { setCatError(true); valid = false; }
-    if (!valid) return;
+    if (!selectedColor) { setColorError(true); valid = false; }
+    if (!valid) {
+      Alert.alert('Missing details', 'Please choose a category and a colour before saving.');
+      return;
+    }
 
     if (!user?.id) {
       Alert.alert('Error', 'You must be logged in to save items.');
@@ -264,6 +175,7 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
     }
 
     const icon = getSelectedIcon();
+    const hex = COLOR_SWATCHES.find(sw => sw.label === selectedColor)?.hex;
 
     setSaving(true);
     try {
@@ -274,8 +186,12 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
         subCategory: selectedSubCategory || undefined,
         wearType: selectedWearType || undefined,
         color: selectedColor || undefined,
+        colorHex: hex,
         fabric: selectedFabric || undefined,
-        imageUri: imageUri || undefined,
+        gender: user.gender || undefined,
+        isPublic,
+        // Only send the image when it is new (avoids rewriting the same data)
+        imageUri: isEditing ? (imageChanged ? imageUri : undefined) : imageUri,
       };
 
       const savedItem = isEditing && itemToEdit?.id
@@ -289,26 +205,14 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
           subCategory: savedItem.subCategory || undefined,
           wearType: savedItem.wearType || undefined,
           categoryIcon: icon,
-          color: savedItem.color || '#F8F8F8',
+          color: savedItem.colorHex || hex || '#F8F8F8',
           fabric: savedItem.fabric || '',
         });
       }
 
-      navigation?.navigate('WardrobeMain', {
-        savedItem: {
-          name: savedItem.name,
-          category: savedItem.category,
-          subCategory: savedItem.subCategory,
-          wearType: savedItem.wearType,
-          categoryIcon: icon,
-          color: savedItem.color || '#F8F8F8',
-          fabric: savedItem.fabric || '',
-          imageUrl: savedItem.imageUrl || null,
-          id: savedItem.id,
-        },
-      });
+      navigation?.navigate('WardrobeMain');
     } catch (err: any) {
-      Alert.alert(isEditing ? 'Update Failed' : 'Upload Failed', err.message || 'Could not save item. Please try again.');
+      Alert.alert(isEditing ? 'Update Failed' : 'Upload Failed', err?.message || 'Could not save item. Please try again.');
     } finally {
       setSaving(false);
     }
@@ -402,6 +306,9 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
       </View>
 
       {/* Scrollable Form Fields */}
+      <KeyboardAvoidingView
+        style={styles.scroll}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
@@ -413,39 +320,28 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
           {catError ? 'CATEGORY — please select one item' : 'CATEGORY'}
         </Text>
 
-        {CATEGORY_GROUPS.map(group => (
-          <View key={group.id} style={styles.groupCard}>
-            <Text style={styles.groupHeaderTitle}>{group.title}</Text>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.chipScrollContainer}>
-              {group.items.map(item => {
-                const isSelected = selectedSubCategory === item.label;
-                return (
-                  <TouchableOpacity
-                    key={item.id}
-                    style={[styles.itemChip, isSelected && styles.itemChipSelected]}
-                    onPress={() => {
-                      setSelectedCategory(group.title);
-                      setSelectedSubCategory(item.label);
-                      setCatError(false);
-                      if (!itemName.trim() || CATEGORY_GROUPS.some(g => g.items.some(i => i.label === itemName))) {
-                        setItemName(item.label);
-                      }
-                      setNameError('');
-                    }}
-                    activeOpacity={0.75}>
-                    <Text style={styles.chipEmoji}>{item.icon}</Text>
-                    <Text style={[styles.itemChipText, isSelected && styles.itemChipTextSelected]}>
-                      {item.label}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-          </View>
-        ))}
+        <View style={styles.categoryWrap}>
+          {categories.map(cat => {
+            const isSelected = selectedCategory === cat;
+            return (
+              <TouchableOpacity
+                key={cat}
+                style={[styles.itemChip, styles.categoryChip, isSelected && styles.itemChipSelected]}
+                onPress={() => {
+                  setSelectedCategory(cat);
+                  setCatError(false);
+                  if (!itemName.trim() || categories.includes(itemName)) {
+                    setItemName(cat);
+                  }
+                  setNameError('');
+                }}
+                activeOpacity={0.75}>
+                <Text style={styles.chipEmoji}>{categoryIcon(cat)}</Text>
+                <Text style={[styles.itemChipText, isSelected && styles.itemChipTextSelected]}>{cat}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
 
         {/* WEAR TYPE Section */}
         <Text style={styles.mainSectionTitle}>WEAR TYPE</Text>
@@ -471,7 +367,7 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
         <View style={[styles.textInputWrap, nameError ? styles.textInputError : null]}>
           <TextInput
             style={styles.textInput}
-            placeholder={selectedSubCategory ? `Name e.g. "My favorite ${selectedSubCategory}"` : 'Enter custom item name…'}
+            placeholder={selectedCategory ? `Name e.g. "My favourite ${selectedCategory}"` : 'Enter custom item name…'}
             placeholderTextColor="#B0AECB"
             value={itemName}
             onChangeText={t => { setItemName(t); setNameError(''); }}
@@ -481,19 +377,21 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
         {nameError ? <Text style={styles.errorMsg}>{nameError}</Text> : null}
 
         {/* Colour */}
-        <Text style={styles.mainSectionTitle}>COLOUR</Text>
+        <Text style={[styles.mainSectionTitle, colorError && styles.sectionLabelError]}>
+          {colorError ? 'COLOUR — please select one' : 'COLOUR'}
+        </Text>
         <View style={styles.swatchGrid}>
           {COLOR_SWATCHES.map(sw => {
-            const active = selectedColor === sw.hex;
+            const active = selectedColor === sw.label;
             return (
               <TouchableOpacity
-                key={sw.hex}
+                key={sw.label}
                 style={[
                   styles.swatch,
                   { backgroundColor: sw.hex, borderColor: active ? colors.primary : sw.border },
                   active && styles.swatchActive,
                 ]}
-                onPress={() => setSelectedColor(sw.hex)}
+                onPress={() => { setSelectedColor(sw.label); setColorError(false); }}
                 activeOpacity={0.8}
               />
             );
@@ -501,7 +399,7 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
         </View>
         {selectedColor ? (
           <Text style={styles.colorName}>
-            {COLOR_SWATCHES.find(s => s.hex === selectedColor)?.label}
+            {selectedColor}
           </Text>
         ) : null}
 
@@ -522,21 +420,27 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
           })}
         </View>
 
+        {/* Public toggle (for a later public feed) */}
+        <View style={styles.publicRow}>
+          <Text style={styles.publicLabel}>Show in public feed</Text>
+          <Switch value={isPublic} onValueChange={setIsPublic} />
+        </View>
+
         {/* Live Preview */}
-        {(selectedSubCategory || itemName.trim()) && selectedCategory ? (
+        {selectedCategory ? (
           <View style={styles.previewCard}>
-            <View style={[styles.previewThumb, { backgroundColor: selectedColor || '#F5F0FF' }]}>
+            <View style={[styles.previewThumb, { backgroundColor: COLOR_SWATCHES.find(sw => sw.label === selectedColor)?.hex || '#F5F0FF' }]}>
               <Text style={styles.previewEmoji}>{getSelectedIcon()}</Text>
             </View>
             <View style={styles.previewInfo}>
-              <Text style={styles.previewName}>{itemName.trim() || selectedSubCategory}</Text>
+              <Text style={styles.previewName}>{itemName.trim() || selectedCategory}</Text>
               <Text style={styles.previewMeta}>
-                {selectedCategory} · {selectedSubCategory || 'Item'} · {selectedWearType}
+                {selectedCategory} · {selectedWearType}{selectedColor ? ` · ${selectedColor}` : ''}
                 {selectedFabric ? ` · ${selectedFabric}` : ''}
               </Text>
             </View>
             {selectedColor ? (
-              <View style={[styles.previewColorDot, { backgroundColor: selectedColor }]} />
+              <View style={[styles.previewColorDot, { backgroundColor: COLOR_SWATCHES.find(sw => sw.label === selectedColor)?.hex || '#F5F0FF' }]} />
             ) : null}
           </View>
         ) : null}
@@ -554,6 +458,7 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
           )}
         </TouchableOpacity>
       </ScrollView>
+      </KeyboardAvoidingView>
 
       {/* Full Screen Image Preview Modal */}
       <Modal
@@ -591,6 +496,15 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
 }
 
 const styles = StyleSheet.create({
+  categoryWrap: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: spacing.md },
+  categoryChip: { marginBottom: 8, marginRight: 8 },
+  publicRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: spacing.base,
+  },
+  publicLabel: { fontSize: 14, fontWeight: '600', color: '#0A1940' },
   safe: { flex: 1, backgroundColor: '#FAFAFA' },
   scroll: { flex: 1 },
   scrollContent: { paddingBottom: 48, paddingHorizontal: spacing.base },

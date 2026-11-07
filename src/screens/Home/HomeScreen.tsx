@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -12,199 +12,197 @@ import {
   Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import { spacing, borderRadius } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
 import { doc, setDoc, serverTimestamp, collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../../config/firebaseConfig';
+import { getUserProfile, recordDailyLogin } from '../../services/userApi';
+import { hasUploadedToday } from '../../services/wardrobeApi';
+import { getTodayVaaraColour, getRashiLuckyColour } from '../../utils/panchangam';
+import { localDateKey, greetingForNow } from '../../utils/date';
+import { firestoreErrorMessage } from '../../utils/firebaseErrors';
 
-const lindaAvatar = require('../../assets/linda_avatar.jpg');
 const outfitA = require('../../assets/outfit_a.jpg');
 
-interface DailyColorResponse {
-  date: string;
-  day: string;
-  recommended_color: string;
-  secondary_colors: string[];
-  confidence: number;
-  reason: string;
-  dress_suggestion: string;
+// Colours shown in the daily vote
+const VOTE_COLOURS = [
+  { name: 'Blue', hex: '#1D92F3' },
+  { name: 'Green', hex: '#3FA73F' },
+  { name: 'Purple', hex: '#8E24AA' },
+  { name: 'Pink', hex: '#E91E63' },
+  { name: 'Yellow', hex: '#FBC02D' },
+  { name: 'Orange', hex: '#F57C00' },
+  { name: 'Red', hex: '#D32F2F' },
+  { name: 'Black', hex: '#212121' },
+  { name: 'Brown', hex: '#8B4513' },
+  { name: 'White', hex: '#EEEEEE' },
+];
+
+interface ColourTally {
+  rank: number;
+  name: string;
+  hex: string;
+  votes: number;
+  men: string;
+  women: string;
+  percentage: string;
 }
 
-const COLOR_HEX_MAP: Record<string, string> = {
-  'DEEP BLUE': '#0D47A1',
-  'NAVY BLUE': '#1A237E',
-  'ROYAL BLUE': '#1565C0',
-  'SKY BLUE': '#0288D1',
-  'LIGHT BLUE': '#4FC3F7',
-  'BLUE': '#1D92F3',
-  'EMERALD GREEN': '#00897B',
-  'OLIVE GREEN': '#558B2F',
-  'SAGE GREEN': '#A8B5A0',
-  'MINT GREEN': '#80CBC4',
-  'GREEN': '#3FA73F',
-  'MUSTARD YELLOW': '#F57F17',
-  'PASTEL YELLOW': '#FFF59D',
-  'YELLOW': '#FBC02D',
-  'PURPLE': '#8E24AA',
-  'VIOLET': '#7B1FA2',
-  'LAVENDER': '#CE93D8',
-  'ROSE PINK': '#F06292',
-  'PINK': '#E91E63',
-  'ORANGE': '#F57C00',
-  'CORAL': '#FF7043',
-  'CRIMSON': '#C62828',
-  'MAROON': '#880E4F',
-  'RED': '#D32F2F',
-  'CHARCOAL': '#37474F',
-  'BLACK': '#212121',
-  'WHITE': '#EEEEEE',
-  'SILVER': '#B0BEC5',
-  'GOLD': '#FFD54F',
-  'BEIGE': '#D7CCC8',
-  'CREAM': '#FFF9C4',
-};
-
-const getColorHex = (colorName: string): string => {
-  if (!colorName) return '#0D47A1';
-  const upper = colorName.toUpperCase().trim();
-  for (const [key, hex] of Object.entries(COLOR_HEX_MAP)) {
-    if (upper.includes(key)) return hex;
-  }
-  return '#0D47A1';
-};
-
+const pct = (n: number, total: number) => (total > 0 ? `${Math.round((n / total) * 100)}%` : '0%');
 
 export default function HomeScreen() {
-  const { user } = useAuth(); // <-- 1. ఈ లైన్ పెట్టు
-  const [votedRank, setVotedRank] = useState<number | null>(null);
-  const [dailyStyle, setDailyStyle] = useState<DailyColorResponse | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [topColours, setTopColours] = useState<any[]>([]);
+  const { user, updateUserData } = useAuth();
+  const uid = user?.id;
+  const [topColours, setTopColours] = useState<ColourTally[]>(
+    VOTE_COLOURS.map((c, i) => ({ rank: i + 1, ...c, votes: 0, men: '0%', women: '0%', percentage: '0%' })),
+  );
+  const [myVote, setMyVote] = useState<string | null>(null);
+  const [voting, setVoting] = useState<string | null>(null);
+  const [votesLoading, setVotesLoading] = useState<boolean>(true);
+  const [streak, setStreak] = useState<number>(0);
+  const [loggedInToday, setLoggedInToday] = useState<boolean>(false);
+  const [uploadedToday, setUploadedToday] = useState<boolean>(false);
+  const [greeting, setGreeting] = useState<string>(greetingForNow());
 
-  const handleVoteColor = async (rank: number) => {
-    if (!user) return Alert.alert("Please login to vote!");
-    
-    const item = topColours.find(c => c.rank === rank);  
-    if (!item) return;
+  const displayName = (user?.name || '').trim() || 'there';
+  const firstName = displayName.split(' ')[0];
+  const initial = displayName === 'there' ? '🙂' : displayName.charAt(0).toUpperCase();
+  const vaara = getTodayVaaraColour();
+  const lucky = getRashiLuckyColour(user?.rashi);
 
-    const today = new Date().toISOString().split('T')[0]; 
-    const voteId = `top_colors_${today}_${user.id}`;
+  // Today's votes, grouped by colour (one doc per user per day = one vote each)
+  const fetchVotes = useCallback(async () => {
+    try {
+      const today = localDateKey();
+      const snap = await getDocs(
+        query(collection(db, 'votes'), where('systemId', '==', 'top_colors'), where('date', '==', today)),
+      );
+      const counts: Record<string, { total: number; men: number; women: number }> = {};
+      let total = 0;
+      let mine: string | null = null;
+      snap.forEach(d => {
+        const v: any = d.data();
+        if (!v?.color) return;
+        const c = counts[v.color] || { total: 0, men: 0, women: 0 };
+        c.total += 1;
+        const g = String(v.voterGender || '').toLowerCase();
+        if (g === 'male') c.men += 1;
+        if (g === 'female') c.women += 1;
+        counts[v.color] = c;
+        total += 1;
+        if (uid && v.userId === uid) mine = v.color;
+      });
+      const results: ColourTally[] = VOTE_COLOURS.map(col => {
+        const c = counts[col.name] || { total: 0, men: 0, women: 0 };
+        return {
+          rank: 0,
+          name: col.name,
+          hex: col.hex,
+          votes: c.total,
+          men: pct(c.men, c.total),
+          women: pct(c.women, c.total),
+          percentage: pct(c.total, total),
+        };
+      });
+      results.sort((a, b) => b.votes - a.votes);
+      results.forEach((item, idx) => {
+        item.rank = idx + 1;
+      });
+      setTopColours(results);
+      setMyVote(mine);
+    } catch (error: any) {
+      console.warn('Error fetching votes:', error?.code, error?.message);
+    } finally {
+      setVotesLoading(false);
+    }
+  }, [uid]);
 
+  const refreshUploadTask = useCallback(async () => {
+    if (!uid) return;
+    setUploadedToday(await hasUploadedToday(uid));
+  }, [uid]);
+
+  // Load profile + mark daily login once per user
+  useEffect(() => {
+    if (!uid) return;
+    let alive = true;
+    (async () => {
+      try {
+        const stored = await getUserProfile(uid);
+        if (alive && Object.keys(stored).length) {
+          updateUserData({
+            name: stored.name,
+            avatarUrl: stored.avatarUrl,
+            rashi: stored.rashi,
+            gender: stored.gender,
+            dob: stored.dob,
+            language: stored.language,
+            timeOfBirth: stored.timeOfBirth,
+            bio: stored.bio,
+          });
+        }
+      } catch (e: any) {
+        console.warn('Home profile load failed:', e?.message);
+      }
+      const res = await recordDailyLogin(uid);
+      if (alive) {
+        setStreak(res.streak);
+        setLoggedInToday(true);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uid]);
+
+  // Refresh votes/tasks/greeting whenever Home is shown
+  useFocusEffect(
+    useCallback(() => {
+      setGreeting(greetingForNow());
+      fetchVotes();
+      refreshUploadTask();
+    }, [fetchVotes, refreshUploadTask]),
+  );
+
+  // Tapping a colour sets (or changes) today's vote. Overwrites the same doc, so the old vote is gone.
+  const handleVoteColor = async (colorName: string) => {
+    if (!uid) {
+      Alert.alert('Please login to vote!');
+      return;
+    }
+    if (colorName === myVote || voting) return;
+    const today = localDateKey();
+    const voteId = `top_colors_${today}_${uid}`;
+    const previous = myVote;
+    setVoting(colorName);
+    setMyVote(colorName); // optimistic
     try {
       await setDoc(doc(db, 'votes', voteId), {
         systemId: 'top_colors',
-        color: item.name,
-        userId: user.id,
+        color: colorName,
+        userId: uid,
+        voterGender: user?.gender || null,
         date: today,
-        timestamp: serverTimestamp()
-      }, { merge: true });
-
-      setVotedRank(rank);
-      Alert.alert("✅ Vote Recorded!", `You voted for ${item.name}!`);
-      fetchRealVotes();
-    } catch (error) {
-      console.error("Voting error:", error);
-      Alert.alert("Failed to cast vote.");
+        timestamp: serverTimestamp(),
+      });
+      await fetchVotes();
+    } catch (error: any) {
+      console.warn('Voting error:', error?.code, error?.message);
+      setMyVote(previous);
+      Alert.alert('Vote failed', firestoreErrorMessage(error, 'Voting'));
+    } finally {
+      setVoting(null);
     }
   };
 
-  const fetchRealVotes = async () => {
-    try {
-          // UI లో ఉన్న కలర్స్ లిస్ట్ (Fixed List)
-    const fixedColors = [
-      { name: 'Blue', hex: '#1D92F3' },
-      { name: 'Green', hex: '#3FA73F' },
-      { name: 'Purple', hex: '#8E24AA' },
-      { name: 'Pink', hex: '#E91E63' },
-      { name: 'Yellow', hex: '#FBC02D' },
-      { name: 'Orange', hex: '#F57C00' },
-      { name: 'Red', hex: '#D32F2F' },
-      { name: 'Black', hex: '#212121' },
-      { name: 'Brown', hex: '#8B4513' },
-      { name: 'White', hex: '#EEEEEE' }
-    ];
-
-      const results = await Promise.all(
-        fixedColors.map(async (color) => {
-          const q = query(
-            collection(db, 'votes'),
-            where('systemId', '==', 'top_colors'),
-            where('color', '==', color.name)
-          );
-          const snapshot = await getDocs(q);
-          
-          return {
-            rank: 0, 
-            name: color.name,
-            hex: color.hex,
-            votes: snapshot.size,
-            men: '0%',
-            women: '0%',
-            percentage: '0%',
-          };
-        })
-      );
-
-      results.sort((a, b) => b.votes - a.votes);
-      results.forEach((item, idx) => item.rank = idx + 1);
-
-      setTopColours(results);
-    } catch (error) {
-      console.error("Error fetching votes:", error);
-    }
-  };
-
-  useEffect(() => {
-    let isMounted = true;
-    
-    fetchRealVotes();
-
-    const fetchDailyColor = async () => {
-      setLoading(true);
-      const urls = Platform.OS === 'android'
-        ? ['http://10.0.2.2:8000', 'http://localhost:8000', 'http://127.0.0.1:8000']
-        : ['http://localhost:8000', 'http://127.0.0.1:8000', 'http://10.0.2.2:8000'];
-
-      for (const baseUrl of urls) {
-        try {
-          const response = await fetch(`${baseUrl}/api/recommendations/color-response-daily`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              dateofbirth: '1995-05-15',
-              name: 'Linda',
-              gender: 'Female',
-              rasi: 'Taurus',
-              user_id: 'user_123',
-            }),
-          });
-
-          if (response.ok) {
-            const data: DailyColorResponse = await response.json();
-            if (isMounted) {
-              setDailyStyle(data);
-              setLoading(false);
-            }
-            return;
-          }
-        } catch {
-          // try next URL candidate
-        }
-      }
-
-      if (isMounted) {
-        setLoading(false);
-      }
-    };
-
-    fetchDailyColor();
-    return () => { isMounted = false; };
-  }, []);
-
-  const recommendedColorName = dailyStyle?.recommended_color || 'DEEP BLUE';
-  const colorHex = getColorHex(recommendedColorName);
+  const tasks = [
+    { id: 'login', label: 'Daily login', done: loggedInToday },
+    { id: 'vote', label: "Vote today's colour", done: !!myVote },
+    { id: 'upload', label: 'Upload one wardrobe item today', done: uploadedToday },
+  ];
+  const doneCount = tasks.filter(t => t.done).length;
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
@@ -220,12 +218,62 @@ export default function HomeScreen() {
         {/* Header */}
         <View style={styles.header}>
           <View style={styles.headerLeft}>
-            <Image source={lindaAvatar} style={styles.avatar} />
-            <Text style={styles.greeting}>Good morning, Linda</Text>
+            {user?.avatarUrl ? (
+              <Image source={{ uri: user.avatarUrl }} style={styles.avatar} />
+            ) : (
+              <View style={[styles.avatar, styles.avatarFallback]}>
+                <Text style={styles.avatarInitial}>{initial}</Text>
+              </View>
+            )}
+            <Text style={styles.greeting} numberOfLines={1}>
+              {greeting}, {firstName}
+            </Text>
           </View>
           <TouchableOpacity style={styles.notifBadge} activeOpacity={0.7}>
             <Text style={styles.notifIcon}>🔔</Text>
           </TouchableOpacity>
+        </View>
+
+        {/* Daily tasks */}
+        <View style={styles.sectionHeaderRow}>
+          <Text style={styles.sectionTitle}>Today's tasks</Text>
+          <Text style={styles.streakText}>🔥 {streak} day streak</Text>
+        </View>
+        <View style={styles.tasksCard}>
+          {tasks.map(t => (
+            <View key={t.id} style={styles.taskRow}>
+              <View style={[styles.taskCheck, t.done && styles.taskCheckDone]}>
+                {t.done && <Text style={styles.taskCheckMark}>✓</Text>}
+              </View>
+              <Text style={[styles.taskLabel, t.done && styles.taskLabelDone]}>{t.label}</Text>
+            </View>
+          ))}
+          <Text style={styles.taskSummary}>{doneCount}/3 done</Text>
+        </View>
+
+        {/* Panchangam colour */}
+        <View style={styles.plainHeaderRow}>
+          <Text style={styles.sectionTitle}>Today's colour as per Panchangam</Text>
+        </View>
+        <View style={styles.panchangCard}>
+          <View style={styles.swatchRow}>
+            {vaara.colours.map(c => (
+              <View key={c.name} style={styles.swatchItem}>
+                <View style={[styles.swatchCircle, { backgroundColor: c.hex }]} />
+                <Text style={styles.swatchLabel}>{c.name}</Text>
+              </View>
+            ))}
+          </View>
+          <Text style={styles.panchangTitle}>
+            {vaara.weekday} · {vaara.vaara} · {vaara.graha}
+          </Text>
+          <Text style={styles.panchangWhy}>{vaara.why}</Text>
+          {lucky ? (
+            <Text style={styles.panchangLucky}>
+              Your rashi ({lucky.rashi}) lord is {lucky.lord}: lucky colour {lucky.colour}.
+            </Text>
+          ) : null}
+          <Text style={styles.panchangNote}>Traditional guidance</Text>
         </View>
 
         {/* Today's Top Colours */}
@@ -236,85 +284,53 @@ export default function HomeScreen() {
             <Text style={styles.liveText}>LIVE RESULTS</Text>
           </View>
         </View>
+        <Text style={styles.voteHint}>
+          {myVote ? `Your vote: ${myVote}. Tap another colour to change it.` : 'Tap a colour to vote for today.'}
+        </Text>
 
         <View style={styles.topColoursCard}>
-          <ScrollView
-            style={styles.topColoursScroll}
-            nestedScrollEnabled={true}
-            showsVerticalScrollIndicator={true}>
-            {topColours.map((item, index) => (
-              <React.Fragment key={item.rank}>
-                <TouchableOpacity
-                  style={[styles.colorRow, votedRank === item.rank && styles.colorRowVoted]}
-                  activeOpacity={0.7}
-                  onPress={() => handleVoteColor(item.rank)}
-                >
-                  <Text style={styles.colorRank}>{item.rank}</Text>
-                  <View style={[styles.colorCircle, { backgroundColor: item.hex }]} />
-                  <View style={styles.colorDetails}>
-                    <Text style={styles.colorName}>{item.name}</Text>
-                    <Text style={styles.votesCountText}>{item.votes.toLocaleString()} votes</Text>
-                    <View style={styles.genderRow}>
-                      <Text style={styles.genderText}>🧍‍♂️ Men: {item.men}</Text>
-                      <View style={styles.genderDivider} />
-                      <Text style={styles.genderText}>🧍‍♀️ Women: {item.women}</Text>
-                    </View>
-                  </View>
-                  <Text style={styles.colorPercentage}>{item.percentage}</Text>
-                </TouchableOpacity>
-                {index < topColours.length - 1 && <View style={styles.rowDivider} />}
-              </React.Fragment>
-            ))}
-          </ScrollView>
-        </View>
-
-        {/* Your style for today */}
-        <View style={styles.plainHeaderRow}>
-          <Text style={styles.sectionTitle}>Your style for today</Text>
-        </View>
-
-        <View style={styles.styleCard}>
-          {loading ? (
+          {votesLoading ? (
             <View style={styles.loadingContainer}>
               <ActivityIndicator size="small" color="#E91E63" />
-              <Text style={styles.loadingText}>Fetching today's style...</Text>
+              <Text style={styles.loadingText}>Loading votes...</Text>
             </View>
           ) : (
-            <>
-              <View style={[styles.sageGreenBlock, { backgroundColor: colorHex }]}>
-                <Text style={styles.sageGreenTitle}>{recommendedColorName.toUpperCase()}</Text>
-                <Text style={styles.sageGreenHex}>{colorHex}</Text>
-              </View>
-              <View style={styles.styleDescriptionBox}>
-                <Text style={styles.styleDescriptionText}>
-                  {dailyStyle?.dress_suggestion ||
-                    'Embrace the calmness of nature. Sage green brings a grounding energy, perfect for a busy day of meetings followed by a relaxed evening.'}
-                </Text>
-              </View>
-            </>
+            <ScrollView
+              style={styles.topColoursScroll}
+              nestedScrollEnabled={true}
+              showsVerticalScrollIndicator={true}>
+              {topColours.map((item, index) => (
+                <React.Fragment key={item.name}>
+                  <TouchableOpacity
+                    style={[styles.colorRow, myVote === item.name && styles.colorRowVoted]}
+                    activeOpacity={0.7}
+                    disabled={!!voting}
+                    onPress={() => handleVoteColor(item.name)}>
+                    <Text style={styles.colorRank}>{item.rank}</Text>
+                    <View style={[styles.colorCircle, { backgroundColor: item.hex }]} />
+                    <View style={styles.colorDetails}>
+                      <Text style={styles.colorName}>
+                        {item.name}
+                        {myVote === item.name ? '  ✓ Your vote' : ''}
+                      </Text>
+                      <Text style={styles.votesCountText}>{item.votes.toLocaleString()} votes</Text>
+                      <View style={styles.genderRow}>
+                        <Text style={styles.genderText}>🧍‍♂️ Men: {item.men}</Text>
+                        <View style={styles.genderDivider} />
+                        <Text style={styles.genderText}>🧍‍♀️ Women: {item.women}</Text>
+                      </View>
+                    </View>
+                    {voting === item.name ? (
+                      <ActivityIndicator size="small" color="#E91E63" />
+                    ) : (
+                      <Text style={styles.colorPercentage}>{item.percentage}</Text>
+                    )}
+                  </TouchableOpacity>
+                  {index < topColours.length - 1 && <View style={styles.rowDivider} />}
+                </React.Fragment>
+              ))}
+            </ScrollView>
           )}
-        </View>
-
-        {/* Why this colour? */}
-        <View style={styles.plainHeaderRow}>
-          <Text style={styles.sectionTitle}>✨ Why this colour?</Text>
-        </View>
-
-        <View style={styles.whyColorCard}>
-          <View style={styles.whyColorIconBox}>
-            <Text style={styles.whyColorIcon}>🗓️</Text>
-          </View>
-          <View style={styles.whyColorContent}>
-            <Text style={styles.whyColorTextMain}>
-              {dailyStyle?.reason ||
-                'Based on your calendar today, which includes an outdoor lunch and a creative review, Sage Green balances professionalism with a creative, approachable vibe.'}
-            </Text>
-            {dailyStyle?.secondary_colors && dailyStyle.secondary_colors.length > 0 && (
-              <Text style={styles.whyColorTextSub}>
-                Complementary shades: {dailyStyle.secondary_colors.join(', ')}
-              </Text>
-            )}
-          </View>
         </View>
 
         {/* What do you think? */}
@@ -335,6 +351,54 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
+  avatarFallback: {
+    backgroundColor: '#6C5CE7',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarInitial: { color: '#FFFFFF', fontSize: 18, fontWeight: '800' },
+  streakText: { fontSize: 13, fontWeight: '700', color: '#F57C00' },
+  tasksCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    marginHorizontal: spacing.base,
+    borderWidth: 1,
+    borderColor: '#EBE9F3',
+    padding: spacing.base,
+  },
+  taskRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 6 },
+  taskCheck: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    borderColor: '#D0CBDF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  taskCheckDone: { backgroundColor: '#3FA73F', borderColor: '#3FA73F' },
+  taskCheckMark: { color: '#FFFFFF', fontSize: 12, fontWeight: '900' },
+  taskLabel: { fontSize: 14, color: '#0A1940', fontWeight: '600' },
+  taskLabelDone: { color: '#6B6B8A', textDecorationLine: 'line-through' },
+  taskSummary: { fontSize: 12, color: '#6B6B8A', marginTop: 6, textAlign: 'right' },
+  panchangCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    marginHorizontal: spacing.base,
+    borderWidth: 1,
+    borderColor: '#EBE9F3',
+    padding: spacing.base,
+  },
+  swatchRow: { flexDirection: 'row', marginBottom: 10 },
+  swatchItem: { alignItems: 'center', marginRight: 16 },
+  swatchCircle: { width: 44, height: 44, borderRadius: 22, borderWidth: 1, borderColor: '#E0DDEA' },
+  swatchLabel: { fontSize: 12, fontWeight: '700', color: '#0A1940', marginTop: 4 },
+  panchangTitle: { fontSize: 14, fontWeight: '800', color: '#0A1940', marginBottom: 4 },
+  panchangWhy: { fontSize: 13, color: '#4A4A6A', lineHeight: 19 },
+  panchangLucky: { fontSize: 13, color: '#6C5CE7', fontWeight: '600', marginTop: 6 },
+  panchangNote: { fontSize: 11, color: '#9E9EBA', marginTop: 8, fontStyle: 'italic' },
+  voteHint: { fontSize: 12, color: '#6B6B8A', paddingHorizontal: spacing.base, marginBottom: spacing.sm },
   safeArea: {
     flex: 1,
     backgroundColor: '#FAF9FC',

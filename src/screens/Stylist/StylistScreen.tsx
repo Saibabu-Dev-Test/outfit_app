@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -11,9 +11,51 @@ import {
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import { colors, fontSize, fontWeight, spacing, borderRadius } from '../../theme';
+import { useAuth } from '../../context/AuthContext';
+import { getWardrobeItems, WardrobeItemResponse } from '../../services/wardrobeApi';
+import { categoryIcon } from '../../constants/wardrobe';
+import { getTodayVaaraColour } from '../../utils/panchangam';
 
 const occasions = ['Work', 'College', 'Date', 'Party'];
+
+// Occasion "mode" -> preferred wear types / fabrics
+const OCCASION_PREFS: Record<string, string[]> = {
+  Work: ['Formal', 'Daily Wear'],
+  College: ['Casual', 'Daily Wear'],
+  Date: ['Casual', 'Party'],
+  Party: ['Party', 'Casual', 'Ethnic'],
+};
+const TOP_CATS = ['Shirts', 'T-Shirts', 'Kurtas', 'Tops', 'Kurtis', 'Jackets', 'Ethnic'];
+const BOTTOM_CATS = ['Jeans', 'Trousers', 'Shorts', 'Leggings', 'Skirts'];
+const ONE_PIECE_CATS = ['Sarees', 'Dresses', 'Lehengas'];
+
+// Pick an outfit from the user's own wardrobe for the occasion
+const suggestFromWardrobe = (items: WardrobeItemResponse[], occasion: string): Message['outfit'] | null => {
+  if (!items.length) return null;
+  const prefs = OCCASION_PREFS[occasion] || [];
+  const score = (i: WardrobeItemResponse) =>
+    (prefs.includes(i.wearType || '') ? 2 : 0) + (prefs.includes(i.fabric || '') ? 1 : 0);
+  const best = (cats: string[]) =>
+    items.filter(i => cats.includes(i.category)).sort((a, b) => score(b) - score(a))[0];
+  const onePiece = best(ONE_PIECE_CATS);
+  const top = best(TOP_CATS);
+  const bottom = best(BOTTOM_CATS);
+  const shoes = best(['Footwear']);
+  const pieces = (onePiece && (!top || !bottom || score(onePiece) > score(top)))
+    ? [onePiece, shoes]
+    : [top, bottom, shoes];
+  const chosen = pieces.filter(Boolean) as WardrobeItemResponse[];
+  if (!chosen.length) return null;
+  const vaara = getTodayVaaraColour();
+  return {
+    title: `${occasion} look from your wardrobe`,
+    description: chosen.map(i => `${i.color ? `${i.color} ` : ''}${i.name}`).join(' + '),
+    emoji: categoryIcon(chosen[0].category),
+    reason: `Picked from your saved items for a ${occasion.toLowerCase()} setting (${prefs.join(' / ')}). Today's traditional colour is ${vaara.colours.map(c => c.name).join(' / ')}; add a touch of it if you like.`,
+  };
+};
 
 type Message = {
   id: string;
@@ -50,6 +92,42 @@ export default function StylistScreen() {
   const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [inputText, setInputText] = useState('');
   const [activeOccasion, setActiveOccasion] = useState('Work');
+  const [wardrobe, setWardrobe] = useState<WardrobeItemResponse[]>([]);
+  const { user } = useAuth();
+  const uid = user?.id;
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!uid) return;
+      getWardrobeItems(uid)
+        .then(setWardrobe)
+        .catch(e => console.warn('Stylist wardrobe load failed:', e?.message));
+    }, [uid]),
+  );
+
+  const buildReply = (occasion: string): Message => {
+    const outfit = suggestFromWardrobe(wardrobe, occasion);
+    return {
+      id: `${Date.now()}_ai`,
+      text: outfit
+        ? `Here's a ${occasion} outfit from your own wardrobe.`
+        : `For ${occasion}, add a few items (top, bottom, footwear) to your wardrobe and I'll put outfits together from them.`,
+      isUser: false,
+      outfit: outfit || {
+        title: 'AI Curated Look',
+        description: 'Smart casual combo tailored to your request',
+        emoji: '✨',
+        reason: 'This combination balances style and comfort, making it perfect for the occasion you described.',
+      },
+    };
+  };
+
+  // Switching the occasion mode posts a fresh suggestion for it
+  const selectOccasion = (occ: string) => {
+    if (occ === activeOccasion) return;
+    setActiveOccasion(occ);
+    setMessages(prev => [...prev, buildReply(occ)]);
+  };
 
   const sendMessage = () => {
     if (!inputText.trim()) return;
@@ -63,18 +141,7 @@ export default function StylistScreen() {
 
     // Simulated AI response
     setTimeout(() => {
-      const reply: Message = {
-        id: (Date.now() + 1).toString(),
-        text: `Great choice for ${activeOccasion}! Here's what I'd suggest based on your style profile.`,
-        isUser: false,
-        outfit: {
-          title: 'AI Curated Look',
-          description: 'Smart casual combo tailored to your request',
-          emoji: '✨',
-          reason: 'This combination balances style and comfort, making it perfect for the occasion you described.',
-        },
-      };
-      setMessages(prev => [...prev, reply]);
+      setMessages(prev => [...prev, buildReply(activeOccasion)]);
     }, 1200);
   };
 
@@ -86,8 +153,8 @@ export default function StylistScreen() {
       />
       <KeyboardAvoidingView
         style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={90}>
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}>
 
         {/* Header */}
         <View style={styles.header}>
@@ -110,7 +177,7 @@ export default function StylistScreen() {
             <TouchableOpacity
               key={occ}
               style={[styles.occasionChip, activeOccasion === occ && styles.occasionChipActive]}
-              onPress={() => setActiveOccasion(occ)}>
+              onPress={() => selectOccasion(occ)}>
               <Text style={[styles.occasionText, activeOccasion === occ && styles.occasionTextActive]}>
                 {occ}
               </Text>
@@ -145,6 +212,7 @@ export default function StylistScreen() {
                         </View>
                         <View style={styles.outfitDetails}>
                           <Text style={styles.outfitTitle}>{msg.outfit.title}</Text>
+                          <Text style={styles.reasonText}>{msg.outfit.description}</Text>
                           <View style={styles.reasonBox}>
                             <Text style={styles.reasonLabel}>WHY IT WORKS</Text>
                             <Text style={styles.reasonText}>{msg.outfit.reason}</Text>
