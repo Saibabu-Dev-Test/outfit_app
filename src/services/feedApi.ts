@@ -1,4 +1,4 @@
-// Public feed: posts/{id} with likes at posts/{id}/likes/{uid}. Photo is a base64 data URI (no Storage).
+// Public feed: posts/{id} with likes at posts/{id}/likes/{uid} and comments at posts/{id}/comments/{cid}. Photo is a base64 data URI (no Storage).
 import {
   collection,
   doc,
@@ -12,6 +12,7 @@ import {
   limit,
   startAfter,
   runTransaction,
+  onSnapshot,
   increment,
   serverTimestamp,
   QueryDocumentSnapshot,
@@ -22,6 +23,7 @@ import { firestoreErrorMessage } from '../utils/firebaseErrors';
 import { MAX_BASE64_CHARS } from '../utils/imagePicker';
 import { toDate } from '../utils/date';
 import { inlineAvatar } from './userApi';
+import { assertClean } from '../utils/profanity';
 
 export interface Post {
   id: string;
@@ -31,6 +33,7 @@ export interface Post {
   imageData: string;
   caption: string;
   likeCount: number;
+  commentCount: number;
   createdAt: Date | null;
 }
 
@@ -47,6 +50,8 @@ const toPost = (id: string, d: any): Post => ({
   imageData: d?.imageData || '',
   caption: d?.caption || '',
   likeCount: typeof d?.likeCount === 'number' ? Math.max(0, d.likeCount) : 0,
+  // Older posts have no commentCount: treat as 0
+  commentCount: typeof d?.commentCount === 'number' ? Math.max(0, d.commentCount) : 0,
   createdAt: toDate(d?.createdAt),
 });
 
@@ -97,6 +102,7 @@ export const createPost = async (
   if (imageData.length > MAX_BASE64_CHARS + 100) {
     throw new Error('This photo is too large to post. Please pick a smaller photo.');
   }
+  assertClean(caption, 'Please keep captions respectful 🙏');
   try {
     await addDoc(collection(db, POSTS), {
       userId: me.uid,
@@ -105,6 +111,7 @@ export const createPost = async (
       imageData,
       caption: caption.trim().slice(0, 500),
       likeCount: 0,
+      commentCount: 0,
       isPublic: true,
       createdAt: serverTimestamp(),
     });
@@ -163,5 +170,120 @@ export const toggleLike = async (
   } catch (e: any) {
     if (!e?.code && e instanceof Error) throw e;
     return fail(e, 'Liking');
+  }
+};
+
+// ── Comments ──────────────────────────────────────────────────────────
+export interface Comment {
+  id: string;
+  userId: string;
+  userName: string;
+  userAvatar: string | null;
+  text: string;
+  createdAt: Date | null;
+}
+
+export const MAX_COMMENT_CHARS = 300;
+export const COMMENTS_LIMIT = 100;
+
+// Tiny listener so the feed can update its 💬 count after a comment is added or deleted
+type CountListener = (postId: string, delta: number) => void;
+const countListeners = new Set<CountListener>();
+export const onCommentCountChange = (fn: CountListener): (() => void) => {
+  countListeners.add(fn);
+  return () => {
+    countListeners.delete(fn);
+  };
+};
+const emitCount = (postId: string, delta: number) => countListeners.forEach(fn => fn(postId, delta));
+
+const toComment = (id: string, d: any): Comment => ({
+  id,
+  userId: String(d?.userId || ''),
+  userName: d?.userName || 'Outfit user',
+  userAvatar: d?.userAvatar || null,
+  text: d?.text || '',
+  createdAt: toDate(d?.createdAt),
+});
+
+export const getPost = async (postId: string): Promise<Post | null> => {
+  try {
+    const s = await getDoc(doc(db, POSTS, postId));
+    return s.exists() ? toPost(s.id, s.data()) : null;
+  } catch (e: any) {
+    return fail(e, 'Loading post');
+  }
+};
+
+// Live list, oldest first (max 100). Returns unsubscribe.
+export const subscribeComments = (
+  postId: string,
+  onData: (list: Comment[]) => void,
+  onError: (msg: string) => void,
+): (() => void) =>
+  onSnapshot(
+    query(collection(db, POSTS, postId, 'comments'), orderBy('createdAt', 'asc'), limit(COMMENTS_LIMIT)),
+    snap => onData(snap.docs.map(d => toComment(d.id, d.data({ serverTimestamps: 'estimate' })))),
+    e => {
+      console.warn('comments listener failed:', (e as any)?.code, e?.message);
+      onError(firestoreErrorMessage(e, 'Loading comments'));
+    },
+  );
+
+// Comment + commentCount (+1) in one transaction. lastCommentId lets the rules check the new comment.
+export const addComment = async (
+  postId: string,
+  me: { uid: string; name?: string | null; avatar?: string | null },
+  text: string,
+): Promise<void> => {
+  const t = text.trim();
+  if (!t) return;
+  if (t.length > MAX_COMMENT_CHARS) throw new Error(`Comments can be up to ${MAX_COMMENT_CHARS} characters.`);
+  assertClean(t);
+  const postRef = doc(db, POSTS, postId);
+  const commentRef = doc(collection(db, POSTS, postId, 'comments'));
+  try {
+    await runTransaction(db, async tx => {
+      const post = await tx.get(postRef);
+      if (!post.exists()) throw new Error('This post was deleted.');
+      const current = Math.max(0, Number((post.data() as any)?.commentCount) || 0);
+      tx.set(commentRef, {
+        userId: me.uid,
+        userName: (me.name || '').trim() || 'Outfit user',
+        userAvatar: inlineAvatar(me.avatar),
+        text: t,
+        createdAt: serverTimestamp(),
+      });
+      tx.update(postRef, { commentCount: current + 1, lastCommentId: commentRef.id });
+    });
+    emitCount(postId, 1);
+  } catch (e: any) {
+    if (!e?.code && e instanceof Error) throw e;
+    fail(e, 'Commenting');
+  }
+};
+
+// Comment author, post owner or admin. Count goes down by 1 in the same transaction.
+export const deleteComment = async (postId: string, commentId: string): Promise<void> => {
+  const postRef = doc(db, POSTS, postId);
+  const commentRef = doc(db, POSTS, postId, 'comments', commentId);
+  try {
+    let counted = false;
+    await runTransaction(db, async tx => {
+      const post = await tx.get(postRef);
+      const comment = await tx.get(commentRef);
+      if (!comment.exists()) return;
+      tx.delete(commentRef);
+      const current = post.exists() ? Math.max(0, Number((post.data() as any)?.commentCount) || 0) : 0;
+      // Skip the count if the post is gone or the count is already 0
+      if (current > 0) {
+        tx.update(postRef, { commentCount: current - 1, lastCommentId: commentId });
+        counted = true;
+      }
+    });
+    if (counted) emitCount(postId, -1);
+  } catch (e: any) {
+    if (!e?.code && e instanceof Error) throw e;
+    fail(e, 'Deleting comment');
   }
 };

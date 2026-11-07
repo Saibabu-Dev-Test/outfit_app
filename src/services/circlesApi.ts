@@ -28,6 +28,7 @@ import { firestoreErrorMessage } from '../utils/firebaseErrors';
 import { MAX_BASE64_CHARS } from '../utils/imagePicker';
 import { toDate } from '../utils/date';
 import { inlineAvatar } from './userApi';
+import { assertClean } from '../utils/profanity';
 
 export interface Circle {
   id: string;
@@ -366,6 +367,7 @@ const checkImage = (uri: string, max = MAX_BASE64_CHARS + 100) => {
 export const sendTextMessage = async (circleId: string, me: ChatAuthor, text: string): Promise<void> => {
   const t = text.trim();
   if (!t) return;
+  assertClean(t, 'Please keep messages respectful 🙏');
   try {
     await addDoc(collection(db, CIRCLES, circleId, 'messages'), {
       ...authorFields(me),
@@ -385,6 +387,7 @@ export const sendImageMessage = async (
   caption?: string,
 ): Promise<void> => {
   checkImage(imageData);
+  if (caption) assertClean(caption, 'Please keep messages respectful 🙏');
   try {
     const data: any = { ...authorFields(me), type: 'image', imageData };
     if (caption && caption.trim()) data.text = caption.trim().slice(0, 500);
@@ -403,6 +406,7 @@ export const sendPollMessage = async (
 ): Promise<void> => {
   if (options.length < 2 || options.length > 4) throw new Error('A poll needs 2 to 4 photos.');
   options.forEach(o => checkImage(o.imageData));
+  options.forEach(o => assertClean(o.label || '', 'Please keep poll labels respectful 🙏'));
   const total = options.reduce((n, o) => n + o.imageData.length, 0);
   if (total > MAX_POLL_TOTAL_CHARS) {
     throw new Error('These photos are too large together. Remove one or pick smaller photos.');

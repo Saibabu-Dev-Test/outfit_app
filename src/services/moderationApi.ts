@@ -1,4 +1,4 @@
-// Reports for moderators: reports/{id} {circleId, messageId?, postId?, reporterId, reason, createdAt}
+// Reports for moderators: reports/{id} {circleId, messageId?, postId?, commentId?, reporterId, reason, createdAt}
 import {
   collection,
   addDoc,
@@ -28,13 +28,14 @@ export interface Report {
   circleId: string | null;
   messageId: string | null;
   postId: string | null;
+  commentId: string | null;
   reporterId: string;
   reason: string;
   createdAt: Date | null;
 }
 
 export const createReport = async (
-  target: { circleId?: string | null; messageId?: string | null; postId?: string | null },
+  target: { circleId?: string | null; messageId?: string | null; postId?: string | null; commentId?: string | null },
   reporterId: string,
   reason: string,
 ): Promise<void> => {
@@ -46,6 +47,7 @@ export const createReport = async (
   };
   if (target.messageId) data.messageId = target.messageId;
   if (target.postId) data.postId = target.postId;
+  if (target.postId && target.commentId) data.commentId = target.commentId;
   try {
     await addDoc(collection(db, 'reports'), data);
   } catch (e: any) {
@@ -65,6 +67,7 @@ export const getReports = async (): Promise<Report[]> => {
         circleId: x?.circleId || null,
         messageId: x?.messageId || null,
         postId: x?.postId || null,
+        commentId: x?.commentId || null,
         reporterId: String(x?.reporterId || ''),
         reason: x?.reason || '',
         createdAt: toDate(x?.createdAt),

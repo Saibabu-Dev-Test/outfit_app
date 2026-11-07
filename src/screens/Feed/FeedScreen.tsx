@@ -1,4 +1,4 @@
-// Instagram-style public feed: infinite scroll, pull to refresh, like (tap heart or double-tap the photo)
+// Instagram-style public feed: infinite scroll, pull to refresh, like (tap heart or double-tap the photo), comments
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
@@ -22,7 +22,15 @@ import { useAuth } from '../../context/AuthContext';
 import useIsAdmin from '../../hooks/useIsAdmin';
 import Avatar from '../../components/Avatar';
 import ReportModal, { ReportTarget } from '../../components/ReportModal';
-import { FeedCursor, Post, deletePost, getFeedPage, getLikedPostIds, toggleLike } from '../../services/feedApi';
+import {
+  FeedCursor,
+  Post,
+  deletePost,
+  getFeedPage,
+  getLikedPostIds,
+  onCommentCountChange,
+  toggleLike,
+} from '../../services/feedApi';
 import { timeAgo } from '../../utils/date';
 
 interface PostCardProps {
@@ -32,9 +40,10 @@ interface PostCardProps {
   onToggleLike: (post: Post, forceLike?: boolean) => void;
   onOpenProfile: (userId: string) => void;
   onMenu: (post: Post) => void;
+  onOpenComments: (post: Post) => void;
 }
 
-function PostCard({ post, liked, width, onToggleLike, onOpenProfile, onMenu }: PostCardProps) {
+function PostCard({ post, liked, width, onToggleLike, onOpenProfile, onMenu, onOpenComments }: PostCardProps) {
   const lastTap = useRef(0);
   const heart = useRef(new Animated.Value(0)).current;
 
@@ -88,6 +97,13 @@ function PostCard({ post, liked, width, onToggleLike, onOpenProfile, onMenu }: P
         <Text style={styles.likes}>
           {post.likeCount} {post.likeCount === 1 ? 'like' : 'likes'}
         </Text>
+        <TouchableOpacity
+          style={styles.commentBtn}
+          onPress={() => onOpenComments(post)}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+          <Text style={styles.commentIcon}>💬</Text>
+          <Text style={styles.likes}>{post.commentCount}</Text>
+        </TouchableOpacity>
       </View>
       {post.caption ? (
         <Text style={styles.caption}>
@@ -97,6 +113,13 @@ function PostCard({ post, liked, width, onToggleLike, onOpenProfile, onMenu }: P
           {post.caption}
         </Text>
       ) : null}
+      <TouchableOpacity onPress={() => onOpenComments(post)}>
+        <Text style={styles.viewComments}>
+          {post.commentCount > 0
+            ? `View all ${post.commentCount} ${post.commentCount === 1 ? 'comment' : 'comments'}`
+            : 'Add a comment...'}
+        </Text>
+      </TouchableOpacity>
     </View>
   );
 }
@@ -168,6 +191,17 @@ export default function FeedScreen({ navigation, route }: { navigation: any; rou
 
   // First load, and again after a new post (NewPost passes refreshAt)
   const refreshAt = route?.params?.refreshAt;
+
+  // Keep 💬 counts in step with the Comments screen
+  useEffect(
+    () =>
+      onCommentCountChange((postId, delta) =>
+        setPosts(prev =>
+          prev.map(p => (p.id === postId ? { ...p, commentCount: Math.max(0, p.commentCount + delta) } : p)),
+        ),
+      ),
+    [],
+  );
   useEffect(() => {
     loadFirst();
   }, [loadFirst, refreshAt]);
@@ -226,6 +260,8 @@ export default function FeedScreen({ navigation, route }: { navigation: any; rou
     Alert.alert('Post', undefined, buttons);
   };
 
+  const openComments = (post: Post) => navigation.navigate('Comments', { postId: post.id });
+
   const openProfile = (userId: string) => {
     if (userId) navigation.navigate('UserProfile', { userId });
   };
@@ -260,6 +296,7 @@ export default function FeedScreen({ navigation, route }: { navigation: any; rou
             onToggleLike={handleToggleLike}
             onOpenProfile={openProfile}
             onMenu={handleMenu}
+            onOpenComments={openComments}
           />
         )}
         onEndReached={loadMore}
@@ -352,6 +389,9 @@ const styles = StyleSheet.create({
   heart: { fontSize: 28, color: colors.textPrimary, marginRight: spacing.sm },
   heartOn: { color: '#E91E63' },
   likes: { fontSize: fontSize.sm, fontWeight: fontWeight.bold, color: colors.textPrimary },
+  commentBtn: { flexDirection: 'row', alignItems: 'center', marginLeft: spacing.lg },
+  commentIcon: { fontSize: 20, marginRight: 4 },
+  viewComments: { fontSize: fontSize.sm, color: colors.textMuted, paddingHorizontal: spacing.md, paddingTop: 4 },
   caption: { fontSize: fontSize.sm, color: colors.textPrimary, paddingHorizontal: spacing.md, paddingTop: 4, lineHeight: 19 },
   captionName: { fontWeight: fontWeight.bold },
   error: { color: colors.error, textAlign: 'center', padding: spacing.md },

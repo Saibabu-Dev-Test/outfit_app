@@ -19,6 +19,7 @@ import { MAX_BASE64_CHARS } from '../utils/imagePicker';
 export interface StoredProfile {
   name?: string;
   phoneNumber?: string;
+  phone?: string; // login key (digits), written only at sign up
   dob?: string;
   timeOfBirth?: string;
   rashi?: string;
@@ -34,7 +35,7 @@ export interface StoredProfile {
 }
 
 const PROFILE_KEYS: (keyof StoredProfile)[] = [
-  'name', 'phoneNumber', 'dob', 'timeOfBirth', 'rashi', 'language', 'gender',
+  'name', 'phoneNumber', 'phone', 'dob', 'timeOfBirth', 'rashi', 'language', 'gender',
   'bio', 'avatarUrl', 'isPublic', 'nameLower', 'role', 'lastLoginDate', 'streak',
 ];
 

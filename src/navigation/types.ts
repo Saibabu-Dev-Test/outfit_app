@@ -8,5 +8,6 @@ export type RootStackParamList = {
   NewPost: undefined;
   UserProfile: { userId: string };
   UserSearch: undefined;
+  Comments: { postId: string; highlightId?: string };
   Admin: undefined;
 };

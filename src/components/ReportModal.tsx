@@ -8,6 +8,7 @@ export interface ReportTarget {
   circleId?: string | null;
   messageId?: string | null;
   postId?: string | null;
+  commentId?: string | null; // with postId
 }
 
 interface Props {
@@ -17,7 +18,13 @@ interface Props {
 }
 
 export default function ReportModal({ target, reporterId, onClose }: Props) {
-  const title = target?.messageId ? 'Report message' : target?.postId ? 'Report post' : 'Report circle';
+  const title = target?.commentId
+    ? 'Report comment'
+    : target?.messageId
+    ? 'Report message'
+    : target?.postId
+    ? 'Report post'
+    : 'Report circle';
   const onSelect = async (reason: string) => {
     if (!target || !reporterId) {
       Alert.alert('Not signed in', 'Please sign in again to report.');

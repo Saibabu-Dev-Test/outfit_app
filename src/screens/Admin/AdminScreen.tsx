@@ -19,7 +19,7 @@ import { useAuth } from '../../context/AuthContext';
 import { getMyRole } from '../../services/userApi';
 import { Report, getReports, deleteReport } from '../../services/moderationApi';
 import { Circle, getAllCircles, deleteCircle, deleteMessageById } from '../../services/circlesApi';
-import { deletePost } from '../../services/feedApi';
+import { deletePost, deleteComment } from '../../services/feedApi';
 import { timeAgo } from '../../utils/date';
 
 type TabKey = 'reports' | 'circles';
@@ -92,7 +92,7 @@ export default function AdminScreen({ navigation }: { navigation: any }) {
     ]);
 
   const renderReport = ({ item }: { item: Report }) => {
-    const kind = item.postId ? 'Post' : item.messageId ? 'Message' : 'Circle';
+    const kind = item.commentId ? 'Comment' : item.postId ? 'Post' : item.messageId ? 'Message' : 'Circle';
     return (
       <View style={styles.card}>
         <View style={styles.cardTop}>
@@ -124,7 +124,30 @@ export default function AdminScreen({ navigation }: { navigation: any }) {
               <Text style={styles.btnDangerText}>Delete message</Text>
             </TouchableOpacity>
           ) : null}
-          {item.postId ? (
+          {item.postId && item.commentId ? (
+            <>
+              <TouchableOpacity
+                style={styles.btn}
+                onPress={() =>
+                  navigation.navigate('Comments', { postId: item.postId, highlightId: item.commentId })
+                }>
+                <Text style={styles.btnText}>Open comments</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.btn, styles.btnDanger]}
+                onPress={() =>
+                  confirm('Delete this comment?', () =>
+                    run(item.id, async () => {
+                      await deleteComment(item.postId as string, item.commentId as string);
+                      await deleteReport(item.id);
+                    }),
+                  )
+                }>
+                <Text style={styles.btnDangerText}>Delete comment</Text>
+              </TouchableOpacity>
+            </>
+          ) : null}
+          {item.postId && !item.commentId ? (
             <TouchableOpacity
               style={[styles.btn, styles.btnDanger]}
               onPress={() =>

@@ -25,9 +25,17 @@ import TimePickerModal from '../../components/TimePickerModal';
 import { colors, fontSize, fontWeight, spacing, borderRadius } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
 
+// "+91 98765 43210" from users/{uid}.phone (10 digits), else the saved phoneNumber
+const phoneLabel = (p?: { phone?: string; phoneNumber?: string } | null): string => {
+  const d = (p?.phone || '').replace(/\D/g, '');
+  if (d.length === 10) return `+91 ${d.slice(0, 5)} ${d.slice(5)}`;
+  return d ? `+${d}` : p?.phoneNumber || '';
+};
+
 interface UserProfile {
   id?: string;
   phoneNumber?: string;
+  phone?: string; // login key (digits), read-only here
   name?: string;
   dob?: string;
   timeOfBirth?: string;
@@ -69,7 +77,6 @@ export default function ProfileScreen() {
   // Edit modal states
   const [isEditModalVisible, setIsEditModalVisible] = useState<boolean>(false);
   const [editName, setEditName] = useState<string>('');
-  const [editPhone, setEditPhone] = useState<string>('');
   const [editDob, setEditDob] = useState<string>('');
   const [editTimeOfBirth, setEditTimeOfBirth] = useState<string>('');
   const [editRashi, setEditRashi] = useState<string>('');
@@ -205,6 +212,7 @@ const fetchProfile = async () => {
     const merged: UserProfile = {
       id: authUser.id,
       phoneNumber: stored.phoneNumber || authUser.phoneNumber || '',
+      phone: stored.phone || '',
       name: stored.name || authUser.name || '',
       avatarUrl: stored.avatarUrl || authUser.avatarUrl || null,
       dob: stored.dob || '',
@@ -234,7 +242,6 @@ const fetchProfile = async () => {
   // ✅ ONLY ONE handleOpenEditModal (removed duplicate)
   const handleOpenEditModal = () => {
     setEditName(profileData?.name || '');
-    setEditPhone(profileData?.phoneNumber || '');
     setEditDob(profileData?.dob || '');
     setEditTimeOfBirth(profileData?.timeOfBirth || '');
     setEditRashi(profileData?.rashi || '');
@@ -247,10 +254,6 @@ const fetchProfile = async () => {
   };
 
  const handleSaveProfile = async () => {
-  if (!editPhone.trim()) {
-    Alert.alert('Validation Error', 'Phone number cannot be empty.');
-    return;
-  }
   const uid = profileData?.id || authUser?.id;
   if (!uid) {
     Alert.alert('Not signed in', 'Please sign in again to save your profile.');
@@ -260,7 +263,8 @@ const fetchProfile = async () => {
   const updatedProfile: UserProfile = {
     id: uid,
     name: editName.trim(),
-    phoneNumber: editPhone.trim(),
+    phoneNumber: profileData?.phoneNumber,
+    phone: profileData?.phone,
     dob: editDob.trim(),
     timeOfBirth: editTimeOfBirth.trim(),
     rashi: editRashi.trim(),
@@ -276,7 +280,6 @@ const fetchProfile = async () => {
     // Merge into Firestore users/{uid} (avatar is saved separately)
     await saveUserProfile(uid, {
       name: updatedProfile.name,
-      phoneNumber: updatedProfile.phoneNumber,
       dob: updatedProfile.dob,
       timeOfBirth: updatedProfile.timeOfBirth,
       rashi: updatedProfile.rashi,
@@ -572,14 +575,14 @@ const fetchProfile = async () => {
 
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>Phone Number</Text>
-                <TextInput
-                  style={styles.modalInput}
-                  placeholder="Enter phone number"
-                  placeholderTextColor="#9E9EBA"
-                  keyboardType="phone-pad"
-                  value={editPhone}
-                  onChangeText={setEditPhone}
-                />
+                {/* Read-only: login depends on this number */}
+                <View style={[styles.modalInputTouchable, styles.readOnlyInput]}>
+                  <Text style={styles.modalInputValueText}>
+                    {phoneLabel(profileData) || 'Not set'}
+                  </Text>
+                  <Text style={styles.inputCalendarIcon}>🔒</Text>
+                </View>
+                <Text style={styles.readOnlyHint}>Used to sign in, so it can't be changed here.</Text>
               </View>
 
               <View style={styles.formRow}>
@@ -1246,6 +1249,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
+  readOnlyInput: { backgroundColor: colors.divider, opacity: 0.85 },
+  readOnlyHint: { fontSize: fontSize.xs, color: colors.textMuted, marginTop: 4 },
   modalInputValueText: {
     fontSize: fontSize.base,
     color: colors.textPrimary,

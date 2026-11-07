@@ -8,6 +8,7 @@ import CircleChatScreen from '../screens/Circles/CircleChatScreen';
 import CircleInfoScreen from '../screens/Circles/CircleInfoScreen';
 import FeedScreen from '../screens/Feed/FeedScreen';
 import NewPostScreen from '../screens/Feed/NewPostScreen';
+import CommentsScreen from '../screens/Feed/CommentsScreen';
 import UserProfileScreen from '../screens/Profile/UserProfileScreen';
 import UserSearchScreen from '../screens/Profile/UserSearchScreen';
 import AdminScreen from '../screens/Admin/AdminScreen';
@@ -41,6 +42,7 @@ function NavigationContent() {
               <Stack.Screen name="CircleInfo" component={CircleInfoScreen} />
               <Stack.Screen name="Feed" component={FeedScreen} />
               <Stack.Screen name="NewPost" component={NewPostScreen} />
+              <Stack.Screen name="Comments" component={CommentsScreen} />
               <Stack.Screen name="UserProfile" component={UserProfileScreen} />
               <Stack.Screen name="UserSearch" component={UserSearchScreen} />
               <Stack.Screen name="Admin" component={AdminScreen} />

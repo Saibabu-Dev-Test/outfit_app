@@ -162,29 +162,79 @@ service cloud.firestore {
 
     // ── Public feed ─────────────────────────────────────────────────────
     match /posts/{postId} {
+      function postPath() {
+        return /databases/$(db)/documents/posts/$(postId);
+      }
+      function likePath() {
+        return /databases/$(db)/documents/posts/$(postId)/likes/$(request.auth.uid);
+      }
+      function commentPath(cid) {
+        return /databases/$(db)/documents/posts/$(postId)/comments/$(cid);
+      }
+      // likeCount changes by exactly 1, together with the liker's own like doc
+      function likeUpdate() {
+        return onlyChanged(['likeCount'])
+          && (
+            (request.resource.data.likeCount == resource.data.likeCount + 1
+              && !exists(likePath()) && existsAfter(likePath()))
+            || (request.resource.data.likeCount == resource.data.likeCount - 1
+              && exists(likePath()) && !existsAfter(likePath()))
+          );
+      }
+      // commentCount changes by exactly 1, together with the comment named in lastCommentId
+      // (posts without commentCount count as 0)
+      function commentCountUpdate() {
+        let cid = request.resource.data.lastCommentId;
+        let before = resource.data.get('commentCount', 0);
+        return onlyChanged(['commentCount', 'lastCommentId'])
+          && cid is string
+          && (
+            (request.resource.data.commentCount == before + 1
+              && !exists(commentPath(cid)) && existsAfter(commentPath(cid)))
+            || (request.resource.data.commentCount == before - 1
+              && before > 0
+              && exists(commentPath(cid)) && !existsAfter(commentPath(cid)))
+          );
+      }
+
       allow read: if signedIn();
       allow create: if signedIn()
         && request.resource.data.userId == me()
         && request.resource.data.isPublic == true
         && request.resource.data.likeCount == 0
+        && request.resource.data.get('commentCount', 0) == 0
         && request.resource.data.imageData is string;
-      // Only likeCount may change, by exactly 1, together with the liker's own like doc
-      allow update: if signedIn()
-        && onlyChanged(['likeCount'])
-        && (
-          (request.resource.data.likeCount == resource.data.likeCount + 1
-            && !exists(/databases/$(db)/documents/posts/$(postId)/likes/$(request.auth.uid))
-            && existsAfter(/databases/$(db)/documents/posts/$(postId)/likes/$(request.auth.uid)))
-          || (request.resource.data.likeCount == resource.data.likeCount - 1
-            && exists(/databases/$(db)/documents/posts/$(postId)/likes/$(request.auth.uid))
-            && !existsAfter(/databases/$(db)/documents/posts/$(postId)/likes/$(request.auth.uid)))
-        );
+      allow update: if signedIn() && (likeUpdate() || commentCountUpdate());
       allow delete: if signedIn() && (resource.data.userId == me() || isAdmin());
 
       match /likes/{likerId} {
         allow read: if signedIn();
         allow create, delete: if signedIn() && likerId == me();
         allow update: if false;
+      }
+
+      // ── Comments: posts/{postId}/comments/{cid} {userId, userName, userAvatar, text, createdAt} ──
+      match /comments/{cid} {
+        allow read: if signedIn();
+        allow create: if signedIn()
+          && exists(postPath())
+          && request.resource.data.keys().hasOnly(['userId', 'userName', 'userAvatar', 'text', 'createdAt'])
+          && request.resource.data.userId == me()
+          && request.resource.data.text is string
+          && request.resource.data.text.size() >= 1
+          && request.resource.data.text.size() <= 300
+          && request.resource.data.createdAt == request.time
+          && (request.resource.data.get('userAvatar', null) == null
+              || (request.resource.data.userAvatar is string
+                  && request.resource.data.userAvatar.size() <= 60000))
+          // Worst abusive words (the app filters a longer list before sending)
+          && !request.resource.data.text.lower().matches('(([a-z]|[^a-z])*[^a-z])?(fuck[a-z]*|motherfucker[a-z]*|bitch(es)?|cunts?|nigg(er|a)s?|faggots?|madarchod|behenchod|bhenchod|chutiy[ae]|bhosdike|lanja|lanjakodaka|dengu|puku|modda|randi|gandu|lavda)([^a-z]([a-z]|[^a-z])*)?');
+        allow update: if false;
+        // Comment author, post owner or admin
+        allow delete: if signedIn()
+          && (resource.data.userId == me()
+              || get(postPath()).data.userId == me()
+              || isAdmin());
       }
     }
 
