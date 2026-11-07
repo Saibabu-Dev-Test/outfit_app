@@ -36,7 +36,6 @@ const COUNTRY_CODES = [
 
 const MIN_PASSWORD = 6;
 
-// Pull a readable message out of axios / fetch / plain errors
 const getErrorMessage = (err: any, fallback: string): string =>
   err?.response?.data?.message || err?.data?.message || err?.message || fallback;
 
@@ -53,8 +52,9 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
 
-  const passwordRef = useRef<TextInput>(null);
-  const confirmRef = useRef<TextInput>(null);
+  // RN 0.87 ref type (useRef<TextInput> no longer type-checks)
+  const passwordRef = useRef<React.ComponentRef<typeof TextInput>>(null);
+  const confirmRef = useRef<React.ComponentRef<typeof TextInput>>(null);
   const submittingRef = useRef(false); // blocks double taps
 
   const isRegister = authMode === 'register';
@@ -119,13 +119,16 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
 
     try {
       if (isRegister) {
-        try {
-          await registerWithPhoneAndPassword({ phoneNumber: formattedPhone, password });
-        } catch (err: any) {
-          setError(getErrorMessage(err, 'Could not create your account. Please try again.'));
+        // authApi returns { message } with no user on failure (it doesn't throw)
+        const regRes = await registerWithPhoneAndPassword({ phoneNumber: formattedPhone, password });
+        if (!regRes?.user) {
+          setError(regRes?.message || 'Could not create your account. Please try again.');
           return;
         }
+        // Firebase signs the new user in automatically, so no second login call
         setSuccessMsg('Account created! Signing you in...');
+        finishLogin(regRes.user);
+        return;
       }
 
       const loginRes = await loginWithPhoneAndPassword({
@@ -134,22 +137,14 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
       });
 
       if (!loginRes?.user) {
-        if (isRegister) {
-          // Account exists now; let them sign in manually
-          setAuthMode('login');
-          setConfirmPassword('');
-          setSuccessMsg('');
-          setError('Account created, but auto sign-in failed. Please sign in.');
-        } else {
-          setError(loginRes?.message || 'Invalid mobile number or password');
-        }
+        setError(loginRes?.message || 'Invalid mobile number or password');
         return;
       }
 
       setSuccessMsg(loginRes.message || 'Signed in!');
       finishLogin(loginRes.user);
     } catch (err: any) {
-      console.error('Auth error:', err);
+      console.warn('Auth error:', err);
       setSuccessMsg('');
       setError(
         getErrorMessage(
@@ -378,7 +373,7 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
               onPress={() => switchMode(isRegister ? 'login' : 'register')}
               disabled={loading}>
               <Text style={styles.switchText}>
-                {isRegister ? 'Already have an account? ' : "New here? "}
+                {isRegister ? 'Already have an account? ' : 'New here? '}
                 <Text style={styles.termsLink}>{isRegister ? 'Sign In' : 'Create Account'}</Text>
               </Text>
             </TouchableOpacity>
