@@ -1,5 +1,5 @@
 // Auth: Google account on the device + mobile number + password. No OTP, no SMS.
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -14,10 +14,12 @@ import {
   Keyboard,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { spacing, borderRadius } from '../../theme';
 import SelectModal from '../../components/SelectModal';
 import {
   cancelAuthFlow,
+  checkResetSim,
   completeSignUp,
   loginWithGoogleEmailPhoneAndPassword,
   pickGoogleAccountForLogin,
@@ -26,6 +28,7 @@ import {
   startGoogleSignUp,
   switchGoogleAccount,
   GoogleStepResponse,
+  SIM_RESET_MESSAGE,
 } from '../../services/authApi';
 import { pickSimNumber, SIM_REQUIRED_MESSAGE } from '../../native/phoneHint';
 
@@ -46,6 +49,22 @@ const COUNTRY_CODES = [
 
 const GENDER_OPTIONS = ['Male', 'Female', 'Other'];
 const MIN_PASSWORD = 6;
+
+// Brute-force guard: 5 wrong passwords -> Sign In locked for 60 s (survives app restart).
+// Not 'outfit:' prefixed, so logout doesn't clear it.
+const GUARD_KEY = 'loginGuard:v1';
+const MAX_WRONG = 5;
+const LOCK_MS = 60 * 1000;
+type Guard = { fails: number; lockedUntil: number };
+const readGuard = async (): Promise<Guard> => {
+  try {
+    const g = JSON.parse((await AsyncStorage.getItem(GUARD_KEY)) || '{}');
+    return { fails: Number(g.fails) || 0, lockedUntil: Number(g.lockedUntil) || 0 };
+  } catch {
+    return { fails: 0, lockedUntil: 0 };
+  }
+};
+const writeGuard = (g: Guard) => AsyncStorage.setItem(GUARD_KEY, JSON.stringify(g)).catch(() => {});
 
 const getErrorMessage = (err: any, fallback: string): string =>
   err?.response?.data?.message || err?.data?.message || err?.message || fallback;
@@ -89,6 +108,9 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
   // Register/reset: the number must come from the SIM picker (not typed)
   const [simPicked, setSimPicked] = useState(false);
   const [simLoading, setSimLoading] = useState(false);
+  // Brute-force lock (login only)
+  const [lockedUntil, setLockedUntil] = useState(0);
+  const [lockLeft, setLockLeft] = useState(0); // seconds
 
   // RN 0.87 ref type (useRef<TextInput> no longer type-checks)
   const passwordRef = useRef<React.ComponentRef<typeof TextInput>>(null);
@@ -101,6 +123,42 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
   const needsSim = isRegister || isForgot; // SIM must be in this phone
   const busy = loading || googleLoading || simLoading;
   const copy = TITLES[authMode];
+  const locked = authMode === 'login' && lockLeft > 0;
+
+  // Restore a lock that was running when the app closed
+  useEffect(() => {
+    readGuard().then(g => {
+      if (g.lockedUntil > Date.now()) setLockedUntil(g.lockedUntil);
+    });
+  }, []);
+
+  // Countdown
+  useEffect(() => {
+    const tick = () => {
+      const left = Math.max(0, Math.ceil((lockedUntil - Date.now()) / 1000));
+      setLockLeft(left);
+      return left;
+    };
+    if (tick() === 0) return;
+    const id = setInterval(() => {
+      if (tick() === 0) clearInterval(id);
+    }, 1000);
+    return () => clearInterval(id);
+  }, [lockedUntil]);
+
+  const recordWrongPassword = async (): Promise<string | null> => {
+    const g = await readGuard();
+    const fails = g.fails + 1;
+    if (fails >= MAX_WRONG) {
+      const until = Date.now() + LOCK_MS;
+      await writeGuard({ fails: 0, lockedUntil: until });
+      setLockedUntil(until);
+      return `${MAX_WRONG} wrong passwords. Sign In is locked for ${LOCK_MS / 1000} seconds.`;
+    }
+    await writeGuard({ fails, lockedUntil: 0 });
+    const left = MAX_WRONG - fails;
+    return left <= 2 ? `${left} ${left === 1 ? 'try' : 'tries'} left before a ${LOCK_MS / 1000}-second lock.` : null;
+  };
 
   // force: called from handleSubmit while still busy
   const switchMode = (mode: AuthMode, keepSuccess = false, force = false) => {
@@ -141,7 +199,7 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
       if (res.email) {
         setGoogleEmail(res.email);
         if (isRegister && !name && res.name) setName(res.name);
-      } else if (!res.cancelled) {
+      } else if (!res.cancelled && res.message) {
         setError(res.message);
       }
     } finally {
@@ -160,8 +218,18 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
       if (!res.ok) {
         setSimPicked(false);
         setPhoneNumber('');
-        setError(SIM_REQUIRED_MESSAGE);
+        setError(isForgot ? SIM_RESET_MESSAGE : SIM_REQUIRED_MESSAGE);
         return;
+      }
+      if (isForgot && googleEmail) {
+        // Must be the SIM of the registered number (checked in the app)
+        const simError = checkResetSim(googleEmail, res.number);
+        if (simError) {
+          setSimPicked(false);
+          setPhoneNumber('');
+          setError(simError);
+          return;
+        }
       }
       const hasPlus = res.number.startsWith('+');
       const digits = res.number.replace(/\D/g, '');
@@ -202,7 +270,7 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
 
   const validate = (): string | null => {
     if (!googleEmail) return 'Please continue with Google first';
-    if (needsSim && !simPicked) return SIM_REQUIRED_MESSAGE;
+    if (needsSim && !simPicked) return isForgot ? SIM_RESET_MESSAGE : SIM_REQUIRED_MESSAGE;
     const digits = normalizeLocal(phoneNumber);
     if (digits.length !== selectedCountry.length) {
       return `Enter a valid ${selectedCountry.length}-digit mobile number`;
@@ -230,7 +298,7 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
   };
 
   const handleSubmit = async () => {
-    if (submittingRef.current) return;
+    if (submittingRef.current || locked) return;
     Keyboard.dismiss();
     setShowCountryPicker(false);
     setError('');
@@ -266,7 +334,11 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
       }
 
       if (isForgot) {
-        const resetRes = await resetPasswordWithPhone({ phoneNumber: formattedPhone, newPassword: password });
+        const resetRes = await resetPasswordWithPhone({
+          email: googleEmail!,
+          phoneNumber: formattedPhone,
+          newPassword: password,
+        });
         if (!resetRes.success) {
           setError(resetRes.message);
           return;
@@ -283,15 +355,21 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
         password,
       });
       if (!loginRes?.user) {
-        setError(loginRes?.message || 'Wrong password. Try again or use Forgot password.');
+        let msg = loginRes?.message || 'Sign in did not finish. Try again.';
+        if (loginRes?.wrongPassword) {
+          const extra = await recordWrongPassword();
+          if (extra) msg = `${msg} ${extra}`;
+        }
+        setError(msg);
         return;
       }
+      writeGuard({ fails: 0, lockedUntil: 0 });
       setSuccessMsg(loginRes.message || 'Signed in!');
       finishLogin(loginRes.user);
     } catch (err: any) {
       console.warn('Auth error:', err);
       setSuccessMsg('');
-      setError(getErrorMessage(err, 'Something went wrong. Please try again.'));
+      setError(getErrorMessage(err, 'Unexpected error. Please try again.'));
     } finally {
       submittingRef.current = false;
       setLoading(false);
@@ -625,15 +703,17 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
 
             {!!googleEmail && (
               <TouchableOpacity
-                style={[styles.primaryButton, busy && styles.buttonDisabled]}
+                style={[styles.primaryButton, (busy || locked) && styles.buttonDisabled]}
                 activeOpacity={0.8}
                 onPress={handleSubmit}
-                disabled={busy}
+                disabled={busy || locked}
                 accessibilityRole="button">
                 {loading ? (
                   <ActivityIndicator color="#FFFFFF" size="small" />
                 ) : (
-                  <Text style={styles.primaryButtonText}>{copy.button}</Text>
+                  <Text style={styles.primaryButtonText}>
+                    {locked ? `Try again in ${lockLeft}s` : copy.button}
+                  </Text>
                 )}
               </TouchableOpacity>
             )}

@@ -3,8 +3,12 @@ service cloud.firestore {
   match /databases/{db}/documents {
 
     // ── Helpers ──────────────────────────────────────────────────────────
+    // Only sessions signed in with Google count. An email+password-only session
+    // (someone who knows the Gmail address + password but doesn't own the Gmail,
+    // or a REST script) can't read or write anything.
     function signedIn() {
-      return request.auth != null;
+      return request.auth != null
+        && request.auth.token.firebase.sign_in_provider == 'google.com';
     }
     function me() {
       return request.auth.uid;

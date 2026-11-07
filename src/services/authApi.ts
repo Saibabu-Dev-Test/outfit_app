@@ -1,12 +1,16 @@
 // Login = Google account on this device + mobile number + password (no OTP/SMS).
 // Firebase user = Google provider + Email/Password provider (same Gmail address).
+// Firestore rules accept only sessions whose token says sign_in_provider == 'google.com',
+// so every flow here ends with a Google re-auth (password checks switch the token to 'password').
 import {
+  deleteUser,
   EmailAuthProvider,
+  getAdditionalUserInfo,
   GoogleAuthProvider,
   linkWithCredential,
+  OAuthCredential,
   reauthenticateWithCredential,
   signInWithCredential,
-  signInWithEmailAndPassword,
   signOut,
   updatePassword,
   User,
@@ -14,12 +18,25 @@ import {
 import { deleteDoc, doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { auth, db } from '../config/firebaseConfig';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { authErrorMessage, firestoreErrorMessage, SERVER_SETUP_MESSAGE } from '../utils/firebaseErrors';
+import {
+  alreadyRegisteredMessage,
+  authErrorMessage,
+  firestoreErrorMessage,
+  NO_INTERNET,
+  notRegisteredMessage,
+  phoneNotRegisteredMessage,
+  SERVER_SETUP_MESSAGE,
+  SIGNUP_UNFINISHED,
+  TOO_MANY_ATTEMPTS,
+  WRONG_PASSWORD,
+} from '../utils/firebaseErrors';
 import { lookupReferralCode, saveReferral } from './rewardsApi';
 import { getGoogleAccount, googleSignOut } from './googleAuth';
 
 export interface AuthResponse {
   message: string;
+  // Set when the password itself was wrong (used for the 5-tries lock)
+  wrongPassword?: boolean;
   user?: {
     id: string;
     phoneNumber: string;
@@ -42,7 +59,15 @@ export const normalizePhone = (phone: string): string => {
   return phone.trim().startsWith('+91') ? digits.slice(2) : digits;
 };
 
-const NOT_LINKED = 'This mobile number is not linked to this Google account';
+// 9876543210 -> +91 98765 43210 (for messages)
+const prettyPhone = (e164: string): string => {
+  const d = normalizePhone(e164);
+  if (e164.trim().startsWith('+91') && d.length === 10) return `+91 ${d.slice(0, 5)} ${d.slice(5)}`;
+  return e164.startsWith('+') ? e164 : `+${d}`;
+};
+
+export const SIM_RESET_MESSAGE =
+  'Insert the SIM card of your registered mobile number to reset the password.';
 
 const silentSignOut = async () => {
   try {
@@ -50,6 +75,82 @@ const silentSignOut = async () => {
   } catch {
     // ignore
   }
+};
+
+// ── Google ID token kept in memory for the current flow (valid ~1 h; reused for re-auth) ──
+let pendingGoogle: { email: string; idToken: string; name: string | null; at: number } | null = null;
+const GOOGLE_TOKEN_MAX_AGE_MS = 45 * 60 * 1000;
+// Forgot password: registered number of the Gmail checked in step 1 (digits)
+let forgotPhone: { email: string; phone: string } | null = null;
+
+const clearFlowState = () => {
+  pendingGoogle = null;
+  forgotPhone = null;
+};
+
+// Google credential for `email`: cached token, else silent refresh (picker only if needed)
+const googleCredentialFor = async (
+  email: string,
+): Promise<{ cred?: OAuthCredential; message?: string }> => {
+  if (pendingGoogle && pendingGoogle.email === email && Date.now() - pendingGoogle.at < GOOGLE_TOKEN_MAX_AGE_MS) {
+    return { cred: GoogleAuthProvider.credential(pendingGoogle.idToken) };
+  }
+  const g = await getGoogleAccount(true);
+  if (!g.email || !g.idToken) {
+    return { message: g.message || `Continue with Google (${email}) again.` };
+  }
+  if (g.email !== email) {
+    return { message: `You chose ${g.email}. Tap Change and pick ${email}.` };
+  }
+  pendingGoogle = { email: g.email, idToken: g.idToken, name: g.name ?? null, at: Date.now() };
+  return { cred: GoogleAuthProvider.credential(g.idToken) };
+};
+
+// Which provider the current ID token was minted for ('google.com', 'password', ...)
+const tokenProvider = async (user: User, force: boolean): Promise<string | null> => {
+  try {
+    return (await user.getIdTokenResult(force)).signInProvider;
+  } catch (e: any) {
+    console.warn('getIdTokenResult failed:', e?.code);
+    return cachedTokenProvider(user);
+  }
+};
+
+// Offline fallback: read sign_in_provider from the cached ID token (no network)
+const cachedTokenProvider = (user: User): string | null => {
+  try {
+    const jwt: string | undefined = (user as any)?.stsTokenManager?.accessToken;
+    const decode: ((s: string) => string) | undefined = (globalThis as any).atob;
+    if (!jwt || !decode) return null;
+    let part = jwt.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    while (part.length % 4) part += '=';
+    return JSON.parse(decode(part))?.firebase?.sign_in_provider ?? null;
+  } catch {
+    return null;
+  }
+};
+
+// Make the session token google.com again (after link / password check / updatePassword)
+const endWithGoogleToken = async (
+  user: User,
+  email: string,
+): Promise<{ ok: boolean; message?: string }> => {
+  if ((await tokenProvider(user, false)) !== 'google.com') {
+    const gc = await googleCredentialFor(email);
+    if (!gc.cred) return { ok: false, message: gc.message };
+    try {
+      await reauthenticateWithCredential(user, gc.cred);
+    } catch (e: any) {
+      console.warn('Google re-auth failed:', e?.code, e?.message);
+      return { ok: false, message: authErrorMessage(e?.code, 'Google check') };
+    }
+  }
+  const provider = await tokenProvider(user, true);
+  console.log('Session token provider:', provider);
+  if (provider !== 'google.com') {
+    return { ok: false, message: 'Could not finish the Google check. Try again.' };
+  }
+  return { ok: true };
 };
 
 // Reads users/{uid}; data is undefined when the read itself failed (code says why)
@@ -64,39 +165,73 @@ const readUserDoc = async (uid: string): Promise<{ data?: any; code?: string }> 
 };
 
 // Read failure -> message. permission-denied is a server problem, not the user's.
-const readFailMessage = (code?: string, what = 'check your mobile number') =>
+const readFailMessage = (code?: string) =>
   code === 'permission-denied'
     ? SERVER_SETUP_MESSAGE
-    : `Could not ${what}. Check your internet and try again.`;
+    : code === 'unavailable' || code === 'deadline-exceeded'
+      ? NO_INTERNET
+      : firestoreErrorMessage({ code }, 'Checking your account');
 
 const hasPasswordProvider = (user: User) =>
   user.providerData.some(p => p.providerId === 'password');
 
-// Google picker (or silent) -> Firebase signInWithCredential
+// Google picker (or silent) -> Firebase signInWithCredential (token: google.com)
 const googleFirebaseSignIn = async (
   silentFirst: boolean,
-): Promise<{ user?: User; email?: string; name?: string | null; res?: GoogleStepResponse }> => {
+): Promise<{ user?: User; isNew?: boolean; email?: string; name?: string | null; res?: GoogleStepResponse }> => {
   const g = await getGoogleAccount(silentFirst);
   if (!g.email || !g.idToken) {
-    return { res: { message: g.message || 'Google sign-in failed', cancelled: g.cancelled } };
+    return { res: { message: g.message || '', cancelled: g.cancelled || !g.message } };
   }
+  pendingGoogle = { email: g.email, idToken: g.idToken, name: g.name ?? null, at: Date.now() };
   try {
     const cred = await signInWithCredential(auth, GoogleAuthProvider.credential(g.idToken));
-    return { user: cred.user, email: g.email, name: g.name };
+    return {
+      user: cred.user,
+      isNew: !!getAdditionalUserInfo(cred)?.isNewUser,
+      email: g.email,
+      name: g.name,
+    };
   } catch (error: any) {
     console.warn('Firebase Google sign-in error:', error?.code, error?.message);
-    return { res: { message: authErrorMessage(error?.code, 'Google sign-in failed') } };
+    const code = error?.code;
+    const message =
+      code === 'auth/invalid-credential'
+        ? 'Google sign-in was rejected by the server. Tap Continue with Google again.'
+        : authErrorMessage(code, 'Google sign-in');
+    return { res: { message } };
   }
 };
 
-// LOGIN step 1: get the Google email on this device (no Firebase sign-in yet)
-export const pickGoogleAccountForLogin = async (silentFirst = true): Promise<GoogleStepResponse> => {
-  const g = await getGoogleAccount(silentFirst);
-  if (!g.email) return { message: g.message || 'Google sign-in failed', cancelled: g.cancelled };
-  return { message: 'Google account selected', email: g.email, name: g.name };
+// Gmail has no finished account: sign out, drop a just-created empty user, show the picker next time
+const rejectUnregistered = async (user: User, isNew: boolean | undefined, email: string) => {
+  if (isNew) {
+    await deleteUser(user).catch(() => {});
+  }
+  await silentSignOut();
+  await googleSignOut();
+  clearFlowState();
+  return { message: notRegisteredMessage(email) };
 };
 
-// LOGIN step 2: Google email + password, then the mobile must match users/{uid}.phone
+// ── LOGIN ──────────────────────────────────────────────────────────────
+// Step 1: Google account on this device; it must be registered. Ends signed out of
+// Firebase (no session until the password is checked).
+export const pickGoogleAccountForLogin = async (silentFirst = true): Promise<GoogleStepResponse> => {
+  const r = await googleFirebaseSignIn(silentFirst);
+  if (!r.user) return r.res!;
+  const email = r.email!;
+  const { data, code } = await readUserDoc(r.user.uid);
+  if (data === undefined) {
+    await silentSignOut();
+    return { message: readFailMessage(code) };
+  }
+  if (!data.phone) return rejectUnregistered(r.user, r.isNew, email);
+  await silentSignOut();
+  return { message: 'Google account selected', email, name: r.name };
+};
+
+// Step 2: Google -> users/{uid} -> mobile -> password -> back to a google.com token
 export const loginWithGoogleEmailPhoneAndPassword = async ({
   email,
   phoneNumber,
@@ -106,13 +241,19 @@ export const loginWithGoogleEmailPhoneAndPassword = async ({
   phoneNumber: string;
   password: string;
 }): Promise<AuthResponse> => {
+  const gc = await googleCredentialFor(email);
+  if (!gc.cred) return { message: gc.message || `Continue with Google (${email}) again.` };
+
   let user: User;
+  let isNew = false;
   try {
-    const cred = await signInWithEmailAndPassword(auth, email, password);
+    const cred = await signInWithCredential(auth, gc.cred);
     user = cred.user;
+    isNew = !!getAdditionalUserInfo(cred)?.isNewUser;
   } catch (error: any) {
-    console.warn('Firebase Login Error:', error?.code, error?.message);
-    return { message: authErrorMessage(error?.code, 'Login failed') };
+    console.warn('Login Google step error:', error?.code, error?.message);
+    pendingGoogle = null;
+    return { message: authErrorMessage(error?.code, 'Google sign-in') };
   }
 
   const { data, code } = await readUserDoc(user.uid);
@@ -120,14 +261,37 @@ export const loginWithGoogleEmailPhoneAndPassword = async ({
     await silentSignOut();
     return { message: readFailMessage(code) };
   }
-  if (!data.phone) {
-    await silentSignOut();
-    return { message: 'Sign-up was not finished for this Google account. New here? Sign up' };
-  }
+  if (!data.phone) return rejectUnregistered(user, isNew, email);
   if (data.phone !== normalizePhone(phoneNumber)) {
     await silentSignOut();
-    return { message: NOT_LINKED };
+    return { message: phoneNotRegisteredMessage(email) };
   }
+  if (!hasPasswordProvider(user)) {
+    await silentSignOut();
+    return { message: SIGNUP_UNFINISHED };
+  }
+
+  // Password check (token becomes 'password' for a moment)
+  try {
+    await reauthenticateWithCredential(user, EmailAuthProvider.credential(email, password));
+  } catch (error: any) {
+    const c = error?.code;
+    console.warn('Password check failed:', c);
+    await silentSignOut();
+    if (c === 'auth/wrong-password' || c === 'auth/invalid-credential' || c === 'auth/invalid-login-credentials') {
+      return { message: WRONG_PASSWORD, wrongPassword: true };
+    }
+    if (c === 'auth/too-many-requests') return { message: TOO_MANY_ATTEMPTS };
+    if (c === 'auth/user-mismatch' || c === 'auth/user-not-found') return { message: SIGNUP_UNFINISHED };
+    return { message: authErrorMessage(c, 'Password check') };
+  }
+
+  const g = await endWithGoogleToken(user, email);
+  if (!g.ok) {
+    await silentSignOut();
+    return { message: g.message || 'Could not finish the Google check. Try again.' };
+  }
+  clearFlowState();
 
   return {
     message: 'Login successful!',
@@ -140,19 +304,25 @@ export const loginWithGoogleEmailPhoneAndPassword = async ({
   };
 };
 
-// SIGN UP step 1: Google -> Firebase. Stops if this Google account already finished sign-up.
+// ── SIGN UP ────────────────────────────────────────────────────────────
+// Step 1: Google -> Firebase (kept signed in for step 2). Stops if already registered.
 export const startGoogleSignUp = async (): Promise<GoogleStepResponse> => {
   const r = await googleFirebaseSignIn(false);
   if (!r.user) return r.res!;
-  const { data } = await readUserDoc(r.user.uid);
-  if (data?.phone && hasPasswordProvider(r.user)) {
+  const { data, code } = await readUserDoc(r.user.uid);
+  if (data === undefined) {
     await silentSignOut();
-    return { message: 'This Google account is already registered. Please sign in.' };
+    return { message: readFailMessage(code) };
+  }
+  if (data.phone && hasPasswordProvider(r.user)) {
+    await silentSignOut();
+    return { message: alreadyRegisteredMessage(r.email) };
   }
   return { message: 'Google account connected', email: r.email, name: r.name };
 };
 
-// SIGN UP step 2: claim phones/{digits}, add password to the Google user, save profile
+// Step 2: claim phones/{digits} (google.com token), add the password, re-auth with Google,
+// then save the profile (also needs the google.com token)
 export const completeSignUp = async ({
   phoneNumber,
   password,
@@ -169,8 +339,12 @@ export const completeSignUp = async ({
   const user = auth.currentUser;
   const email = user?.email?.toLowerCase();
   if (!user || !email) {
-    return { message: 'Please continue with Google first' };
+    return { message: 'Please continue with Google first.' };
   }
+  // A restored session may carry a password token; rules need google.com
+  const g0 = await endWithGoogleToken(user, email);
+  if (!g0.ok) return { message: g0.message || 'Continue with Google again.' };
+
   const digits = normalizePhone(phoneNumber);
   const phoneRef = doc(db, 'phones', digits);
 
@@ -188,7 +362,7 @@ export const completeSignUp = async ({
   try {
     const snap = await getDoc(phoneRef);
     if (snap.exists() && snap.data()?.uid !== user.uid) {
-      return { message: 'This mobile number is already registered. Please sign in.' };
+      return { message: 'This mobile number is already registered with another Gmail. Tap Sign In.' };
     }
     if (!snap.exists()) {
       // Rules allow create only if the doc doesn't exist yet
@@ -202,7 +376,7 @@ export const completeSignUp = async ({
       try {
         const again = await getDoc(phoneRef);
         if (again.exists() && again.data()?.uid !== user.uid) {
-          return { message: 'This mobile number is already registered. Please sign in.' };
+          return { message: 'This mobile number is already registered with another Gmail. Tap Sign In.' };
         }
       } catch (e2: any) {
         console.warn('phones re-check failed:', e2?.code, e2?.message);
@@ -222,14 +396,27 @@ export const completeSignUp = async ({
       await linkWithCredential(user, cred);
     }
   } catch (error: any) {
-    console.warn('Link password error:', error?.code, error?.message);
+    const c = error?.code;
+    console.warn('Link password error:', c, error?.message);
+    // Token may now be 'password': get google.com back before touching Firestore
+    await endWithGoogleToken(user, email);
     if (claimedNow) {
       await deleteDoc(phoneRef).catch(() => {});
     }
-    return { message: authErrorMessage(error?.code, 'Sign up failed') };
+    if (hasPasswordProvider(user) && (c === 'auth/wrong-password' || c === 'auth/invalid-credential')) {
+      return { message: 'This Gmail already has a password from an earlier sign-up. Enter that password.' };
+    }
+    return { message: authErrorMessage(c, 'Sign up') };
+  }
+  console.log('Token provider after password link:', await tokenProvider(user, false));
+
+  // 3) Back to a google.com token (rules reject 'password' tokens)
+  const g = await endWithGoogleToken(user, email);
+  if (!g.ok) {
+    return { message: `${g.message || 'Google check failed.'} Tap Create Account again to finish.` };
   }
 
-  // 3) Profile (login needs users/{uid}.phone, so this must succeed)
+  // 4) Profile (login needs users/{uid}.phone, so this must succeed)
   const formatted = phoneNumber.startsWith('+') ? phoneNumber : `+${digits}`;
   const profile: any = {
     phone: digits,
@@ -245,13 +432,14 @@ export const completeSignUp = async ({
     await setDoc(doc(db, 'users', user.uid), profile, { merge: true });
   } catch (e: any) {
     console.warn('users doc save failed:', e?.code, e?.message);
-    return { message: `${firestoreErrorMessage(e, 'Saving profile')} Tap Sign Up again to retry.` };
+    return { message: `${firestoreErrorMessage(e, 'Saving profile')} Tap Create Account again to retry.` };
   }
 
-  // 4) Referral (create-only, never blocks sign-up)
+  // 5) Referral (create-only, never blocks sign-up)
   if (referrerId && referralCode) {
     await saveReferral(user.uid, referralCode, referrerId);
   }
+  clearFlowState();
 
   return {
     message: 'Registration successful!',
@@ -259,63 +447,112 @@ export const completeSignUp = async ({
   };
 };
 
-// FORGOT step 1: Google -> Firebase; the account must have finished sign-up
+// ── FORGOT PASSWORD ────────────────────────────────────────────────────
+// Step 1: Google -> must be registered. Ends signed out (no session without a password).
 export const startForgotPassword = async (): Promise<GoogleStepResponse> => {
   const r = await googleFirebaseSignIn(false);
   if (!r.user) return r.res!;
+  const email = r.email!;
   const { data, code } = await readUserDoc(r.user.uid);
   if (data === undefined) {
     await silentSignOut();
-    return { message: readFailMessage(code, 'load your account') };
+    return { message: readFailMessage(code) };
   }
-  if (!data.phone) {
-    await silentSignOut();
-    return { message: 'No account found for this Google account. New here? Sign up' };
-  }
-  return { message: 'Google account verified', email: r.email, name: r.name };
+  if (!data.phone) return rejectUnregistered(r.user, r.isNew, email);
+  forgotPhone = { email, phone: data.phone };
+  await silentSignOut();
+  return { message: 'Google account verified', email, name: r.name };
 };
 
-// FORGOT step 2: mobile must match, then set the new password. Signs out after.
+// Step 2 (right after the SIM picker): picked number must be the registered one.
+// Returns an error line, or null when it matches. Runs in the app only.
+export const checkResetSim = (email: string, pickedE164: string): string | null => {
+  if (!forgotPhone || forgotPhone.email !== email) return 'Continue with Google again.';
+  if (normalizePhone(pickedE164) !== forgotPhone.phone) {
+    return `This SIM's number (${prettyPhone(pickedE164)}) isn't the one registered with ${email}. Insert the registered SIM.`;
+  }
+  return null;
+};
+
+// Step 3: Google again -> mobile must match -> new password. Signs out after.
 export const resetPasswordWithPhone = async ({
+  email,
   phoneNumber,
   newPassword,
 }: {
+  email: string;
   phoneNumber: string;
   newPassword: string;
 }): Promise<{ message: string; success: boolean }> => {
-  const user = auth.currentUser;
-  if (!user?.email) return { message: 'Please continue with Google first', success: false };
+  const simError = checkResetSim(email, phoneNumber);
+  if (simError) return { message: simError, success: false };
+
+  const gc = await googleCredentialFor(email);
+  if (!gc.cred) return { message: gc.message || 'Continue with Google again.', success: false };
+  let user: User;
+  try {
+    user = (await signInWithCredential(auth, gc.cred)).user;
+  } catch (error: any) {
+    console.warn('Reset Google step error:', error?.code, error?.message);
+    pendingGoogle = null;
+    return { message: authErrorMessage(error?.code, 'Google sign-in'), success: false };
+  }
 
   const { data, code } = await readUserDoc(user.uid);
   if (data === undefined) {
+    await silentSignOut();
     return { message: readFailMessage(code), success: false };
   }
-  if (!data.phone || data.phone !== normalizePhone(phoneNumber)) {
-    return { message: NOT_LINKED, success: false };
+  if (!data.phone) {
+    await silentSignOut();
+    return { message: notRegisteredMessage(email), success: false };
+  }
+  if (data.phone !== normalizePhone(phoneNumber)) {
+    await silentSignOut();
+    return {
+      message: `This SIM's number (${prettyPhone(phoneNumber)}) isn't the one registered with ${email}. Insert the registered SIM.`,
+      success: false,
+    };
   }
 
+  const setPassword = () =>
+    hasPasswordProvider(user)
+      ? updatePassword(user, newPassword)
+      : linkWithCredential(user, EmailAuthProvider.credential(email, newPassword));
   try {
-    if (hasPasswordProvider(user)) {
-      await updatePassword(user, newPassword);
-    } else {
-      await linkWithCredential(user, EmailAuthProvider.credential(user.email, newPassword));
+    try {
+      await setPassword();
+    } catch (e: any) {
+      if (e?.code !== 'auth/requires-recent-login') throw e;
+      const fresh = await googleCredentialFor(email);
+      if (!fresh.cred) throw e;
+      await reauthenticateWithCredential(user, fresh.cred);
+      await setPassword();
     }
   } catch (error: any) {
     console.warn('Update password error:', error?.code, error?.message);
-    return { message: authErrorMessage(error?.code, 'Could not change password'), success: false };
+    await silentSignOut();
+    return { message: authErrorMessage(error?.code, 'Changing password'), success: false };
   }
 
+  // updatePassword switches the token to 'password'; restore google.com, then sign out so
+  // the user signs in with the new password
+  const g = await endWithGoogleToken(user, email);
+  if (!g.ok) console.warn('Post-reset Google check failed:', g.message);
   await silentSignOut();
+  clearFlowState();
   return { message: 'Password changed. Sign in with your new password.', success: true };
 };
 
 // Leaving sign-up / forgot half way: drop the Firebase session (keeps Google on device)
 export const cancelAuthFlow = async (): Promise<void> => {
+  clearFlowState();
   await silentSignOut();
 };
 
 // "Use another account": sign out of Google and Firebase
 export const switchGoogleAccount = async (): Promise<void> => {
+  clearFlowState();
   await googleSignOut();
   await silentSignOut();
 };
@@ -347,13 +584,19 @@ export interface ProfileResponse {
   user: UserProfile;
 }
 
-// Saved session on app start: the persisted Firebase user, if sign-up was finished.
-// 'none' = show login, 'offline' = couldn't read the profile (still a finished account).
+// Saved session on app start: the persisted Firebase user, if sign-up was finished and
+// the token was minted by Google sign-in. Anything else signs out -> login screen.
 export type RestoreResult =
   | { status: 'ok'; user: UserProfile & { email?: string } }
   | { status: 'none' };
 
 export const restoreSession = async (user: User): Promise<RestoreResult> => {
+  const provider = await tokenProvider(user, false);
+  if (provider !== 'google.com') {
+    console.warn('Restored session is not a Google session:', provider);
+    await silentSignOut();
+    return { status: 'none' };
+  }
   const { data, code } = await readUserDoc(user.uid);
   if (data === undefined) {
     // Offline etc.: trust a finished account (password linked), fill the profile later
@@ -397,6 +640,7 @@ const clearAppStorage = async () => {
 };
 
 export const logoutUser = async (): Promise<{ message: string; success: boolean }> => {
+  clearFlowState();
   await clearAppStorage();
   // Also sign out of Google so the next login can pick an account
   await googleSignOut();

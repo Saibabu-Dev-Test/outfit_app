@@ -275,7 +275,7 @@ export default function HomeScreen() {
       Alert.alert(
         'Vote not saved',
         error?.code === 'permission-denied'
-          ? `Server rules not published yet. ${SERVER_SETUP_MESSAGE}`
+          ? SERVER_SETUP_MESSAGE
           : firestoreErrorMessage(error, 'Voting'),
       );
       return;
