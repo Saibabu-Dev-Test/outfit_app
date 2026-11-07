@@ -1,7 +1,7 @@
-import { 
-  signInWithEmailAndPassword, 
+import {
+  signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
-  signOut
+  signOut,
 } from 'firebase/auth';
 import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../config/firebaseConfig';
@@ -16,100 +16,117 @@ export interface AuthResponse {
   };
 }
 
+// +919876543210 -> 9876543210@outfit.app (same format existing accounts use)
+// Other countries keep their code so numbers can't collide: 14155550100@outfit.app
 const phoneToEmail = (phone: string): string => {
-  const cleanNum = phone.replace('+91', '').replace(/\s/g, '');
-  return `${cleanNum}@outfit.app`;
-};  
+  const digits = phone.replace(/\D/g, '');
+  const local = phone.trim().startsWith('+91') ? digits.slice(2) : digits;
+  return `${local}@outfit.app`;
+};
 
-export const loginWithPhoneAndPassword = async ({ 
-  phoneNumber, 
-  password 
-}: { 
-  phoneNumber: string; 
-  password: string; 
-}): Promise<AuthResponse> => {
-  try {
-    const email = phoneToEmail(phoneNumber);
-    
-    // Firebase Direct Login
-    const userCredential = await signInWithEmailAndPassword(auth, email, password);
-    const user = userCredential.user;
-
-    // Firestore nundi extra details teesukovadam
-    const userDoc = await getDoc(doc(db, 'users', user.uid));
-    const userData = userDoc.exists() ? userDoc.data() : {};
-
-    return {
-      message: 'Login successful!',
-      user: {
-        id: user.uid,
-        phoneNumber: userData.phoneNumber || phoneNumber,
-        email: user.email!,
-        createdAt: userData.createdAt
-      }
-    };
-  } catch (error: any) {
-    console.error("Firebase Login Error:", error.code, error.message);
-    
-    let msg = 'Login failed';
-    if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
-      msg = 'Invalid mobile number or password';
-    } else if (error.code === 'auth/invalid-email') {
-      msg = 'Invalid mobile number format';
-    } else if (error.code === 'auth/network-request-failed') {
-      msg = 'Network error. Please check your internet connection';
-    }
-    
-    // 🔥 CRITICAL FIX: Throw cheyakunda, error object return cheyi
-    // Idi app crash avvadam stop chesthundi
-    return { message: msg }; 
+// Firebase error code -> message the user can act on
+const authErrorMessage = (code: string | undefined, fallback: string): string => {
+  switch (code) {
+    case 'auth/invalid-credential':
+    case 'auth/wrong-password':
+    case 'auth/user-not-found':
+    case 'auth/invalid-login-credentials':
+      return 'Invalid mobile number or password';
+    case 'auth/invalid-email':
+      return 'Invalid mobile number format';
+    case 'auth/email-already-in-use':
+      return 'This mobile number is already registered. Please sign in.';
+    case 'auth/weak-password':
+      return 'Password should be at least 6 characters';
+    case 'auth/too-many-requests':
+      return 'Too many attempts. Please wait a few minutes and try again.';
+    case 'auth/network-request-failed':
+      return 'Network error. Please check your internet connection';
+    case 'auth/operation-not-allowed':
+      return 'Email/Password sign-in is disabled in Firebase. Enable it in Firebase Console > Authentication > Sign-in method.';
+    case 'auth/user-disabled':
+      return 'This account has been disabled';
+    default:
+      return code ? `${fallback} (${code})` : fallback;
   }
 };
 
-export const registerWithPhoneAndPassword = async ({ 
-  phoneNumber, 
-  password 
-}: { 
-  phoneNumber: string; 
-  password: string; 
+export const loginWithPhoneAndPassword = async ({
+  phoneNumber,
+  password,
+}: {
+  phoneNumber: string;
+  password: string;
 }): Promise<AuthResponse> => {
+  let user;
   try {
     const email = phoneToEmail(phoneNumber);
-    
-    // Firebase Direct Registration
-    const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-    const user = userCredential.user;
-
-    // Firestore lo user data save cheyyadam
-    await setDoc(doc(db, 'users', user.uid), {
-      phoneNumber: phoneNumber,
-      email: email,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp()
-    });
-
-    return {
-      message: 'Registration successful!',
-      user: {
-        id: user.uid,
-        phoneNumber: phoneNumber,
-        email: email,
-        createdAt: new Date()
-      }
-    };
+    const userCredential = await signInWithEmailAndPassword(auth, email, password);
+    user = userCredential.user;
   } catch (error: any) {
-    console.error("Firebase Register Error:", error.code, error.message);
-    
-    let msg = 'Registration failed';
-    if (error.code === 'auth/email-already-in-use') {
-      msg = 'This mobile number is already registered';
-    } else if (error.code === 'auth/weak-password') {
-      msg = 'Password should be at least 6 characters';
-    }
-    
-    // 🔥 CRITICAL FIX: Throw cheyakunda, error object return cheyi
-    return { message: msg }; 
+    console.warn('Firebase Login Error:', error?.code, error?.message);
+    // Return instead of throw so the screen never crashes
+    return { message: authErrorMessage(error?.code, 'Login failed') };
   }
+
+  // Auth already succeeded. A Firestore problem must NOT turn this into "Login failed".
+  let userData: any = {};
+  try {
+    const userDoc = await getDoc(doc(db, 'users', user.uid));
+    userData = userDoc.exists() ? userDoc.data() : {};
+  } catch (error: any) {
+    console.warn('Firestore profile read failed (login continues):', error?.code, error?.message);
+  }
+
+  return {
+    message: 'Login successful!',
+    user: {
+      id: user.uid,
+      phoneNumber: userData?.phoneNumber || phoneNumber,
+      email: user.email ?? '',
+      createdAt: userData?.createdAt,
+    },
+  };
+};
+
+export const registerWithPhoneAndPassword = async ({
+  phoneNumber,
+  password,
+}: {
+  phoneNumber: string;
+  password: string;
+}): Promise<AuthResponse> => {
+  const email = phoneToEmail(phoneNumber);
+  let user;
+  try {
+    const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+    user = userCredential.user;
+  } catch (error: any) {
+    console.warn('Firebase Register Error:', error?.code, error?.message);
+    return { message: authErrorMessage(error?.code, 'Registration failed') };
+  }
+
+  // Account exists now; saving the profile doc is best-effort
+  try {
+    await setDoc(doc(db, 'users', user.uid), {
+      phoneNumber,
+      email,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error: any) {
+    console.warn('Firestore profile save failed (account still created):', error?.code, error?.message);
+  }
+
+  return {
+    message: 'Registration successful!',
+    user: {
+      id: user.uid,
+      phoneNumber,
+      email,
+      createdAt: new Date(),
+    },
+  };
 };
 
 export interface ProfileStat {
@@ -118,7 +135,7 @@ export interface ProfileStat {
 }
 
 export interface UserProfile {
-  id: number | string;
+  id: string;
   phoneNumber: string;
   name?: string;
   dob?: string;
