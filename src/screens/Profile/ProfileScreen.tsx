@@ -216,14 +216,14 @@ const fetchProfile = async () => {
     // 🔥 FIREBASE SAFE CHECK 🔥
     // AWS call తీసేశాం. ఇప్పుడు కేవలం Firebase Auth User ని మాత్రమే వాడుతున్నాం.
     if (authUser) {
-      console.log("Firebase User Found:", authUser.uid);
+      console.log("Firebase User Found:", authUser.id);
       
       // Profile data ని Firebase Auth నుండే set చేస్తున్నాం (Temporary fix to stop crash)
       const firebaseProfile: UserProfile = {
-        id: authUser.uid,
-        name: authUser.displayName || "User",
+        id: authUser.id,
+        name: authUser.name || "User",
         phoneNumber: authUser.phoneNumber || "",
-        avatarUrl: authUser.photoURL || null,
+        avatarUrl: authUser.avatarUrl || null,
         // మిగిలిన fields (dob, rashi etc) ప్రస్తుతానికి empty గా ఉంచుతున్నాం
         dob: profileData?.dob || "", 
         rashi: profileData?.rashi || "",
@@ -281,7 +281,7 @@ const fetchProfile = async () => {
     console.log("Saving profile locally:", { editName, editPhone, editDob });
 
     const updatedProfile: UserProfile = {
-      id: profileData?.id || authUser?.uid,
+      id: profileData?.id || authUser?.id,
       name: editName.trim(),
       phoneNumber: editPhone.trim(),
       dob: editDob.trim(),
