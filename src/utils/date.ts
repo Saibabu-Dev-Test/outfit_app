@@ -46,3 +46,24 @@ export const clockTime = (v: any): string => {
   if (!d) return '';
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 };
+
+// Monday (local) of the week that contains d, as YYYY-MM-DD. Weeks run Mon-Sun.
+export const weekKeyFor = (d: Date = new Date()): string => {
+  const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const offset = (x.getDay() + 6) % 7; // Mon=0 ... Sun=6
+  x.setDate(x.getDate() - offset);
+  return localDateKey(x);
+};
+
+// Monday key of last week
+export const lastWeekKey = (): string => {
+  const d = new Date();
+  d.setDate(d.getDate() - 7);
+  return weekKeyFor(d);
+};
+
+// The 7 date keys of a week (Mon..Sun) from its Monday key
+export const weekDayKeys = (weekKey: string): string[] => {
+  const [y, m, day] = weekKey.split('-').map(Number);
+  return Array.from({ length: 7 }, (_, i) => localDateKey(new Date(y, m - 1, day + i)));
+};

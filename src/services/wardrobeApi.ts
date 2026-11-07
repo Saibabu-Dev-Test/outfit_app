@@ -15,6 +15,7 @@ import { db } from '../config/firebaseConfig';
 import { BACKEND_IP } from '../config/apiConfig';
 import { MAX_BASE64_CHARS } from '../utils/imagePicker';
 import { firestoreErrorMessage } from '../utils/firebaseErrors';
+import { recordTask } from './rewardsApi';
 import { toDate } from '../utils/date';
 
 export interface WardrobeItemPayload {
@@ -107,6 +108,7 @@ export const addWardrobeItem = async (
   };
   try {
     const r = await addDoc(collection(db, COLL), data);
+    recordTask(uid, 'uploaded'); // daily task (never throws)
     const now = new Date().toISOString();
     return { ...toItem(r.id, data), createdAt: now, updatedAt: now };
   } catch (e: any) {

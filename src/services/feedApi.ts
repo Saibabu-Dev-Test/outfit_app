@@ -20,6 +20,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../config/firebaseConfig';
 import { firestoreErrorMessage } from '../utils/firebaseErrors';
+import { recordTask } from './rewardsApi';
 import { MAX_BASE64_CHARS } from '../utils/imagePicker';
 import { toDate } from '../utils/date';
 import { inlineAvatar } from './userApi';
@@ -115,6 +116,7 @@ export const createPost = async (
       isPublic: true,
       createdAt: serverTimestamp(),
     });
+    recordTask(me.uid, 'uploaded'); // daily task (never throws)
   } catch (e: any) {
     fail(e, 'Posting');
   }

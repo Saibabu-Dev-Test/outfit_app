@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -21,7 +21,21 @@ import { getUserProfile, recordDailyLogin } from '../../services/userApi';
 import { hasUploadedToday } from '../../services/wardrobeApi';
 import { getTodayVaaraColour, getRashiLuckyColour } from '../../utils/panchangam';
 import { localDateKey, greetingForNow } from '../../utils/date';
-import { firestoreErrorMessage } from '../../utils/firebaseErrors';
+import { firestoreErrorMessage, SERVER_SETUP_MESSAGE } from '../../utils/firebaseErrors';
+import Avatar from '../../components/Avatar';
+import {
+  checkWeeklyStars,
+  countFriendsJoined,
+  DayState,
+  getDay,
+  getLastWeekStars,
+  getPoints,
+  recordTask,
+  REFERRAL_POINTS,
+  setStarProfile,
+  TaskResult,
+  WeeklyStar,
+} from '../../services/rewardsApi';
 
 const outfitA = require('../../assets/outfit_a.jpg');
 
@@ -51,6 +65,40 @@ interface ColourTally {
 
 const pct = (n: number, total: number) => (total > 0 ? `${Math.round((n / total) * 100)}%` : '0%');
 
+type VoteMap = Map<string, { color: string; gender: string }>;
+const colourIndex = (name: string) => VOTE_COLOURS.findIndex(c => c.name === name);
+
+// Tallies from one-vote-per-user map. Stable order: votes desc, then VOTE_COLOURS order.
+const tally = (map: VoteMap): ColourTally[] => {
+  const counts: Record<string, { total: number; men: number; women: number }> = {};
+  let total = 0;
+  map.forEach(v => {
+    const c = counts[v.color] || { total: 0, men: 0, women: 0 };
+    c.total += 1;
+    if (v.gender === 'male') c.men += 1;
+    if (v.gender === 'female') c.women += 1;
+    counts[v.color] = c;
+    total += 1;
+  });
+  const results: ColourTally[] = VOTE_COLOURS.map(col => {
+    const c = counts[col.name] || { total: 0, men: 0, women: 0 };
+    return {
+      rank: 0,
+      name: col.name,
+      hex: col.hex,
+      votes: c.total,
+      men: pct(c.men, c.total),
+      women: pct(c.women, c.total),
+      percentage: pct(c.total, total),
+    };
+  });
+  results.sort((a, b) => b.votes - a.votes || colourIndex(a.name) - colourIndex(b.name));
+  results.forEach((item, idx) => {
+    item.rank = idx + 1;
+  });
+  return results;
+};
+
 export default function HomeScreen() {
   const navigation = useNavigation<any>();
   const { user, updateUserData } = useAuth();
@@ -62,8 +110,15 @@ export default function HomeScreen() {
   const [voting, setVoting] = useState<string | null>(null);
   const [votesLoading, setVotesLoading] = useState<boolean>(true);
   const [streak, setStreak] = useState<number>(0);
-  const [loggedInToday, setLoggedInToday] = useState<boolean>(false);
-  const [uploadedToday, setUploadedToday] = useState<boolean>(false);
+  const [day, setDay] = useState<DayState>({ opened: false, voted: false, uploaded: false });
+  const [points, setPoints] = useState<number>(0);
+  const [friends, setFriends] = useState<number>(0);
+  const [stars, setStars] = useState<WeeklyStar[]>([]);
+  const [flashName, setFlashName] = useState<string | null>(null);
+  // Votes by userId, and our last write (a refetch must not undo it with stale data)
+  const votesRef = useRef<VoteMap>(new Map());
+  const lastWriteRef = useRef<{ color: string; date: string; at: number } | null>(null);
+  const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [greeting, setGreeting] = useState<string>(greetingForNow());
 
   const displayName = (user?.name || '').trim() || 'there';
@@ -72,57 +127,67 @@ export default function HomeScreen() {
   const vaara = getTodayVaaraColour();
   const lucky = getRashiLuckyColour(user?.rashi);
 
-  // Today's votes, grouped by colour (one doc per user per day = one vote each)
+  const showVotes = useCallback(
+    (map: VoteMap) => {
+      setTopColours(tally(map));
+      setMyVote(uid ? map.get(uid)?.color ?? null : null);
+    },
+    [uid],
+  );
+
+  // Applies a task result (day checklist + points)
+  const applyTask = useCallback(
+    (r: TaskResult) => {
+      setDay(r.day);
+      // Re-read the saved total (avoids double counting with a parallel load)
+      if (r.pointsAdded && uid) getPoints(uid).then(setPoints);
+    },
+    [uid],
+  );
+
+  // Today's votes. Only docs with id top_colors_{today}_{userId} count (old builds used random ids),
+  // so each user counts once and "my vote" comes from my own doc.
   const fetchVotes = useCallback(async () => {
     try {
       const today = localDateKey();
       const snap = await getDocs(
         query(collection(db, 'votes'), where('systemId', '==', 'top_colors'), where('date', '==', today)),
       );
-      const counts: Record<string, { total: number; men: number; women: number }> = {};
-      let total = 0;
-      let mine: string | null = null;
+      const map: VoteMap = new Map();
       snap.forEach(d => {
         const v: any = d.data();
-        if (!v?.color) return;
-        const c = counts[v.color] || { total: 0, men: 0, women: 0 };
-        c.total += 1;
-        const g = String(v.voterGender || '').toLowerCase();
-        if (g === 'male') c.men += 1;
-        if (g === 'female') c.women += 1;
-        counts[v.color] = c;
-        total += 1;
-        if (uid && v.userId === uid) mine = v.color;
+        if (!v?.color || !v?.userId) return;
+        if (d.id !== `top_colors_${today}_${v.userId}`) return;
+        map.set(v.userId, { color: v.color, gender: String(v.voterGender || '').toLowerCase() });
       });
-      const results: ColourTally[] = VOTE_COLOURS.map(col => {
-        const c = counts[col.name] || { total: 0, men: 0, women: 0 };
-        return {
-          rank: 0,
-          name: col.name,
-          hex: col.hex,
-          votes: c.total,
-          men: pct(c.men, c.total),
-          women: pct(c.women, c.total),
-          percentage: pct(c.total, total),
-        };
-      });
-      results.sort((a, b) => b.votes - a.votes);
-      results.forEach((item, idx) => {
-        item.rank = idx + 1;
-      });
-      setTopColours(results);
-      setMyVote(mine);
+      // Our own recent write wins over a stale read
+      const lw = lastWriteRef.current;
+      if (uid && lw && lw.date === today && Date.now() - lw.at < 30000 && map.get(uid)?.color !== lw.color) {
+        map.set(uid, { color: lw.color, gender: String(user?.gender || '').toLowerCase() });
+      }
+      votesRef.current = map;
+      showVotes(map);
+      // Voted earlier (or on another device): tick the daily task
+      if (uid && map.has(uid)) recordTask(uid, 'voted').then(applyTask);
     } catch (error: any) {
       console.warn('Error fetching votes:', error?.code, error?.message);
     } finally {
       setVotesLoading(false);
     }
-  }, [uid]);
+  }, [uid, user?.gender, showVotes, applyTask]);
 
-  const refreshUploadTask = useCallback(async () => {
+  // Day checklist, points and referral count
+  const refreshRewards = useCallback(async () => {
     if (!uid) return;
-    setUploadedToday(await hasUploadedToday(uid));
-  }, [uid]);
+    const [d, p, f] = await Promise.all([getDay(uid), getPoints(uid), countFriendsJoined(uid)]);
+    setDay(d);
+    setPoints(p);
+    setFriends(f);
+    // Uploaded before this build tracked it: tick the task now
+    if (!d.uploaded && (await hasUploadedToday(uid))) {
+      applyTask(await recordTask(uid, 'uploaded'));
+    }
+  }, [uid, applyTask]);
 
   // Load profile + mark daily login once per user
   useEffect(() => {
@@ -147,10 +212,13 @@ export default function HomeScreen() {
         console.warn('Home profile load failed:', e?.message);
       }
       const res = await recordDailyLogin(uid);
-      if (alive) {
-        setStreak(res.streak);
-        setLoggedInToday(true);
-      }
+      if (alive) setStreak(res.streak);
+      const opened = await recordTask(uid, 'opened');
+      if (alive) applyTask(opened);
+      // Weekly celebrities: claim a finished week, then load last week's list
+      await checkWeeklyStars(uid);
+      const list = await getLastWeekStars();
+      if (alive) setStars(list);
     })();
     return () => {
       alive = false;
@@ -163,8 +231,20 @@ export default function HomeScreen() {
     useCallback(() => {
       setGreeting(greetingForNow());
       fetchVotes();
-      refreshUploadTask();
-    }, [fetchVotes, refreshUploadTask]),
+      refreshRewards();
+    }, [fetchVotes, refreshRewards]),
+  );
+
+  // Celebrities card uses the current name/avatar
+  useEffect(() => {
+    setStarProfile({ name: user?.name, avatar: user?.avatarUrl });
+  }, [user?.name, user?.avatarUrl]);
+
+  useEffect(
+    () => () => {
+      if (flashTimer.current) clearTimeout(flashTimer.current);
+    },
+    [],
   );
 
   // Tapping a colour sets (or changes) today's vote. Overwrites the same doc, so the old vote is gone.
@@ -188,22 +268,39 @@ export default function HomeScreen() {
         date: today,
         timestamp: serverTimestamp(),
       });
-      await fetchVotes();
     } catch (error: any) {
       console.warn('Voting error:', error?.code, error?.message);
       setMyVote(previous);
-      Alert.alert('Vote failed', firestoreErrorMessage(error, 'Voting'));
-    } finally {
       setVoting(null);
+      Alert.alert(
+        'Vote not saved',
+        error?.code === 'permission-denied'
+          ? `Server rules not published yet. ${SERVER_SETUP_MESSAGE}`
+          : firestoreErrorMessage(error, 'Voting'),
+      );
+      return;
     }
+    // Saved: show it now from the written value, even if the refetch fails
+    lastWriteRef.current = { color: colorName, date: today, at: Date.now() };
+    const map: VoteMap = new Map(votesRef.current);
+    map.set(uid, { color: colorName, gender: String(user?.gender || '').toLowerCase() });
+    votesRef.current = map;
+    showVotes(map);
+    setFlashName(colorName);
+    if (flashTimer.current) clearTimeout(flashTimer.current);
+    flashTimer.current = setTimeout(() => setFlashName(null), 1500);
+    setVoting(null);
+    recordTask(uid, 'voted').then(applyTask);
+    fetchVotes(); // never throws; keeps our vote if the read is stale
   };
 
   const tasks = [
-    { id: 'login', label: 'Daily login', done: loggedInToday },
-    { id: 'vote', label: "Vote today's colour", done: !!myVote },
-    { id: 'upload', label: 'Upload one wardrobe item today', done: uploadedToday },
+    { id: 'opened', label: 'Open the app', done: day.opened },
+    { id: 'voted', label: "Vote today's colour", done: day.voted || !!myVote },
+    { id: 'uploaded', label: 'Upload one item (wardrobe or feed post)', done: day.uploaded },
   ];
   const doneCount = tasks.filter(t => t.done).length;
+  const totalPoints = points + friends * REFERRAL_POINTS;
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
@@ -262,7 +359,41 @@ export default function HomeScreen() {
               <Text style={[styles.taskLabel, t.done && styles.taskLabelDone]}>{t.label}</Text>
             </View>
           ))}
-          <Text style={styles.taskSummary}>{doneCount}/3 done</Text>
+          <Text style={styles.taskSummary}>
+            {doneCount}/3 done · 10 pts each, +20 for all 3
+          </Text>
+          <View style={styles.pointsRow}>
+            <Text style={styles.pointsValue}>🏅 {totalPoints.toLocaleString()} points</Text>
+            {friends > 0 && <Text style={styles.pointsSub}>incl. {friends} friend{friends === 1 ? '' : 's'} joined</Text>}
+          </View>
+          <Text style={styles.rewardsSoon}>Rewards coming soon for active members</Text>
+        </View>
+
+        {/* Last week's celebrities */}
+        <View style={styles.plainHeaderRow}>
+          <Text style={styles.sectionTitle}>Congratulations! This week's celebrities ⭐</Text>
+        </View>
+        <View style={styles.tasksCard}>
+          {stars.length === 0 ? (
+            <Text style={styles.starsEmpty}>
+              No celebrities yet. Finish all 3 tasks every day this week to be here next week!
+            </Text>
+          ) : (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              {stars.map(st => (
+                <TouchableOpacity
+                  key={st.uid}
+                  style={styles.starItem}
+                  activeOpacity={0.7}
+                  onPress={() => navigation.navigate('UserProfile', { userId: st.uid })}>
+                  <Avatar uri={st.avatar} name={st.name} size={52} />
+                  <Text style={styles.starName} numberOfLines={1}>
+                    ⭐ {st.name}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          )}
         </View>
 
         {/* Panchangam colour */}
@@ -316,7 +447,11 @@ export default function HomeScreen() {
               {topColours.map((item, index) => (
                 <React.Fragment key={item.name}>
                   <TouchableOpacity
-                    style={[styles.colorRow, myVote === item.name && styles.colorRowVoted]}
+                    style={[
+                      styles.colorRow,
+                      myVote === item.name && styles.colorRowVoted,
+                      flashName === item.name && styles.colorRowFlash,
+                    ]}
                     activeOpacity={0.7}
                     disabled={!!voting}
                     onPress={() => handleVoteColor(item.name)}>
@@ -528,6 +663,14 @@ const styles = StyleSheet.create({
   topColoursScroll: {
     height: 254,
   },
+  colorRowFlash: { backgroundColor: '#FFD6E7' },
+  pointsRow: { flexDirection: 'row', alignItems: 'baseline', marginTop: 10, flexWrap: 'wrap' },
+  pointsValue: { fontSize: 16, fontWeight: '800', color: '#0A1940', marginRight: 8 },
+  pointsSub: { fontSize: 12, color: '#6B6B8A' },
+  rewardsSoon: { fontSize: 12, color: '#6C5CE7', fontWeight: '600', marginTop: 4 },
+  starsEmpty: { fontSize: 13, color: '#6B6B8A', lineHeight: 19 },
+  starItem: { alignItems: 'center', width: 76, marginRight: 8 },
+  starName: { fontSize: 11, fontWeight: '700', color: '#0A1940', marginTop: 4, maxWidth: 76 },
   colorRowVoted: {
     backgroundColor: "#FFF0F5",
     borderRadius: 12,

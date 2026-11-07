@@ -1,6 +1,8 @@
 // src/config/firebaseConfig.ts
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
+import * as FirebaseAuth from 'firebase/auth';
+import { Auth, getAuth, initializeAuth } from 'firebase/auth';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { initializeFirestore, getFirestore, Firestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 
@@ -16,7 +18,20 @@ const firebaseConfig = {
 // Reuse the app on Fast Refresh instead of initializing twice (that throws)
 const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 
-export const auth = getAuth(app);
+// Keep the user signed in across app restarts (getAuth alone = memory only on RN).
+// getReactNativePersistence lives in the RN build of firebase/auth but not in its TS types.
+const getRNPersistence: ((storage: any) => any) | undefined = (FirebaseAuth as any)
+  .getReactNativePersistence;
+let authInstance: Auth;
+try {
+  authInstance = getRNPersistence
+    ? initializeAuth(app, { persistence: getRNPersistence(AsyncStorage) })
+    : getAuth(app);
+} catch {
+  // Already initialized (Fast Refresh)
+  authInstance = getAuth(app);
+}
+export const auth = authInstance;
 
 // React Native can't use Firestore's default WebChannel transport reliably.
 // Long polling fixes "client is offline" / hanging getDoc errors.

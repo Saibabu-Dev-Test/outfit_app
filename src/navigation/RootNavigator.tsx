@@ -1,4 +1,5 @@
 import React from 'react';
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import BottomTabNavigator from './BottomTabNavigator';
@@ -12,6 +13,7 @@ import CommentsScreen from '../screens/Feed/CommentsScreen';
 import UserProfileScreen from '../screens/Profile/UserProfileScreen';
 import UserSearchScreen from '../screens/Profile/UserSearchScreen';
 import AdminScreen from '../screens/Admin/AdminScreen';
+import AppLockGate from '../components/AppLockGate';
 import type { RootStackParamList } from './types';
 
 export type { RootStackParamList } from './types';
@@ -19,9 +21,21 @@ export type { RootStackParamList } from './types';
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 function NavigationContent() {
-  const { isAuthenticated, login } = useAuth();
+  const { isAuthenticated, initializing, login } = useAuth();
+
+  // Checking the saved session (stay logged in until logout)
+  if (initializing) {
+    return (
+      <View style={styles.splash}>
+        <Text style={styles.splashLogo}>👗</Text>
+        <Text style={styles.splashName}>OUTFIT</Text>
+        <ActivityIndicator color="#E91E63" style={styles.splashSpinner} />
+      </View>
+    );
+  }
 
   return (
+    <>
     <NavigationContainer>
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         {!isAuthenticated ? (
@@ -51,8 +65,17 @@ function NavigationContent() {
         )}
       </Stack.Navigator>
     </NavigationContainer>
+    <AppLockGate />
+    </>
   );
 }
+
+const styles = StyleSheet.create({
+  splash: { flex: 1, backgroundColor: '#FAF9FC', alignItems: 'center', justifyContent: 'center' },
+  splashLogo: { fontSize: 44 },
+  splashName: { fontSize: 24, fontWeight: '900', color: '#0A1940', letterSpacing: 4, marginTop: 8 },
+  splashSpinner: { marginTop: 20 },
+});
 
 export default function RootNavigator() {
   return (

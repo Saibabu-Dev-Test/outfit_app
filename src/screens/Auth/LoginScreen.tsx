@@ -27,6 +27,7 @@ import {
   switchGoogleAccount,
   GoogleStepResponse,
 } from '../../services/authApi';
+import { pickSimNumber, SIM_REQUIRED_MESSAGE } from '../../native/phoneHint';
 
 interface LoginScreenProps {
   navigation: any;
@@ -57,12 +58,12 @@ const TITLES: Record<AuthMode, { title: string; subtitle: string; button: string
   },
   register: {
     title: 'Get Started',
-    subtitle: 'Step 1: continue with Google. Step 2: add your mobile number & a password',
+    subtitle: 'Step 1: continue with Google. Step 2: select the SIM number in this phone & set a password',
     button: 'Create Account',
   },
   forgot: {
     title: 'Reset Password',
-    subtitle: 'Continue with the same Google account, confirm your mobile number, then set a new password',
+    subtitle: 'Continue with the same Google account, select the SIM number in this phone, then set a new password',
     button: 'Change Password',
   },
 };
@@ -84,6 +85,10 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
   const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+  const [referralCode, setReferralCode] = useState('');
+  // Register/reset: the number must come from the SIM picker (not typed)
+  const [simPicked, setSimPicked] = useState(false);
+  const [simLoading, setSimLoading] = useState(false);
 
   // RN 0.87 ref type (useRef<TextInput> no longer type-checks)
   const passwordRef = useRef<React.ComponentRef<typeof TextInput>>(null);
@@ -93,7 +98,8 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
   const isRegister = authMode === 'register';
   const isForgot = authMode === 'forgot';
   const needsConfirm = isRegister || isForgot; // new password typed twice
-  const busy = loading || googleLoading;
+  const needsSim = isRegister || isForgot; // SIM must be in this phone
+  const busy = loading || googleLoading || simLoading;
   const copy = TITLES[authMode];
 
   // force: called from handleSubmit while still busy
@@ -109,6 +115,12 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
     setConfirmPassword('');
     setShowPassword(false);
     setShowConfirmPassword(false);
+    setSimPicked(false);
+    if (mode !== 'login') {
+      // Number must be picked from the SIM again
+      setPhoneNumber('');
+      setShowCountryPicker(false);
+    }
   };
 
   // Strip non-digits and a leading trunk 0 (common for UK/AU/AE)
@@ -137,6 +149,48 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
     }
   };
 
+  // SIM number picker -> fills the (read-only) mobile field
+  const handlePickSim = async () => {
+    if (busy) return;
+    Keyboard.dismiss();
+    setError('');
+    setSimLoading(true);
+    try {
+      const res = await pickSimNumber();
+      if (!res.ok) {
+        setSimPicked(false);
+        setPhoneNumber('');
+        setError(SIM_REQUIRED_MESSAGE);
+        return;
+      }
+      const hasPlus = res.number.startsWith('+');
+      const digits = res.number.replace(/\D/g, '');
+      // Longest country code first (+971 before +9...)
+      const byLength = [...COUNTRY_CODES].sort((a, b) => b.code.length - a.code.length);
+      let country = hasPlus
+        ? byLength.find(c => digits.startsWith(c.code.slice(1)))
+        : undefined;
+      let local = country ? digits.slice(country.code.length - 1) : digits;
+      if (!country) {
+        // No country code from the picker: assume the selected one
+        country = selectedCountry;
+        local = normalizeLocal(digits);
+      }
+      local = normalizeLocal(local);
+      if (local.length !== country.length) {
+        setSimPicked(false);
+        setPhoneNumber('');
+        setError('This SIM number is not supported yet');
+        return;
+      }
+      setSelectedCountry(country);
+      setPhoneNumber(local);
+      setSimPicked(true);
+    } finally {
+      setSimLoading(false);
+    }
+  };
+
   const handleChangeAccount = async () => {
     if (busy) return;
     setGoogleLoading(true);
@@ -148,6 +202,7 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
 
   const validate = (): string | null => {
     if (!googleEmail) return 'Please continue with Google first';
+    if (needsSim && !simPicked) return SIM_REQUIRED_MESSAGE;
     const digits = normalizeLocal(phoneNumber);
     if (digits.length !== selectedCountry.length) {
       return `Enter a valid ${selectedCountry.length}-digit mobile number`;
@@ -194,7 +249,13 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
     try {
       if (isRegister) {
         // authApi returns { message } with no user on failure (it doesn't throw)
-        const regRes = await completeSignUp({ phoneNumber: formattedPhone, password, name, gender });
+        const regRes = await completeSignUp({
+          phoneNumber: formattedPhone,
+          password,
+          name,
+          gender,
+          referralCode: referralCode.trim() || undefined,
+        });
         if (!regRes?.user) {
           setError(regRes?.message || 'Could not create your account. Please try again.');
           return;
@@ -354,6 +415,22 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
                       onSelect={setGender}
                       onClose={() => setShowGenderPicker(false)}
                     />
+
+                    <Text style={[styles.inputLabel, styles.labelSpacing]}>Referral Code</Text>
+                    <TextInput
+                      style={styles.textInputBox}
+                      placeholder="Optional"
+                      placeholderTextColor="#9E9EBA"
+                      autoCapitalize="characters"
+                      autoCorrect={false}
+                      maxLength={6}
+                      editable={!busy}
+                      value={referralCode}
+                      onChangeText={t => {
+                        setError('');
+                        setReferralCode(t.toUpperCase().replace(/[^A-Z0-9]/g, ''));
+                      }}
+                    />
                   </>
                 )}
 
@@ -363,16 +440,25 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
                   <TouchableOpacity
                     style={styles.countryPickerButton}
                     activeOpacity={0.7}
-                    disabled={busy}
+                    disabled={busy || needsSim}
                     accessibilityLabel={`Country code ${selectedCountry.code}`}
                     onPress={() => setShowCountryPicker((v) => !v)}>
                     <Text style={styles.flagText}>{selectedCountry.flag}</Text>
                     <Text style={styles.countryCodeText}>{selectedCountry.code}</Text>
-                    <Text style={styles.dropdownChevron}>{showCountryPicker ? '▴' : '▾'}</Text>
+                    {!needsSim && (
+                      <Text style={styles.dropdownChevron}>{showCountryPicker ? '▴' : '▾'}</Text>
+                    )}
                   </TouchableOpacity>
 
                   <View style={styles.inputDivider} />
 
+                  {needsSim ? (
+                    <Text
+                      style={[styles.phoneInput, styles.phoneReadOnly, !phoneNumber && styles.phonePlaceholder]}
+                      numberOfLines={1}>
+                      {phoneNumber || 'Select your SIM number'}
+                    </Text>
+                  ) : (
                   <TextInput
                     style={styles.phoneInput}
                     placeholder="Mobile number"
@@ -391,7 +477,30 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
                       setPhoneNumber(text.replace(/\D/g, ''));
                     }}
                   />
+                  )}
                 </View>
+
+                {needsSim && (
+                  <>
+                    <TouchableOpacity
+                      style={[styles.simButton, busy && styles.buttonDisabled]}
+                      onPress={handlePickSim}
+                      disabled={busy}
+                      activeOpacity={0.8}
+                      accessibilityRole="button">
+                      {simLoading ? (
+                        <ActivityIndicator color="#E91E63" size="small" />
+                      ) : (
+                        <Text style={styles.simButtonText}>
+                          📱 {simPicked ? 'Change SIM number' : 'Select your SIM number'}
+                        </Text>
+                      )}
+                    </TouchableOpacity>
+                    <Text style={styles.stepHint}>
+                      The SIM card of this number must be in this phone.
+                    </Text>
+                  </>
+                )}
 
                 {showCountryPicker && (
                   <View style={styles.countryDropdown}>
@@ -611,6 +720,10 @@ const styles = StyleSheet.create({
   selectBox: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 1.5, borderColor: '#E0DBF0', borderRadius: borderRadius.md, backgroundColor: '#FAF9FC', height: 52, paddingHorizontal: spacing.md },
   selectValue: { fontSize: 15, fontWeight: '600', color: '#0A1940' },
   selectPlaceholder: { fontSize: 15, color: '#9E9EBA' },
+  phoneReadOnly: { textAlignVertical: 'center', lineHeight: 52 },
+  phonePlaceholder: { color: '#9E9EBA', fontWeight: '500', fontSize: 15 },
+  simButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', height: 46, borderRadius: borderRadius.md, borderWidth: 1.5, borderColor: '#E91E63', backgroundColor: '#FFF0F5', marginTop: spacing.sm },
+  simButtonText: { fontSize: 14, fontWeight: '700', color: '#E91E63' },
   forgotRow: { alignSelf: 'flex-end', marginTop: spacing.sm },
   forgotText: { fontSize: 13, fontWeight: '700', color: '#E91E63' },
 });

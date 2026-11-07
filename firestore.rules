@@ -33,6 +33,64 @@ service cloud.firestore {
         || get(/databases/$(db)/documents/phones/$(request.resource.data.phone)).data.uid == me();
     }
 
+    // ── Rewards helpers (daily tasks, points, weekly celebrities) ─────────
+    // Days in a Mon-Sun week with all 3 tasks done to become a weekly celebrity.
+    // Keep in sync with WEEKLY_REQUIRED_DAYS in src/services/rewardsApi.ts
+    function weeklyRequiredDays() {
+      return 7;
+    }
+    function isDateKey(key) {
+      return key is string && key.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$');
+    }
+    // 'YYYY-MM-DD' -> 00:00 UTC of that day
+    function dateTs(key) {
+      return timestamp.date(int(key.split('-')[0]), int(key.split('-')[1]), int(key.split('-')[2]));
+    }
+    // 1970-01-05 was a Monday (4 days after the epoch)
+    function isMonday(key) {
+      return dateTs(key).toMillis() % 604800000 == 345600000;
+    }
+    function dayPath(uid, day) {
+      return /databases/$(db)/documents/users/$(uid)/days/$(day);
+    }
+    function fullDay(d) {
+      return d.get('opened', false) == true
+        && d.get('voted', false) == true
+        && d.get('uploaded', false) == true;
+    }
+    // 10 per task, +20 when all 3 are done (same as dayScore in rewardsApi.ts)
+    function dayScore(d) {
+      return (d.get('opened', false) == true ? 10 : 0)
+        + (d.get('voted', false) == true ? 10 : 0)
+        + (d.get('uploaded', false) == true ? 10 : 0)
+        + (fullDay(d) ? 20 : 0);
+    }
+    function scoreBefore(uid, day) {
+      return exists(dayPath(uid, day)) ? dayScore(get(dayPath(uid, day)).data) : 0;
+    }
+    function scoreAfter(uid, day) {
+      return existsAfter(dayPath(uid, day)) ? dayScore(getAfter(dayPath(uid, day)).data) : 0;
+    }
+    // users.points may only grow by what users/{uid}/days/{pointsDay} gains in the same write
+    function pointsOk() {
+      let newP = request.resource.data.get('points', 0);
+      let oldP = resource.data.get('points', 0);
+      let day = request.resource.data.get('pointsDay', '');
+      return newP == oldP
+        || (isDateKey(day)
+            && newP > oldP
+            && newP - oldP == scoreAfter(me(), day) - scoreBefore(me(), day));
+    }
+    // users.referralCode is set once, together with referralCodes/{code} -> this user
+    function referralCodeOk() {
+      let oldC = resource.data.get('referralCode', null);
+      let newC = request.resource.data.get('referralCode', null);
+      return newC == oldC
+        || (oldC == null
+            && newC is string
+            && getAfter(/databases/$(db)/documents/referralCodes/$(newC)).data.uid == me());
+    }
+
     // ── Users ────────────────────────────────────────────────────────────
     match /users/{uid} {
       allow read: if signedIn()
@@ -40,11 +98,56 @@ service cloud.firestore {
       // Users write their own doc but can never set or change role
       allow create: if signedIn() && me() == uid
         && !('role' in request.resource.data)
-        && phoneOk(null);
+        && phoneOk(null)
+        && request.resource.data.get('points', 0) == 0
+        && !('referralCode' in request.resource.data);
       allow update: if signedIn() && me() == uid
         && request.resource.data.get('role', null) == resource.data.get('role', null)
-        && phoneOk(resource.data.get('phone', null));
+        && phoneOk(resource.data.get('phone', null))
+        && pointsOk()
+        && referralCodeOk();
       allow delete: if signedIn() && me() == uid;
+    }
+
+    // ── Daily tasks: users/{uid}/days/{yyyy-mm-dd} {opened, voted, uploaded, updatedAt} ──
+    // Only around that date (any timezone), and a done task can't be undone.
+    match /users/{uid}/days/{day} {
+      allow read: if signedIn() && me() == uid;
+      allow create, update: if signedIn() && me() == uid
+        && isDateKey(day)
+        && request.time > dateTs(day) - duration.value(14, 'h')
+        && request.time < dateTs(day) + duration.value(38, 'h')
+        && request.resource.data.keys().hasOnly(['opened', 'voted', 'uploaded', 'updatedAt'])
+        && request.resource.data.get('opened', false) is bool
+        && request.resource.data.get('voted', false) is bool
+        && request.resource.data.get('uploaded', false) is bool
+        && (resource == null
+            || ((resource.data.get('opened', false) == false || request.resource.data.get('opened', false) == true)
+                && (resource.data.get('voted', false) == false || request.resource.data.get('voted', false) == true)
+                && (resource.data.get('uploaded', false) == false || request.resource.data.get('uploaded', false) == true)));
+      allow delete: if false;
+    }
+
+    // ── Week counter: users/{uid}/weeks/{mondayKey} {fullDays, lastDay, updatedAt} ──
+    // +1 only in the same write that makes lastDay (a day of that week) fully done.
+    function weekCountOk(uid, week, oldCount) {
+      let day = request.resource.data.get('lastDay', '');
+      return isDateKey(week) && isMonday(week) && isDateKey(day)
+        && request.resource.data.keys().hasOnly(['fullDays', 'lastDay', 'updatedAt'])
+        && request.resource.data.fullDays == oldCount + 1
+        && dateTs(day) >= dateTs(week)
+        && dateTs(day) < dateTs(week) + duration.value(7, 'd')
+        && existsAfter(dayPath(uid, day))
+        && fullDay(getAfter(dayPath(uid, day)).data)
+        && !(exists(dayPath(uid, day)) && fullDay(get(dayPath(uid, day)).data));
+    }
+    match /users/{uid}/weeks/{week} {
+      allow read: if signedIn() && me() == uid;
+      allow create: if signedIn() && me() == uid && weekCountOk(uid, week, 0);
+      allow update: if signedIn() && me() == uid
+        && request.resource.data.lastDay != resource.data.get('lastDay', '')
+        && weekCountOk(uid, week, resource.data.get('fullDays', 0));
+      allow delete: if false;
     }
 
     // ── Phone registry: phones/{digits} -> {uid, createdAt} ──────────────
@@ -235,6 +338,59 @@ service cloud.firestore {
           && (resource.data.userId == me()
               || get(postPath()).data.userId == me()
               || isAdmin());
+      }
+    }
+
+    // ── Referral codes: referralCodes/{code} -> {uid, createdAt} (one per user) ──
+    match /referralCodes/{code} {
+      allow get: if signedIn();
+      allow list: if false;
+      allow create: if signedIn()
+        && code.matches('^[A-Z0-9]{6}$')
+        && request.resource.data.keys().hasOnly(['uid', 'createdAt'])
+        && request.resource.data.uid == me()
+        && getAfter(/databases/$(db)/documents/users/$(request.auth.uid)).data.get('referralCode', '') == code;
+      allow update, delete: if false;
+    }
+
+    // ── Referrals: referrals/{newUid} {referrerId, code, createdAt}, written once by the new user ──
+    // The referrer counts these (count query); nothing is written to the referrer's docs.
+    match /referrals/{newUid} {
+      allow get: if signedIn() && (me() == newUid || resource.data.referrerId == me());
+      allow list: if signedIn() && resource.data.referrerId == me();
+      allow create: if signedIn() && me() == newUid
+        && request.resource.data.keys().hasOnly(['referrerId', 'code', 'createdAt'])
+        && request.resource.data.referrerId is string
+        && request.resource.data.referrerId != me()
+        && request.resource.data.code is string
+        && request.resource.data.createdAt == request.time
+        && get(/databases/$(db)/documents/referralCodes/$(request.resource.data.code)).data.uid
+           == request.resource.data.referrerId
+        // only right after sign-up
+        && get(/databases/$(db)/documents/users/$(request.auth.uid)).data.createdAt
+           > request.time - duration.value(1, 'd');
+      allow update, delete: if false;
+    }
+
+    // ── Weekly celebrities: weeklyStars/{mondayKey}/members/{uid} ──
+    match /weeklyStars/{week} {
+      match /members/{uid} {
+        allow read: if signedIn();
+        allow create: if signedIn() && me() == uid
+          && isDateKey(week) && isMonday(week)
+          && request.resource.data.keys().hasOnly(['name', 'avatar', 'completedDays', 'createdAt'])
+          && request.resource.data.name is string
+          && request.resource.data.name.size() >= 1
+          && request.resource.data.name.size() <= 60
+          && (request.resource.data.get('avatar', null) == null
+              || (request.resource.data.avatar is string && request.resource.data.avatar.size() <= 60000))
+          && request.resource.data.createdAt == request.time
+          && request.resource.data.completedDays is int
+          && request.resource.data.completedDays
+             == get(/databases/$(db)/documents/users/$(request.auth.uid)/weeks/$(week)).data.fullDays
+          && request.resource.data.completedDays >= weeklyRequiredDays();
+        allow update: if false;
+        allow delete: if signedIn() && (me() == uid || isAdmin());
       }
     }
 

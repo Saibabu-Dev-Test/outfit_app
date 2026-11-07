@@ -1,8 +1,13 @@
+// Shown when Firestore rules deny a request (rules not published yet, or out of date)
+export const SERVER_SETUP_MESSAGE = 'Server setup incomplete (Firestore rules). Please try again later.';
+
 // Turn Firestore errors into messages the user can act on
 export const firestoreErrorMessage = (error: any, action: string): string => {
   const code: string = error?.code || '';
   if (code === 'permission-denied') {
-    return `${action} failed (permission-denied). Firestore security rules are blocking this. Update the rules in Firebase Console > Firestore > Rules.`;
+    // Rules not published (or blocking): a server problem, not the user's mistake
+    console.warn(`${action}: Firestore permission-denied`);
+    return `${action} failed. ${SERVER_SETUP_MESSAGE}`;
   }
   if (code === 'unavailable') {
     return `${action} failed: you seem to be offline. Please check your internet.`;

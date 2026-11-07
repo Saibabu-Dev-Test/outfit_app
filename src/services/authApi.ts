@@ -13,7 +13,9 @@ import {
 } from 'firebase/auth';
 import { deleteDoc, doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { auth, db } from '../config/firebaseConfig';
-import { authErrorMessage, firestoreErrorMessage } from '../utils/firebaseErrors';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { authErrorMessage, firestoreErrorMessage, SERVER_SETUP_MESSAGE } from '../utils/firebaseErrors';
+import { lookupReferralCode, saveReferral } from './rewardsApi';
 import { getGoogleAccount, googleSignOut } from './googleAuth';
 
 export interface AuthResponse {
@@ -50,16 +52,22 @@ const silentSignOut = async () => {
   }
 };
 
-// Reads users/{uid}; undefined when the read itself failed
-const readUserDoc = async (uid: string): Promise<any | undefined> => {
+// Reads users/{uid}; data is undefined when the read itself failed (code says why)
+const readUserDoc = async (uid: string): Promise<{ data?: any; code?: string }> => {
   try {
     const snap = await getDoc(doc(db, 'users', uid));
-    return snap.exists() ? snap.data() || {} : {};
+    return { data: snap.exists() ? snap.data() || {} : {} };
   } catch (e: any) {
     console.warn('users doc read failed:', e?.code, e?.message);
-    return undefined;
+    return { code: e?.code || 'unknown' };
   }
 };
+
+// Read failure -> message. permission-denied is a server problem, not the user's.
+const readFailMessage = (code?: string, what = 'check your mobile number') =>
+  code === 'permission-denied'
+    ? SERVER_SETUP_MESSAGE
+    : `Could not ${what}. Check your internet and try again.`;
 
 const hasPasswordProvider = (user: User) =>
   user.providerData.some(p => p.providerId === 'password');
@@ -107,10 +115,10 @@ export const loginWithGoogleEmailPhoneAndPassword = async ({
     return { message: authErrorMessage(error?.code, 'Login failed') };
   }
 
-  const data = await readUserDoc(user.uid);
+  const { data, code } = await readUserDoc(user.uid);
   if (data === undefined) {
     await silentSignOut();
-    return { message: 'Could not check your mobile number. Check your internet and try again.' };
+    return { message: readFailMessage(code) };
   }
   if (!data.phone) {
     await silentSignOut();
@@ -136,7 +144,7 @@ export const loginWithGoogleEmailPhoneAndPassword = async ({
 export const startGoogleSignUp = async (): Promise<GoogleStepResponse> => {
   const r = await googleFirebaseSignIn(false);
   if (!r.user) return r.res!;
-  const data = await readUserDoc(r.user.uid);
+  const { data } = await readUserDoc(r.user.uid);
   if (data?.phone && hasPasswordProvider(r.user)) {
     await silentSignOut();
     return { message: 'This Google account is already registered. Please sign in.' };
@@ -150,11 +158,13 @@ export const completeSignUp = async ({
   password,
   name,
   gender,
+  referralCode,
 }: {
   phoneNumber: string;
   password: string;
   name?: string;
   gender?: string;
+  referralCode?: string;
 }): Promise<AuthResponse> => {
   const user = auth.currentUser;
   const email = user?.email?.toLowerCase();
@@ -164,7 +174,16 @@ export const completeSignUp = async ({
   const digits = normalizePhone(phoneNumber);
   const phoneRef = doc(db, 'phones', digits);
 
-  // 1) Is the number free?
+  // 0) Optional referral code must be valid before anything is written
+  let referrerId: string | null = null;
+  if (referralCode?.trim()) {
+    const ref = await lookupReferralCode(referralCode, user.uid);
+    if (!ref.ok) return { message: ref.message };
+    referrerId = ref.referrerId;
+  }
+
+  // 1) Is the number free? Only "taken" when phones/{digits} belongs to another uid.
+  //    Same uid = an earlier sign-up stopped half way, so continue.
   let claimedNow = false;
   try {
     const snap = await getDoc(phoneRef);
@@ -179,7 +198,16 @@ export const completeSignUp = async ({
   } catch (e: any) {
     console.warn('phones claim failed:', e?.code, e?.message);
     if (e?.code === 'permission-denied') {
-      return { message: 'This mobile number is already registered. Please sign in.' };
+      // Someone may have claimed it a moment ago; otherwise the rules are the problem
+      try {
+        const again = await getDoc(phoneRef);
+        if (again.exists() && again.data()?.uid !== user.uid) {
+          return { message: 'This mobile number is already registered. Please sign in.' };
+        }
+      } catch (e2: any) {
+        console.warn('phones re-check failed:', e2?.code, e2?.message);
+      }
+      return { message: SERVER_SETUP_MESSAGE };
     }
     return { message: firestoreErrorMessage(e, 'Checking mobile number') };
   }
@@ -220,6 +248,11 @@ export const completeSignUp = async ({
     return { message: `${firestoreErrorMessage(e, 'Saving profile')} Tap Sign Up again to retry.` };
   }
 
+  // 4) Referral (create-only, never blocks sign-up)
+  if (referrerId && referralCode) {
+    await saveReferral(user.uid, referralCode, referrerId);
+  }
+
   return {
     message: 'Registration successful!',
     user: { id: user.uid, phoneNumber: formatted, email, createdAt: new Date() },
@@ -230,10 +263,10 @@ export const completeSignUp = async ({
 export const startForgotPassword = async (): Promise<GoogleStepResponse> => {
   const r = await googleFirebaseSignIn(false);
   if (!r.user) return r.res!;
-  const data = await readUserDoc(r.user.uid);
+  const { data, code } = await readUserDoc(r.user.uid);
   if (data === undefined) {
     await silentSignOut();
-    return { message: 'Could not load your account. Check your internet and try again.' };
+    return { message: readFailMessage(code, 'load your account') };
   }
   if (!data.phone) {
     await silentSignOut();
@@ -253,9 +286,9 @@ export const resetPasswordWithPhone = async ({
   const user = auth.currentUser;
   if (!user?.email) return { message: 'Please continue with Google first', success: false };
 
-  const data = await readUserDoc(user.uid);
+  const { data, code } = await readUserDoc(user.uid);
   if (data === undefined) {
-    return { message: 'Could not check your mobile number. Check your internet and try again.', success: false };
+    return { message: readFailMessage(code), success: false };
   }
   if (!data.phone || data.phone !== normalizePhone(phoneNumber)) {
     return { message: NOT_LINKED, success: false };
@@ -314,7 +347,57 @@ export interface ProfileResponse {
   user: UserProfile;
 }
 
+// Saved session on app start: the persisted Firebase user, if sign-up was finished.
+// 'none' = show login, 'offline' = couldn't read the profile (still a finished account).
+export type RestoreResult =
+  | { status: 'ok'; user: UserProfile & { email?: string } }
+  | { status: 'none' };
+
+export const restoreSession = async (user: User): Promise<RestoreResult> => {
+  const { data, code } = await readUserDoc(user.uid);
+  if (data === undefined) {
+    // Offline etc.: trust a finished account (password linked), fill the profile later
+    if (code !== 'permission-denied' && hasPasswordProvider(user)) {
+      return { status: 'ok', user: { id: user.uid, phoneNumber: '', email: user.email ?? undefined } };
+    }
+    return { status: 'none' };
+  }
+  if (!data.phone || !hasPasswordProvider(user)) {
+    // Half-finished sign-up: drop the session so the login screen starts clean
+    await silentSignOut();
+    return { status: 'none' };
+  }
+  return {
+    status: 'ok',
+    user: {
+      id: user.uid,
+      phoneNumber: data.phoneNumber || `+${data.phone}`,
+      email: user.email ?? undefined,
+      name: data.name,
+      gender: data.gender,
+      rashi: data.rashi,
+      avatarUrl: data.avatarUrl ?? null,
+      dob: data.dob,
+      language: data.language,
+      timeOfBirth: data.timeOfBirth,
+      bio: data.bio,
+    },
+  };
+};
+
+// App keys in AsyncStorage (Firebase's own session key is removed by signOut)
+const clearAppStorage = async () => {
+  try {
+    const keys = await AsyncStorage.getAllKeys();
+    const mine = keys.filter(k => k.startsWith('outfit:'));
+    if (mine.length) await AsyncStorage.multiRemove(mine);
+  } catch (e: any) {
+    console.warn('Clear storage failed:', e?.message);
+  }
+};
+
 export const logoutUser = async (): Promise<{ message: string; success: boolean }> => {
+  await clearAppStorage();
   // Also sign out of Google so the next login can pick an account
   await googleSignOut();
   try {

@@ -14,6 +14,7 @@ import {
   TextInput,
   KeyboardAvoidingView,
   Image,
+  Share,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -24,6 +25,13 @@ import SelectModal from '../../components/SelectModal';
 import TimePickerModal from '../../components/TimePickerModal';
 import { colors, fontSize, fontWeight, spacing, borderRadius } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
+import {
+  countFriendsJoined,
+  ensureReferralCode,
+  isWeeklyStar,
+  REFERRAL_POINTS,
+} from '../../services/rewardsApi';
+import { authenticate, isLockEnabled, isLockSupported, setLockEnabled } from '../../native/appLock';
 
 // "+91 98765 43210" from users/{uid}.phone (10 digits), else the saved phoneNumber
 const phoneLabel = (p?: { phone?: string; phoneNumber?: string } | null): string => {
@@ -73,6 +81,14 @@ export default function ProfileScreen() {
   const [loggingOut, setLoggingOut] = useState<boolean>(false);
   const [notifEnabled, setNotifEnabled] = useState(true);
   const [darkEnabled, setDarkEnabled] = useState(false);
+  // App lock (fingerprint): hidden when the phone has no biometrics
+  const [lockSupported, setLockSupported] = useState(false);
+  const [lockOn, setLockOn] = useState(false);
+  // Referrals + weekly celebrity badge
+  const [referralCode, setReferralCode] = useState<string | null>(null);
+  const [referralError, setReferralError] = useState('');
+  const [friendsJoined, setFriendsJoined] = useState(0);
+  const [isStar, setIsStar] = useState(false);
 
   // Edit modal states
   const [isEditModalVisible, setIsEditModalVisible] = useState<boolean>(false);
@@ -239,6 +255,53 @@ const fetchProfile = async () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authUser?.id]);
 
+  // App lock, invite code, friends joined, ⭐ badge
+  useEffect(() => {
+    const uid = authUser?.id;
+    let alive = true;
+    (async () => {
+      const supported = await isLockSupported();
+      const on = supported && (await isLockEnabled());
+      if (alive) {
+        setLockSupported(supported);
+        setLockOn(on);
+      }
+      if (!uid) return;
+      isWeeklyStar(uid).then(v => alive && setIsStar(v));
+      countFriendsJoined(uid).then(n => alive && setFriendsJoined(n));
+      try {
+        const code = await ensureReferralCode(uid);
+        if (alive) setReferralCode(code);
+      } catch (e: any) {
+        if (alive) setReferralError(e?.message || 'Could not load your invite code');
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [authUser?.id]);
+
+  const handleToggleLock = async (value: boolean) => {
+    if (value) {
+      // Confirm the fingerprint works before turning it on
+      const r = await authenticate('Turn on app lock', 'Confirm with your fingerprint');
+      if (r !== 'success') return;
+    }
+    await setLockEnabled(value);
+    setLockOn(value);
+  };
+
+  const handleShareInvite = async () => {
+    if (!referralCode) return;
+    try {
+      await Share.share({
+        message: `Join me on Outfit, your AI stylist & daily colour guide! Use my referral code ${referralCode} when you create your account.`,
+      });
+    } catch (e: any) {
+      console.warn('Share failed:', e?.message);
+    }
+  };
+
   // ✅ ONLY ONE handleOpenEditModal (removed duplicate)
   const handleOpenEditModal = () => {
     setEditName(profileData?.name || '');
@@ -366,7 +429,9 @@ const fetchProfile = async () => {
               <>
                 <Text style={styles.profileName}>
                   {profileData?.name ? profileData.name : 'Set Your Name'}
+                  {isStar ? ' ⭐' : ''}
                 </Text>
+                {isStar && <Text style={styles.starBadgeText}>Weekly celebrity</Text>}
                 
                 {Boolean(profileData?.bio) && (
                   <Text style={styles.profileBio}>{profileData?.bio}</Text>
@@ -452,6 +517,50 @@ const fetchProfile = async () => {
             </TouchableOpacity>
           ))}
         </View>
+
+        {/* Invite friends */}
+        <View style={styles.menuSection}>
+          <View style={styles.inviteBox}>
+            <Text style={styles.inviteTitle}>🎁 Invite friends</Text>
+            <Text style={styles.inviteSub}>
+              Friends enter your code when they create an account. {REFERRAL_POINTS} points per friend.
+            </Text>
+            <View style={styles.inviteRow}>
+              <Text style={styles.inviteCode} selectable>
+                {referralCode || (referralError ? '------' : '…')}
+              </Text>
+              <TouchableOpacity
+                style={[styles.inviteShare, !referralCode && styles.inviteShareOff]}
+                onPress={handleShareInvite}
+                disabled={!referralCode}
+                activeOpacity={0.8}>
+                <Text style={styles.inviteShareText}>Share</Text>
+              </TouchableOpacity>
+            </View>
+            {!!referralError && <Text style={styles.inviteError}>{referralError}</Text>}
+            <Text style={styles.inviteFriends}>Friends joined: {friendsJoined}</Text>
+          </View>
+        </View>
+
+        {/* App lock (only when the phone has a fingerprint) */}
+        {lockSupported && (
+          <View style={styles.menuSection}>
+            <View style={styles.menuItem}>
+              <View style={styles.menuLeft}>
+                <View style={styles.menuIconBox}>
+                  <Text style={styles.menuIcon}>🔒</Text>
+                </View>
+                <Text style={styles.menuLabel}>App lock (fingerprint)</Text>
+              </View>
+              <Switch
+                value={lockOn}
+                onValueChange={handleToggleLock}
+                trackColor={{ false: colors.border, true: colors.accent }}
+                thumbColor={colors.textInverse}
+              />
+            </View>
+          </View>
+        )}
 
         {/* Menu Section */}
         <View style={styles.menuSection}>
@@ -1076,6 +1185,28 @@ const styles = StyleSheet.create({
     backgroundColor: colors.divider,
     marginVertical: spacing.md,
   },
+  starBadgeText: { fontSize: fontSize.xs, color: '#FFE082', fontWeight: fontWeight.bold, marginBottom: 2 },
+  inviteBox: { padding: spacing.base },
+  inviteTitle: { fontSize: fontSize.base, fontWeight: fontWeight.bold, color: colors.textPrimary },
+  inviteSub: { fontSize: fontSize.xs, color: colors.textSecondary, marginTop: 4, lineHeight: 17 },
+  inviteRow: { flexDirection: 'row', alignItems: 'center', marginTop: spacing.md },
+  inviteCode: {
+    flex: 1,
+    fontSize: 22,
+    fontWeight: fontWeight.bold,
+    color: colors.primary,
+    letterSpacing: 4,
+  },
+  inviteShare: {
+    backgroundColor: colors.accent,
+    borderRadius: borderRadius.md,
+    paddingHorizontal: spacing.base,
+    paddingVertical: spacing.sm,
+  },
+  inviteShareOff: { opacity: 0.5 },
+  inviteShareText: { color: colors.textInverse, fontWeight: fontWeight.bold, fontSize: fontSize.sm },
+  inviteError: { fontSize: fontSize.xs, color: colors.error, marginTop: 6 },
+  inviteFriends: { fontSize: fontSize.sm, color: colors.textSecondary, marginTop: spacing.sm, fontWeight: fontWeight.medium },
   menuSection: {
     marginHorizontal: spacing.base,
     backgroundColor: colors.surface,

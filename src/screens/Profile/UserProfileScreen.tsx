@@ -24,6 +24,7 @@ import { getPublicUser, PublicUser } from '../../services/userApi';
 import { getUserPosts, Post } from '../../services/feedApi';
 import { firestoreErrorMessage } from '../../utils/firebaseErrors';
 import { toDate } from '../../utils/date';
+import { isWeeklyStar } from '../../services/rewardsApi';
 
 interface PublicItem {
   id: string;
@@ -75,6 +76,7 @@ export default function UserProfileScreen({ navigation, route }: { navigation: a
   const [refreshing, setRefreshing] = useState(false);
   const [openPost, setOpenPost] = useState<Post | null>(null);
   const [sectionError, setSectionError] = useState<string | null>(null);
+  const [isStar, setIsStar] = useState(false);
 
   const load = useCallback(async () => {
     if (!userId) {
@@ -114,6 +116,15 @@ export default function UserProfileScreen({ navigation, route }: { navigation: a
   useEffect(() => {
     load();
   }, [load]);
+
+  // ⭐ weekly celebrity badge
+  useEffect(() => {
+    let alive = true;
+    isWeeklyStar(userId).then(v => alive && setIsStar(v));
+    return () => {
+      alive = false;
+    };
+  }, [userId]);
 
   const header = (
     <View style={styles.header}>
@@ -185,7 +196,11 @@ export default function UserProfileScreen({ navigation, route }: { navigation: a
           </View>
         </View>
         <View style={styles.bioBox}>
-          <Text style={styles.name}>{profile.name}</Text>
+          <Text style={styles.name}>
+            {profile.name}
+            {isStar ? ' ⭐' : ''}
+          </Text>
+          {isStar && <Text style={styles.starBadge}>Weekly celebrity</Text>}
           {profile.rashi ? <Text style={styles.rashi}>✨ {profile.rashi}</Text> : null}
           {profile.bio ? <Text style={styles.bio}>{profile.bio}</Text> : null}
           {isMe && !profile.isPublic ? (
@@ -251,6 +266,7 @@ export default function UserProfileScreen({ navigation, route }: { navigation: a
 }
 
 const styles = StyleSheet.create({
+  starBadge: { fontSize: fontSize.xs, color: '#F57C00', fontWeight: fontWeight.bold, marginTop: 2 },
   safeArea: { flex: 1, backgroundColor: colors.background },
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
   back: { fontSize: 34, color: colors.primary, marginRight: spacing.sm, lineHeight: 36 },
