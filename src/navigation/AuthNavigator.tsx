@@ -1,11 +1,10 @@
 import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import LoginScreen from '../screens/Auth/LoginScreen';
-import OtpScreen from '../screens/Auth/OtpScreen'; // placeholder, not used in the login flow yet
 
+// Login, sign up and forgot password all live in LoginScreen (Google + mobile + password)
 export type AuthStackParamList = {
   Login: undefined;
-  Otp: { fullPhone?: string; phone?: string; countryCode?: string };
 };
 
 const Stack = createNativeStackNavigator<AuthStackParamList>();
@@ -23,9 +22,6 @@ export default function AuthNavigator({ onLoginSuccess }: AuthNavigatorProps) {
       }}>
       <Stack.Screen name="Login">
         {(props) => <LoginScreen {...props} onLoginSuccess={onLoginSuccess} />}
-      </Stack.Screen>
-      <Stack.Screen name="Otp">
-        {(props) => <OtpScreen {...props} onLoginSuccess={onLoginSuccess} />}
       </Stack.Screen>
     </Stack.Navigator>
   );

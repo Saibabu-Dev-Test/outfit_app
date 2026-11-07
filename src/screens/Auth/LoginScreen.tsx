@@ -1,3 +1,4 @@
+// Auth: Google account on the device + mobile number + password. No OTP, no SMS.
 import React, { useRef, useState } from 'react';
 import {
   View,
@@ -14,9 +15,17 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { spacing, borderRadius } from '../../theme';
+import SelectModal from '../../components/SelectModal';
 import {
-  loginWithPhoneAndPassword,
-  registerWithPhoneAndPassword,
+  cancelAuthFlow,
+  completeSignUp,
+  loginWithGoogleEmailPhoneAndPassword,
+  pickGoogleAccountForLogin,
+  resetPasswordWithPhone,
+  startForgotPassword,
+  startGoogleSignUp,
+  switchGoogleAccount,
+  GoogleStepResponse,
 } from '../../services/authApi';
 
 interface LoginScreenProps {
@@ -24,7 +33,7 @@ interface LoginScreenProps {
   onLoginSuccess?: (user?: any) => void;
 }
 
-type AuthMode = 'login' | 'register';
+type AuthMode = 'login' | 'register' | 'forgot';
 
 const COUNTRY_CODES = [
   { code: '+91', country: 'IN', flag: '🇮🇳', length: 10 },
@@ -34,13 +43,36 @@ const COUNTRY_CODES = [
   { code: '+971', country: 'AE', flag: '🇦🇪', length: 9 },
 ];
 
+const GENDER_OPTIONS = ['Male', 'Female', 'Other'];
 const MIN_PASSWORD = 6;
 
 const getErrorMessage = (err: any, fallback: string): string =>
   err?.response?.data?.message || err?.data?.message || err?.message || fallback;
 
+const TITLES: Record<AuthMode, { title: string; subtitle: string; button: string }> = {
+  login: {
+    title: 'Welcome Back',
+    subtitle: 'Continue with your Google account, then enter your mobile number & password',
+    button: 'Sign In',
+  },
+  register: {
+    title: 'Get Started',
+    subtitle: 'Step 1: continue with Google. Step 2: add your mobile number & a password',
+    button: 'Create Account',
+  },
+  forgot: {
+    title: 'Reset Password',
+    subtitle: 'Continue with the same Google account, confirm your mobile number, then set a new password',
+    button: 'Change Password',
+  },
+};
+
 export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenProps) {
   const [authMode, setAuthMode] = useState<AuthMode>('login');
+  const [googleEmail, setGoogleEmail] = useState<string | null>(null);
+  const [name, setName] = useState('');
+  const [gender, setGender] = useState('');
+  const [showGenderPicker, setShowGenderPicker] = useState(false);
   const [phoneNumber, setPhoneNumber] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -49,6 +81,7 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
   const [selectedCountry, setSelectedCountry] = useState(COUNTRY_CODES[0]);
   const [showCountryPicker, setShowCountryPicker] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
 
@@ -58,12 +91,20 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
   const submittingRef = useRef(false); // blocks double taps
 
   const isRegister = authMode === 'register';
+  const isForgot = authMode === 'forgot';
+  const needsConfirm = isRegister || isForgot; // new password typed twice
+  const busy = loading || googleLoading;
+  const copy = TITLES[authMode];
 
-  const switchMode = (mode: AuthMode) => {
-    if (loading) return;
+  // force: called from handleSubmit while still busy
+  const switchMode = (mode: AuthMode, keepSuccess = false, force = false) => {
+    if (busy && !force) return;
+    // Sign-up / forgot keep a Firebase session between steps; drop it
+    if (authMode !== 'login' && googleEmail) cancelAuthFlow();
     setAuthMode(mode);
+    setGoogleEmail(null);
     setError('');
-    setSuccessMsg('');
+    if (!keepSuccess) setSuccessMsg('');
     setPassword('');
     setConfirmPassword('');
     setShowPassword(false);
@@ -71,18 +112,51 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
   };
 
   // Strip non-digits and a leading trunk 0 (common for UK/AU/AE)
-  const normalizePhone = (raw: string) => raw.replace(/\D/g, '').replace(/^0+/, '');
+  const normalizeLocal = (raw: string) => raw.replace(/\D/g, '').replace(/^0+/, '');
+
+  const handleGoogle = async () => {
+    if (busy) return;
+    Keyboard.dismiss();
+    setError('');
+    setSuccessMsg('');
+    setGoogleLoading(true);
+    try {
+      let res: GoogleStepResponse;
+      if (authMode === 'login') res = await pickGoogleAccountForLogin(true);
+      else if (authMode === 'register') res = await startGoogleSignUp();
+      else res = await startForgotPassword();
+
+      if (res.email) {
+        setGoogleEmail(res.email);
+        if (isRegister && !name && res.name) setName(res.name);
+      } else if (!res.cancelled) {
+        setError(res.message);
+      }
+    } finally {
+      setGoogleLoading(false);
+    }
+  };
+
+  const handleChangeAccount = async () => {
+    if (busy) return;
+    setGoogleLoading(true);
+    await switchGoogleAccount();
+    setGoogleEmail(null);
+    setGoogleLoading(false);
+    setError('');
+  };
 
   const validate = (): string | null => {
-    const digits = normalizePhone(phoneNumber);
+    if (!googleEmail) return 'Please continue with Google first';
+    const digits = normalizeLocal(phoneNumber);
     if (digits.length !== selectedCountry.length) {
       return `Enter a valid ${selectedCountry.length}-digit mobile number`;
     }
     if (isRegister && selectedCountry.code === '+91' && !/^[6-9]/.test(digits)) {
       return 'Indian mobile numbers start with 6, 7, 8 or 9';
     }
-    if (!password) return 'Please enter your password';
-    if (isRegister) {
+    if (!password) return isForgot ? 'Please enter a new password' : 'Please enter your password';
+    if (needsConfirm) {
       if (password.length < MIN_PASSWORD) {
         return `Password must be at least ${MIN_PASSWORD} characters`;
       }
@@ -113,45 +187,50 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
       return;
     }
 
-    const formattedPhone = `${selectedCountry.code}${normalizePhone(phoneNumber)}`;
+    const formattedPhone = `${selectedCountry.code}${normalizeLocal(phoneNumber)}`;
     submittingRef.current = true;
     setLoading(true);
 
     try {
       if (isRegister) {
         // authApi returns { message } with no user on failure (it doesn't throw)
-        const regRes = await registerWithPhoneAndPassword({ phoneNumber: formattedPhone, password });
+        const regRes = await completeSignUp({ phoneNumber: formattedPhone, password, name, gender });
         if (!regRes?.user) {
           setError(regRes?.message || 'Could not create your account. Please try again.');
           return;
         }
-        // Firebase signs the new user in automatically, so no second login call
         setSuccessMsg('Account created! Signing you in...');
         finishLogin(regRes.user);
         return;
       }
 
-      const loginRes = await loginWithPhoneAndPassword({
-        phoneNumber: formattedPhone,
-        password,
-      });
-
-      if (!loginRes?.user) {
-        setError(loginRes?.message || 'Invalid mobile number or password');
+      if (isForgot) {
+        const resetRes = await resetPasswordWithPhone({ phoneNumber: formattedPhone, newPassword: password });
+        if (!resetRes.success) {
+          setError(resetRes.message);
+          return;
+        }
+        // Back to Sign In with the number still filled in
+        switchMode('login', true, true);
+        setSuccessMsg(resetRes.message);
         return;
       }
 
+      const loginRes = await loginWithGoogleEmailPhoneAndPassword({
+        email: googleEmail!,
+        phoneNumber: formattedPhone,
+        password,
+      });
+      if (!loginRes?.user) {
+        setError(loginRes?.message || 'Wrong password. Try again or use Forgot password.');
+        return;
+      }
       setSuccessMsg(loginRes.message || 'Signed in!');
       finishLogin(loginRes.user);
     } catch (err: any) {
       console.warn('Auth error:', err);
       setSuccessMsg('');
-      setError(
-        getErrorMessage(
-          err,
-          isRegister ? 'Sign up failed. Please try again.' : 'Invalid mobile number or password',
-        ),
-      );
+      setError(getErrorMessage(err, 'Something went wrong. Please try again.'));
     } finally {
       submittingRef.current = false;
       setLoading(false);
@@ -182,161 +261,243 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
           </View>
 
           <View style={styles.card}>
-            {/* Tabs */}
-            <View style={styles.tabContainer}>
-              {(['login', 'register'] as AuthMode[]).map((mode) => {
-                const active = authMode === mode;
-                return (
-                  <TouchableOpacity
-                    key={mode}
-                    style={[styles.tabButton, active && styles.tabButtonActive]}
-                    onPress={() => switchMode(mode)}
-                    disabled={loading}
-                    accessibilityRole="tab"
-                    accessibilityState={{ selected: active }}>
-                    <Text style={[styles.tabText, active && styles.tabTextActive]}>
-                      {mode === 'login' ? 'Sign In' : 'Create Account'}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-
-            <Text style={styles.cardTitle}>{isRegister ? 'Get Started' : 'Welcome Back'}</Text>
-            <Text style={styles.cardSubtitle}>
-              {isRegister
-                ? 'Create an account using your mobile number & password'
-                : 'Sign in with your registered mobile number & password'}
-            </Text>
-
-            {/* Mobile */}
-            <Text style={styles.inputLabel}>Mobile Number</Text>
-            <View style={styles.inputRow}>
-              <TouchableOpacity
-                style={styles.countryPickerButton}
-                activeOpacity={0.7}
-                disabled={loading}
-                accessibilityLabel={`Country code ${selectedCountry.code}`}
-                onPress={() => setShowCountryPicker((v) => !v)}>
-                <Text style={styles.flagText}>{selectedCountry.flag}</Text>
-                <Text style={styles.countryCodeText}>{selectedCountry.code}</Text>
-                <Text style={styles.dropdownChevron}>{showCountryPicker ? '▴' : '▾'}</Text>
-              </TouchableOpacity>
-
-              <View style={styles.inputDivider} />
-
-              <TextInput
-                style={styles.phoneInput}
-                placeholder="Mobile number"
-                placeholderTextColor="#9E9EBA"
-                keyboardType="phone-pad"
-                textContentType="telephoneNumber"
-                autoComplete="tel"
-                maxLength={selectedCountry.length + 1}
-                editable={!loading}
-                returnKeyType="next"
-                onSubmitEditing={() => passwordRef.current?.focus()}
-                onFocus={() => setShowCountryPicker(false)}
-                value={phoneNumber}
-                onChangeText={(text) => {
-                  setError('');
-                  setPhoneNumber(text.replace(/\D/g, ''));
-                }}
-              />
-            </View>
-
-            {showCountryPicker && (
-              <View style={styles.countryDropdown}>
-                {COUNTRY_CODES.map((item) => (
-                  <TouchableOpacity
-                    key={item.code}
-                    style={[
-                      styles.countryOption,
-                      selectedCountry.code === item.code && styles.countryOptionSelected,
-                    ]}
-                    onPress={() => {
-                      setSelectedCountry(item);
-                      setShowCountryPicker(false);
-                      setError('');
-                    }}>
-                    <Text style={styles.countryOptionText}>
-                      {item.flag} {item.country} ({item.code})
-                    </Text>
-                  </TouchableOpacity>
-                ))}
+            {/* Tabs (hidden on Reset Password) */}
+            {!isForgot && (
+              <View style={styles.tabContainer}>
+                {(['login', 'register'] as AuthMode[]).map((mode) => {
+                  const active = authMode === mode;
+                  return (
+                    <TouchableOpacity
+                      key={mode}
+                      style={[styles.tabButton, active && styles.tabButtonActive]}
+                      onPress={() => switchMode(mode)}
+                      disabled={busy}
+                      accessibilityRole="tab"
+                      accessibilityState={{ selected: active }}>
+                      <Text style={[styles.tabText, active && styles.tabTextActive]}>
+                        {mode === 'login' ? 'Sign In' : 'Create Account'}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
               </View>
             )}
 
-            {/* Password */}
-            <Text style={[styles.inputLabel, styles.labelSpacing]}>Password</Text>
-            <View style={styles.passwordRow}>
-              <TextInput
-                ref={passwordRef}
-                style={styles.passwordInput}
-                placeholder={isRegister ? `Create password (min ${MIN_PASSWORD} chars)` : 'Enter password'}
-                placeholderTextColor="#9E9EBA"
-                secureTextEntry={!showPassword}
-                autoCapitalize="none"
-                autoCorrect={false}
-                textContentType={isRegister ? 'newPassword' : 'password'}
-                autoComplete={isRegister ? 'new-password' : 'password'}
-                editable={!loading}
-                returnKeyType={isRegister ? 'next' : 'go'}
-                onSubmitEditing={() =>
-                  isRegister ? confirmRef.current?.focus() : handleSubmit()
-                }
-                value={password}
-                onChangeText={(text) => {
-                  setError('');
-                  setPassword(text);
-                }}
-              />
-              <TouchableOpacity
-                style={styles.eyeButton}
-                onPress={() => setShowPassword((v) => !v)}
-                accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
-                activeOpacity={0.7}>
-                <Text style={styles.eyeIcon}>{showPassword ? '👁️' : '🙈'}</Text>
-              </TouchableOpacity>
-            </View>
+            <Text style={styles.cardTitle}>{copy.title}</Text>
+            <Text style={styles.cardSubtitle}>{copy.subtitle}</Text>
 
-            {isRegister && (
+            {/* Step 1: Google account on this device */}
+            <Text style={styles.inputLabel}>Google Account</Text>
+            {googleEmail ? (
+              <View style={styles.googleChip}>
+                <Text style={styles.googleChipText} numberOfLines={1}>✓ {googleEmail}</Text>
+                <TouchableOpacity onPress={handleChangeAccount} disabled={busy} accessibilityRole="button">
+                  <Text style={styles.changeLink}>Change</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity
+                style={[styles.googleButton, busy && styles.buttonDisabled]}
+                onPress={handleGoogle}
+                disabled={busy}
+                activeOpacity={0.8}
+                accessibilityRole="button">
+                {googleLoading ? (
+                  <ActivityIndicator color="#E91E63" size="small" />
+                ) : (
+                  <>
+                    <Text style={styles.googleG}>G</Text>
+                    <Text style={styles.googleButtonText}>Continue with Google</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            )}
+
+            {!googleEmail && (
+              <Text style={styles.stepHint}>
+                Use the Gmail account on this phone. No OTP or SMS needed.
+              </Text>
+            )}
+
+            {/* Step 2: details */}
+            {!!googleEmail && (
               <>
-                <Text style={[styles.inputLabel, styles.labelSpacing]}>Confirm Password</Text>
-                <View
-                  style={[
-                    styles.passwordRow,
-                    !!confirmPassword && confirmPassword !== password && styles.inputErrorBorder,
-                  ]}>
+                {isRegister && (
+                  <>
+                    <Text style={[styles.inputLabel, styles.labelSpacing]}>Name</Text>
+                    <TextInput
+                      style={styles.textInputBox}
+                      placeholder="Your name"
+                      placeholderTextColor="#9E9EBA"
+                      autoCapitalize="words"
+                      editable={!busy}
+                      value={name}
+                      onChangeText={setName}
+                    />
+
+                    <Text style={[styles.inputLabel, styles.labelSpacing]}>Gender</Text>
+                    <TouchableOpacity
+                      style={styles.selectBox}
+                      onPress={() => setShowGenderPicker(true)}
+                      disabled={busy}
+                      activeOpacity={0.7}>
+                      <Text style={gender ? styles.selectValue : styles.selectPlaceholder}>
+                        {gender || 'Select (optional)'}
+                      </Text>
+                      <Text style={styles.dropdownChevron}>▾</Text>
+                    </TouchableOpacity>
+                    <SelectModal
+                      visible={showGenderPicker}
+                      title="Gender"
+                      options={GENDER_OPTIONS}
+                      selected={gender}
+                      onSelect={setGender}
+                      onClose={() => setShowGenderPicker(false)}
+                    />
+                  </>
+                )}
+
+                {/* Mobile */}
+                <Text style={[styles.inputLabel, styles.labelSpacing]}>Mobile Number</Text>
+                <View style={styles.inputRow}>
+                  <TouchableOpacity
+                    style={styles.countryPickerButton}
+                    activeOpacity={0.7}
+                    disabled={busy}
+                    accessibilityLabel={`Country code ${selectedCountry.code}`}
+                    onPress={() => setShowCountryPicker((v) => !v)}>
+                    <Text style={styles.flagText}>{selectedCountry.flag}</Text>
+                    <Text style={styles.countryCodeText}>{selectedCountry.code}</Text>
+                    <Text style={styles.dropdownChevron}>{showCountryPicker ? '▴' : '▾'}</Text>
+                  </TouchableOpacity>
+
+                  <View style={styles.inputDivider} />
+
                   <TextInput
-                    ref={confirmRef}
-                    style={styles.passwordInput}
-                    placeholder="Re-enter your password"
+                    style={styles.phoneInput}
+                    placeholder="Mobile number"
                     placeholderTextColor="#9E9EBA"
-                    secureTextEntry={!showConfirmPassword}
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                    textContentType="newPassword"
-                    autoComplete="new-password"
-                    editable={!loading}
-                    returnKeyType="go"
-                    onSubmitEditing={handleSubmit}
-                    value={confirmPassword}
+                    keyboardType="phone-pad"
+                    textContentType="telephoneNumber"
+                    autoComplete="tel"
+                    maxLength={selectedCountry.length + 1}
+                    editable={!busy}
+                    returnKeyType="next"
+                    onSubmitEditing={() => passwordRef.current?.focus()}
+                    onFocus={() => setShowCountryPicker(false)}
+                    value={phoneNumber}
                     onChangeText={(text) => {
                       setError('');
-                      setConfirmPassword(text);
+                      setPhoneNumber(text.replace(/\D/g, ''));
+                    }}
+                  />
+                </View>
+
+                {showCountryPicker && (
+                  <View style={styles.countryDropdown}>
+                    {COUNTRY_CODES.map((item) => (
+                      <TouchableOpacity
+                        key={item.code}
+                        style={[
+                          styles.countryOption,
+                          selectedCountry.code === item.code && styles.countryOptionSelected,
+                        ]}
+                        onPress={() => {
+                          setSelectedCountry(item);
+                          setShowCountryPicker(false);
+                          setError('');
+                        }}>
+                        <Text style={styles.countryOptionText}>
+                          {item.flag} {item.country} ({item.code})
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
+
+                {/* Password */}
+                <Text style={[styles.inputLabel, styles.labelSpacing]}>
+                  {isForgot ? 'New Password' : 'Password'}
+                </Text>
+                <View style={styles.passwordRow}>
+                  <TextInput
+                    ref={passwordRef}
+                    style={styles.passwordInput}
+                    placeholder={needsConfirm ? `Create password (min ${MIN_PASSWORD} chars)` : 'Enter password'}
+                    placeholderTextColor="#9E9EBA"
+                    secureTextEntry={!showPassword}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    textContentType={needsConfirm ? 'newPassword' : 'password'}
+                    autoComplete={needsConfirm ? 'new-password' : 'password'}
+                    editable={!busy}
+                    returnKeyType={needsConfirm ? 'next' : 'go'}
+                    onSubmitEditing={() =>
+                      needsConfirm ? confirmRef.current?.focus() : handleSubmit()
+                    }
+                    value={password}
+                    onChangeText={(text) => {
+                      setError('');
+                      setPassword(text);
                     }}
                   />
                   <TouchableOpacity
                     style={styles.eyeButton}
-                    onPress={() => setShowConfirmPassword((v) => !v)}
-                    accessibilityLabel={showConfirmPassword ? 'Hide password' : 'Show password'}
+                    onPress={() => setShowPassword((v) => !v)}
+                    accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
                     activeOpacity={0.7}>
-                    <Text style={styles.eyeIcon}>{showConfirmPassword ? '👁️' : '🙈'}</Text>
+                    <Text style={styles.eyeIcon}>{showPassword ? '👁️' : '🙈'}</Text>
                   </TouchableOpacity>
                 </View>
-                {!!confirmPassword && confirmPassword !== password && (
-                  <Text style={styles.hintError}>Passwords don't match yet</Text>
+
+                {authMode === 'login' && (
+                  <TouchableOpacity
+                    style={styles.forgotRow}
+                    onPress={() => switchMode('forgot')}
+                    disabled={busy}>
+                    <Text style={styles.forgotText}>Forgot password?</Text>
+                  </TouchableOpacity>
+                )}
+
+                {needsConfirm && (
+                  <>
+                    <Text style={[styles.inputLabel, styles.labelSpacing]}>Confirm Password</Text>
+                    <View
+                      style={[
+                        styles.passwordRow,
+                        !!confirmPassword && confirmPassword !== password && styles.inputErrorBorder,
+                      ]}>
+                      <TextInput
+                        ref={confirmRef}
+                        style={styles.passwordInput}
+                        placeholder="Re-enter your password"
+                        placeholderTextColor="#9E9EBA"
+                        secureTextEntry={!showConfirmPassword}
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                        textContentType="newPassword"
+                        autoComplete="new-password"
+                        editable={!busy}
+                        returnKeyType="go"
+                        onSubmitEditing={handleSubmit}
+                        value={confirmPassword}
+                        onChangeText={(text) => {
+                          setError('');
+                          setConfirmPassword(text);
+                        }}
+                      />
+                      <TouchableOpacity
+                        style={styles.eyeButton}
+                        onPress={() => setShowConfirmPassword((v) => !v)}
+                        accessibilityLabel={showConfirmPassword ? 'Hide password' : 'Show password'}
+                        activeOpacity={0.7}>
+                        <Text style={styles.eyeIcon}>{showConfirmPassword ? '👁️' : '🙈'}</Text>
+                      </TouchableOpacity>
+                    </View>
+                    {!!confirmPassword && confirmPassword !== password && (
+                      <Text style={styles.hintError}>Passwords don't match yet</Text>
+                    )}
+                  </>
                 )}
               </>
             )}
@@ -353,28 +514,30 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
               </View>
             )}
 
-            <TouchableOpacity
-              style={[styles.primaryButton, loading && styles.buttonDisabled]}
-              activeOpacity={0.8}
-              onPress={handleSubmit}
-              disabled={loading}
-              accessibilityRole="button">
-              {loading ? (
-                <ActivityIndicator color="#FFFFFF" size="small" />
-              ) : (
-                <Text style={styles.primaryButtonText}>
-                  {isRegister ? 'Register & Sign In' : 'Sign In'}
-                </Text>
-              )}
-            </TouchableOpacity>
+            {!!googleEmail && (
+              <TouchableOpacity
+                style={[styles.primaryButton, busy && styles.buttonDisabled]}
+                activeOpacity={0.8}
+                onPress={handleSubmit}
+                disabled={busy}
+                accessibilityRole="button">
+                {loading ? (
+                  <ActivityIndicator color="#FFFFFF" size="small" />
+                ) : (
+                  <Text style={styles.primaryButtonText}>{copy.button}</Text>
+                )}
+              </TouchableOpacity>
+            )}
 
             <TouchableOpacity
               style={styles.switchRow}
-              onPress={() => switchMode(isRegister ? 'login' : 'register')}
-              disabled={loading}>
+              onPress={() => switchMode(isRegister || isForgot ? 'login' : 'register')}
+              disabled={busy}>
               <Text style={styles.switchText}>
-                {isRegister ? 'Already have an account? ' : 'New here? '}
-                <Text style={styles.termsLink}>{isRegister ? 'Sign In' : 'Create Account'}</Text>
+                {isForgot ? 'Remembered it? ' : isRegister ? 'Already have an account? ' : 'New here? '}
+                <Text style={styles.termsLink}>
+                  {isRegister || isForgot ? 'Sign In' : 'Create Account'}
+                </Text>
               </Text>
             </TouchableOpacity>
 
@@ -437,4 +600,17 @@ const styles = StyleSheet.create({
   switchText: { fontSize: 13, color: '#6B6B8A' },
   termsText: { fontSize: 11, color: '#8E8EA8', textAlign: 'center', lineHeight: 17, marginTop: spacing.md },
   termsLink: { color: '#0A1940', fontWeight: '700' },
+  googleButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', height: 52, borderRadius: borderRadius.md, borderWidth: 1.5, borderColor: '#E0DBF0', backgroundColor: '#FFFFFF' },
+  googleG: { fontSize: 18, fontWeight: '900', color: '#4285F4', marginRight: spacing.sm },
+  googleButtonText: { fontSize: 15, fontWeight: '700', color: '#0A1940' },
+  googleChip: { flexDirection: 'row', alignItems: 'center', borderWidth: 1.5, borderColor: '#A5D6A7', backgroundColor: '#F1F8F2', borderRadius: borderRadius.md, paddingHorizontal: spacing.md, height: 52 },
+  googleChipText: { flex: 1, fontSize: 14, fontWeight: '700', color: '#0A1940' },
+  changeLink: { fontSize: 13, fontWeight: '700', color: '#E91E63', paddingLeft: spacing.sm },
+  stepHint: { fontSize: 12, color: '#6B6B8A', marginTop: spacing.sm },
+  textInputBox: { borderWidth: 1.5, borderColor: '#E0DBF0', borderRadius: borderRadius.md, backgroundColor: '#FAF9FC', height: 52, paddingHorizontal: spacing.md, fontSize: 15, fontWeight: '600', color: '#0A1940' },
+  selectBox: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 1.5, borderColor: '#E0DBF0', borderRadius: borderRadius.md, backgroundColor: '#FAF9FC', height: 52, paddingHorizontal: spacing.md },
+  selectValue: { fontSize: 15, fontWeight: '600', color: '#0A1940' },
+  selectPlaceholder: { fontSize: 15, color: '#9E9EBA' },
+  forgotRow: { alignSelf: 'flex-end', marginTop: spacing.sm },
+  forgotText: { fontSize: 13, fontWeight: '700', color: '#E91E63' },
 });

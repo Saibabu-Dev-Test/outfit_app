@@ -27,6 +27,11 @@ service cloud.firestore {
     function isCircleOwner(cid) {
       return signedIn() && circleData(cid).ownerId == me();
     }
+    // users/{uid}.phone (login key) may only be set to a number this user owns in phones/
+    function phoneOk(oldPhone) {
+      return request.resource.data.get('phone', null) == oldPhone
+        || get(/databases/$(db)/documents/phones/$(request.resource.data.phone)).data.uid == me();
+    }
 
     // ── Users ────────────────────────────────────────────────────────────
     match /users/{uid} {
@@ -34,10 +39,24 @@ service cloud.firestore {
         && (me() == uid || resource.data.isPublic == true || isAdmin());
       // Users write their own doc but can never set or change role
       allow create: if signedIn() && me() == uid
-        && !('role' in request.resource.data);
+        && !('role' in request.resource.data)
+        && phoneOk(null);
       allow update: if signedIn() && me() == uid
-        && request.resource.data.get('role', null) == resource.data.get('role', null);
+        && request.resource.data.get('role', null) == resource.data.get('role', null)
+        && phoneOk(resource.data.get('phone', null));
       allow delete: if signedIn() && me() == uid;
+    }
+
+    // ── Phone registry: phones/{digits} -> {uid, createdAt} ──────────────
+    // One account per mobile number. Get by id only (no listing).
+    match /phones/{digits} {
+      allow get: if signedIn();
+      allow list: if false;
+      // create() only runs when the doc doesn't exist yet
+      allow create: if signedIn() && request.resource.data.uid == me();
+      allow update: if signedIn() && resource.data.uid == me()
+        && request.resource.data.uid == me();
+      allow delete: if signedIn() && resource.data.uid == me();
     }
 
     // ── Daily colour votes (Phase 1) ────────────────────────────────────
