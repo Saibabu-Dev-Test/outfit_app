@@ -88,13 +88,13 @@ export default function HomeScreen() {
     if (!item) return;
 
     const today = new Date().toISOString().split('T')[0]; 
-    const voteId = `top_colors_${today}_${user.uid}`;
+    const voteId = `top_colors_${today}_${user.id}`;
 
     try {
       await setDoc(doc(db, 'votes', voteId), {
         systemId: 'top_colors',
         color: item.name,
-        userId: user.uid,
+        userId: user.id,
         date: today,
         timestamp: serverTimestamp()
       }, { merge: true });
@@ -435,6 +435,10 @@ const styles = StyleSheet.create({
   },
   topColoursScroll: {
     height: 254,
+  },
+  colorRowVoted: {
+    backgroundColor: "#FFF0F5",
+    borderRadius: 12,
   },
   colorRow: {
     flexDirection: 'row',
