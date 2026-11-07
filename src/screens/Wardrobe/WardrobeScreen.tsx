@@ -68,6 +68,7 @@ export default function WardrobeScreen({ navigation }: { navigation: any }) {
   useFocusEffect(
     useCallback(() => {
       fetchItems();
+      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [user?.id])
   );
 

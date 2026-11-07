@@ -160,7 +160,7 @@ export const logoutUser = async (): Promise<{ message: string; success: boolean 
   try {
     await signOut(auth);
     return { message: 'Logged out successfully', success: true };
-  } catch (error) {
+  } catch {
     return { message: 'Logged out locally', success: true };
   }
 };

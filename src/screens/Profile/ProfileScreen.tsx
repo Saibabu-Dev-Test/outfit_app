@@ -19,9 +19,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { launchImageLibrary, launchCamera, ImagePickerResponse } from 'react-native-image-picker';
 import { colors, fontSize, fontWeight, spacing, borderRadius } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
-import { db, storage } from '../../config/firebaseConfig';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 interface UserProfile {
   id?: string;
@@ -250,6 +247,7 @@ const fetchProfile = async () => {
   // ✅ ONLY ONE useEffect (removed duplicate)
   useEffect(() => {
     fetchProfile();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authUser?.id]);
 
   // ✅ ONLY ONE handleOpenEditModal (removed duplicate)

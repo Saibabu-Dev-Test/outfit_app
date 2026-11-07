@@ -12,10 +12,10 @@ import {
   Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { colors, fontSize, fontWeight, spacing, borderRadius } from '../../theme';
+import { spacing, borderRadius } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
 import { doc, setDoc, serverTimestamp, collection, query, where, getDocs } from 'firebase/firestore';
-import { auth, db } from '../../config/firebaseConfig';
+import { db } from '../../config/firebaseConfig';
 
 const lindaAvatar = require('../../assets/linda_avatar.jpg');
 const outfitA = require('../../assets/outfit_a.jpg');
@@ -189,7 +189,7 @@ export default function HomeScreen() {
             }
             return;
           }
-        } catch (err) {
+        } catch {
           // try next URL candidate
         }
       }

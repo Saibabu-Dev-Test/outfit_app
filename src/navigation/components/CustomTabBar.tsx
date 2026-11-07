@@ -4,11 +4,10 @@ import {
   Text,
   TouchableOpacity,
   StyleSheet,
-  Platform,
 } from 'react-native';
 import { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { colors, fontSize, fontWeight, spacing, borderRadius } from '../../theme';
+import { colors, fontSize, fontWeight, spacing } from '../../theme';
 
 type TabItem = {
   name: string;
@@ -25,13 +24,12 @@ const TABS: TabItem[] = [
   { name: 'Profile', icon: '⊙', iconActive: '⊙', label: 'Me' },
 ];
 
-export default function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
+export default function CustomTabBar({ state, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
 
   return (
     <View style={[styles.container, { paddingBottom: insets.bottom || spacing.sm }]}>
       {state.routes.map((route, index) => {
-        const { options } = descriptors[route.key];
         const isFocused = state.index === index;
         const tab = TABS[index];
         const isStylist = tab.name === 'Stylist';

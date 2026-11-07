@@ -175,7 +175,7 @@ export const analyzeClothingPhoto = async (
           return analysis as ClothingAnalysisResult;
         }
       }
-    } catch (e) {
+    } catch {
       // try next candidate
     }
   }
