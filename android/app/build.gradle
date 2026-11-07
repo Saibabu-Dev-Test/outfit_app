@@ -57,6 +57,8 @@ react {
 /**
  * Set this to true to Run Proguard on Release builds to minify the Java bytecode.
  */
+// Kept off on purpose: R8/minify would obfuscate the Kotlin app-lock code a little, but it needs
+// keep rules for React Native modules and a real-device test first. Turn on only after testing.
 def enableProguardInReleaseBuilds = false
 
 /**

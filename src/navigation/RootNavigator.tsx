@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -14,14 +14,34 @@ import UserProfileScreen from '../screens/Profile/UserProfileScreen';
 import UserSearchScreen from '../screens/Profile/UserSearchScreen';
 import AdminScreen from '../screens/Admin/AdminScreen';
 import AppLockGate from '../components/AppLockGate';
+import SessionLockScreen from '../components/SessionLockScreen';
+import TamperScreen from '../components/TamperScreen';
+import { getVaultStatus, subscribeVault, VaultStatus } from '../native/sessionVault';
 import type { RootStackParamList } from './types';
 
 export type { RootStackParamList } from './types';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
+function useVaultStatus(): VaultStatus {
+  const [status, setStatus] = useState<VaultStatus>(getVaultStatus());
+  useEffect(() => {
+    setStatus(getVaultStatus());
+    return subscribeVault(setStatus);
+  }, []);
+  return status;
+}
+
 function NavigationContent() {
   const { isAuthenticated, initializing, login } = useAuth();
+  const vault = useVaultStatus();
+
+  // APK not signed with the official key: blocked, signed out
+  if (vault === 'tampered') return <TamperScreen />;
+  // Fingerprint lock on: the session stays encrypted until the fingerprint unlocks it
+  if (vault === 'locked' || vault === 'unlocking' || vault === 'invalidated') {
+    return <SessionLockScreen status={vault} />;
+  }
 
   // Checking the saved session (stay logged in until logout)
   if (initializing) {

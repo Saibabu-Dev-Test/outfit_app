@@ -31,7 +31,13 @@ import {
   isWeeklyStar,
   REFERRAL_POINTS,
 } from '../../services/rewardsApi';
-import { authenticate, isLockEnabled, isLockSupported, setLockEnabled } from '../../native/appLock';
+import {
+  disableHardwareLock,
+  enableHardwareLock,
+  isLockEnabled,
+  isLockSupported,
+} from '../../native/appLock';
+import { signOutKeepLock } from '../../services/authApi';
 
 // "+91 98765 43210" from users/{uid}.phone (10 digits), else the saved phoneNumber
 const phoneLabel = (p?: { phone?: string; phoneNumber?: string } | null): string => {
@@ -281,14 +287,16 @@ const fetchProfile = async () => {
     };
   }, [authUser?.id]);
 
+  // ON: new Keystore key + one fingerprint, session moved to encrypted storage.
+  // OFF: one fingerprint, session stored normally again.
   const handleToggleLock = async (value: boolean) => {
-    if (value) {
-      // Confirm the fingerprint works before turning it on
-      const r = await authenticate('Turn on app lock', 'Confirm with your fingerprint');
-      if (r !== 'success') return;
+    const r = value ? await enableHardwareLock() : await disableHardwareLock();
+    if (r.ok) {
+      setLockOn(value);
+      return;
     }
-    await setLockEnabled(value);
-    setLockOn(value);
+    if (r.message) Alert.alert('Fingerprint lock', r.message);
+    if (r.invalidated) await signOutKeepLock();
   };
 
   const handleShareInvite = async () => {

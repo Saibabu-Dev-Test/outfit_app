@@ -1,4 +1,5 @@
-// Fingerprint app lock: covers the app on cold start and after > 30 s in background.
+// Fingerprint app lock: covers the app after > 30 s in background (cold start is handled by
+// SessionLockScreen, which decrypts the hardware-bound session before Firebase can read it).
 // Also asks once after the first login/sign-up whether to turn it on.
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -14,13 +15,18 @@ import {
 import { useAuth } from '../context/AuthContext';
 import {
   authenticate,
+  enableHardwareLock,
+  FINGERPRINTS_CHANGED_MESSAGE,
   isLockEnabled,
   isLockSupported,
   LOCK_AFTER_MS,
   markLockAsked,
   setLockEnabled,
+  setPrivacy,
   wasLockAsked,
+  wasUnlockedThisLaunch,
 } from '../native/appLock';
+import { signOutKeepLock } from '../services/authApi';
 
 export default function AppLockGate() {
   const { isAuthenticated, freshLogin, clearFreshLogin } = useAuth();
@@ -38,7 +44,15 @@ export default function AppLockGate() {
     prompting.current = false;
     setChecking(false);
     if (r === 'success') setLocked(false);
-    else if (r === 'error' && !(await isLockSupported())) {
+    else if (r === 'password') {
+      // Full Google + mobile + password login instead
+      setLocked(false);
+      await signOutKeepLock();
+    } else if (r === 'invalidated') {
+      setLocked(false);
+      await signOutKeepLock();
+      Alert.alert('Sign in again', FINGERPRINTS_CHANGED_MESSAGE);
+    } else if (r === 'error' && !(await isLockSupported())) {
       // Fingerprint removed from the phone: don't trap the user
       await setLockEnabled(false);
       enabledRef.current = false;
@@ -57,8 +71,9 @@ export default function AppLockGate() {
     (async () => {
       const on = (await isLockEnabled()) && (await isLockSupported());
       enabledRef.current = on;
-      // A fresh login just proved who this is; only lock a restored session
-      if (alive && on && !freshLogin) setLocked(true);
+      // A fresh login just proved who this is, and a cold start already asked for the
+      // fingerprint to decrypt the session; lock only a restored session that skipped both
+      if (alive && on && !freshLogin && !wasUnlockedThisLaunch()) setLocked(true);
     })();
     return () => {
       alive = false;
@@ -69,22 +84,27 @@ export default function AppLockGate() {
   // Background > 30 s: lock again
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state: AppStateStatus) => {
-      if (prompting.current) return; // the PIN screen also backgrounds the app
+      if (prompting.current) return; // the fingerprint prompt can background the app
       if (state === 'background') {
         backgroundAt.current = Date.now();
       } else if (state === 'active') {
         const since = backgroundAt.current;
         backgroundAt.current = null;
-        if (enabledRef.current && isAuthenticated && since && Date.now() - since > LOCK_AFTER_MS) {
-          setLocked(true);
+        if (isAuthenticated && since && Date.now() - since > LOCK_AFTER_MS) {
+          // Re-read the setting: it may have been switched in Profile since login
+          isLockEnabled().then(on => {
+            enabledRef.current = on;
+            if (on) setLocked(true);
+          });
         }
       }
     });
     return () => sub.remove();
   }, [isAuthenticated]);
 
-  // Show the prompt right away when locked
+  // Show the prompt right away when locked; no screenshots / recents preview of the lock screen
   useEffect(() => {
+    setPrivacy(enabledRef.current, locked);
     if (locked) unlock();
   }, [locked, unlock]);
 
@@ -104,12 +124,11 @@ export default function AppLockGate() {
             text: 'Enable',
             onPress: async () => {
               prompting.current = true;
-              const r = await authenticate('Turn on app lock', 'Confirm with your fingerprint');
+              // New Keystore key + one fingerprint, then the session is stored encrypted
+              const r = await enableHardwareLock();
               prompting.current = false;
-              if (r === 'success') {
-                await setLockEnabled(true);
-                enabledRef.current = true;
-              }
+              if (r.ok) enabledRef.current = true;
+              else if (r.message) Alert.alert('Fingerprint lock', r.message);
             },
           },
         ],
@@ -122,13 +141,23 @@ export default function AppLockGate() {
     <View style={styles.overlay}>
       <Text style={styles.icon}>🔒</Text>
       <Text style={styles.title}>Outfit is locked</Text>
-      <Text style={styles.sub}>Unlock with your fingerprint or phone PIN</Text>
+      <Text style={styles.sub}>Unlock with your fingerprint</Text>
       <TouchableOpacity style={styles.button} onPress={unlock} disabled={checking} activeOpacity={0.8}>
         {checking ? (
           <ActivityIndicator color="#FFFFFF" size="small" />
         ) : (
           <Text style={styles.buttonText}>Unlock</Text>
         )}
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={styles.linkButton}
+        onPress={async () => {
+          setLocked(false);
+          await signOutKeepLock();
+        }}
+        disabled={checking}
+        activeOpacity={0.7}>
+        <Text style={styles.linkText}>Use password instead</Text>
       </TouchableOpacity>
     </View>
   );
@@ -162,4 +191,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
   },
   buttonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
+  linkButton: { marginTop: 18, padding: 8 },
+  linkText: { color: '#E91E63', fontSize: 14, fontWeight: '600' },
 });

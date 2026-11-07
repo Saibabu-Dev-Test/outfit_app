@@ -2,7 +2,7 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import * as FirebaseAuth from 'firebase/auth';
 import { Auth, getAuth, initializeAuth } from 'firebase/auth';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { secureAuthStorage } from '../native/sessionVault';
 import { initializeFirestore, getFirestore, Firestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 
@@ -20,12 +20,14 @@ const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 
 // Keep the user signed in across app restarts (getAuth alone = memory only on RN).
 // getReactNativePersistence lives in the RN build of firebase/auth but not in its TS types.
+// secureAuthStorage = AsyncStorage, except that with the fingerprint lock on the session is kept
+// encrypted by a Keystore key and auth can't read it until the fingerprint unlocks it.
 const getRNPersistence: ((storage: any) => any) | undefined = (FirebaseAuth as any)
   .getReactNativePersistence;
 let authInstance: Auth;
 try {
   authInstance = getRNPersistence
-    ? initializeAuth(app, { persistence: getRNPersistence(AsyncStorage) })
+    ? initializeAuth(app, { persistence: getRNPersistence(secureAuthStorage) })
     : getAuth(app);
 } catch {
   // Already initialized (Fast Refresh)

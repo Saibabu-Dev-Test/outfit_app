@@ -1,20 +1,31 @@
-// Fingerprint app lock with the phone's own biometrics (device PIN as fallback). Android only.
+// Fingerprint app lock (Android). Strong biometric only, no device PIN fallback.
+// The session encryption itself lives in sessionVault.ts.
 import { NativeModules, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { LOCK_ENABLED_KEY, Native, verifyFingerprint } from './sessionVault';
 
-const Native:
-  | { isAvailable?: () => Promise<boolean>; authenticate?: (t: string, s: string) => Promise<string> }
-  | undefined = NativeModules.OutfitAppLock;
+export {
+  enableHardwareLock,
+  disableHardwareLock,
+  verifyFingerprint,
+  wipeForPasswordLogin,
+  wasUnlockedThisLaunch,
+  setPrivacy,
+  FINGERPRINTS_CHANGED_MESSAGE,
+} from './sessionVault';
+export type { LockChange, VerifyResult } from './sessionVault';
+export { LOCK_ENABLED_KEY };
 
-export const LOCK_ENABLED_KEY = 'outfit:appLockEnabled';
+const Legacy: { isAvailable?: () => Promise<boolean> } | undefined = NativeModules.OutfitAppLock;
+
 export const LOCK_ASKED_KEY = 'outfit:appLockAsked';
 export const LOCK_AFTER_MS = 30 * 1000; // lock again after 30 s in background
 
-// True when the phone has a fingerprint enrolled. Never throws.
+// True when the phone has a strong biometric (fingerprint) enrolled. Never throws.
 export const isLockSupported = async (): Promise<boolean> => {
-  if (Platform.OS !== 'android' || !Native?.isAvailable) return false;
+  if (Platform.OS !== 'android' || !Native || !Legacy?.isAvailable) return false;
   try {
-    return !!(await Native.isAvailable());
+    return !!(await Legacy.isAvailable());
   } catch {
     return false;
   }
@@ -28,6 +39,8 @@ export const isLockEnabled = async (): Promise<boolean> => {
   }
 };
 
+// Only for turning the flag off when the phone has no fingerprint left.
+// Turning the lock on/off goes through enableHardwareLock / disableHardwareLock.
 export const setLockEnabled = async (on: boolean): Promise<void> => {
   try {
     if (on) await AsyncStorage.setItem(LOCK_ENABLED_KEY, '1');
@@ -53,22 +66,15 @@ export const markLockAsked = async (): Promise<void> => {
   }
 };
 
-export type UnlockResult = 'success' | 'cancelled' | 'error';
+export type UnlockResult = 'success' | 'cancelled' | 'password' | 'invalidated' | 'error';
 
-// Shows the system fingerprint prompt. Never throws.
+// Fingerprint prompt (bound to the session key when the lock is on). Never throws.
 export const authenticate = async (
-  title = 'Unlock Outfit',
-  subtitle = 'Use your fingerprint or phone PIN',
+  title = 'Unlock OUTFIT',
+  subtitle = 'Touch the fingerprint sensor',
+  negativeText = 'Use password instead',
 ): Promise<UnlockResult> => {
-  if (!Native?.authenticate) return 'error';
-  try {
-    const r = String(await Native.authenticate(title, subtitle));
-    if (r === 'success') return 'success';
-    if (r === 'cancelled') return 'cancelled';
-    console.warn('App lock prompt:', r);
-    return 'error';
-  } catch (e: any) {
-    console.warn('App lock prompt failed:', e?.message);
-    return 'error';
-  }
+  const r = await verifyFingerprint(title, subtitle, negativeText);
+  if (r === 'lockout') return 'error';
+  return r;
 };

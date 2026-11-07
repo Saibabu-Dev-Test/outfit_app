@@ -32,6 +32,7 @@ import {
 } from '../utils/firebaseErrors';
 import { lookupReferralCode, saveReferral } from './rewardsApi';
 import { getGoogleAccount, googleSignOut } from './googleAuth';
+import { wipeForPasswordLogin } from '../native/sessionVault';
 
 export interface AuthResponse {
   message: string;
@@ -650,6 +651,15 @@ export const logoutUser = async (): Promise<{ message: string; success: boolean 
   } catch {
     return { message: 'Logged out locally', success: true };
   }
+};
+
+// "Use password instead" / fingerprints changed: end the session but keep the app lock setting,
+// so the next full login (Google + mobile + password) is stored encrypted again.
+export const signOutKeepLock = async (): Promise<void> => {
+  clearFlowState();
+  await wipeForPasswordLogin();
+  await googleSignOut();
+  await silentSignOut();
 };
 
 export interface UpdateProfilePayload {

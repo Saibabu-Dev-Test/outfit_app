@@ -19,4 +19,15 @@ class MainActivity : ReactActivity() {
    */
   override fun createReactActivityDelegate(): ReactActivityDelegate =
       DefaultReactActivityDelegate(this, mainComponentName, fabricEnabled)
+
+  // App lock privacy: FLAG_SECURE on the lock screen, and no recents preview while the lock is on
+  override fun onPause() {
+    AppLockModule.applyPrivacy(this, true)
+    super.onPause()
+  }
+
+  override fun onResume() {
+    super.onResume()
+    AppLockModule.applyPrivacy(this, false)
+  }
 }
