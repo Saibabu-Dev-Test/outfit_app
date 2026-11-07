@@ -16,7 +16,8 @@ import {
   Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { pickImage } from '../../utils/imagePicker';
+import { useNavigation } from '@react-navigation/native';
+import { pickImage, AVATAR_PICK } from '../../utils/imagePicker';
 import { getUserProfile, saveUserProfile, uploadAvatar } from '../../services/userApi';
 import { RASHIS } from '../../utils/panchangam';
 import SelectModal from '../../components/SelectModal';
@@ -55,7 +56,10 @@ const menuItems = [
 ];
 
 export default function ProfileScreen() {
+  const navigation = useNavigation<any>();
   const { user: authUser, logout, updateUserData } = useAuth();
+  const [isAdmin, setIsAdmin] = useState<boolean>(false);
+  const [editIsPublic, setEditIsPublic] = useState<boolean>(true);
   const [profileData, setProfileData] = useState<UserProfile | null>(authUser);
   const [loading, setLoading] = useState<boolean>(true);
   const [loggingOut, setLoggingOut] = useState<boolean>(false);
@@ -160,7 +164,8 @@ export default function ProfileScreen() {
       return;
     }
     try {
-      const picked = await pickImage(source);
+      // Small avatar: it is also copied onto chat messages and posts
+      const picked = await pickImage(source, AVATAR_PICK);
       if (!picked) return;
       setUploadingAvatar(true);
       const url = await uploadAvatar(uid, picked.dataUri);
@@ -210,6 +215,7 @@ const fetchProfile = async () => {
       bio: stored.bio || '',
       isPublic: stored.isPublic !== false,
     };
+    setIsAdmin(stored.role === 'admin');
     setProfileData(merged);
     updateUserData(merged as any);
   } catch (err: any) {
@@ -235,6 +241,7 @@ const fetchProfile = async () => {
     setEditLanguage(profileData?.language || '');
     setEditGender(profileData?.gender || '');
     setEditBio(profileData?.bio || '');
+    setEditIsPublic(profileData?.isPublic !== false);
     setIsGenderDropdownOpen(false);
     setIsEditModalVisible(true);
   };
@@ -261,7 +268,7 @@ const fetchProfile = async () => {
     gender: editGender.trim(),
     bio: editBio.trim(),
     avatarUrl: profileData?.avatarUrl || null,
-    isPublic: profileData?.isPublic !== false,
+    isPublic: editIsPublic,
   };
 
   try {
@@ -414,6 +421,33 @@ const fetchProfile = async () => {
               </View>
             </View>
           </View>
+        </View>
+
+        {/* Community */}
+        <View style={styles.menuSection}>
+          {[
+            { id: 'feed', icon: '📰', label: 'Feed', onPress: () => navigation.navigate('Feed') },
+            { id: 'search', icon: '🔍', label: 'Find people', onPress: () => navigation.navigate('UserSearch') },
+            {
+              id: 'me',
+              icon: profileData?.isPublic === false ? '🔒' : '👁️',
+              label: profileData?.isPublic === false ? 'My profile (private)' : 'View my public profile',
+              onPress: () => authUser?.id && navigation.navigate('UserProfile', { userId: authUser.id }),
+            },
+            ...(isAdmin
+              ? [{ id: 'admin', icon: '🛡️', label: 'Admin', onPress: () => navigation.navigate('Admin') }]
+              : []),
+          ].map(item => (
+            <TouchableOpacity key={item.id} style={styles.menuItem} activeOpacity={0.7} onPress={item.onPress}>
+              <View style={styles.menuLeft}>
+                <View style={styles.menuIconBox}>
+                  <Text style={styles.menuIcon}>{item.icon}</Text>
+                </View>
+                <Text style={styles.menuLabel}>{item.label}</Text>
+              </View>
+              <Text style={styles.menuArrow}>›</Text>
+            </TouchableOpacity>
+          ))}
         </View>
 
         {/* Menu Section */}
@@ -663,6 +697,23 @@ const fetchProfile = async () => {
                   onChangeText={setEditBio}
                 />
               </View>
+
+              <View style={styles.publicRow}>
+                <View style={styles.flexShrink}>
+                  <Text style={styles.publicTitle}>Public profile</Text>
+                  <Text style={styles.publicHint}>
+                    {editIsPublic
+                      ? 'Anyone signed in can see your profile, posts and public wardrobe items.'
+                      : 'Others see "This profile is private".'}
+                  </Text>
+                </View>
+                <Switch
+                  value={editIsPublic}
+                  onValueChange={setEditIsPublic}
+                  trackColor={{ false: colors.border, true: colors.accent }}
+                  thumbColor={colors.textInverse}
+                />
+              </View>
             </ScrollView>
 
             <View style={styles.modalActions}>
@@ -825,6 +876,18 @@ const fetchProfile = async () => {
 
 const styles = StyleSheet.create({
   flexShrink: { flexShrink: 1 },
+  publicRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+    padding: spacing.md,
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.background,
+    marginBottom: spacing.md,
+  },
+  publicTitle: { fontSize: fontSize.base, fontWeight: fontWeight.bold, color: colors.textPrimary },
+  publicHint: { fontSize: fontSize.xs, color: colors.textSecondary, marginTop: 2 },
   safeArea: { flex: 1, backgroundColor: colors.background },
   scroll: { flex: 1 },
   scrollContent: { paddingBottom: spacing.xxxl },

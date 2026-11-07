@@ -31,7 +31,8 @@ export default function CustomTabBar({ state, navigation }: BottomTabBarProps) {
     <View style={[styles.container, { paddingBottom: insets.bottom || spacing.sm }]}>
       {state.routes.map((route, index) => {
         const isFocused = state.index === index;
-        const tab = TABS[index];
+        // Look tabs up by route name so the bar stays right if the navigator order changes
+        const tab = TABS.find(t => t.name === route.name) || TABS[index] || TABS[0];
         const isStylist = tab.name === 'Stylist';
 
         const onPress = () => {

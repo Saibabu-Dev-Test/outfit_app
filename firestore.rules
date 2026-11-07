@@ -1,0 +1,182 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{db}/documents {
+
+    // ── Helpers ──────────────────────────────────────────────────────────
+    function signedIn() {
+      return request.auth != null;
+    }
+    function me() {
+      return request.auth.uid;
+    }
+    // users/{uid}.role == 'admin' is set by hand in the Firebase console
+    function isAdmin() {
+      return signedIn()
+        && exists(/databases/$(db)/documents/users/$(request.auth.uid))
+        && get(/databases/$(db)/documents/users/$(request.auth.uid)).data.get('role', '') == 'admin';
+    }
+    function onlyChanged(keys) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys);
+    }
+    function circleData(cid) {
+      return get(/databases/$(db)/documents/circles/$(cid)).data;
+    }
+    function isMember(cid) {
+      return signedIn() && me() in circleData(cid).memberIds;
+    }
+    function isCircleOwner(cid) {
+      return signedIn() && circleData(cid).ownerId == me();
+    }
+
+    // ── Users ────────────────────────────────────────────────────────────
+    match /users/{uid} {
+      allow read: if signedIn()
+        && (me() == uid || resource.data.isPublic == true || isAdmin());
+      // Users write their own doc but can never set or change role
+      allow create: if signedIn() && me() == uid
+        && !('role' in request.resource.data);
+      allow update: if signedIn() && me() == uid
+        && request.resource.data.get('role', null) == resource.data.get('role', null);
+      allow delete: if signedIn() && me() == uid;
+    }
+
+    // ── Daily colour votes (Phase 1) ────────────────────────────────────
+    // Home writes votes/top_colors_{date}_{uid} with {systemId, color, userId, voterGender, date, timestamp}
+    match /votes/{voteId} {
+      allow read: if signedIn();
+      allow create, update: if signedIn()
+        && request.resource.data.userId == me()
+        && request.resource.data.systemId == 'top_colors'
+        && voteId == 'top_colors_' + request.resource.data.date + '_' + me();
+      allow delete: if false;
+    }
+
+    // ── Wardrobe (Phase 1) ──────────────────────────────────────────────
+    match /wardrobe/{itemId} {
+      allow read: if signedIn()
+        && (resource.data.userId == me() || resource.data.isPublic == true);
+      allow create: if signedIn() && request.resource.data.userId == me();
+      allow update: if signedIn() && resource.data.userId == me()
+        && request.resource.data.userId == resource.data.userId;
+      allow delete: if signedIn() && resource.data.userId == me();
+    }
+
+    // ── Invite codes: inviteCodes/{code} -> {circleId, createdBy} ──────────
+    // Anyone signed in can look up one code they know; nobody can list them.
+    match /inviteCodes/{code} {
+      allow get: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.createdBy == me()
+        && getAfter(/databases/$(db)/documents/circles/$(request.resource.data.circleId)).data.ownerId == me()
+        && getAfter(/databases/$(db)/documents/circles/$(request.resource.data.circleId)).data.inviteCode == code;
+      allow update: if false;
+      allow delete: if signedIn() && (resource.data.createdBy == me() || isAdmin());
+    }
+
+    // ── Circles ─────────────────────────────────────────────────────────
+    match /circles/{cid} {
+      allow read: if signedIn()
+        && (resource.data.isPrivate == false || me() in resource.data.memberIds || isAdmin());
+
+      allow create: if signedIn()
+        && request.resource.data.ownerId == me()
+        && request.resource.data.memberIds == [me()]
+        && request.resource.data.isPrivate is bool
+        && request.resource.data.inviteCode is string
+        && request.resource.data.inviteCode.size() == 6
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 60;
+
+      allow update: if signedIn() && (
+        // Owner: anything except ownership
+        (resource.data.ownerId == me() && request.resource.data.ownerId == resource.data.ownerId)
+        // Join: add only yourself. Private circles need lastJoin = {uid: me, code: inviteCode}
+        || (onlyChanged(['memberIds', 'lastJoin'])
+            && request.resource.data.memberIds.toSet() == resource.data.memberIds.toSet().union([me()].toSet())
+            && (resource.data.isPrivate == false
+                || (request.resource.data.lastJoin.uid == me()
+                    && request.resource.data.lastJoin.code == resource.data.inviteCode)))
+        // Leave: remove only yourself (the owner deletes instead of leaving)
+        || (onlyChanged(['memberIds'])
+            && me() in resource.data.memberIds
+            && resource.data.ownerId != me()
+            && request.resource.data.memberIds.toSet() == resource.data.memberIds.toSet().difference([me()].toSet()))
+        // Members bump lastMessageAt when they send
+        || (onlyChanged(['lastMessageAt']) && me() in resource.data.memberIds)
+      );
+
+      allow delete: if signedIn() && (resource.data.ownerId == me() || isAdmin());
+
+      // ── Messages ──
+      match /messages/{mid} {
+        allow read: if isMember(cid) || isAdmin();
+        allow create: if isMember(cid)
+          && request.resource.data.userId == me()
+          && request.resource.data.type in ['text', 'image', 'poll']
+          && (request.resource.data.type != 'poll'
+              || (request.resource.data.poll.options.size() >= 2
+                  && request.resource.data.poll.options.size() <= 4));
+        allow update: if false;
+        allow delete: if signedIn()
+          && (resource.data.userId == me() || isCircleOwner(cid) || isAdmin());
+
+        // ── Poll votes: one doc per voter, so a new vote replaces the old one ──
+        match /votes/{voterId} {
+          allow read: if isMember(cid) || isAdmin();
+          allow create, update: if isMember(cid)
+            && voterId == me()
+            && request.resource.data.keys().hasOnly(['optionIndex', 'updatedAt'])
+            && request.resource.data.optionIndex is int
+            && request.resource.data.optionIndex >= 0
+            && request.resource.data.optionIndex
+               < get(/databases/$(db)/documents/circles/$(cid)/messages/$(mid)).data.poll.options.size();
+          // Own vote, or cleanup by the poll author, circle owner or admin
+          allow delete: if signedIn()
+            && (voterId == me()
+                || isCircleOwner(cid)
+                || isAdmin()
+                || get(/databases/$(db)/documents/circles/$(cid)/messages/$(mid)).data.userId == me());
+        }
+      }
+    }
+
+    // ── Public feed ─────────────────────────────────────────────────────
+    match /posts/{postId} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.userId == me()
+        && request.resource.data.isPublic == true
+        && request.resource.data.likeCount == 0
+        && request.resource.data.imageData is string;
+      // Only likeCount may change, by exactly 1, together with the liker's own like doc
+      allow update: if signedIn()
+        && onlyChanged(['likeCount'])
+        && (
+          (request.resource.data.likeCount == resource.data.likeCount + 1
+            && !exists(/databases/$(db)/documents/posts/$(postId)/likes/$(request.auth.uid))
+            && existsAfter(/databases/$(db)/documents/posts/$(postId)/likes/$(request.auth.uid)))
+          || (request.resource.data.likeCount == resource.data.likeCount - 1
+            && exists(/databases/$(db)/documents/posts/$(postId)/likes/$(request.auth.uid))
+            && !existsAfter(/databases/$(db)/documents/posts/$(postId)/likes/$(request.auth.uid)))
+        );
+      allow delete: if signedIn() && (resource.data.userId == me() || isAdmin());
+
+      match /likes/{likerId} {
+        allow read: if signedIn();
+        allow create, delete: if signedIn() && likerId == me();
+        allow update: if false;
+      }
+    }
+
+    // ── Reports (moderation) ────────────────────────────────────────────
+    match /reports/{reportId} {
+      allow create: if signedIn()
+        && request.resource.data.reporterId == me()
+        && request.resource.data.reason is string
+        && request.resource.data.reason.size() <= 200;
+      allow read, delete: if isAdmin();
+      allow update: if false;
+    }
+  }
+}

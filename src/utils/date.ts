@@ -27,3 +27,22 @@ export const toDate = (v: any): Date | null => {
   const d = new Date(v);
   return isNaN(d.getTime()) ? null : d;
 };
+
+// "now", "5m", "3h", "2d", then a short date
+export const timeAgo = (v: any): string => {
+  const d = toDate(v);
+  if (!d) return '';
+  const secs = Math.max(0, Math.floor((Date.now() - d.getTime()) / 1000));
+  if (secs < 60) return 'now';
+  if (secs < 3600) return `${Math.floor(secs / 60)}m`;
+  if (secs < 86400) return `${Math.floor(secs / 3600)}h`;
+  if (secs < 7 * 86400) return `${Math.floor(secs / 86400)}d`;
+  return d.toLocaleDateString();
+};
+
+// "14:05" for chat bubbles
+export const clockTime = (v: any): string => {
+  const d = toDate(v);
+  if (!d) return '';
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+};

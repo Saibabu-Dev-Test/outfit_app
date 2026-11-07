@@ -12,7 +12,7 @@ import {
   Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { spacing, borderRadius } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
 import { doc, setDoc, serverTimestamp, collection, query, where, getDocs } from 'firebase/firestore';
@@ -52,6 +52,7 @@ interface ColourTally {
 const pct = (n: number, total: number) => (total > 0 ? `${Math.round((n / total) * 100)}%` : '0%');
 
 export default function HomeScreen() {
+  const navigation = useNavigation<any>();
   const { user, updateUserData } = useAuth();
   const uid = user?.id;
   const [topColours, setTopColours] = useState<ColourTally[]>(
@@ -234,6 +235,19 @@ export default function HomeScreen() {
           </TouchableOpacity>
         </View>
 
+        {/* Public feed entry */}
+        <TouchableOpacity
+          style={styles.feedCard}
+          activeOpacity={0.85}
+          onPress={() => navigation.navigate('Feed')}>
+          <Text style={styles.feedEmoji}>📸</Text>
+          <View style={styles.feedTextWrap}>
+            <Text style={styles.feedTitle}>Style Feed</Text>
+            <Text style={styles.feedSub}>See today's looks from the community and share yours</Text>
+          </View>
+          <Text style={styles.feedArrow}>›</Text>
+        </TouchableOpacity>
+
         {/* Daily tasks */}
         <View style={styles.sectionHeaderRow}>
           <Text style={styles.sectionTitle}>Today's tasks</Text>
@@ -357,6 +371,20 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   avatarInitial: { color: '#FFFFFF', fontSize: 18, fontWeight: '800' },
+  feedCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: spacing.base,
+    marginBottom: spacing.base,
+    padding: spacing.base,
+    borderRadius: borderRadius.lg,
+    backgroundColor: '#2D1F6E',
+  },
+  feedEmoji: { fontSize: 30, marginRight: spacing.md },
+  feedTextWrap: { flex: 1 },
+  feedTitle: { color: '#FFFFFF', fontSize: 17, fontWeight: '800' },
+  feedSub: { color: '#C4B5FD', fontSize: 13, marginTop: 2 },
+  feedArrow: { color: '#FFFFFF', fontSize: 28, marginLeft: spacing.sm },
   streakText: { fontSize: 13, fontWeight: '700', color: '#F57C00' },
   tasksCard: {
     backgroundColor: '#FFFFFF',
