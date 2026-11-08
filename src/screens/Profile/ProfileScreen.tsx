@@ -14,7 +14,6 @@ import {
   TextInput,
   KeyboardAvoidingView,
   Image,
-  Share,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -27,6 +26,7 @@ import FeedbackModal from '../../components/FeedbackModal';
 import TimePickerModal from '../../components/TimePickerModal';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles, statusBarStyle, useTheme, ThemeMode } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
+import { copyReferralLink, referralLink, shareReferral, shareReferralOnWhatsApp } from '../../utils/referralLink';
 import {
   countFriendsJoined,
   ensureReferralCode,
@@ -345,15 +345,8 @@ const fetchProfile = async () => {
     if (r.invalidated) await signOutKeepLock();
   };
 
-  const handleShareInvite = async () => {
-    if (!referralCode) return;
-    try {
-      await Share.share({
-        message: `Join me on Outfit, your AI stylist & daily colour guide! Use my referral code ${referralCode} when you create your account.`,
-      });
-    } catch (e: any) {
-      console.warn('Share failed:', e?.message);
-    }
+  const handleShareInvite = () => {
+    if (referralCode) shareReferral(referralCode);
   };
 
   // ✅ ONLY ONE handleOpenEditModal (removed duplicate)
@@ -581,7 +574,7 @@ const fetchProfile = async () => {
           <View style={styles.inviteBox}>
             <Text style={styles.inviteTitle}>🎁 Invite friends</Text>
             <Text style={styles.inviteSub}>
-              Friends enter your code when they create an account. {REFERRAL_POINTS} points per friend.
+              Share your link. Friends who sign up with it count as yours. {REFERRAL_POINTS} points per friend.
             </Text>
             <View style={styles.inviteRow}>
               <Text style={styles.inviteCode} selectable>
@@ -595,6 +588,27 @@ const fetchProfile = async () => {
                 <Text style={styles.inviteShareText}>Share</Text>
               </TouchableOpacity>
             </View>
+            {!!referralCode && (
+              <>
+                <Text style={styles.inviteLink} selectable numberOfLines={1}>
+                  {referralLink(referralCode)}
+                </Text>
+                <View style={styles.inviteRow}>
+                  <TouchableOpacity
+                    style={[styles.inviteShare, styles.inviteWhatsApp]}
+                    onPress={() => shareReferralOnWhatsApp(referralCode)}
+                    activeOpacity={0.8}>
+                    <Text style={styles.inviteShareText}>WhatsApp</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.inviteShare, styles.inviteCopy]}
+                    onPress={() => copyReferralLink(referralCode)}
+                    activeOpacity={0.8}>
+                    <Text style={styles.inviteCopyText}>Copy link</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
             {!!referralError && <Text style={styles.inviteError}>{referralError}</Text>}
             <Text style={styles.inviteFriends}>Friends joined: {friendsJoined}</Text>
           </View>
@@ -1369,6 +1383,10 @@ const styles = themedStyles(() => StyleSheet.create({
     paddingVertical: spacing.sm,
   },
   inviteShareOff: { opacity: 0.5 },
+  inviteLink: { fontSize: fontSize.xs, color: colors.primary, marginTop: spacing.sm },
+  inviteWhatsApp: { backgroundColor: '#25D366', marginRight: spacing.sm },
+  inviteCopy: { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.border },
+  inviteCopyText: { color: colors.textPrimary, fontWeight: fontWeight.bold, fontSize: fontSize.sm },
   inviteShareText: { color: colors.textInverse, fontWeight: fontWeight.bold, fontSize: fontSize.sm },
   inviteError: { fontSize: fontSize.xs, color: colors.error, marginTop: 6 },
   inviteFriends: { fontSize: fontSize.sm, color: colors.textSecondary, marginTop: spacing.sm, fontWeight: fontWeight.medium },

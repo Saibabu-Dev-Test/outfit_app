@@ -31,6 +31,7 @@ import {
   SIM_RESET_MESSAGE,
 } from '../../services/authApi';
 import { pickSimNumber, SIM_REQUIRED_MESSAGE } from '../../native/phoneHint';
+import { clearPendingReferral, readPendingReferral } from '../../utils/referralLink';
 
 interface LoginScreenProps {
   navigation: any;
@@ -132,6 +133,16 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
   const busy = loading || googleLoading || simLoading;
   const copy = TITLES[authMode];
   const locked = authMode === 'login' && lockLeft > 0;
+
+  // Opened from an invite link (?ref=CODE): fill the code and open Create account
+  useEffect(() => {
+    readPendingReferral().then(code => {
+      if (code.length === 6) {
+        setReferralCode(code);
+        setAuthMode('register');
+      }
+    });
+  }, []);
 
   // Restore a lock that was running when the app closed
   useEffect(() => {
@@ -336,6 +347,7 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
           setError(regRes?.message || 'Could not create your account. Please try again.');
           return;
         }
+        clearPendingReferral();
         setSuccessMsg('Account created! Signing you in...');
         finishLogin(regRes.user);
         return;

@@ -10,13 +10,13 @@ import {
   RefreshControl,
   StatusBar,
   Platform,
-  Share,
   StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles, statusBarStyle } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
+import { shareReferral } from '../../utils/referralLink';
 import {
   ALL_TASKS_BONUS,
   DayState,
@@ -87,13 +87,8 @@ export default function AchievementsScreen({ navigation }: { navigation: any }) 
     }, [load]),
   );
 
-  const invite = async () => {
-    if (!code) return;
-    try {
-      await Share.share({
-        message: `Join me on Outfit, your AI stylist & daily colour guide! Use my referral code ${code} when you create your account.`,
-      });
-    } catch {}
+  const invite = () => {
+    if (code) shareReferral(code);
   };
 
   const fullDays = week?.fullDays || 0;
@@ -138,7 +133,7 @@ export default function AchievementsScreen({ navigation }: { navigation: any }) 
           id: 'invite',
           icon: '🎁',
           title: friends > 0 ? `${friends} friend${friends === 1 ? '' : 's'} joined` : 'Invite a friend',
-          sub: `${REFERRAL_POINTS} points per friend who joins with your code`,
+          sub: `${REFERRAL_POINTS} points per friend who joins with your link`,
           points: friends > 0 ? `+${friends * REFERRAL_POINTS}` : `+${REFERRAL_POINTS}`,
           done: friends > 0,
           action: { label: 'Invite', onPress: invite },
