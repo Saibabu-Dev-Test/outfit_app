@@ -23,6 +23,7 @@ import { getUserProfile, saveUserProfile, uploadAvatar, STYLE_OPTIONS } from '..
 import { checkNotifications, openNotificationSettings } from '../../native/notifications';
 import { RASHIS } from '../../utils/panchangam';
 import SelectModal from '../../components/SelectModal';
+import FeedbackModal from '../../components/FeedbackModal';
 import TimePickerModal from '../../components/TimePickerModal';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles, statusBarStyle, useTheme, ThemeMode } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
@@ -78,6 +79,7 @@ export default function ProfileScreen() {
   const { user: authUser, logout, updateUserData } = useAuth();
   const { mode: themeMode, isDark, setMode: setThemeMode } = useTheme();
   const [stylePrefsOpen, setStylePrefsOpen] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [editStylePrefs, setEditStylePrefs] = useState<string[]>([]);
   const [savingStyles, setSavingStyles] = useState(false);
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
@@ -644,6 +646,13 @@ const fetchProfile = async () => {
               value: THEME_LABEL[themeMode],
               onPress: pickTheme,
             },
+            {
+              id: 'feedback',
+              icon: '💌',
+              label: 'Feedback & Suggestions',
+              value: 'Suggestion, complaint or bug',
+              onPress: () => setFeedbackOpen(true),
+            },
             { id: 'help', icon: '❓', label: 'Help & Support' },
             { id: 'terms', icon: '📋', label: 'Terms & Conditions' },
           ].map(item => (
@@ -695,6 +704,13 @@ const fetchProfile = async () => {
 
         <Text style={styles.version}>Outfit Vote v1.0.0</Text>
       </ScrollView>
+
+      <FeedbackModal
+        visible={feedbackOpen}
+        uid={authUser?.id}
+        name={profileData?.name || authUser?.name}
+        onClose={() => setFeedbackOpen(false)}
+      />
 
       {/* Style preference (multi-select) */}
       <Modal visible={stylePrefsOpen} transparent animationType="slide" onRequestClose={() => setStylePrefsOpen(false)}>

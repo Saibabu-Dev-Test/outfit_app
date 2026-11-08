@@ -1,4 +1,4 @@
-// Moderation for users/{uid}.role == 'admin': reports and every circle (private ones too)
+// Moderation for users/{uid}.role == 'admin': reports, every circle (private ones too) and user feedback
 import React, { useCallback, useState } from 'react';
 import {
   View,
@@ -11,6 +11,7 @@ import {
   RefreshControl,
   StatusBar,
   Platform,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
@@ -21,8 +22,11 @@ import { Report, getReports, deleteReport } from '../../services/moderationApi';
 import { Circle, getAllCircles, deleteCircle, deleteMessageById } from '../../services/circlesApi';
 import { deletePost, deleteComment } from '../../services/feedApi';
 import { timeAgo } from '../../utils/date';
+import { Feedback, FeedbackStatus, getFeedback, setFeedbackStatus } from '../../services/feedbackApi';
 
-type TabKey = 'reports' | 'circles';
+type TabKey = 'reports' | 'circles' | 'feedback';
+const TAB_KEYS: TabKey[] = ['reports', 'circles', 'feedback'];
+const FEEDBACK_ICON: Record<string, string> = { Suggestion: '💡', Complaint: '😕', Bug: '🐞', Other: '💬' };
 
 export default function AdminScreen({ navigation }: { navigation: any }) {
   const { user } = useAuth();
@@ -31,6 +35,8 @@ export default function AdminScreen({ navigation }: { navigation: any }) {
   const [tab, setTab] = useState<TabKey>('reports');
   const [reports, setReports] = useState<Report[]>([]);
   const [circles, setCircles] = useState<Circle[]>([]);
+  const [feedback, setFeedback] = useState<Feedback[]>([]);
+  const [openShot, setOpenShot] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -52,6 +58,11 @@ export default function AdminScreen({ navigation }: { navigation: any }) {
     }
     try {
       setCircles(await getAllCircles());
+    } catch (e: any) {
+      errs.push(e?.message);
+    }
+    try {
+      setFeedback(await getFeedback());
     } catch (e: any) {
       errs.push(e?.message);
     }
@@ -203,6 +214,49 @@ export default function AdminScreen({ navigation }: { navigation: any }) {
     </View>
   );
 
+  const renderFeedback = ({ item }: { item: Feedback }) => {
+    const next: FeedbackStatus[] = item.status === 'new' ? ['read', 'done'] : item.status === 'read' ? ['done', 'new'] : ['new'];
+    return (
+      <View style={styles.card}>
+        <View style={styles.cardTop}>
+          <Text style={styles.kind}>
+            {FEEDBACK_ICON[item.type] || '💬'} {item.type} · {item.status}
+          </Text>
+          <Text style={styles.time}>{timeAgo(item.createdAt)}</Text>
+        </View>
+        <Text style={styles.feedbackText} selectable>
+          {item.text}
+        </Text>
+        {item.image ? (
+          <TouchableOpacity onPress={() => setOpenShot(openShot === item.id ? null : item.id)}>
+            <Image
+              source={{ uri: item.image }}
+              style={openShot === item.id ? styles.shotBig : styles.shot}
+              resizeMode="contain"
+            />
+          </TouchableOpacity>
+        ) : null}
+        <Text style={styles.meta}>
+          {item.name || 'Unknown'} ({item.uid.slice(0, 8)}…) · {item.platform} · v{item.appVersion}
+        </Text>
+        <View style={styles.btnRow}>
+          <TouchableOpacity style={styles.btn} onPress={() => navigation.navigate('UserProfile', { userId: item.uid })}>
+            <Text style={styles.btnText}>Profile</Text>
+          </TouchableOpacity>
+          {next.map(st => (
+            <TouchableOpacity key={st} style={styles.btn} onPress={() => run(item.id, () => setFeedbackStatus(item.id, st))}>
+              {busyId === item.id ? (
+                <ActivityIndicator size="small" color={colors.primary} />
+              ) : (
+                <Text style={styles.btnText}>Mark {st}</Text>
+              )}
+            </TouchableOpacity>
+          ))}
+        </View>
+      </View>
+    );
+  };
+
   const header = (
     <View style={styles.header}>
       <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
@@ -238,19 +292,23 @@ export default function AdminScreen({ navigation }: { navigation: any }) {
       />
       {header}
       <View style={styles.tabs}>
-        {(['reports', 'circles'] as TabKey[]).map(k => (
+        {TAB_KEYS.map(k => (
           <TouchableOpacity key={k} style={[styles.tab, tab === k && styles.tabActive]} onPress={() => setTab(k)}>
             <Text style={[styles.tabText, tab === k && styles.tabTextActive]}>
-              {k === 'reports' ? `Reports (${reports.length})` : `All circles (${circles.length})`}
+              {k === 'reports'
+                ? `Reports (${reports.length})`
+                : k === 'circles'
+                ? `Circles (${circles.length})`
+                : `Feedback (${feedback.filter(f => f.status === 'new').length})`}
             </Text>
           </TouchableOpacity>
         ))}
       </View>
       {error ? <Text style={styles.error}>{error}</Text> : null}
       <FlatList<any>
-        data={tab === 'reports' ? reports : circles}
+        data={tab === 'reports' ? reports : tab === 'circles' ? circles : feedback}
         keyExtractor={x => x.id}
-        renderItem={tab === 'reports' ? renderReport : renderCircle}
+        renderItem={tab === 'reports' ? renderReport : tab === 'circles' ? renderCircle : renderFeedback}
         contentContainerStyle={styles.list}
         refreshControl={
           <RefreshControl
@@ -263,7 +321,9 @@ export default function AdminScreen({ navigation }: { navigation: any }) {
           />
         }
         ListEmptyComponent={
-          <Text style={styles.empty}>{tab === 'reports' ? 'No open reports 🎉' : 'No circles yet.'}</Text>
+          <Text style={styles.empty}>
+            {tab === 'reports' ? 'No open reports 🎉' : tab === 'circles' ? 'No circles yet.' : 'No feedback yet.'}
+          </Text>
         }
       />
     </SafeAreaView>
@@ -303,6 +363,9 @@ const styles = themedStyles(() => StyleSheet.create({
   reason: { fontSize: fontSize.base, fontWeight: fontWeight.bold, color: colors.textPrimary, marginTop: 4 },
   circleName: { flex: 1, fontSize: fontSize.base, fontWeight: fontWeight.bold, color: colors.textPrimary },
   meta: { fontSize: fontSize.sm, color: colors.textSecondary, marginTop: 2 },
+  feedbackText: { fontSize: fontSize.base, color: colors.textPrimary, marginTop: 6, lineHeight: 21 },
+  shot: { width: 80, height: 130, borderRadius: 8, marginTop: spacing.sm, backgroundColor: colors.divider },
+  shotBig: { width: '100%', height: 420, borderRadius: 8, marginTop: spacing.sm, backgroundColor: colors.divider },
   btnRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.sm },
   btn: {
     borderWidth: 1.5,

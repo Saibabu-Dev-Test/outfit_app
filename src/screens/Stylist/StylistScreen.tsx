@@ -82,6 +82,8 @@ export default function StylistScreen() {
   const [sending, setSending] = useState(false);
   const [used, setUsed] = useState(0);
   const [wardrobe, setWardrobe] = useState<WardrobeItemResponse[]>([]);
+  // Occasion/place chips: open until the first message, then folded into one bar
+  const [pickersOpen, setPickersOpen] = useState(true);
   const scrollRef = useRef<any>(null);
 
   useEffect(() => {
@@ -99,13 +101,16 @@ export default function StylistScreen() {
   );
 
   const left = Math.max(0, AI_DAILY_LIMIT - used);
-  const scrollDown = () => setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 150);
+  const scrollDown = (animated = true) =>
+    setTimeout(() => scrollRef.current?.scrollToEnd({ animated }), 80);
 
   const send = async (raw?: string) => {
     const text = (raw ?? input).trim();
     if (!text || sending || !uid) return;
+    setPickersOpen(false);
     if (containsProfanity(text)) {
       setMessages(prev => [...prev, { id: `${Date.now()}_e`, role: 'model', text: RESPECT_MESSAGE, error: true }]);
+      scrollDown();
       return;
     }
     const mine: Msg = { id: `${Date.now()}_u`, role: 'user', text };
@@ -148,23 +153,33 @@ export default function StylistScreen() {
 
   const offlinePick = occasion ? suggestFromWardrobe(wardrobe, occasion) : null;
 
-  const chips = (list: string[], value: string | null, onPick: (v: string) => void, small = false) => (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+  // Small pill chips in a one-line horizontal row (flexGrow 0 so the row never stretches tall)
+  const chips = (list: string[], value: string | null, onPick: (v: string) => void, labels?: Record<string, string>) => (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      style={styles.chipScroll}
+      contentContainerStyle={styles.chipRow}
+      keyboardShouldPersistTaps="handled">
       {list.map(o => {
         const on = value === o;
         return (
           <TouchableOpacity
             key={o}
-            style={[styles.chip, small && styles.chipSmall, on && styles.chipOn]}
+            style={[styles.chip, on && styles.chipOn]}
             onPress={() => onPick(o)}
             disabled={sending}
             activeOpacity={0.8}>
-            <Text style={[styles.chipText, on && styles.chipTextOn]}>{o}</Text>
+            <Text style={[styles.chipText, on && styles.chipTextOn]} numberOfLines={1}>
+              {labels?.[o] || o}
+            </Text>
           </TouchableOpacity>
         );
       })}
     </ScrollView>
   );
+
+  const pickerSummary = [occasion ? `🎯 ${occasion}` : '🎯 Occasion', place ? `📍 ${place}` : '📍 Place'].join('   ');
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
@@ -172,32 +187,62 @@ export default function StylistScreen() {
         barStyle={statusBarStyle()}
         {...(Platform.OS === 'android' ? { backgroundColor: colors.background } : {})}
       />
-      <View style={styles.header}>
-        <View style={styles.flex1}>
-          <Text style={styles.title}>AI Stylist ✦</Text>
-          <Text style={styles.sub}>
-            {aiOn ? `Clothes, colours & style · ${left}/${AI_DAILY_LIMIT} messages left today` : 'Your personal style guide'}
-          </Text>
+      <KeyboardAvoidingView
+        style={styles.flex1}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={0}>
+        {/* Compact header: title + language pills */}
+        <View style={styles.header}>
+          <View style={styles.flex1}>
+            <Text style={styles.title}>AI Stylist ✦</Text>
+            <Text style={styles.sub} numberOfLines={1}>
+              {aiOn ? `${left}/${AI_DAILY_LIMIT} messages left today` : 'Your personal style guide'}
+            </Text>
+          </View>
+          <View style={styles.langRow}>
+            {AI_LANGUAGES.map(l => {
+              const on = language === l;
+              return (
+                <TouchableOpacity
+                  key={l}
+                  style={[styles.langPill, on && styles.chipOn]}
+                  onPress={() => setLanguage(l)}
+                  disabled={sending}>
+                  <Text style={[styles.langText, on && styles.chipTextOn]}>{LANG_LABEL[l]}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
         </View>
-      </View>
 
-      <Text style={styles.label}>Language</Text>
-      {chips(AI_LANGUAGES, language, v => setLanguage(v as AiLanguage), true)}
-      <Text style={styles.label}>Occasion</Text>
-      {chips(OCCASIONS, occasion, askForOccasion)}
-      <Text style={styles.label}>Place</Text>
-      {chips(PLACES, place, v => setPlace(place === v ? null : v), true)}
+        {/* Occasion + place: one collapsible bar */}
+        <TouchableOpacity style={styles.pickerBar} onPress={() => setPickersOpen(o => !o)} activeOpacity={0.8}>
+          <Text style={styles.pickerSummary} numberOfLines={1}>
+            {pickerSummary}
+          </Text>
+          <Text style={styles.pickerToggle}>{pickersOpen ? '▲' : '▼'}</Text>
+        </TouchableOpacity>
+        {pickersOpen ? (
+          <View style={styles.pickers}>
+            {chips(OCCASIONS, occasion, askForOccasion)}
+            {chips(PLACES, place, v => setPlace(place === v ? null : v))}
+          </View>
+        ) : null}
 
-      <KeyboardAvoidingView style={styles.flex1} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <ScrollView ref={scrollRef} style={styles.flex1} contentContainerStyle={styles.chat} keyboardShouldPersistTaps="handled">
-          <View style={styles.luckyCard}>
-            <View style={styles.luckyRow}>
-              {vaara.colours.map(c => (
-                <View key={c.name} style={[styles.luckyDot, { backgroundColor: c.hex }]} />
-              ))}
-              <Text style={styles.luckyTitle}>Today's lucky colour: {vaara.colours.map(c => c.name).join(' / ')}</Text>
-            </View>
-            <Text style={styles.luckyWhy}>{vaara.why}</Text>
+        {/* Chat history takes the rest of the screen */}
+        <ScrollView
+          ref={scrollRef}
+          style={styles.chatScroll}
+          contentContainerStyle={styles.chat}
+          keyboardShouldPersistTaps="handled"
+          onContentSizeChange={() => scrollDown(false)}>
+          <View style={styles.luckyRow}>
+            {vaara.colours.map(c => (
+              <View key={c.name} style={[styles.luckyDot, { backgroundColor: c.hex }]} />
+            ))}
+            <Text style={styles.luckyTitle} numberOfLines={2}>
+              Today's lucky colour: {vaara.colours.map(c => c.name).join(' / ')}
+            </Text>
           </View>
 
           {!aiOn ? (
@@ -228,12 +273,27 @@ export default function StylistScreen() {
             </View>
           ) : (
             messages.map(m => (
-              <View key={m.id} style={[styles.bubble, m.role === 'user' ? styles.bubbleMe : styles.bubbleAi, m.error && styles.bubbleErr]}>
-                <Text style={[styles.bubbleText, m.role === 'user' && styles.bubbleTextMe]}>{m.text}</Text>
+              <View
+                key={m.id}
+                style={[
+                  styles.bubble,
+                  m.role === 'user' ? styles.bubbleMe : styles.bubbleAi,
+                  m.error && styles.bubbleErr,
+                ]}>
+                <Text
+                  selectable
+                  style={[styles.bubbleText, m.role === 'user' && styles.bubbleTextMe, m.error && styles.bubbleTextErr]}>
+                  {m.text}
+                </Text>
               </View>
             ))
           )}
-          {sending ? <ActivityIndicator style={styles.typing} color={colors.primary} /> : null}
+          {sending ? (
+            <View style={[styles.bubble, styles.bubbleAi, styles.typing]}>
+              <ActivityIndicator size="small" color={colors.primary} />
+              <Text style={styles.typingText}>Stylist is typing…</Text>
+            </View>
+          ) : null}
         </ScrollView>
 
         {aiOn ? (
@@ -244,6 +304,7 @@ export default function StylistScreen() {
               placeholderTextColor={colors.textMuted}
               value={input}
               onChangeText={setInput}
+              onFocus={() => scrollDown()}
               editable={left > 0 && !sending}
               multiline
               maxLength={500}
@@ -261,51 +322,82 @@ export default function StylistScreen() {
   );
 }
 
+const LANG_LABEL: Record<AiLanguage, string> = { English: 'EN', Telugu: 'తె', Hindi: 'हि' };
+
 const styles = themedStyles(() => StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.background },
   flex1: { flex: 1 },
-  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.base, paddingTop: spacing.md },
-  title: { fontSize: fontSize.xl, fontWeight: fontWeight.extraBold, color: colors.textPrimary },
-  sub: { fontSize: fontSize.xs, color: colors.textSecondary, marginTop: 2 },
-  label: {
-    fontSize: fontSize.xs,
-    fontWeight: fontWeight.bold,
-    color: colors.textMuted,
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: spacing.base,
-    marginTop: spacing.sm,
-    textTransform: 'uppercase',
+    paddingTop: spacing.sm,
+    paddingBottom: 6,
   },
-  chipRow: { paddingHorizontal: spacing.base, paddingVertical: 6 },
-  chip: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+  title: { fontSize: fontSize.lg, fontWeight: fontWeight.extraBold, color: colors.textPrimary },
+  sub: { fontSize: fontSize.xs, color: colors.textSecondary, marginTop: 1 },
+  langRow: { flexDirection: 'row', alignItems: 'center' },
+  langPill: {
+    minWidth: 36,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 16,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    marginLeft: 6,
+    alignItems: 'center',
+  },
+  langText: { fontSize: fontSize.sm, fontWeight: fontWeight.bold, color: colors.textPrimary },
+  pickerBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: spacing.base,
+    marginBottom: 4,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 7,
     borderRadius: 18,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  pickerSummary: { flex: 1, fontSize: fontSize.sm, fontWeight: fontWeight.semiBold, color: colors.textPrimary },
+  pickerToggle: { fontSize: fontSize.xs, color: colors.textMuted, marginLeft: spacing.sm },
+  pickers: { paddingBottom: 2 },
+  chipScroll: { flexGrow: 0, flexShrink: 0 },
+  chipRow: { alignItems: 'center', paddingHorizontal: spacing.base, paddingVertical: 4 },
+  chip: {
+    alignSelf: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
     borderWidth: 1.5,
     borderColor: colors.border,
     backgroundColor: colors.surface,
     marginRight: 8,
   },
-  chipSmall: { paddingVertical: 5, paddingHorizontal: 12 },
   chipOn: { backgroundColor: colors.primary, borderColor: colors.primary },
   chipText: { fontSize: fontSize.sm, fontWeight: fontWeight.semiBold, color: colors.textPrimary },
   chipTextOn: { color: colors.onPrimary },
-  chat: { padding: spacing.base, paddingBottom: spacing.xl },
-  luckyCard: {
+  chatScroll: { flex: 1 },
+  chat: { flexGrow: 1, paddingHorizontal: spacing.base, paddingTop: spacing.sm, paddingBottom: spacing.md },
+  luckyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'center',
+    paddingHorizontal: spacing.md,
+    paddingVertical: 5,
+    borderRadius: 14,
     backgroundColor: colors.surface,
-    borderRadius: borderRadius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing.md,
     marginBottom: spacing.md,
+    maxWidth: '100%',
   },
-  luckyRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' },
-  luckyDot: { width: 18, height: 18, borderRadius: 9, marginRight: 4, borderWidth: 1, borderColor: colors.border },
-  luckyTitle: { fontSize: fontSize.sm, fontWeight: fontWeight.bold, color: colors.textPrimary, marginLeft: 4 },
-  luckyWhy: { fontSize: fontSize.xs, color: colors.textSecondary, marginTop: 4, lineHeight: 17 },
+  luckyDot: { width: 12, height: 12, borderRadius: 6, marginRight: 4, borderWidth: 1, borderColor: colors.border },
+  luckyTitle: { fontSize: fontSize.xs, fontWeight: fontWeight.semiBold, color: colors.textSecondary, marginLeft: 2, flexShrink: 1 },
   soon: { alignItems: 'center', padding: spacing.lg },
   soonEmoji: { fontSize: 40 },
   soonTitle: { fontSize: fontSize.lg, fontWeight: fontWeight.extraBold, color: colors.textPrimary, marginTop: spacing.sm },
-  soonText: { fontSize: fontSize.sm, color: colors.textSecondary, textAlign: 'center', marginTop: spacing.sm, lineHeight: 20 },
+  soonText: { fontSize: fontSize.base, color: colors.textSecondary, textAlign: 'center', marginTop: spacing.sm, lineHeight: 22 },
   offline: {
     alignSelf: 'stretch',
     backgroundColor: colors.surface,
@@ -316,31 +408,47 @@ const styles = themedStyles(() => StyleSheet.create({
     marginTop: spacing.lg,
   },
   offlineTitle: { fontSize: fontSize.base, fontWeight: fontWeight.bold, color: colors.textPrimary, marginBottom: 6 },
-  offlineText: { fontSize: fontSize.sm, color: colors.textSecondary, lineHeight: 21 },
-  bubble: { maxWidth: '85%', borderRadius: borderRadius.lg, padding: spacing.md, marginBottom: spacing.sm },
-  bubbleMe: { alignSelf: 'flex-end', backgroundColor: colors.primary },
-  bubbleAi: { alignSelf: 'flex-start', backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
-  bubbleErr: { borderColor: colors.error },
-  bubbleText: { fontSize: fontSize.sm, color: colors.textPrimary, lineHeight: 20 },
+  offlineText: { fontSize: fontSize.base, color: colors.textSecondary, lineHeight: 22 },
+  bubble: {
+    maxWidth: '85%',
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginBottom: spacing.sm,
+  },
+  bubbleMe: { alignSelf: 'flex-end', backgroundColor: colors.primary, borderBottomRightRadius: 4 },
+  bubbleAi: {
+    alignSelf: 'flex-start',
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderBottomLeftRadius: 4,
+  },
+  bubbleErr: { borderColor: colors.error, borderWidth: 1.5 },
+  bubbleText: { fontSize: 15.5, color: colors.textPrimary, lineHeight: 23 },
   bubbleTextMe: { color: colors.onPrimary },
-  typing: { alignSelf: 'flex-start', marginLeft: spacing.md },
+  bubbleTextErr: { fontSize: fontSize.sm, lineHeight: 20 },
+  typing: { flexDirection: 'row', alignItems: 'center' },
+  typingText: { fontSize: fontSize.sm, color: colors.textMuted, marginLeft: spacing.sm },
   inputBar: {
     flexDirection: 'row',
-    alignItems: 'center',
-    padding: spacing.sm,
+    alignItems: 'flex-end',
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 6,
     borderTopWidth: 1,
     borderTopColor: colors.border,
     backgroundColor: colors.surface,
   },
   input: {
     flex: 1,
-    maxHeight: 100,
+    maxHeight: 110,
     minHeight: 42,
     backgroundColor: colors.inputBg,
-    borderRadius: borderRadius.lg,
+    borderRadius: 21,
     paddingHorizontal: spacing.md,
-    paddingVertical: 8,
-    fontSize: fontSize.sm,
+    paddingTop: 10,
+    paddingBottom: 10,
+    fontSize: fontSize.base,
     color: colors.textPrimary,
   },
   sendBtn: {

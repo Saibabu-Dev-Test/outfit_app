@@ -1,9 +1,18 @@
 // AI stylist chat on the Gemini API (free tier) over REST. Clothing/style/colour topics only.
 // Daily cap per user: AsyncStorage count + users/{uid}/days/{today}.aiCount (the higher one wins).
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
 import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { db } from '../config/firebaseConfig';
-import { AI_DAILY_LIMIT, GEMINI_API_KEY, GEMINI_ENDPOINT, GEMINI_MODELS } from '../config/ai';
+import {
+  AI_DAILY_LIMIT,
+  GEMINI_ANDROID_CERT_SHA1,
+  GEMINI_ANDROID_PACKAGE,
+  GEMINI_ANDROID_RESTRICTED,
+  GEMINI_API_KEY,
+  GEMINI_ENDPOINT,
+  GEMINI_MODELS,
+} from '../config/ai';
 import { localDateKey } from '../utils/date';
 
 export type AiLanguage = 'English' | 'Telugu' | 'Hindi';
@@ -25,10 +34,6 @@ export interface StylistContext {
   luckyColours?: string[];
   luckyWhy?: string;
 }
-
-// Same as the Android signing cert, so the key can be restricted to this app in Google Cloud
-const ANDROID_PACKAGE = 'com.outfit';
-const ANDROID_CERT_SHA1 = '5E8F16062EA3CD2C4A0D547876BAA6F38CABF625';
 
 export const REFUSAL: Record<AiLanguage, string> = {
   English: 'I can only help with clothes, colours and style. Ask me what to wear! 👗',
@@ -98,19 +103,82 @@ const bumpAiUsed = async (uid: string, used: number): Promise<void> => {
 };
 
 // ── Chat ─────────────────────────────────────────────────────────────────
+// Gemini REST (https://ai.google.dev/api/generate-content):
+// POST /v1beta/models/{model}:generateContent, key in the x-goog-api-key header,
+// body { system_instruction, contents: [{role: 'user'|'model', parts: [{text}]}], generationConfig }.
 let workingModel: string | null = null;
+
+// Error shown in the chat. `detail` is the raw API status + message so a screenshot tells us what broke.
+export class StylistError extends Error {
+  detail: string;
+  constructor(message: string, detail = '') {
+    super(detail ? `${message}\n\n${detail}` : message);
+    this.name = 'StylistError';
+    this.detail = detail;
+  }
+}
+
+interface ApiError {
+  code: number;
+  status: string;
+  message: string;
+}
+
+const readApiError = async (res: Response): Promise<ApiError> => {
+  const raw = await res.text().catch(() => '');
+  let json: any = null;
+  try {
+    json = raw ? JSON.parse(raw) : null;
+  } catch {}
+  const e = json?.error || (Array.isArray(json) ? json[0]?.error : null) || {};
+  return {
+    code: Number(e.code) || res.status,
+    status: String(e.status || res.statusText || ''),
+    message: String(e.message || raw || 'No message').slice(0, 400),
+  };
+};
+
+const describe = (model: string, e: ApiError) => `Error ${e.code}${e.status ? ` ${e.status}` : ''} (${model}): ${e.message}`;
+
+// Gemini 3.x Flash models think before answering. "low" keeps chat replies quick and leaves the
+// output budget for the answer (thinking tokens count against maxOutputTokens).
+const thinkingFor = (model: string): Record<string, string> | null =>
+  /^gemini-3\.(6|8)-flash$/.test(model) ? { thinkingLevel: 'low' } : null;
+
+// Valid turn order: start with a user turn, no two same-role turns in a row, end with a user turn
+// (Gemini 3.6+ returns 400 when the last turn is a model turn).
+export const buildContents = (history: AiTurn[]) => {
+  const out: { role: 'user' | 'model'; parts: { text: string }[] }[] = [];
+  for (const t of history.slice(-12)) {
+    const text = (t.text || '').trim().slice(0, 1000);
+    if (!text) continue;
+    if (!out.length && t.role !== 'user') continue;
+    const last = out[out.length - 1];
+    if (last && last.role === t.role) last.parts[0].text += `\n\n${text}`;
+    else out.push({ role: t.role, parts: [{ text }] });
+  }
+  while (out.length && out[out.length - 1].role !== 'user') out.pop();
+  const recent = out.slice(-10);
+  while (recent.length && recent[0].role !== 'user') recent.shift();
+  return recent;
+};
 
 const callModel = async (model: string, body: any): Promise<Response> => {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 30000);
+  const timer = setTimeout(() => controller.abort(), 40000);
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'x-goog-api-key': GEMINI_API_KEY,
+  };
+  // Only when the key really has an Android-app restriction (see config/ai.ts)
+  if (GEMINI_ANDROID_RESTRICTED && Platform.OS === 'android') {
+    headers['X-Android-Package'] = GEMINI_ANDROID_PACKAGE;
+    headers['X-Android-Cert'] = GEMINI_ANDROID_CERT_SHA1;
+  }
   try {
-    return await fetch(`${GEMINI_ENDPOINT}/${model}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`, {
+    return await fetch(`${GEMINI_ENDPOINT}/${model}:generateContent`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Android-Package': ANDROID_PACKAGE,
-        'X-Android-Cert': ANDROID_CERT_SHA1,
-      },
+      headers,
       body: JSON.stringify(body),
       signal: controller.signal,
     });
@@ -119,21 +187,31 @@ const callModel = async (model: string, body: any): Promise<Response> => {
   }
 };
 
-// Sends the chat (last 10 turns). Throws a readable Error.
+const isKeyProblem = (e: ApiError) =>
+  /API_KEY_INVALID|API key not valid|API_KEY_.*BLOCKED|API_KEY_SERVICE_BLOCKED|key expired|API key expired/i.test(
+    `${e.status} ${e.message}`,
+  ) || (e.code === 403 && /PERMISSION_DENIED|blocked|referer|android/i.test(`${e.status} ${e.message}`));
+
+const isModelProblem = (e: ApiError) =>
+  e.code === 404 ||
+  /not found|is not supported|not available|unsupported model|does not exist|no longer available/i.test(e.message);
+
+// Sends the chat (last 10 turns). Throws a StylistError with the API's own status + message.
 export const askStylist = async (
   uid: string,
   history: AiTurn[],
   ctx: StylistContext,
 ): Promise<{ text: string; usedToday: number }> => {
-  if (!GEMINI_API_KEY) throw new Error('AI stylist is coming soon.');
+  if (!GEMINI_API_KEY) throw new StylistError('AI stylist is coming soon.');
   const used = await getAiUsedToday(uid);
   if (used >= AI_DAILY_LIMIT) {
-    throw new Error(`You've used today's ${AI_DAILY_LIMIT} stylist messages. Come back tomorrow! 🌙`);
+    throw new StylistError(`You've used today's ${AI_DAILY_LIMIT} stylist messages. Come back tomorrow! 🌙`);
   }
-  const body = {
-    systemInstruction: { parts: [{ text: systemPrompt(ctx) }] },
-    contents: history.slice(-10).map(t => ({ role: t.role, parts: [{ text: t.text.slice(0, 1000) }] })),
-    generationConfig: { temperature: 0.7, maxOutputTokens: 600 },
+  const contents = buildContents(history);
+  if (!contents.length) throw new StylistError('Type a question about clothes, colours or style.');
+  const baseBody = {
+    system_instruction: { parts: [{ text: systemPrompt(ctx) }] },
+    contents,
     safetySettings: [
       { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_MEDIUM_AND_ABOVE' },
       { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_MEDIUM_AND_ABOVE' },
@@ -141,46 +219,84 @@ export const askStylist = async (
       { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_MEDIUM_AND_ABOVE' },
     ],
   };
+  const bodyFor = (model: string, withThinking: boolean) => {
+    const thinking = withThinking ? thinkingFor(model) : null;
+    return {
+      ...baseBody,
+      generationConfig: { maxOutputTokens: 2048, ...(thinking ? { thinkingConfig: thinking } : {}) },
+    };
+  };
+
   const models = workingModel ? [workingModel, ...GEMINI_MODELS.filter(m => m !== workingModel)] : GEMINI_MODELS;
-  let lastMsg = 'The stylist is busy right now. Please try again.';
+  const tried: string[] = [];
+  let last: { msg: string; detail: string } = { msg: 'The stylist is busy right now. Please try again.', detail: '' };
+
   for (const model of models) {
-    let res: Response;
-    try {
-      res = await callModel(model, body);
-    } catch (e: any) {
-      lastMsg = e?.name === 'AbortError' ? 'The stylist took too long. Please try again.' : 'No internet connection?';
-      break;
-    }
-    if (res.status === 404 || res.status === 400) {
-      const errText = await res.text().catch(() => '');
-      if (/api key/i.test(errText)) {
-        lastMsg = 'AI stylist is not set up correctly yet (key rejected).';
+    let withThinking = true;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      let res: Response;
+      try {
+        res = await callModel(model, bodyFor(model, withThinking));
+      } catch (e: any) {
+        const msg =
+          e?.name === 'AbortError'
+            ? 'The stylist took too long to answer. Please try again.'
+            : 'Could not reach the AI service. Check your internet connection.';
+        throw new StylistError(msg, `Network error (${model}): ${e?.message || e?.name || 'request failed'}`);
+      }
+
+      if (res.ok) {
+        const json: any = await res.json().catch(() => null);
+        const cand = json?.candidates?.[0];
+        const text: string = (cand?.content?.parts || [])
+          .filter((p: any) => !p?.thought)
+          .map((p: any) => (typeof p?.text === 'string' ? p.text : ''))
+          .join('')
+          .trim();
+        const blocked = json?.promptFeedback?.blockReason || (cand?.finishReason === 'SAFETY' ? 'SAFETY' : '');
+        if (!text && !blocked) {
+          // e.g. finishReason MAX_TOKENS with only thinking: try the next model
+          last = {
+            msg: 'The stylist could not finish an answer. Please try again.',
+            detail: `Empty reply (${model}): finishReason ${cand?.finishReason || 'none'}`,
+          };
+          tried.push(model);
+          break;
+        }
+        workingModel = model;
+        await bumpAiUsed(uid, used);
+        return { text: text || REFUSAL[ctx.language], usedToday: Math.min(used + 1, AI_DAILY_LIMIT) };
+      }
+
+      const err = await readApiError(res);
+      console.warn('Gemini error', model, err.code, err.status, err.message);
+      const detail = describe(model, err);
+
+      if (isKeyProblem(err)) {
+        throw new StylistError('The AI key was rejected by Google.', detail);
+      }
+      // A model that doesn't accept thinkingConfig: retry the same model once without it
+      if (err.code === 400 && withThinking && thinkingFor(model) && /thinking/i.test(err.message)) {
+        withThinking = false;
+        continue;
+      }
+      tried.push(model);
+      if (isModelProblem(err)) {
+        last = { msg: 'AI model not available.', detail };
+        break; // next model
+      }
+      if (err.code === 429) {
+        // Free-tier quota is per model: the next model may still have room
+        last = { msg: 'Too many requests right now. Please wait a minute and try again.', detail };
         break;
       }
-      // Model retired or not available for this key: try the next one
-      lastMsg = 'AI model not available.';
-      continue;
+      if (err.code >= 500) {
+        last = { msg: `The AI service had a problem (error ${err.code}). Please try again.`, detail };
+        break;
+      }
+      // Other 400/403: the request itself was refused. Show it as it is.
+      throw new StylistError('The AI service refused the request.', detail);
     }
-    if (res.status === 429) {
-      lastMsg = 'Too many requests right now. Please wait a minute and try again.';
-      break;
-    }
-    if (res.status === 403) {
-      lastMsg = 'AI stylist is not set up correctly yet (key rejected).';
-      break;
-    }
-    if (!res.ok) {
-      lastMsg = `The stylist is busy (error ${res.status}). Please try again.`;
-      continue;
-    }
-    const json: any = await res.json().catch(() => null);
-    const text: string = (json?.candidates?.[0]?.content?.parts || [])
-      .map((p: any) => (typeof p?.text === 'string' ? p.text : ''))
-      .join('')
-      .trim();
-    workingModel = model;
-    await bumpAiUsed(uid, used);
-    return { text: text || REFUSAL[ctx.language], usedToday: Math.min(used + 1, AI_DAILY_LIMIT) };
   }
-  throw new Error(lastMsg);
+  throw new StylistError(last.msg, `${last.detail}${tried.length ? `\nTried: ${tried.join(', ')}` : ''}`);
 };
