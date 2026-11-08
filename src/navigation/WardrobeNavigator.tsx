@@ -6,8 +6,8 @@ import WardrobeCategoryScreen from '../screens/Wardrobe/WardrobeCategoryScreen';
 
 export type WardrobeStackParamList = {
   WardrobeMain: undefined;
-  AddItem: { itemToEdit?: any; category?: string } | undefined;
-  WardrobeCategory: { category: string };
+  AddItem: { itemToEdit?: any; category?: string; subType?: string } | undefined;
+  WardrobeCategory: { category: string; subType?: string };
 };
 
 const Stack = createNativeStackNavigator<WardrobeStackParamList>();

@@ -26,12 +26,23 @@ import {
 } from '../../services/wardrobeApi';
 import { pickImage } from '../../utils/imagePicker';
 import {
-  getAllCategoriesSorted,
+  CATEGORY_GROUPS,
+  ALL_CATEGORIES,
+  SHOE_TYPES,
+  ACCESSORY_TYPES,
+  groupOfCategory,
+  groupCategoriesSorted,
+  normalizeCategory,
+  resolveCategory,
+  itemSubType,
   categoryIcon,
   COLOR_SWATCHES,
   WEAR_TYPES,
   colorNameFromHex,
 } from '../../constants/wardrobe';
+
+// Labels the item name may be auto-filled with (replaced when the pick changes)
+const AUTO_NAMES = new Set([...ALL_CATEGORIES, ...SHOE_TYPES, ...ACCESSORY_TYPES]);
 
 const FABRIC_TYPES = [ 'Formal', 'Casual', 'Party', 'Ethnic', 'Sports'];
 
@@ -54,8 +65,13 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
   const itemToEdit = route?.params?.itemToEdit;
   const isEditing = Boolean(itemToEdit?.id);
 
-  // All categories in a swipeable chip slider (gender-wise ones first)
-  const categories = getAllCategoriesSorted(user?.gender);
+  // Category picker: first a group (Tops / Bottoms / Ethnic & Dresses / Shoes / Accessories / Others),
+  // then that group's categories, or the Shoes / Accessories types. Old values map in (Footwear -> Shoes).
+  const initialRaw: string | null = itemToEdit?.category || route?.params?.category || null;
+  const initialCategory: string | null = initialRaw ? normalizeCategory(initialRaw) : null;
+  const initialSubType: string | null = itemToEdit
+    ? itemSubType(itemToEdit) || null
+    : route?.params?.subType || (initialRaw ? resolveCategory(initialRaw)?.subType : null) || null;
   // Old items may hold a hex in color; normalise to a swatch name
   const initialColor: string | null = itemToEdit?.color
     ? (String(itemToEdit.color).startsWith('#') ? colorNameFromHex(itemToEdit.color) : itemToEdit.color)
@@ -71,9 +87,11 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
   const [colorError, setColorError]           = useState(false);
   const [isPreviewVisible, setIsPreviewVisible] = useState(false);
   const [itemName, setItemName]               = useState(itemToEdit?.name || '');
-  const [selectedCategory, setSelectedCategory]   = useState<string | null>(
-    itemToEdit?.category || route?.params?.category || null,
+  const [selectedGroupKey, setSelectedGroupKey]   = useState<string>(
+    initialCategory ? groupOfCategory(initialCategory).key : CATEGORY_GROUPS[0].key,
   );
+  const [selectedCategory, setSelectedCategory]   = useState<string | null>(initialCategory);
+  const [selectedSubType, setSelectedSubType]     = useState<string | null>(initialSubType);
   const [selectedSubCategory] = useState<string | null>(itemToEdit?.subCategory || null);
   const [selectedWearType, setSelectedWearType]   = useState<string>(itemToEdit?.wearType || 'Daily Wear');
   const [selectedColor, setSelectedColor]       = useState<string | null>(initialColor);
@@ -84,7 +102,60 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
   const [isAnalyzingAI, setIsAnalyzingAI]     = useState(false);
   const [aiStatusMsg, setAiStatusMsg]         = useState<string | null>(null);
 
-  const getSelectedIcon = () => categoryIcon(selectedCategory);
+  const getSelectedIcon = () => categoryIcon(selectedSubType || selectedCategory);
+  const selectedGroup = CATEGORY_GROUPS.find(g => g.key === selectedGroupKey) || CATEGORY_GROUPS[0];
+  const selectedLabel = selectedSubType || selectedCategory;
+
+  // Auto-fill the item name from the pick unless the user typed their own
+  const autoName = (label: string) => {
+    if (!itemName.trim() || AUTO_NAMES.has(itemName)) setItemName(label);
+    setNameError('');
+  };
+
+  const pickGroup = (key: string) => {
+    const g = CATEGORY_GROUPS.find(x => x.key === key);
+    if (!g) return;
+    setSelectedGroupKey(key);
+    if (selectedCategory && g.categories.includes(selectedCategory)) return;
+    // Shoes / Accessories / Others are one category each: picking the group picks it
+    if (g.subTypes || g.categories.length === 1) {
+      setSelectedCategory(g.categories[0]);
+      setSelectedSubType(null);
+      setCatError(false);
+      autoName(g.categories[0]);
+    } else {
+      setSelectedCategory(null);
+      setSelectedSubType(null);
+    }
+  };
+
+  const pickType = (label: string) => {
+    if (selectedGroup.subTypes) {
+      const next = selectedSubType === label ? null : label; // tap again = no type (All / Other)
+      setSelectedCategory(selectedGroup.categories[0]);
+      setSelectedSubType(next);
+      autoName(next || selectedGroup.categories[0]);
+    } else {
+      setSelectedCategory(label);
+      setSelectedSubType(null);
+      autoName(label);
+    }
+    setCatError(false);
+  };
+
+  const applySuggestion = (...names: (string | null | undefined)[]): string | null => {
+    for (const n of names) {
+      const hit = resolveCategory(n);
+      if (hit && hit.category !== 'Others') {
+        setSelectedGroupKey(groupOfCategory(hit.category).key);
+        setSelectedCategory(hit.category);
+        setSelectedSubType(hit.subType || null);
+        setCatError(false);
+        return hit.subType || hit.category;
+      }
+    }
+    return null;
+  };
 
   // Trigger AI vision analysis to automatically set options
   const triggerAIAnalysis = async (uri: string) => {
@@ -96,14 +167,7 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
         setAiStatusMsg('Pick a category and colour below.');
         return;
       }
-      const cat = categories.find(
-        c => c.toLowerCase() === String(result.subCategory || '').toLowerCase()
-          || c.toLowerCase() === String(result.category || '').toLowerCase(),
-      );
-      if (cat) {
-        setSelectedCategory(cat);
-        setCatError(false);
-      }
+      const cat = applySuggestion(result.subCategory, result.category);
       if (result.wearType && WEAR_TYPES.includes(result.wearType)) setSelectedWearType(result.wearType);
       const col = COLOR_SWATCHES.find(sw => sw.label.toLowerCase() === String(result.colorName || '').toLowerCase())
         || COLOR_SWATCHES.find(sw => sw.hex.toLowerCase() === String(result.color || '').toLowerCase());
@@ -190,6 +254,8 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
         name: finalName,
         category: selectedCategory!,
         subCategory: selectedSubCategory || undefined,
+        // Only Shoes / Accessories carry a type; '' clears an old one on edit
+        subType: selectedSubType || (isEditing ? '' : undefined),
         wearType: selectedWearType || undefined,
         color: selectedColor || undefined,
         colorHex: hex,
@@ -326,33 +392,57 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
           {catError ? 'CATEGORY — please select one item' : 'CATEGORY'}
         </Text>
 
-        <Text style={styles.swipeHint}>Swipe to see all categories ›</Text>
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
-          style={styles.categorySlider}
-          contentContainerStyle={styles.categorySliderContent}>
-          {categories.map(cat => {
-            const isSelected = selectedCategory === cat;
+          style={styles.chipSlider}
+          contentContainerStyle={styles.chipSliderContent}>
+          {CATEGORY_GROUPS.map(g => {
+            const isSelected = selectedGroupKey === g.key;
             return (
               <TouchableOpacity
-                key={cat}
-                style={[styles.itemChip, styles.categoryChip, isSelected && styles.itemChipSelected]}
-                onPress={() => {
-                  setSelectedCategory(cat);
-                  setCatError(false);
-                  if (!itemName.trim() || categories.includes(itemName)) {
-                    setItemName(cat);
-                  }
-                  setNameError('');
-                }}
+                key={g.key}
+                style={[styles.pill, isSelected && styles.groupPillSelected]}
+                onPress={() => pickGroup(g.key)}
                 activeOpacity={0.75}>
-                <Text style={styles.chipEmoji}>{categoryIcon(cat)}</Text>
-                <Text style={[styles.itemChipText, isSelected && styles.itemChipTextSelected]}>{cat}</Text>
+                <Text style={styles.chipEmoji}>{g.icon}</Text>
+                <Text style={[styles.itemChipText, isSelected && styles.itemChipTextSelected]}>{g.label}</Text>
               </TouchableOpacity>
             );
           })}
         </ScrollView>
+
+        {selectedGroup.key !== 'others' ? (
+          <>
+            <Text style={styles.swipeHint}>
+              {selectedGroup.subTypes ? `${selectedGroup.label} type (optional) · swipe ›` : `Pick the ${selectedGroup.label.toLowerCase()} type · swipe ›`}
+            </Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.chipSlider}
+              contentContainerStyle={styles.chipSliderContent}>
+              {(selectedGroup.subTypes || groupCategoriesSorted(selectedGroup, user?.gender)).map(t => {
+                const isSelected = selectedGroup.subTypes ? selectedSubType === t : selectedCategory === t;
+                return (
+                  <TouchableOpacity
+                    key={t}
+                    style={[styles.pill, styles.pillSmall, isSelected && styles.itemChipSelected]}
+                    onPress={() => pickType(t)}
+                    activeOpacity={0.75}>
+                    <Text style={styles.chipEmojiSmall}>{categoryIcon(t)}</Text>
+                    <Text style={[styles.pillText, isSelected && styles.itemChipTextSelected]}>{t}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </>
+        ) : null}
+        {selectedLabel ? (
+          <Text style={styles.pickedText}>
+            Selected: {categoryIcon(selectedLabel)} {selectedSubType ? `${selectedCategory} › ${selectedSubType}` : selectedCategory}
+          </Text>
+        ) : null}
 
         {/* WEAR TYPE Section */}
         <Text style={styles.mainSectionTitle}>WEAR TYPE</Text>
@@ -378,7 +468,7 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
         <View style={[styles.textInputWrap, nameError ? styles.textInputError : null]}>
           <TextInput
             style={styles.textInput}
-            placeholder={selectedCategory ? `Name e.g. "My favourite ${selectedCategory}"` : 'Enter custom item name…'}
+            placeholder={selectedLabel ? `Name e.g. "My favourite ${selectedLabel}"` : 'Enter custom item name…'}
             placeholderTextColor={colors.textMuted}
             value={itemName}
             onChangeText={t => { setItemName(t); setNameError(''); }}
@@ -446,7 +536,7 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
             <View style={styles.previewInfo}>
               <Text style={styles.previewName}>{itemName.trim() || selectedCategory}</Text>
               <Text style={styles.previewMeta}>
-                {selectedCategory} · {selectedWearType}{selectedColor ? ` · ${selectedColor}` : ''}
+                {selectedSubType ? `${selectedCategory} › ${selectedSubType}` : selectedCategory} · {selectedWearType}{selectedColor ? ` · ${selectedColor}` : ''}
                 {selectedFabric ? ` · ${selectedFabric}` : ''}
               </Text>
             </View>
@@ -507,10 +597,30 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
 }
 
 const styles = themedStyles(() => StyleSheet.create({
-  categorySlider: { marginBottom: spacing.md, marginHorizontal: -spacing.base },
-  categorySliderContent: { paddingHorizontal: spacing.base },
+  // Horizontal pill sliders: never let the row or the chips stretch tall
+  chipSlider: { flexGrow: 0, flexShrink: 0, marginBottom: spacing.sm, marginHorizontal: -spacing.base },
+  chipSliderContent: { paddingHorizontal: spacing.base, alignItems: 'center', flexDirection: 'row' },
+  pill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'center',
+    flexGrow: 0,
+    flexShrink: 0,
+    gap: 6,
+    backgroundColor: colors.surface,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    marginRight: 8,
+  },
+  pillSmall: { paddingHorizontal: 11, paddingVertical: 6, gap: 4, borderRadius: 16 },
+  pillText: { fontSize: 12, fontWeight: '700', color: colors.textPrimary },
+  groupPillSelected: { backgroundColor: colors.primary, borderColor: colors.primary },
+  chipEmojiSmall: { fontSize: 12 },
+  pickedText: { fontSize: 12, color: colors.textSecondary, fontWeight: '600', marginTop: 2 },
   swipeHint: { fontSize: 11, color: colors.textMuted, marginBottom: 6 },
-  categoryChip: { marginBottom: 8, marginRight: 8 },
   publicRow: {
     flexDirection: 'row',
     alignItems: 'center',

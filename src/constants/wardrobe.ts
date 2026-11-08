@@ -1,71 +1,183 @@
 // Gender-wise wardrobe categories and colour swatches
 
-export const MALE_CATEGORIES = [
-  'Shirts', 'T-Shirts', 'Kurtas', 'Jeans', 'Trousers', 'Shorts',
-  'Jackets', 'Ethnic', 'Footwear', 'Accessories',
+// ── Grouped categories ─────────────────────────────────────────────────────
+// Wardrobe tiles and the upload/edit category picker both use these groups.
+// An item stores `category` (one of the category values below) and an optional
+// `subType` (only for Shoes and Accessories). Old values map in via normalizeCategory.
+
+export interface CategoryGroup {
+  key: string;
+  label: string;
+  icon: string;
+  categories: string[]; // category values in this group
+  subTypes?: string[]; // set for Shoes / Accessories: the group is one category with types
+}
+
+export const SHOE_TYPES = [
+  'Sneakers', 'Formal Shoes', 'Loafers', 'Sandals', 'Slippers / Flip-flops', 'Boots',
+  'Sports Shoes', 'Heels', 'Flats', 'Ethnic (Mojari / Jutti)',
 ];
 
-export const FEMALE_CATEGORIES = [
-  'Tops', 'Kurtis', 'Sarees', 'Dresses', 'Jeans', 'Leggings', 'Skirts',
-  'Lehengas', 'Jackets', 'Footwear', 'Accessories', 'Jewellery',
+export const ACCESSORY_TYPES = [
+  'Watches', 'Belts', 'Sunglasses', 'Caps / Hats', 'Bags', 'Wallets', 'Jewellery', 'Ties',
+  'Scarves / Stoles', 'Socks',
 ];
 
-// Every category (the wardrobe tiles and the upload chip slider show all of them)
-export const ALL_CATEGORIES = Array.from(
-  new Set([
-    'Shirts', 'T-Shirts', 'Pants', 'Jeans', 'Shorts', 'Kurtas', 'Sarees', 'Dresses', 'Tops', 'Skirts',
-    'Jackets', 'Shoes', 'Accessories',
-    ...MALE_CATEGORIES,
-    ...FEMALE_CATEGORIES,
-    'Others',
-  ]),
-);
+export const CATEGORY_GROUPS: CategoryGroup[] = [
+  { key: 'tops', label: 'Tops', icon: '👕', categories: ['Shirts', 'T-Shirts', 'Tops', 'Kurtas', 'Kurtis', 'Jackets', 'Hoodies & Sweatshirts'] },
+  { key: 'bottoms', label: 'Bottoms', icon: '👖', categories: ['Pants', 'Jeans', 'Trousers', 'Shorts', 'Skirts', 'Leggings', 'Track Pants'] },
+  { key: 'ethnic', label: 'Ethnic & Dresses', icon: '🥻', categories: ['Sarees', 'Dresses', 'Lehengas', 'Ethnic'] },
+  { key: 'shoes', label: 'Shoes', icon: '👟', categories: ['Shoes'], subTypes: SHOE_TYPES },
+  { key: 'accessories', label: 'Accessories', icon: '⌚', categories: ['Accessories'], subTypes: ACCESSORY_TYPES },
+  { key: 'others', label: 'Others', icon: '🧺', categories: ['Others'] },
+];
+
+// Every category value
+export const ALL_CATEGORIES: string[] = CATEGORY_GROUPS.flatMap(g => g.categories);
+
+// Old / AI / loosely typed names -> category value (and a sub-type when the name is one)
+const ALIASES: Record<string, { category: string; subType?: string }> = {
+  'shirt': { category: 'Shirts' },
+  't-shirt': { category: 'T-Shirts' }, 'tshirt': { category: 'T-Shirts' }, 'tshirts': { category: 'T-Shirts' }, 't shirts': { category: 'T-Shirts' }, 't shirt': { category: 'T-Shirts' },
+  'top': { category: 'Tops' }, 'blouse': { category: 'Tops' },
+  'kurta': { category: 'Kurtas' }, 'kurti': { category: 'Kurtis' },
+  'jacket': { category: 'Jackets' }, 'blazer': { category: 'Jackets' }, 'coat': { category: 'Jackets' },
+  'hoodie': { category: 'Hoodies & Sweatshirts' }, 'hoodies': { category: 'Hoodies & Sweatshirts' },
+  'sweatshirt': { category: 'Hoodies & Sweatshirts' }, 'sweatshirts': { category: 'Hoodies & Sweatshirts' },
+  'sweater': { category: 'Hoodies & Sweatshirts' }, 'sweaters': { category: 'Hoodies & Sweatshirts' },
+  'pant': { category: 'Pants' }, 'jean': { category: 'Jeans' }, 'denim': { category: 'Jeans' },
+  'trouser': { category: 'Trousers' }, 'short': { category: 'Shorts' }, 'skirt': { category: 'Skirts' },
+  'legging': { category: 'Leggings' },
+  'track pant': { category: 'Track Pants' }, 'trackpants': { category: 'Track Pants' }, 'joggers': { category: 'Track Pants' },
+  'saree': { category: 'Sarees' }, 'sari': { category: 'Sarees' }, 'dress': { category: 'Dresses' },
+  'lehenga': { category: 'Lehengas' }, 'ethnic wear': { category: 'Ethnic' },
+  'shoe': { category: 'Shoes' }, 'footwear': { category: 'Shoes' },
+  'accessory': { category: 'Accessories' },
+  'other': { category: 'Others' },
+};
+SHOE_TYPES.forEach(t => { ALIASES[t.toLowerCase()] = { category: 'Shoes', subType: t }; });
+ACCESSORY_TYPES.forEach(t => { ALIASES[t.toLowerCase()] = { category: 'Accessories', subType: t }; });
+Object.assign(ALIASES, {
+  'jewelry': { category: 'Accessories', subType: 'Jewellery' },
+  'watch': { category: 'Accessories', subType: 'Watches' },
+  'belt': { category: 'Accessories', subType: 'Belts' },
+  'bag': { category: 'Accessories', subType: 'Bags' }, 'handbag': { category: 'Accessories', subType: 'Bags' },
+  'wallet': { category: 'Accessories', subType: 'Wallets' },
+  'cap': { category: 'Accessories', subType: 'Caps / Hats' }, 'hat': { category: 'Accessories', subType: 'Caps / Hats' },
+  'tie': { category: 'Accessories', subType: 'Ties' }, 'scarf': { category: 'Accessories', subType: 'Scarves / Stoles' },
+  'sneaker': { category: 'Shoes', subType: 'Sneakers' }, 'sandal': { category: 'Shoes', subType: 'Sandals' },
+  'slippers': { category: 'Shoes', subType: 'Slippers / Flip-flops' }, 'flip-flops': { category: 'Shoes', subType: 'Slippers / Flip-flops' },
+  'heel': { category: 'Shoes', subType: 'Heels' }, 'mojari': { category: 'Shoes', subType: 'Ethnic (Mojari / Jutti)' },
+  'jutti': { category: 'Shoes', subType: 'Ethnic (Mojari / Jutti)' },
+});
+
+// Resolve any stored / suggested name. Unknown names -> null.
+export const resolveCategory = (name?: string | null): { category: string; subType?: string } | null => {
+  const c = (name || '').trim().toLowerCase();
+  if (!c) return null;
+  const exact = ALL_CATEGORIES.find(x => x.toLowerCase() === c);
+  if (exact) return { category: exact };
+  return ALIASES[c] || null;
+};
+
+// The category value an item belongs under (old "Footwear" -> "Shoes", "Jewellery" -> "Accessories", unknown -> "Others")
+export const normalizeCategory = (name?: string | null): string => resolveCategory(name)?.category || 'Others';
+
+export const groupOfCategory = (category?: string | null): CategoryGroup => {
+  const c = normalizeCategory(category);
+  return CATEGORY_GROUPS.find(g => g.categories.includes(c)) || CATEGORY_GROUPS[CATEGORY_GROUPS.length - 1];
+};
+
+export const subTypesFor = (category?: string | null): string[] =>
+  groupOfCategory(category).subTypes || [];
+
+// An item's sub-type: its stored subType, else one implied by an old category ("Jewellery")
+// or subCategory. undefined = "All / Other".
+export const itemSubType = (item: { category?: string | null; subType?: string | null; subCategory?: string | null }): string | undefined => {
+  const types = subTypesFor(item.category);
+  if (!types.length) return undefined;
+  for (const raw of [item.subType, resolveCategory(item.category)?.subType, item.subCategory]) {
+    if (!raw) continue;
+    const hit = types.find(t => t.toLowerCase() === raw.toLowerCase()) || resolveCategory(raw)?.subType;
+    if (hit && types.includes(hit)) return hit;
+  }
+  return undefined;
+};
+
+// Gender-wise categories in a group come first
+export const MALE_CATEGORIES = ['Shirts', 'T-Shirts', 'Kurtas', 'Jackets', 'Hoodies & Sweatshirts', 'Jeans', 'Trousers', 'Pants', 'Shorts', 'Track Pants', 'Ethnic'];
+export const FEMALE_CATEGORIES = ['Tops', 'Kurtis', 'Sarees', 'Dresses', 'Lehengas', 'Jeans', 'Leggings', 'Skirts', 'Jackets'];
 
 export const getCategoriesForGender = (gender?: string | null): string[] => {
   const g = (gender || '').toLowerCase();
   if (g === 'male') return MALE_CATEGORIES;
   if (g === 'female') return FEMALE_CATEGORIES;
-  return ALL_CATEGORIES; // Other / not set
+  return ALL_CATEGORIES;
 };
 
-// All categories, the user's gender-wise ones first
-export const getAllCategoriesSorted = (gender?: string | null): string[] => {
+// A group's categories, the user's gender-wise ones first
+export const groupCategoriesSorted = (group: CategoryGroup, gender?: string | null): string[] => {
   const first = getCategoriesForGender(gender);
-  return Array.from(new Set([...first, ...ALL_CATEGORIES.filter(c => c !== 'Others'), 'Others']));
+  return [...group.categories.filter(c => first.includes(c)), ...group.categories.filter(c => !first.includes(c))];
 };
 
-// Item belongs to a tile (case-insensitive). "Others" also takes items with an unknown category.
-export const inCategory = (itemCategory: string | null | undefined, tile: string): boolean => {
-  const c = (itemCategory || '').toLowerCase();
-  if (tile === 'Others') return !c || c === 'others' || !ALL_CATEGORIES.some(x => x.toLowerCase() === c);
-  return c === tile.toLowerCase();
-};
+// All categories (gender-wise first inside each group)
+export const getAllCategoriesSorted = (gender?: string | null): string[] =>
+  CATEGORY_GROUPS.flatMap(g => groupCategoriesSorted(g, gender));
+
+// Item belongs to a tile (old names map in; "Others" takes unknown categories)
+export const inCategory = (itemCategory: string | null | undefined, tile: string): boolean =>
+  normalizeCategory(itemCategory) === normalizeCategory(tile);
 
 export const CATEGORY_ICONS: Record<string, string> = {
   'Shirts': '👔',
   'T-Shirts': '👕',
+  'Tops': '👚',
   'Kurtas': '🥻',
+  'Kurtis': '👘',
+  'Jackets': '🧥',
+  'Hoodies & Sweatshirts': '🧥',
+  'Pants': '👖',
   'Jeans': '👖',
   'Trousers': '👖',
   'Shorts': '🩳',
-  'Jackets': '🧥',
-  'Ethnic': '🧣',
-  'Footwear': '👟',
-  'Accessories': '⌚',
-  'Tops': '👚',
-  'Kurtis': '👘',
+  'Skirts': '👗',
+  'Leggings': '👖',
+  'Track Pants': '🏃',
   'Sarees': '🥻',
   'Dresses': '👗',
-  'Leggings': '👖',
-  'Skirts': '👗',
   'Lehengas': '👗',
+  'Ethnic': '🧣',
+  'Shoes': '👟',
+  'Footwear': '👟',
+  'Accessories': '⌚',
   'Jewellery': '💍',
-  'Pants': '👖',
-  'Shoes': '👞',
   'Others': '🧺',
+  // Shoe types
+  'Sneakers': '👟',
+  'Formal Shoes': '👞',
+  'Loafers': '👞',
+  'Sandals': '🩴',
+  'Slippers / Flip-flops': '🩴',
+  'Boots': '🥾',
+  'Sports Shoes': '🏃',
+  'Heels': '👠',
+  'Flats': '🥿',
+  'Ethnic (Mojari / Jutti)': '🪷',
+  // Accessory types
+  'Watches': '⌚',
+  'Belts': '🪢',
+  'Sunglasses': '🕶️',
+  'Caps / Hats': '🧢',
+  'Bags': '👜',
+  'Wallets': '👛',
+  'Ties': '👔',
+  'Scarves / Stoles': '🧣',
+  'Socks': '🧦',
 };
 
-export const categoryIcon = (c?: string | null): string => (c && CATEGORY_ICONS[c]) || '👕';
+export const categoryIcon = (c?: string | null): string =>
+  (c && (CATEGORY_ICONS[c] || CATEGORY_ICONS[normalizeCategory(c)])) || '👕';
 
 export const COLOR_SWATCHES = [
   { label: 'White', hex: '#FFFFFF', border: '#D0CBDF' },

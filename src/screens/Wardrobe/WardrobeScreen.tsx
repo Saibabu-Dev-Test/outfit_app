@@ -18,7 +18,15 @@ import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles, stat
 import { useAuth } from '../../context/AuthContext';
 import { getWardrobeItems, deleteWardrobeItem, WardrobeItemResponse } from '../../services/wardrobeApi';
 
-import { getAllCategoriesSorted, inCategory, categoryIcon, colorToHex, WEAR_TYPES } from '../../constants/wardrobe';
+import {
+  CATEGORY_GROUPS,
+  groupCategoriesSorted,
+  inCategory,
+  itemSubType,
+  categoryIcon,
+  colorToHex,
+  WEAR_TYPES,
+} from '../../constants/wardrobe';
 
 // "Modes": filter the list by wear type (All / Daily Wear / Formal / Casual)
 const MODES = ['All', ...WEAR_TYPES];
@@ -86,13 +94,9 @@ export default function WardrobeScreen({ navigation }: { navigation: any }) {
     );
   };
 
-  // All categories (the user's gender-wise ones first); unknown ones count under Others
-  const categories = getAllCategoriesSorted(user?.gender).map(label => ({
-    id: label,
-    label,
-    icon: categoryIcon(label),
-    count: items.filter(i => inCategory(i.category, label)).length,
-  }));
+  // Sections: Tops / Bottoms / Ethnic & Dresses / Shoes / Accessories / Others (old names map in)
+  const countIn = (cat: string) => items.filter(i => inCategory(i.category, cat)).length;
+  const sections = CATEGORY_GROUPS.map(g => ({ group: g, cats: groupCategoriesSorted(g, user?.gender) }));
 
   const visibleItems = items.filter(i => activeMode === 'All' || i.wearType === activeMode);
 
@@ -149,23 +153,63 @@ export default function WardrobeScreen({ navigation }: { navigation: any }) {
           </View>
         </View>
 
-        {/* Categories Grid */}
+        {/* Categories, grouped */}
         <Text style={styles.sectionTitle}>Categories</Text>
-        <View style={styles.categoryGrid}>
-          {categories.map(cat => {
+        {sections.map(({ group, cats }) => {
+          if (group.subTypes) {
+            // Shoes / Accessories: one category, its types in a swipe row
+            const cat = group.categories[0];
+            const inCat = items.filter(i => inCategory(i.category, cat));
             return (
-              <TouchableOpacity
-                key={cat.id}
-                style={styles.categoryCard}
-                onPress={() => navigation.navigate('WardrobeCategory', { category: cat.label })}
-                activeOpacity={0.8}>
-                <Text style={styles.categoryEmoji}>{cat.icon}</Text>
-                <Text style={styles.categoryLabel}>{cat.label}</Text>
-                <Text style={styles.categoryCount}>{cat.count} items</Text>
-              </TouchableOpacity>
+              <View key={group.key} style={styles.groupBlock}>
+                <Text style={styles.groupTitle}>{group.icon} {group.label}</Text>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  style={styles.typeSlider}
+                  contentContainerStyle={styles.typeSliderContent}>
+                  <TouchableOpacity
+                    style={[styles.typeTile, styles.typeTileAll]}
+                    onPress={() => navigation.navigate('WardrobeCategory', { category: cat })}
+                    activeOpacity={0.8}>
+                    <Text style={styles.typeTileEmoji}>{group.icon}</Text>
+                    <Text style={styles.typeTileLabel} numberOfLines={1}>All {group.label}</Text>
+                    <Text style={styles.categoryCount}>{inCat.length} items</Text>
+                  </TouchableOpacity>
+                  {group.subTypes.map(t => (
+                    <TouchableOpacity
+                      key={t}
+                      style={styles.typeTile}
+                      onPress={() => navigation.navigate('WardrobeCategory', { category: cat, subType: t })}
+                      activeOpacity={0.8}>
+                      <Text style={styles.typeTileEmoji}>{categoryIcon(t)}</Text>
+                      <Text style={styles.typeTileLabel} numberOfLines={2}>{t}</Text>
+                      <Text style={styles.categoryCount}>{inCat.filter(i => itemSubType(i) === t).length} items</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
             );
-          })}
-        </View>
+          }
+          return (
+            <View key={group.key} style={styles.groupBlock}>
+              <Text style={styles.groupTitle}>{group.icon} {group.label}</Text>
+              <View style={styles.categoryGrid}>
+                {cats.map(cat => (
+                  <TouchableOpacity
+                    key={cat}
+                    style={styles.categoryCard}
+                    onPress={() => navigation.navigate('WardrobeCategory', { category: cat })}
+                    activeOpacity={0.8}>
+                    <Text style={styles.categoryEmoji}>{categoryIcon(cat)}</Text>
+                    <Text style={styles.categoryLabel} numberOfLines={1}>{cat}</Text>
+                    <Text style={styles.categoryCount}>{countIn(cat)} items</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          );
+        })}
 
         {/* Modes: wear-type filter */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.modeRow}>
@@ -215,7 +259,8 @@ export default function WardrobeScreen({ navigation }: { navigation: any }) {
         ) : (
           <View style={styles.recentList}>
             {visibleItems.map(item => {
-              const emoji = categoryIcon(item.category);
+              const sub = itemSubType(item);
+              const emoji = categoryIcon(sub || item.category);
               return (
                 <View key={item.id} style={styles.recentItem}>
                   {item.imageUrl ? (
@@ -232,7 +277,7 @@ export default function WardrobeScreen({ navigation }: { navigation: any }) {
                   <View style={styles.recentItemInfo}>
                     <Text style={styles.recentItemName}>{item.name}</Text>
                     <Text style={styles.recentItemCategory}>
-                      {item.category}{item.color ? ` · ${item.color.startsWith('#') ? '' : item.color}` : ''}{item.subCategory ? ` · ${item.subCategory}` : ''}{item.wearType ? ` · ${item.wearType}` : ''}{item.fabric ? ` · ${item.fabric}` : ''}
+                      {item.category}{sub ? ` › ${sub}` : ''}{item.color ? ` · ${item.color.startsWith('#') ? '' : item.color}` : ''}{item.subCategory ? ` · ${item.subCategory}` : ''}{item.wearType ? ` · ${item.wearType}` : ''}{item.fabric ? ` · ${item.fabric}` : ''}
                     </Text>
                   </View>
                   <View style={styles.actionRow}>
@@ -327,10 +372,38 @@ const styles = themedStyles(() => StyleSheet.create({
     marginBottom: spacing.md,
   },
 
-  categoryGrid: { flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: spacing.base, gap: spacing.sm, marginBottom: spacing.xl },
+  groupBlock: { marginBottom: spacing.base },
+  groupTitle: {
+    fontSize: 12,
+    fontWeight: fontWeight.extraBold,
+    color: colors.textSecondary,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    paddingHorizontal: spacing.base,
+    marginBottom: spacing.sm,
+  },
+  typeSlider: { flexGrow: 0, flexShrink: 0 },
+  typeSliderContent: { paddingHorizontal: spacing.base, paddingBottom: 6, alignItems: 'flex-start', flexDirection: 'row' },
+  typeTile: {
+    width: 96,
+    flexGrow: 0,
+    flexShrink: 0,
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.lg,
+    paddingVertical: spacing.md,
+    paddingHorizontal: 6,
+    alignItems: 'center',
+    marginRight: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  typeTileAll: { borderColor: colors.primary, borderWidth: 1.5 },
+  typeTileEmoji: { fontSize: 24, marginBottom: 4 },
+  typeTileLabel: { fontSize: fontSize.xs, fontWeight: fontWeight.bold, color: colors.textPrimary, textAlign: 'center', marginBottom: 2 },
+  categoryGrid: { flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: spacing.base, gap: spacing.sm },
   categoryCard: {
     width: '30%',
-    flexGrow: 1,
+    flexGrow: 0,
     backgroundColor: colors.surface,
     borderRadius: borderRadius.lg,
     padding: spacing.base,

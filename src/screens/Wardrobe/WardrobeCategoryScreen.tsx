@@ -13,16 +13,23 @@ import {
   Alert,
   useWindowDimensions,
   StyleSheet,
+  ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles, statusBarStyle } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
 import { deleteWardrobeItem, getWardrobeItems, WardrobeItemResponse } from '../../services/wardrobeApi';
-import { categoryIcon, colorToHex, inCategory } from '../../constants/wardrobe';
+import { categoryIcon, colorToHex, inCategory, itemSubType, normalizeCategory, subTypesFor } from '../../constants/wardrobe';
 
 export default function WardrobeCategoryScreen({ navigation, route }: { navigation: any; route: any }) {
-  const category: string = route?.params?.category || 'Others';
+  // Old names map in (Footwear -> Shoes, Jewellery -> Accessories)
+  const category: string = normalizeCategory(route?.params?.category || 'Others');
+  // Shoes / Accessories: filter by type. Items without a type show under All and Other.
+  const types = subTypesFor(category);
+  const [activeType, setActiveType] = useState<string>(
+    route?.params?.subType && types.includes(route.params.subType) ? route.params.subType : 'All',
+  );
   const { user } = useAuth();
   const { width } = useWindowDimensions();
   const tile = Math.floor((width - spacing.base * 2 - spacing.sm) / 2);
@@ -51,8 +58,14 @@ export default function WardrobeCategoryScreen({ navigation, route }: { navigati
     }, [load]),
   );
 
+  const typeOf = (i: WardrobeItemResponse) => itemSubType(i) || 'Other';
+  const hasUntyped = items.some(i => !itemSubType(i));
+  const typeChips = types.length ? ['All', ...types, ...(hasUntyped ? ['Other'] : [])] : [];
+  const shown = activeType === 'All' ? items : items.filter(i => typeOf(i) === activeType);
+  const label = activeType === 'All' ? category : activeType;
+
   const onItemPress = (item: WardrobeItemResponse) =>
-    Alert.alert(item.name, [item.color, item.wearType, item.fabric].filter(Boolean).join(' · ') || undefined, [
+    Alert.alert(item.name, [itemSubType(item), item.color, item.wearType, item.fabric].filter(Boolean).join(' · ') || undefined, [
       { text: 'Edit', onPress: () => navigation.navigate('AddItem', { itemToEdit: item }) },
       {
         text: 'Delete',
@@ -83,12 +96,36 @@ export default function WardrobeCategoryScreen({ navigation, route }: { navigati
           {categoryIcon(category)} {category}
           {!loading ? ` (${items.length})` : ''}
         </Text>
-        <TouchableOpacity style={styles.addBtn} onPress={() => navigation.navigate('AddItem', { category })}>
+        <TouchableOpacity style={styles.addBtn} onPress={() => navigation.navigate('AddItem', { category, subType: types.includes(activeType) ? activeType : undefined })}>
           <Text style={styles.addText}>+ Add</Text>
         </TouchableOpacity>
       </View>
+      {typeChips.length ? (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.typeRow}
+          contentContainerStyle={styles.typeRowContent}>
+          {typeChips.map(t => {
+            const active = activeType === t;
+            const n = t === 'All' ? items.length : items.filter(i => typeOf(i) === t).length;
+            return (
+              <TouchableOpacity
+                key={t}
+                style={[styles.typeChip, active && styles.typeChipActive]}
+                onPress={() => setActiveType(t)}
+                activeOpacity={0.8}>
+                <Text style={[styles.typeText, active && styles.typeTextActive]}>
+                  {t === 'All' || t === 'Other' ? t : `${categoryIcon(t)} ${t}`}
+                  {n ? ` ${n}` : ''}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      ) : null}
       <FlatList
-        data={items}
+        data={shown}
         keyExtractor={i => i.id}
         numColumns={2}
         columnWrapperStyle={styles.column}
@@ -110,7 +147,7 @@ export default function WardrobeCategoryScreen({ navigation, route }: { navigati
               <Image source={{ uri: item.imageUrl }} style={{ width: tile, height: tile * 1.15 }} resizeMode="cover" />
             ) : (
               <View style={[styles.noImg, { width: tile, height: tile * 1.15, backgroundColor: colorToHex(item.colorHex || item.color) }]}>
-                <Text style={styles.noImgEmoji}>{categoryIcon(item.category)}</Text>
+                <Text style={styles.noImgEmoji}>{categoryIcon(itemSubType(item) || item.category)}</Text>
               </View>
             )}
             <View style={styles.info}>
@@ -118,7 +155,7 @@ export default function WardrobeCategoryScreen({ navigation, route }: { navigati
                 {item.name}
               </Text>
               <Text style={styles.meta} numberOfLines={1}>
-                {[item.color && !item.color.startsWith('#') ? item.color : '', item.wearType, item.isPublic ? '🌐 public' : '']
+                {[itemSubType(item), item.color && !item.color.startsWith('#') ? item.color : '', item.wearType, item.isPublic ? '🌐 public' : '']
                   .filter(Boolean)
                   .join(' · ')}
               </Text>
@@ -130,10 +167,12 @@ export default function WardrobeCategoryScreen({ navigation, route }: { navigati
             <ActivityIndicator style={styles.spinner} color={colors.primary} />
           ) : (
             <View style={styles.empty}>
-              <Text style={styles.emptyEmoji}>{categoryIcon(category)}</Text>
-              <Text style={styles.emptyText}>{error || `No ${category.toLowerCase()} yet.`}</Text>
-              <TouchableOpacity style={styles.addBtn} onPress={() => navigation.navigate('AddItem', { category })}>
-                <Text style={styles.addText}>+ Add {category}</Text>
+              <Text style={styles.emptyEmoji}>{categoryIcon(label)}</Text>
+              <Text style={styles.emptyText}>{error || `No ${label.toLowerCase()} yet.`}</Text>
+              <TouchableOpacity
+                style={styles.addBtn}
+                onPress={() => navigation.navigate('AddItem', { category, subType: types.includes(activeType) ? activeType : undefined })}>
+                <Text style={styles.addText}>+ Add {label}</Text>
               </TouchableOpacity>
             </View>
           )
@@ -162,6 +201,23 @@ const styles = themedStyles(() => StyleSheet.create({
     paddingVertical: spacing.sm,
   },
   addText: { color: colors.onPrimary, fontWeight: fontWeight.bold, fontSize: fontSize.sm },
+  typeRow: { flexGrow: 0, flexShrink: 0, borderBottomWidth: 1, borderBottomColor: colors.border },
+  typeRowContent: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm, alignItems: 'center', flexDirection: 'row' },
+  typeChip: {
+    flexGrow: 0,
+    flexShrink: 0,
+    alignSelf: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    marginRight: 8,
+  },
+  typeChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  typeText: { fontSize: 12, fontWeight: '700', color: colors.textPrimary },
+  typeTextActive: { color: '#FFFFFF' },
   list: { padding: spacing.base, flexGrow: 1 },
   column: { justifyContent: 'space-between' },
   card: {

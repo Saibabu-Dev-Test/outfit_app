@@ -23,6 +23,7 @@ export interface WardrobeItemPayload {
   name: string;
   category: string;
   subCategory?: string;
+  subType?: string; // Shoes / Accessories type, e.g. "Sneakers", "Watches"
   wearType?: string;
   color?: string; // colour name, e.g. "Blue"
   colorHex?: string;
@@ -39,6 +40,7 @@ export interface WardrobeItemResponse {
   name: string;
   category: string;
   subCategory?: string | null;
+  subType?: string | null;
   wearType?: string | null;
   color: string | null;
   colorHex?: string | null;
@@ -60,6 +62,7 @@ const toItem = (id: string, d: any): WardrobeItemResponse => ({
   name: d?.name || d?.subCategory || d?.category || 'Item',
   category: d?.category || '',
   subCategory: d?.subCategory ?? null,
+  subType: d?.subType ?? null,
   wearType: d?.wearType ?? null,
   color: d?.color ?? null,
   colorHex: d?.colorHex ?? null,
@@ -95,6 +98,7 @@ export const addWardrobeItem = async (
     name: payload.name,
     category: payload.category,
     subCategory: payload.subCategory || null,
+    subType: payload.subType || null,
     wearType: payload.wearType || null,
     color: payload.color || null,
     colorHex: payload.colorHex || null,
@@ -156,7 +160,7 @@ export const updateWardrobeItem = async (
   const id = String(itemId);
   const changes: any = { updatedAt: serverTimestamp() };
   const fields: (keyof WardrobeItemPayload)[] = [
-    'name', 'category', 'subCategory', 'wearType', 'color', 'colorHex', 'fabric', 'gender', 'notes',
+    'name', 'category', 'subCategory', 'subType', 'wearType', 'color', 'colorHex', 'fabric', 'gender', 'notes',
   ];
   fields.forEach(f => {
     if (payload[f] !== undefined) changes[f] = payload[f] || null;
