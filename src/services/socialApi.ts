@@ -19,6 +19,7 @@ import { db } from '../config/firebaseConfig';
 import { firestoreErrorMessage } from '../utils/firebaseErrors';
 import { inlineAvatar } from './userApi';
 import { toDate } from '../utils/date';
+import { logActivity } from './activityApi';
 
 export interface PersonLite {
   uid: string;
@@ -68,6 +69,8 @@ export const follow = async (me: PersonLite, target: PersonLite): Promise<void> 
     console.warn('follow failed:', e?.code, e?.message);
     throw new Error(firestoreErrorMessage(e, 'Following'));
   }
+  // "<name> started following you" in their Activity (best-effort)
+  logActivity(target.uid, me, 'follow');
 };
 
 export const unfollow = async (meUid: string, targetUid: string): Promise<void> => {

@@ -12,13 +12,15 @@ export {
 export type { LockChange, VerifyResult } from './sessionVault.web';
 
 export const LOCK_ASKED_KEY = 'outfit:appLockAsked';
-export const LOCK_AFTER_MS = 30 * 1000;
+export const LOCK_AFTER_MS = 60 * 1000;
 
 export const isLockSupported = async (): Promise<boolean> => false;
 export const isLockEnabled = async (): Promise<boolean> => false;
 export const setLockEnabled = async (_on: boolean): Promise<void> => {};
-export const wasLockAsked = async (): Promise<boolean> => true;
-export const markLockAsked = async (): Promise<void> => {};
+export const wasLockAsked = async (_uid?: string | null): Promise<boolean> => true;
+export const markLockAsked = async (_uid?: string | null): Promise<void> => {};
+export const getUserLockPref = async (_uid?: string | null): Promise<boolean | null> => null;
+export const setUserLockPref = async (_uid: string | null | undefined, _on: boolean): Promise<void> => {};
 
 export type UnlockResult = 'success' | 'cancelled' | 'password' | 'invalidated' | 'error';
 export const authenticate = async (

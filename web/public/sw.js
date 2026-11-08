@@ -23,6 +23,7 @@ self.addEventListener('fetch', event => {
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return; // Firebase, Google, Gemini: network only
+  if (/\/get(\/|$)/.test(url.pathname)) return; // app download page: always live, never the app shell
 
   // Pages: network first (new versions show up), cached shell when offline
   if (req.mode === 'navigate') {

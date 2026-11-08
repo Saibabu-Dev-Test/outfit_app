@@ -164,6 +164,33 @@ service cloud.firestore {
       allow delete: if signedIn() && me() == uid;
     }
 
+    // ── Activity ("who liked my photos"): users/{uid}/activity/{autoId} ──
+    // {type, actorId, actorName, actorAvatar, targetKind, targetId, thumbnail, text, createdAt}
+    // Written by the person who liked / disliked / commented / followed (never by the owner);
+    // only the owner reads and deletes. No updates.
+    match /users/{uid}/activity/{aid} {
+      allow read, delete: if signedIn() && me() == uid;
+      allow create: if signedIn()
+        && request.resource.data.actorId == me()
+        && uid != me()
+        && request.resource.data.keys().hasOnly(['type', 'actorId', 'actorName', 'actorAvatar', 'targetKind', 'targetId', 'thumbnail', 'text', 'createdAt'])
+        && request.resource.data.type in ['like', 'dislike', 'comment', 'follow']
+        && request.resource.data.createdAt == request.time
+        && (request.resource.data.get('actorName', null) == null
+            || (request.resource.data.actorName is string && request.resource.data.actorName.size() <= 60))
+        && (request.resource.data.get('actorAvatar', null) == null
+            || (request.resource.data.actorAvatar is string && request.resource.data.actorAvatar.size() <= 60000))
+        && (request.resource.data.get('targetKind', null) == null
+            || request.resource.data.targetKind in ['post', 'wardrobe'])
+        && (request.resource.data.get('targetId', null) == null
+            || (request.resource.data.targetId is string && request.resource.data.targetId.size() <= 128))
+        && (request.resource.data.get('thumbnail', null) == null
+            || (request.resource.data.thumbnail is string && request.resource.data.thumbnail.size() <= 2000))
+        && (request.resource.data.get('text', null) == null
+            || (request.resource.data.text is string && request.resource.data.text.size() <= 120));
+      allow update: if false;
+    }
+
     // ── Follow: users/{target}/followers/{follower} + users/{follower}/following/{target} ──
     // Only the follower writes, and both docs change together (checked with getAfter/existsAfter).
     function followEntryOk() {

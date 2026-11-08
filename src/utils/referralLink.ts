@@ -1,10 +1,17 @@
-// Referral share links: https://outfit-vote-9edca.web.app/?ref=CODE
-// Opening the link prefills the code on the sign-up screen (web) and is kept until sign-up.
+// Referral share links: https://outfit-vote-9edca.web.app/get/?ref=CODE (app download page).
+// The /get/ page copies "OUTFITREF:CODE" to the clipboard before the APK download starts; the
+// Android app reads it on the sign-up screen (sideloaded APKs get no Play Install Referrer).
+// "Open in browser" there goes to /?ref=CODE, which prefills the code on the web sign-up screen.
 import { Alert, Linking, Platform, Share } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ensureReferralCode } from '../services/rewardsApi';
+import { readClipboardText, clearClipboardText, setClipboardText } from '../native/clipboard';
 
 export const APP_WEB_URL = 'https://outfit-vote-9edca.web.app/';
+// App download page (Android APK + "open in browser")
+export const APP_GET_URL = `${APP_WEB_URL}get/`;
+// What the /get/ page puts on the clipboard (web/public/get/index.html)
+const CLIPBOARD_REF = /^OUTFITREF:([A-Z0-9]{4,8})$/;
 const PENDING_KEY = 'pendingReferralCode';
 // Browser globals (typed loosely; RN's tsconfig has no DOM lib)
 const g: any = globalThis as any;
@@ -14,10 +21,10 @@ const navigator: any = g.navigator;
 const clean = (s: string | null | undefined) =>
   (s || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
 
-export const referralLink = (code: string) => `${APP_WEB_URL}?ref=${encodeURIComponent(code)}`;
+export const referralLink = (code: string) => `${APP_GET_URL}?ref=${encodeURIComponent(code)}`;
 
 export const referralMessage = (code: string) =>
-  `Join me on Outfit Vote, your AI stylist & daily colour guide! Sign up with my link: ${referralLink(code)}\n(or enter my referral code ${code} when you create your account)`;
+  `Join me on Outfit Vote, your AI stylist & daily colour guide! Download the app: ${referralLink(code)}\n(my referral code ${code} is filled in for you, or enter it when you create your account)`;
 
 const refFromUrl = (url: string | null | undefined): string => {
   if (!url) return '';
@@ -25,7 +32,26 @@ const refFromUrl = (url: string | null | undefined): string => {
   return m ? clean(decodeURIComponent(m[1])) : '';
 };
 
-// Code from the link that opened the app, else one saved earlier. '' when none.
+// Android: "OUTFITREF:CODE" copied by the /get/ download page. Saved as the pending code and
+// removed from the clipboard. '' when none. Never throws.
+const refFromClipboard = async (): Promise<string> => {
+  if (Platform.OS !== 'android') return '';
+  try {
+    const text = (await readClipboardText()).trim();
+    const m = text.match(CLIPBOARD_REF);
+    if (!m) return '';
+    const code = clean(m[1]);
+    if (!code) return '';
+    await AsyncStorage.setItem(PENDING_KEY, code);
+    await clearClipboardText();
+    return code;
+  } catch {
+    return '';
+  }
+};
+
+// Code from the link that opened the app, else one saved earlier, else (Android) the clipboard
+// text left by the download page. '' when none.
 export const readPendingReferral = async (): Promise<string> => {
   try {
     let fromLink = '';
@@ -38,10 +64,26 @@ export const readPendingReferral = async (): Promise<string> => {
       await AsyncStorage.setItem(PENDING_KEY, fromLink);
       return fromLink;
     }
-    return clean(await AsyncStorage.getItem(PENDING_KEY));
+    const saved = clean(await AsyncStorage.getItem(PENDING_KEY));
+    if (saved) return saved;
+    return await refFromClipboard();
   } catch {
     return '';
   }
+};
+
+// First launch after install (any screen): pick up the clipboard code early, before anything
+// else is copied. Later launches leave the clipboard alone (Android 12+ shows a "pasted" toast).
+// No-op when a code is already pending or off Android. Never throws.
+const FIRST_LAUNCH_KEY = 'outfitref:launched'; // not "outfit:", so logout keeps it
+export const captureClipboardReferral = async (): Promise<void> => {
+  if (Platform.OS !== 'android') return;
+  try {
+    if (await AsyncStorage.getItem(FIRST_LAUNCH_KEY)) return;
+    await AsyncStorage.setItem(FIRST_LAUNCH_KEY, '1');
+    if (clean(await AsyncStorage.getItem(PENDING_KEY))) return;
+    await refFromClipboard();
+  } catch {}
 };
 
 export const clearPendingReferral = async () => {
@@ -51,6 +93,7 @@ export const clearPendingReferral = async () => {
 };
 
 const copyText = async (text: string): Promise<boolean> => {
+  if (Platform.OS !== 'web') return setClipboardText(text);
   try {
     const nav: any = typeof navigator !== 'undefined' ? navigator : null;
     if (nav?.clipboard?.writeText) {
@@ -102,8 +145,8 @@ export const getMyReferralCode = (uid: string | undefined): Promise<string | nul
 // Used by Share on posts and "Share profile".
 export const shareWithReferral = async (uid: string | undefined, line: string) => {
   const code = await getMyReferralCode(uid);
-  const link = code ? referralLink(code) : APP_WEB_URL;
-  const message = `${line}\nGet Outfit Vote, your AI stylist & daily colour guide: ${link}${
+  const link = code ? referralLink(code) : APP_GET_URL;
+  const message = `${line}\nDownload the app (Outfit Vote, your AI stylist & daily colour guide): ${link}${
     code ? `\n(referral code ${code})` : ''
   }`;
   await shareText(message, async () => {

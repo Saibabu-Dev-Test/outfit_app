@@ -15,6 +15,7 @@ import AdminScreen from '../screens/Admin/AdminScreen';
 import ProfileScreen from '../screens/Profile/ProfileScreen';
 import AchievementsScreen from '../screens/Profile/AchievementsScreen';
 import LikesScreen from '../screens/Profile/LikesScreen';
+import LikedByScreen from '../screens/Profile/LikedByScreen';
 import FollowListScreen from '../screens/Profile/FollowListScreen';
 import PostDetailScreen from '../screens/Feed/PostDetailScreen';
 import { colors, themedStyles, useTheme } from '../theme';
@@ -102,6 +103,7 @@ function NavigationContent() {
               <Stack.Screen name="Settings" component={ProfileScreen} />
               <Stack.Screen name="Achievements" component={AchievementsScreen} />
               <Stack.Screen name="Likes" component={LikesScreen} />
+              <Stack.Screen name="LikedBy" component={LikedByScreen} />
               <Stack.Screen name="PostDetail" component={PostDetailScreen} />
               <Stack.Screen name="FollowList" component={FollowListScreen} />
               <Stack.Screen name="NewPost" component={NewPostScreen} />

@@ -11,6 +11,8 @@ import android.util.Base64
 import android.view.WindowManager
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_STRONG
+import androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_WEAK
+import androidx.biometric.BiometricManager.Authenticators.DEVICE_CREDENTIAL
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
@@ -42,7 +44,11 @@ import javax.crypto.spec.SecretKeySpec
  * - The RSA public key encrypts without auth, so token refreshes can be saved any time.
  * - The RSA private key never leaves the Keystore (StrongBox when the phone has it, else TEE),
  *   needs a strong biometric for every single use (BiometricPrompt + CryptoObject), and is
- *   destroyed by Android when a new fingerprint is enrolled. No device PIN fallback.
+ *   destroyed by Android when a new fingerprint is enrolled.
+ * - Device PIN / pattern / password fallback: on Android 11+ new keys (KEY_ALIAS_V2) accept the
+ *   fingerprint OR the screen lock for each use, and the prompt offers both. Keys made by older
+ *   builds (KEY_ALIAS, fingerprint only) keep working until the lock is turned off and on again.
+ *   The plain relock prompt allows the screen lock on Android 9+.
  * - Tamper check: the APK signing certificate must match [EXPECTED_SIGNING_SHA256].
  */
 class AppLockModule(private val ctx: ReactApplicationContext) : ReactContextBaseJavaModule(ctx) {
@@ -89,7 +95,7 @@ class AppLockModule(private val ctx: ReactApplicationContext) : ReactContextBase
             }
           },
         )
-        prompt.authenticate(promptInfo(title, subtitle, negativeText))
+        prompt.authenticate(plainPromptInfo(title, subtitle, negativeText))
       } catch (e: Exception) {
         finish("error:${e.message ?: "Biometric prompt failed"}")
       }
@@ -101,7 +107,8 @@ class AppLockModule(private val ctx: ReactApplicationContext) : ReactContextBase
   @ReactMethod
   fun hasKey(promise: Promise) {
     try {
-      promise.resolve(keyStore().containsAlias(KEY_ALIAS))
+      val ks = keyStore()
+      promise.resolve(ks.containsAlias(KEY_ALIAS_V2) || ks.containsAlias(KEY_ALIAS))
     } catch (e: Exception) {
       promise.resolve(false)
     }
@@ -110,13 +117,20 @@ class AppLockModule(private val ctx: ReactApplicationContext) : ReactContextBase
   // Replaces the key pair. Resolves "strongbox", "tee" or "error:<message>"
   @ReactMethod
   fun createKey(preferStrongBox: Boolean, promise: Promise) {
+    createKeyWithOptions(preferStrongBox, true, promise)
+  }
+
+  // allowCredential: Android 11+ key that also opens with the device PIN / pattern / password
+  @ReactMethod
+  fun createKeyWithOptions(preferStrongBox: Boolean, allowCredential: Boolean, promise: Promise) {
     try {
       deleteKeyQuietly()
+      val withCredential = allowCredential && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && deviceSecure()
       val wantStrongBox = preferStrongBox && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
         ctx.packageManager.hasSystemFeature(PackageManager.FEATURE_STRONGBOX_KEYSTORE)
       if (wantStrongBox) {
         try {
-          generateKeyPair(true)
+          generateKeyPair(true, withCredential)
           promise.resolve("strongbox")
           return
         } catch (e: Exception) {
@@ -124,7 +138,14 @@ class AppLockModule(private val ctx: ReactApplicationContext) : ReactContextBase
           deleteKeyQuietly()
         }
       }
-      generateKeyPair(false)
+      try {
+        generateKeyPair(false, withCredential)
+      } catch (e: Exception) {
+        if (!withCredential) throw e
+        // Screen-lock fallback not supported for keys on this phone: fingerprint-only key
+        deleteKeyQuietly()
+        generateKeyPair(false, false)
+      }
       promise.resolve("tee")
     } catch (e: Exception) {
       deleteKeyQuietly()
@@ -147,7 +168,7 @@ class AppLockModule(private val ctx: ReactApplicationContext) : ReactContextBase
         return
       }
       val ks = keyStore()
-      val cert = ks.getCertificate(KEY_ALIAS)
+      val cert = ks.getCertificate(activeAlias(ks))
       if (cert == null) {
         promise.resolve("error:nokey")
         return
@@ -204,8 +225,12 @@ class AppLockModule(private val ctx: ReactApplicationContext) : ReactContextBase
     val ct = decoded[2]
     // "" = ready, otherwise the result to return without prompting
     var initResult = ""
+    var credentialKey = false
     val rsa: Cipher? = try {
-      val key = keyStore().getKey(KEY_ALIAS, null) as? PrivateKey
+      val ks = keyStore()
+      val alias = activeAlias(ks)
+      credentialKey = alias == KEY_ALIAS_V2
+      val key = ks.getKey(alias, null) as? PrivateKey
       if (key == null) {
         initResult = "invalidated"
         null
@@ -265,7 +290,10 @@ class AppLockModule(private val ctx: ReactApplicationContext) : ReactContextBase
             }
           },
         )
-        prompt.authenticate(promptInfo(title, subtitle, negativeText), BiometricPrompt.CryptoObject(rsa))
+        prompt.authenticate(
+          if (credentialKey) credentialPromptInfo(title, subtitle) else promptInfo(title, subtitle, negativeText),
+          BiometricPrompt.CryptoObject(rsa),
+        )
       } catch (e: Exception) {
         finish("error:${e.message ?: "Biometric prompt failed"}")
       }
@@ -317,6 +345,37 @@ class AppLockModule(private val ctx: ReactApplicationContext) : ReactContextBase
       .setConfirmationRequired(false)
       .build()
 
+  // Fingerprint or the phone's PIN / pattern / password (no negative button allowed then)
+  private fun credentialPromptInfo(title: String, subtitle: String): BiometricPrompt.PromptInfo =
+    BiometricPrompt.PromptInfo.Builder()
+      .setTitle(title)
+      .setSubtitle(subtitle)
+      .setAllowedAuthenticators(BIOMETRIC_STRONG or DEVICE_CREDENTIAL)
+      .setConfirmationRequired(false)
+      .build()
+
+  // Plain prompt (no key): screen lock fallback on Android 9+ (androidx: STRONG|CREDENTIAL needs 11+)
+  private fun plainPromptInfo(title: String, subtitle: String, negativeText: String): BiometricPrompt.PromptInfo =
+    when {
+      Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && deviceSecure() -> credentialPromptInfo(title, subtitle)
+      Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && deviceSecure() ->
+        BiometricPrompt.PromptInfo.Builder()
+          .setTitle(title)
+          .setSubtitle(subtitle)
+          .setAllowedAuthenticators(BIOMETRIC_WEAK or DEVICE_CREDENTIAL)
+          .setConfirmationRequired(false)
+          .build()
+      else -> promptInfo(title, subtitle, negativeText)
+    }
+
+  private fun deviceSecure(): Boolean = try {
+    (ctx.getSystemService(Context.KEYGUARD_SERVICE) as android.app.KeyguardManager).isDeviceSecure
+  } catch (e: Exception) {
+    false
+  }
+
+  private fun activeAlias(ks: KeyStore): String = if (ks.containsAlias(KEY_ALIAS_V2)) KEY_ALIAS_V2 else KEY_ALIAS
+
   private fun mapError(errorCode: Int, errString: CharSequence): String = when (errorCode) {
     BiometricPrompt.ERROR_NEGATIVE_BUTTON -> "password"
     BiometricPrompt.ERROR_USER_CANCELED, BiometricPrompt.ERROR_CANCELED -> "cancelled"
@@ -324,9 +383,9 @@ class AppLockModule(private val ctx: ReactApplicationContext) : ReactContextBase
     else -> "error:$errString"
   }
 
-  private fun generateKeyPair(strongBox: Boolean) {
+  private fun generateKeyPair(strongBox: Boolean, withCredential: Boolean) {
     val b = KeyGenParameterSpec.Builder(
-      KEY_ALIAS,
+      if (withCredential) KEY_ALIAS_V2 else KEY_ALIAS,
       KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT,
     )
       .setKeySize(2048)
@@ -336,8 +395,12 @@ class AppLockModule(private val ctx: ReactApplicationContext) : ReactContextBase
       // A newly enrolled fingerprint permanently invalidates the key
       .setInvalidatedByBiometricEnrollment(true)
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-      // 0 = auth for every use; strong biometric only (no device credential)
-      b.setUserAuthenticationParameters(0, KeyProperties.AUTH_BIOMETRIC_STRONG)
+      // 0 = auth for every use; strong biometric, plus the screen lock for V2 keys
+      b.setUserAuthenticationParameters(
+        0,
+        if (withCredential) KeyProperties.AUTH_BIOMETRIC_STRONG or KeyProperties.AUTH_DEVICE_CREDENTIAL
+        else KeyProperties.AUTH_BIOMETRIC_STRONG,
+      )
     } else {
       @Suppress("DEPRECATION")
       b.setUserAuthenticationValidityDurationSeconds(-1)
@@ -354,6 +417,7 @@ class AppLockModule(private val ctx: ReactApplicationContext) : ReactContextBase
     try {
       val ks = keyStore()
       if (ks.containsAlias(KEY_ALIAS)) ks.deleteEntry(KEY_ALIAS)
+      if (ks.containsAlias(KEY_ALIAS_V2)) ks.deleteEntry(KEY_ALIAS_V2)
     } catch (e: Exception) {
       // ignore
     }
@@ -370,6 +434,8 @@ class AppLockModule(private val ctx: ReactApplicationContext) : ReactContextBase
   companion object {
     const val NAME = "OutfitAppLock"
     private const val KEY_ALIAS = "outfit_session_rsa_v1"
+    // Fingerprint OR screen lock (Android 11+)
+    private const val KEY_ALIAS_V2 = "outfit_session_rsa_v2"
     private const val RSA_TRANSFORM = "RSA/ECB/OAEPWithSHA-256AndMGF1Padding"
     private const val AES_TRANSFORM = "AES/GCM/NoPadding"
     private val AAD = "com.outfit/session/v1".toByteArray(Charsets.UTF_8)

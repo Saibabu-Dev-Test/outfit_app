@@ -18,6 +18,8 @@ interface NativeLock {
   authenticate: (title: string, subtitle: string, negativeText: string) => Promise<string>;
   hasKey: () => Promise<boolean>;
   createKey: (preferStrongBox: boolean) => Promise<string>;
+  // Newer builds: allowCredential = the key also opens with the phone's PIN / pattern (Android 11+)
+  createKeyWithOptions?: (preferStrongBox: boolean, allowCredential: boolean) => Promise<string>;
   deleteKey: () => Promise<boolean>;
   encrypt: (plain: string) => Promise<string>;
   decrypt: (blob: string, title: string, subtitle: string, negativeText: string) => Promise<string>;
@@ -157,9 +159,13 @@ const preferStrongBox = async (): Promise<boolean> => {
   }
 };
 
-const createKey = async (strongBox: boolean): Promise<string> => {
+const createKey = async (strongBox: boolean, allowCredential = true): Promise<string> => {
   if (!Native) return 'error:no native';
-  const be = String(await Native.createKey(strongBox));
+  const be = String(
+    Native.createKeyWithOptions
+      ? await Native.createKeyWithOptions(strongBox, allowCredential)
+      : await Native.createKey(strongBox),
+  );
   if (!be.startsWith('error')) await AsyncStorage.setItem(BACKEND_KEY, be).catch(() => undefined);
   return be;
 };
@@ -366,7 +372,7 @@ export const unlockSession = async (): Promise<ColdUnlockResult> => {
   try {
     const blob = await AsyncStorage.getItem(BLOB_KEY);
     r = blob
-      ? String(await Native.decrypt(blob, 'Unlock OUTFIT', 'Touch the fingerprint sensor', 'Use password instead'))
+      ? String(await Native.decrypt(blob, 'Unlock OUTFIT', 'Use your fingerprint or screen lock', 'Sign out'))
       : 'failed';
   } catch (e: any) {
     r = `error:${e?.message || ''}`;
@@ -438,12 +444,12 @@ export const acknowledgeInvalidated = () => {
   if (status === 'invalidated') setStatus('ready');
 };
 
-// Lock screen relock (after 30 s in background): fingerprint bound to the key when possible
+// Lock screen relock (after 1 min in background): fingerprint bound to the key when possible
 export type VerifyResult = 'success' | 'cancelled' | 'password' | 'lockout' | 'invalidated' | 'error';
 export const verifyFingerprint = async (
   title = 'Unlock OUTFIT',
-  subtitle = 'Touch the fingerprint sensor',
-  negativeText = 'Use password instead',
+  subtitle = 'Use your fingerprint or screen lock',
+  negativeText = 'Sign out',
 ): Promise<VerifyResult> => {
   if (!Native) return 'error';
   try {
@@ -494,12 +500,12 @@ export const enableHardwareLock = async (): Promise<LockChange> => {
   if (!(await biometricAvailable())) {
     return { ok: false, message: 'Add a fingerprint in your phone settings first.' };
   }
-  const attempt = async (strongBox: boolean): Promise<{ r: string; be: string }> => {
-    const be = await createKey(strongBox);
+  const attempt = async (strongBox: boolean, allowCredential = true): Promise<{ r: string; be: string }> => {
+    const be = await createKey(strongBox, allowCredential);
     if (be.startsWith('error')) return { r: be, be };
     const blob = String(await Native.encrypt(JSON.stringify(await readPlainSession())));
     if (blob.startsWith('error')) return { r: blob, be };
-    const r = String(await Native.decrypt(blob, 'Turn on app lock', 'Confirm with your fingerprint', 'Cancel'));
+    const r = String(await Native.decrypt(blob, 'Turn on app lock', 'Confirm with your fingerprint or screen lock', 'Cancel'));
     return { r, be };
   };
   try {
@@ -507,6 +513,10 @@ export const enableHardwareLock = async (): Promise<LockChange> => {
     if (be === 'strongbox' && (r === 'failed' || r === 'invalidated' || r.startsWith('error'))) {
       await AsyncStorage.setItem(NO_STRONGBOX_KEY, '1').catch(() => undefined);
       ({ r, be } = await attempt(false));
+    }
+    if (r === 'failed' || r === 'invalidated' || (r.startsWith('error') && r !== 'error:tampered')) {
+      // A key that also takes the screen lock didn't work on this phone: fingerprint-only key
+      ({ r, be } = await attempt(false, false));
     }
     if (!r.startsWith('ok:')) {
       await Native.deleteKey().catch(() => undefined);

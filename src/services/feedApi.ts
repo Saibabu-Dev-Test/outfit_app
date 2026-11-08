@@ -198,10 +198,12 @@ export const getLikedPostIds = async (postIds: string[], uid: string): Promise<S
 
 // Like / unlike in one transaction: like doc + likeCount stay in step.
 // clearDislike: the user has disliked this post, so liking also removes the dislike (like XOR dislike).
+// me: name/avatar kept on the like doc for the owner's "Liked by" list.
 export const toggleLike = async (
   postId: string,
   uid: string,
   clearDislike = false,
+  me?: { name?: string | null; avatar?: string | null },
 ): Promise<{ liked: boolean; likeCount: number }> => {
   const postRef = doc(db, POSTS, postId);
   const likeRef = doc(db, POSTS, postId, 'likes', uid);
@@ -220,7 +222,11 @@ export const toggleLike = async (
         tx.delete(mineRef);
         return { liked: false, likeCount: Math.max(0, current - 1) };
       }
-      tx.set(likeRef, { createdAt: serverTimestamp() });
+      tx.set(likeRef, {
+        createdAt: serverTimestamp(),
+        name: ((me?.name || '').trim() || 'Outfit user').slice(0, 60),
+        avatar: inlineAvatar(me?.avatar),
+      });
       tx.update(postRef, { likeCount: increment(1) });
       tx.set(mineRef, { kind: 'post', refId: postId, createdAt: serverTimestamp() });
       if (clearDislike) tx.delete(dislikeRef);

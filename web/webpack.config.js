@@ -90,6 +90,8 @@ module.exports = (env, argv) => {
         patterns: [
           { from: path.join(__dirname, 'public', 'manifest.json') },
           { from: path.join(__dirname, 'public', 'icons'), to: 'icons' },
+          // Static app download page (/get/?ref=CODE); Firebase Hosting serves it before the SPA rewrite
+          { from: path.join(__dirname, 'public', 'get'), to: 'get' },
           {
             from: path.join(__dirname, 'public', 'sw.js'),
             transform: c => c.toString().replace('__BUILD_ID__', buildId),

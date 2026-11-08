@@ -28,6 +28,7 @@ import {
 } from '../../services/engagementApi';
 import { containsProfanity, RESPECT_MESSAGE } from '../../utils/profanity';
 import { timeAgo } from '../../utils/date';
+import { logActivity } from '../../services/activityApi';
 
 export default function CommentsScreen({ navigation, route }: { navigation: any; route: any }) {
   // Old callers pass { postId }; new ones pass { target }
@@ -102,6 +103,16 @@ export default function CommentsScreen({ navigation, route }: { navigation: any;
     try {
       if (!target) return;
       await addTargetComment(target, { uid, name: user?.name, avatar: user?.avatarUrl }, t);
+      // "<me> commented on your photo" in the owner's Activity (best-effort; owner looked up if not loaded)
+      if (target.kind === 'post' || target.kind === 'wardrobe') {
+        logActivity(
+          post?.userId,
+          { uid, name: user?.name, avatar: user?.avatarUrl },
+          'comment',
+          { kind: target.kind, id: target.id, thumbnail: post?.imageData },
+          t,
+        );
+      }
       setText('');
       setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 300);
     } catch (e: any) {

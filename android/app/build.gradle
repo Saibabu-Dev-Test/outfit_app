@@ -65,7 +65,10 @@ def enableProguardInReleaseBuilds = false
  * The preferred build flavor of JavaScriptCore (JSC)
  *
  * For example, to use the international variant, you can use:
- * `def jscFlavor = io.github.react-native-community:jsc-android-intl:2026004.+`
+ * `// GITHUB_RUN_NUMBER of the Android CI run (main.yml), which is also the build-N release tag
+def ciBuildNumber = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInteger()
+
+def jscFlavor = io.github.react-native-community:jsc-android-intl:2026004.+`
  *
  * The international variant includes ICU i18n library and necessary data
  * allowing to use e.g. `Date.toLocaleString` and `String.localeCompare` that
@@ -84,8 +87,22 @@ android {
         applicationId "com.outfit"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        // CI build number (build-N release): every APK has a higher versionCode, so a new
+        // download installs over the old one. Local builds: 1.
+        versionCode ciBuildNumber
+        versionName "1.0.${ciBuildNumber}"
+    }
+
+    // One APK per CPU type (smaller downloads) + a universal APK for any phone.
+    // Outputs: app-arm64-v8a-release.apk, app-armeabi-v7a-release.apk, app-x86_64-release.apk,
+    // app-universal-release.apk (all signed with the same key, same versionCode).
+    splits {
+        abi {
+            reset()
+            enable true
+            include "arm64-v8a", "armeabi-v7a", "x86_64"
+            universalApk true
+        }
     }
     signingConfigs {
         debug {

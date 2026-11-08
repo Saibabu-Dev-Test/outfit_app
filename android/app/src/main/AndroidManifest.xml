@@ -5,6 +5,8 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <!-- In-app update: open the package installer for the downloaded APK -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
       android:name=".MainApplication"
@@ -28,7 +30,7 @@
         </intent-filter>
       </activity>
 
-      <!-- Required by react-native-image-picker for camera capture on Android -->
+      <!-- Camera capture (react-native-image-picker) and in-app update APKs (xml/file_paths) -->
       <provider
         android:name="androidx.core.content.FileProvider"
         android:authorities="${applicationId}.provider"

@@ -37,6 +37,7 @@ import {
 } from '../services/feedApi';
 import { follow, isFollowingCached, onFollowChange, unfollow } from '../services/socialApi';
 import { shareWithReferral } from '../utils/referralLink';
+import { logActivity } from '../services/activityApi';
 import { timeAgo } from '../utils/date';
 
 interface Props {
@@ -136,6 +137,19 @@ export default function PostCard({ post, width, myUid, isAdmin, onDeleted }: Pro
     };
   }, [multi, post.id, post.photos.length, myUid]);
 
+  // "<me> liked your photo" in the owner's Activity (best-effort, skipped on my own photos)
+  const notifyOwner = (type: 'like' | 'dislike') => {
+    if (!myUid || isMine) return;
+    logActivity(post.userId, { uid: myUid, name: me?.name, avatar: me?.avatarUrl }, type, {
+      kind: post.kind,
+      id: post.id,
+      thumbnail: post.imageData,
+    });
+  };
+
+  // My own photo: who liked it
+  const openLikedBy = () => navigation.navigate('LikedBy', { kind: post.kind, id: post.id });
+
   const like = async (force = false) => {
     if (!myUid) {
       Alert.alert('Not signed in', 'Please sign in again to like posts.');
@@ -155,14 +169,17 @@ export default function PostCard({ post, width, myUid, isAdmin, onDeleted }: Pro
       setDislikeCount(Math.max(0, wasDislikeCount - 1));
     }
     try {
+      let nowLiked: boolean;
       if (post.kind === 'post') {
-        const r = await toggleLike(post.id, myUid, clearDislike);
+        const r = await toggleLike(post.id, myUid, clearDislike, { name: me?.name, avatar: me?.avatarUrl });
         setLiked(r.liked);
         setLikeCount(r.likeCount);
+        nowLiked = r.liked;
       } else {
-        const now = await toggleWardrobeLike(post.id, myUid, was, clearDislike);
-        setLiked(now);
+        nowLiked = await toggleWardrobeLike(post.id, myUid, was, clearDislike);
+        setLiked(nowLiked);
       }
+      if (nowLiked) notifyOwner('like');
     } catch (e: any) {
       setLiked(was);
       setLikeCount(wasCount);
@@ -193,6 +210,7 @@ export default function PostCard({ post, width, myUid, isAdmin, onDeleted }: Pro
     }
     try {
       const r = await toggleDislike(post.kind, post.id, myUid, was, wasLiked);
+      if (r.disliked) notifyOwner('dislike');
       setDisliked(r.disliked);
       setLiked(r.liked);
       if (typeof r.likeCount === 'number') setLikeCount(r.likeCount);
@@ -394,14 +412,32 @@ export default function PostCard({ post, width, myUid, isAdmin, onDeleted }: Pro
       ) : null}
 
       <View style={styles.actions}>
-        <TouchableOpacity
-          style={[styles.pill, liked && styles.pillOn]}
-          onPress={() => like()}
-          accessibilityLabel={`Like, ${likeCount}`}
-          hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}>
-          <Text style={[styles.pillIcon, liked && styles.pillIconOn]}>👍</Text>
-          <Text style={[styles.pillCount, liked && styles.pillCountOn]}>{likeCount}</Text>
-        </TouchableOpacity>
+        {isMine ? (
+          // My photo: 👍 likes, the count opens "Liked by"
+          <View style={[styles.pill, liked && styles.pillOn]}>
+            <TouchableOpacity
+              onPress={() => like()}
+              accessibilityLabel="Like"
+              hitSlop={{ top: 6, bottom: 6, left: 4, right: 2 }}>
+              <Text style={[styles.pillIcon, liked && styles.pillIconOn]}>👍</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={openLikedBy}
+              accessibilityLabel={`Liked by ${likeCount}`}
+              hitSlop={{ top: 6, bottom: 6, left: 2, right: 4 }}>
+              <Text style={[styles.pillCount, styles.pillCountLink, liked && styles.pillCountOn]}>{likeCount}</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <TouchableOpacity
+            style={[styles.pill, liked && styles.pillOn]}
+            onPress={() => like()}
+            accessibilityLabel={`Like, ${likeCount}`}
+            hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}>
+            <Text style={[styles.pillIcon, liked && styles.pillIconOn]}>👍</Text>
+            <Text style={[styles.pillCount, liked && styles.pillCountOn]}>{likeCount}</Text>
+          </TouchableOpacity>
+        )}
         <TouchableOpacity
           style={[styles.pill, disliked && styles.pillOn]}
           onPress={dislike}
@@ -532,6 +568,7 @@ const styles = themedStyles(() => StyleSheet.create({
   pillIconOn: { opacity: 1 },
   pillCount: { fontSize: fontSize.sm, fontWeight: fontWeight.bold, color: colors.textSecondary, marginLeft: 4 },
   pillCountOn: { color: colors.accent },
+  pillCountLink: { textDecorationLine: 'underline', paddingHorizontal: 2 },
   spacer: { flex: 1 },
   followBtn: {
     paddingVertical: 5,

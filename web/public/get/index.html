@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#2D1F6E" />
+  <title>Get OUTFIT 👗 Outfit Vote app</title>
+  <meta name="description" content="Download Outfit Vote, your AI stylist &amp; daily colour guide." />
+  <meta property="og:title" content="Get the Outfit Vote app 👗" />
+  <meta property="og:description" content="Your AI stylist &amp; daily colour guide. Download the Android app." />
+  <link rel="icon" href="/icons/favicon-32.png" />
+  <style>
+    :root { --p: #2D1F6E; --p2: #6C5CE7; --bg: #F5F4FA; --t: #1E1B2E; --m: #6B6880; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; background: var(--bg); color: var(--t);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans", sans-serif; }
+    main { max-width: 440px; margin: 0 auto; padding: 28px 20px 40px; text-align: center; }
+    .logo { font-size: 56px; line-height: 1; }
+    h1 { margin: 10px 0 2px; font-size: 34px; letter-spacing: 6px; color: var(--p); font-weight: 900; }
+    .tag { margin: 0 0 22px; color: var(--m); font-size: 15px; }
+    .code { display: inline-block; margin: 0 0 22px; padding: 10px 16px; border-radius: 14px;
+      background: #fff; border: 2px dashed var(--p2); font-size: 14px; color: var(--m); }
+    .code b { display: block; font-size: 26px; letter-spacing: 4px; color: var(--p); margin-top: 2px; }
+    .btn { display: block; width: 100%; padding: 18px 16px; border: 0; border-radius: 16px;
+      background: linear-gradient(135deg, var(--p), var(--p2)); color: #fff; font-size: 19px; font-weight: 800;
+      text-decoration: none; cursor: pointer; box-shadow: 0 8px 22px rgba(45,31,110,.28); }
+    .btn:active { transform: scale(.98); }
+    .small { display: inline-block; margin-top: 14px; color: var(--p2); font-size: 14px; font-weight: 600; }
+    .note { min-height: 20px; margin: 12px 0 0; font-size: 13px; color: #2E7D32; }
+    .steps { margin: 26px 0 0; padding: 16px 18px; text-align: left; background: #fff; border-radius: 16px;
+      font-size: 14px; color: var(--t); line-height: 1.5; }
+    .steps h2 { margin: 0 0 8px; font-size: 15px; color: var(--p); }
+    .steps ol { margin: 0; padding-left: 20px; }
+    .steps li { margin-bottom: 6px; }
+    .browser { display: block; margin-top: 24px; color: var(--m); font-size: 14px; }
+    .browser a { color: var(--p2); font-weight: 700; }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="logo">👗</div>
+    <h1>OUTFIT</h1>
+    <p class="tag">Outfit Vote · your AI stylist &amp; daily colour guide</p>
+
+    <div class="code" id="codeBox" hidden>Your friend's referral code<b id="code"></b></div>
+
+    <a class="btn" id="dl" href="https://github.com/Saibabu-Dev-Test/outfit_app/releases/latest/download/app-arm64-v8a-release.apk">⬇ Download Android app</a>
+    <p class="note" id="note"></p>
+    <a class="small" id="dlOld" href="https://github.com/Saibabu-Dev-Test/outfit_app/releases/latest/download/app-universal-release.apk">Older phone? Download this version</a>
+
+    <div class="steps">
+      <h2>How to install</h2>
+      <ol>
+        <li>Tap <b>Download Android app</b> and open the file when it finishes.</li>
+        <li>If asked, allow <b>install from this source</b> (Settings → Install unknown apps), then go back and tap <b>Install</b>.</li>
+        <li>If you see <b>"package appears to be invalid"</b>, delete the old download and download again in <b>Chrome</b>.</li>
+        <li>Open OUTFIT and create your account. The referral code is filled in for you.</li>
+      </ol>
+    </div>
+
+    <span class="browser">iPhone or computer? <a id="web" href="/">Open in browser instead</a></span>
+  </main>
+  <script>
+    (function () {
+      var m = /[?&]ref=([^&#]+)/i.exec(location.search);
+      var code = m ? decodeURIComponent(m[1]).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8) : '';
+      if (code.length >= 4) {
+        document.getElementById('code').textContent = code;
+        document.getElementById('codeBox').hidden = false;
+        document.getElementById('web').href = '/?ref=' + encodeURIComponent(code);
+      } else {
+        code = '';
+      }
+
+      // Copies OUTFITREF:CODE so the app can fill the code after install (no Play Install Referrer)
+      function fallbackCopy(text) {
+        try {
+          var ta = document.createElement('textarea');
+          ta.value = text;
+          ta.setAttribute('readonly', '');
+          ta.style.position = 'fixed';
+          ta.style.top = '-1000px';
+          document.body.appendChild(ta);
+          ta.select();
+          ta.setSelectionRange(0, text.length);
+          var ok = document.execCommand('copy');
+          document.body.removeChild(ta);
+          return ok;
+        } catch (e) {
+          return false;
+        }
+      }
+      function copyRef() {
+        if (!code) return Promise.resolve(false);
+        var text = 'OUTFITREF:' + code;
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          return navigator.clipboard.writeText(text).then(function () { return true; }, function () { return fallbackCopy(text); });
+        }
+        return Promise.resolve(fallbackCopy(text));
+      }
+      function startDownload(e) {
+        var url = this.href;
+        if (!code) return; // plain link
+        e.preventDefault();
+        var done = false;
+        function go(ok) {
+          if (done) return;
+          done = true;
+          document.getElementById('note').textContent = ok
+            ? 'Code ' + code + ' saved. Your download is starting…'
+            : 'Your download is starting… Enter code ' + code + ' when you sign up.';
+          location.href = url;
+        }
+        copyRef().then(go, function () { go(false); });
+        setTimeout(function () { go(false); }, 1500); // never block the download
+      }
+      document.getElementById('dl').addEventListener('click', startDownload);
+      document.getElementById('dlOld').addEventListener('click', startDownload);
+    })();
+  </script>
+</body>
+</html>

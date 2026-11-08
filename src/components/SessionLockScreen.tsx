@@ -27,8 +27,8 @@ export default function SessionLockScreen({ status }: { status: VaultStatus }) {
   const unlock = useCallback(async () => {
     setNote('');
     const r = await unlockSession();
-    if (r === 'cancelled') setNote('Fingerprint needed to open OUTFIT.');
-    else if (r === 'lockout') setNote('Too many tries. Wait a little, then try again, or use your password.');
+    if (r === 'cancelled') setNote('Fingerprint or screen lock needed to open OUTFIT.');
+    else if (r === 'lockout') setNote('Too many tries. Wait a little, then try again, or sign out.');
     else if (r === 'error') setNote('Could not read your fingerprint. Try again.');
     else if (r === 'password' || r === 'invalidated') {
       // Next login is a full Google + mobile + password login; let them pick the account
@@ -67,7 +67,7 @@ export default function SessionLockScreen({ status }: { status: VaultStatus }) {
     <View style={styles.wrap}>
       <Text style={styles.icon}>🔒</Text>
       <Text style={styles.title}>OUTFIT is locked</Text>
-      <Text style={styles.sub}>Unlock with your fingerprint</Text>
+      <Text style={styles.sub}>Unlock with your fingerprint or phone PIN / pattern</Text>
       {!!note && <Text style={styles.note}>{note}</Text>}
       <TouchableOpacity style={styles.button} onPress={unlock} disabled={busy} activeOpacity={0.8}>
         {busy ? (
@@ -77,7 +77,7 @@ export default function SessionLockScreen({ status }: { status: VaultStatus }) {
         )}
       </TouchableOpacity>
       <TouchableOpacity style={styles.linkButton} onPress={usePassword} disabled={busy} activeOpacity={0.7}>
-        <Text style={styles.linkText}>Use password instead</Text>
+        <Text style={styles.linkText}>Sign out</Text>
       </TouchableOpacity>
     </View>
   );

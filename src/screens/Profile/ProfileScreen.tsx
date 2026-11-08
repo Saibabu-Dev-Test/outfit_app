@@ -38,6 +38,7 @@ import {
   enableHardwareLock,
   isLockEnabled,
   isLockSupported,
+  setUserLockPref,
 } from '../../native/appLock';
 import { signOutKeepLock } from '../../services/authApi';
 
@@ -339,6 +340,7 @@ const fetchProfile = async () => {
     const r = value ? await enableHardwareLock() : await disableHardwareLock();
     if (r.ok) {
       setLockOn(value);
+      await setUserLockPref(authUser?.id, value); // this user's choice, kept across sign-out
       return;
     }
     if (r.message) Alert.alert('Fingerprint lock', r.message);
@@ -653,7 +655,7 @@ const fetchProfile = async () => {
               onPress: openStylePrefs,
             },
             { id: 'ach', icon: '🏆', label: 'Achievements', onPress: () => navigation.navigate('Achievements') },
-            { id: 'likes', icon: '♥', label: 'Likes', onPress: () => navigation.navigate('Likes') },
+            { id: 'likes', icon: '♥', label: 'Likes', onPress: () => navigation.navigate('Likes', { tab: 'likes' }) },
             {
               id: 'notif',
               icon: '🔔',

@@ -118,18 +118,39 @@ jobs:
             sleep 60
           done
           exit 1
-      # 7. Upload generated APK
+      # 6.5. Split APKs (one per CPU type) + universal; app-release.apk = universal copy for old links
+      - name: Collect APKs
+        run: |
+          OUT=android/app/build/outputs/apk/release
+          ls -la "$OUT"
+          mkdir -p apks
+          for abi in arm64-v8a armeabi-v7a x86_64 universal; do
+            f=$(ls "$OUT"/*-"$abi"-release.apk 2>/dev/null | head -n 1)
+            if [ -z "$f" ]; then echo "Missing $abi APK"; exit 1; fi
+            cp "$f" "apks/app-$abi-release.apk"
+          done
+          cp apks/app-universal-release.apk apks/app-release.apk
+          ls -la apks
+
+      # 7. Upload generated APKs
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: outfit-app-debug-apk
-          path: android/app/build/outputs/apk/release/app-release.apk
+          name: outfit-app-release-apks
+          path: apks/*.apk
           retention-days: 3
 
-      # 8. Create GitHub Release
+      # 8. Create GitHub Release (not a prerelease, so /releases/latest/download/<name> points here)
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
           name: OV App Build ${{ github.run_number }}
-          files: android/app/build/outputs/apk/release/app-release.apk
+          prerelease: false
+          make_latest: true
+          files: |
+            apks/app-arm64-v8a-release.apk
+            apks/app-armeabi-v7a-release.apk
+            apks/app-x86_64-release.apk
+            apks/app-universal-release.apk
+            apks/app-release.apk
