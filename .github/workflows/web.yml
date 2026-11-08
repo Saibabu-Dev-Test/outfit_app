@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   pages: write
   id-token: write
 
@@ -41,6 +41,19 @@ jobs:
         run: |
           node -e "require('fs').writeFileSync('src/config/ai.generated.ts', '// Written by CI. Do not commit.\nexport const GEMINI_API_KEY: string = ' + JSON.stringify(process.env.GEMINI_API_KEY || '') + ';\n')"
           if [ -n "$GEMINI_API_KEY" ]; then echo "AI key: set"; else echo "AI key: missing (AI stylist shows coming soon)"; fi
+
+      # Root-path build for Firebase Hosting (https://outfit-vote-9edca.web.app), published as the
+      # web-latest release asset; scripts/deploy-hosting.sh (Cloud Shell) puts it live.
+      - name: Build web app for Firebase Hosting
+        env:
+          PUBLIC_PATH: /
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          npm run web:build
+          tar -czf web-firebase.tar.gz -C web/dist .
+          gh release view web-latest >/dev/null 2>&1 || gh release create web-latest --prerelease --title "Web build (Firebase Hosting)" --notes "Latest web build for Firebase Hosting. Deploy with scripts/deploy-hosting.sh"
+          gh release upload web-latest web-firebase.tar.gz --clobber
+          rm -rf web/dist
 
       - name: Build web app
         env:

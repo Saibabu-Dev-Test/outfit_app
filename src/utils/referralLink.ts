@@ -1,10 +1,10 @@
-// Referral share links: https://saibabu-dev-test.github.io/outfit_app/?ref=CODE
+// Referral share links: https://outfit-vote-9edca.web.app/?ref=CODE
 // Opening the link prefills the code on the sign-up screen (web) and is kept until sign-up.
 import { Alert, Linking, Platform, Share } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ensureReferralCode } from '../services/rewardsApi';
 
-export const APP_WEB_URL = 'https://saibabu-dev-test.github.io/outfit_app/';
+export const APP_WEB_URL = 'https://outfit-vote-9edca.web.app/';
 const PENDING_KEY = 'pendingReferralCode';
 // Browser globals (typed loosely; RN's tsconfig has no DOM lib)
 const g: any = globalThis as any;
