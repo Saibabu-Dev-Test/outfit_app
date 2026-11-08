@@ -28,8 +28,8 @@ export interface PickOptions {
 
 // Avatars are shown small and copied onto chat messages and posts, so keep them tiny
 export const AVATAR_PICK: PickOptions = { maxWidth: 256, maxHeight: 256, quality: 0.6, maxChars: 60000 };
-// A poll message holds up to 4 photos in one Firestore doc (1 MiB limit)
-export const POLL_PICK: PickOptions = { maxWidth: 540, maxHeight: 540, quality: 0.4, maxChars: 220000 };
+// A poll message / multi-photo post holds up to 6 photos in one Firestore doc (1 MiB limit)
+export const POLL_PICK: PickOptions = { maxWidth: 540, maxHeight: 540, quality: 0.4, maxChars: 145000 };
 
 const toPicked = (res: ImagePickerResponse, maxChars: number = MAX_BASE64_CHARS): PickedImage | null => {
   if (res.didCancel) return null;
@@ -76,3 +76,43 @@ export const pickImage = (
   });
 
 export const isDataUri = (s?: string | null): boolean => !!s && s.startsWith('data:');
+
+// Several photos from the library at once (multi-photo posts / A-F polls).
+// Photos over maxChars are skipped and counted in `skipped`. Resolves [] when cancelled.
+export const pickImages = (
+  max: number,
+  opts: PickOptions = POLL_PICK,
+): Promise<{ images: PickedImage[]; skipped: number }> =>
+  new Promise((resolve, reject) => {
+    const maxChars = Math.min(opts.maxChars ?? MAX_BASE64_CHARS, MAX_BASE64_CHARS);
+    try {
+      launchImageLibrary(
+        {
+          ...OPTIONS,
+          maxWidth: opts.maxWidth ?? OPTIONS.maxWidth,
+          maxHeight: opts.maxHeight ?? OPTIONS.maxHeight,
+          quality: (opts.quality ?? OPTIONS.quality) as CameraOptions['quality'],
+          selectionLimit: Math.max(1, max),
+        },
+        res => {
+          if (res.didCancel) return resolve({ images: [], skipped: 0 });
+          if (res.errorCode || res.errorMessage) {
+            return reject(new Error(res.errorMessage || `Image error: ${res.errorCode}`));
+          }
+          const images: PickedImage[] = [];
+          let skipped = 0;
+          (res.assets || []).slice(0, max).forEach(a => {
+            if (!a.base64 || a.base64.length > maxChars) {
+              skipped += 1;
+              return;
+            }
+            const type = a.type && a.type.startsWith('image/') ? a.type : 'image/jpeg';
+            images.push({ dataUri: `data:${type};base64,${a.base64}`, uri: a.uri });
+          });
+          resolve({ images, skipped });
+        },
+      );
+    } catch (e) {
+      reject(e);
+    }
+  });

@@ -37,6 +37,21 @@ service cloud.firestore {
         || get(/databases/$(db)/documents/phones/$(request.resource.data.phone)).data.uid == me();
     }
 
+    // New comment {userId, userName, userAvatar, text, createdAt} by me, bad-word checked
+    function commentOk() {
+      return request.resource.data.keys().hasOnly(['userId', 'userName', 'userAvatar', 'text', 'createdAt'])
+        && request.resource.data.userId == me()
+        && request.resource.data.text is string
+        && request.resource.data.text.size() >= 1
+        && request.resource.data.text.size() <= 300
+        && request.resource.data.createdAt == request.time
+        && (request.resource.data.get('userAvatar', null) == null
+            || (request.resource.data.userAvatar is string
+                && request.resource.data.userAvatar.size() <= 60000))
+        // Worst abusive words (the app filters a longer list before sending)
+        && !request.resource.data.text.lower().matches('(([a-z]|[^a-z])*[^a-z])?(fuck[a-z]*|motherfucker[a-z]*|bitch(es)?|cunts?|nigg(er|a)s?|faggots?|madarchod|behenchod|bhenchod|chutiy[ae]|bhosdike|lanja|lanjakodaka|dengu|puku|modda|randi|gandu|lavda)([^a-z]([a-z]|[^a-z])*)?');
+    }
+
     // ── Rewards helpers (daily tasks, points, weekly celebrities) ─────────
     // Days in a Mon-Sun week with all 3 tasks done to become a weekly celebrity.
     // Keep in sync with WEEKLY_REQUIRED_DAYS in src/services/rewardsApi.ts
@@ -121,7 +136,12 @@ service cloud.firestore {
         && isDateKey(day)
         && request.time > dateTs(day) - duration.value(14, 'h')
         && request.time < dateTs(day) + duration.value(38, 'h')
-        && request.resource.data.keys().hasOnly(['opened', 'voted', 'uploaded', 'updatedAt'])
+        && request.resource.data.keys().hasOnly(['opened', 'voted', 'uploaded', 'updatedAt', 'aiCount'])
+        // AI stylist messages used that day (0..20, never goes down)
+        && request.resource.data.get('aiCount', 0) is int
+        && request.resource.data.get('aiCount', 0) >= 0
+        && request.resource.data.get('aiCount', 0) <= 20
+        && (resource == null || request.resource.data.get('aiCount', 0) >= resource.data.get('aiCount', 0))
         && request.resource.data.get('opened', false) is bool
         && request.resource.data.get('voted', false) is bool
         && request.resource.data.get('uploaded', false) is bool
@@ -130,6 +150,59 @@ service cloud.firestore {
                 && (resource.data.get('voted', false) == false || request.resource.data.get('voted', false) == true)
                 && (resource.data.get('uploaded', false) == false || request.resource.data.get('uploaded', false) == true)));
       allow delete: if false;
+    }
+
+    // ── Likes list: users/{uid}/liked/{p_postId | w_wardrobeId} {kind, refId, createdAt} ──
+    // Written by the owner in the same write as the like itself.
+    match /users/{uid}/liked/{key} {
+      allow read: if signedIn() && me() == uid;
+      allow create, update: if signedIn() && me() == uid
+        && request.resource.data.keys().hasOnly(['kind', 'refId', 'createdAt'])
+        && request.resource.data.kind in ['post', 'wardrobe']
+        && request.resource.data.refId is string
+        && key == (request.resource.data.kind == 'post' ? 'p_' : 'w_') + request.resource.data.refId;
+      allow delete: if signedIn() && me() == uid;
+    }
+
+    // ── Follow: users/{target}/followers/{follower} + users/{follower}/following/{target} ──
+    // Only the follower writes, and both docs change together (checked with getAfter/existsAfter).
+    function followEntryOk() {
+      return request.resource.data.keys().hasOnly(['name', 'avatar', 'createdAt'])
+        && request.resource.data.name is string
+        && request.resource.data.name.size() <= 60
+        && (request.resource.data.get('avatar', null) == null
+            || (request.resource.data.avatar is string && request.resource.data.avatar.size() <= 60000));
+    }
+    function followPath(target, follower) {
+      return /databases/$(db)/documents/users/$(target)/followers/$(follower);
+    }
+    function followingPath(follower, target) {
+      return /databases/$(db)/documents/users/$(follower)/following/$(target);
+    }
+    // Lists of a private profile: only the owner (and the follower for their own doc)
+    function profileOpen(uid) {
+      return me() == uid
+        || get(/databases/$(db)/documents/users/$(uid)).data.get('isPublic', true) != false;
+    }
+    match /users/{uid}/followers/{follower} {
+      allow get: if signedIn() && (me() == follower || profileOpen(uid));
+      allow list: if signedIn() && profileOpen(uid);
+      allow create: if signedIn() && me() == follower && follower != uid
+        && followEntryOk()
+        && existsAfter(followingPath(follower, uid));
+      allow delete: if signedIn() && me() == follower
+        && !existsAfter(followingPath(follower, uid));
+      allow update: if false;
+    }
+    match /users/{uid}/following/{target} {
+      allow get: if signedIn() && (me() == uid || profileOpen(uid));
+      allow list: if signedIn() && profileOpen(uid);
+      allow create: if signedIn() && me() == uid && target != uid
+        && followEntryOk()
+        && existsAfter(followPath(target, uid));
+      allow delete: if signedIn() && me() == uid
+        && !existsAfter(followPath(target, uid));
+      allow update: if false;
     }
 
     // ── Week counter: users/{uid}/weeks/{mondayKey} {fullDays, lastDay, updatedAt} ──
@@ -167,13 +240,20 @@ service cloud.firestore {
     }
 
     // ── Daily colour votes (Phase 1) ────────────────────────────────────
-    // Home writes votes/top_colors_{date}_{uid} with {systemId, color, userId, voterGender, date, timestamp}
+    // Home writes votes/top_colors_{date}_{uid} with {systemId, color, userId, voterGender, voterName, voterAge, date, timestamp}
     match /votes/{voteId} {
       allow read: if signedIn();
       allow create, update: if signedIn()
         && request.resource.data.userId == me()
         && request.resource.data.systemId == 'top_colors'
-        && voteId == 'top_colors_' + request.resource.data.date + '_' + me();
+        && voteId == 'top_colors_' + request.resource.data.date + '_' + me()
+        // Name and age shown in the Boys / Girls voter lists
+        && (request.resource.data.get('voterName', null) == null
+            || (request.resource.data.voterName is string && request.resource.data.voterName.size() <= 60))
+        && (request.resource.data.get('voterAge', null) == null
+            || (request.resource.data.voterAge is int
+                && request.resource.data.voterAge >= 0
+                && request.resource.data.voterAge < 130));
       allow delete: if false;
     }
 
@@ -185,6 +265,28 @@ service cloud.firestore {
       allow update: if signedIn() && resource.data.userId == me()
         && request.resource.data.userId == resource.data.userId;
       allow delete: if signedIn() && resource.data.userId == me();
+
+      // ── Likes and comments on public wardrobe photos in the feed ──
+      function itemData() {
+        return get(/databases/$(db)/documents/wardrobe/$(itemId)).data;
+      }
+      function itemVisible() {
+        return itemData().userId == me() || itemData().isPublic == true;
+      }
+      match /likes/{likerId} {
+        allow read: if signedIn() && itemVisible();
+        allow create: if signedIn() && likerId == me() && itemVisible()
+          && request.resource.data.keys().hasOnly(['createdAt']);
+        allow delete: if signedIn() && likerId == me();
+        allow update: if false;
+      }
+      match /comments/{cid} {
+        allow read: if signedIn() && itemVisible();
+        allow create: if signedIn() && itemVisible() && commentOk();
+        allow update: if false;
+        allow delete: if signedIn()
+          && (resource.data.userId == me() || itemData().userId == me() || isAdmin());
+      }
     }
 
     // ── Invite codes: inviteCodes/{code} -> {circleId, createdBy} ──────────
@@ -242,7 +344,7 @@ service cloud.firestore {
           && request.resource.data.type in ['text', 'image', 'poll']
           && (request.resource.data.type != 'poll'
               || (request.resource.data.poll.options.size() >= 2
-                  && request.resource.data.poll.options.size() <= 4));
+                  && request.resource.data.poll.options.size() <= 6));
         allow update: if false;
         allow delete: if signedIn()
           && (resource.data.userId == me() || isCircleOwner(cid) || isAdmin());
@@ -260,6 +362,32 @@ service cloud.firestore {
           // Own vote, or cleanup by the poll author, circle owner or admin
           allow delete: if signedIn()
             && (voterId == me()
+                || isCircleOwner(cid)
+                || isAdmin()
+                || get(/databases/$(db)/documents/circles/$(cid)/messages/$(mid)).data.userId == me());
+        }
+
+        // ── Like / dislike: one doc per member, changeable ──
+        match /reactions/{uid} {
+          allow read: if isMember(cid) || isAdmin();
+          allow create, update: if isMember(cid)
+            && uid == me()
+            && request.resource.data.keys().hasOnly(['type', 'updatedAt'])
+            && request.resource.data.type in ['like', 'dislike'];
+          allow delete: if signedIn()
+            && (uid == me()
+                || isCircleOwner(cid)
+                || isAdmin()
+                || get(/databases/$(db)/documents/circles/$(cid)/messages/$(mid)).data.userId == me());
+        }
+
+        // ── Comments on a photo / A-F post ──
+        match /comments/{commentId} {
+          allow read: if isMember(cid) || isAdmin();
+          allow create: if isMember(cid) && commentOk();
+          allow update: if false;
+          allow delete: if signedIn()
+            && (resource.data.userId == me()
                 || isCircleOwner(cid)
                 || isAdmin()
                 || get(/databases/$(db)/documents/circles/$(cid)/messages/$(mid)).data.userId == me());
@@ -310,7 +438,12 @@ service cloud.firestore {
         && request.resource.data.isPublic == true
         && request.resource.data.likeCount == 0
         && request.resource.data.get('commentCount', 0) == 0
-        && request.resource.data.imageData is string;
+        && request.resource.data.imageData is string
+        // 2-6 photo "vote A/B/C" posts keep photos B.. in morePhotos
+        && (request.resource.data.get('morePhotos', null) == null
+            || (request.resource.data.morePhotos is list
+                && request.resource.data.morePhotos.size() >= 1
+                && request.resource.data.morePhotos.size() <= 5));
       allow update: if signedIn() && (likeUpdate() || commentCountUpdate());
       allow delete: if signedIn() && (resource.data.userId == me() || isAdmin());
 
@@ -320,22 +453,26 @@ service cloud.firestore {
         allow update: if false;
       }
 
+      // ── A/B/C votes on multi-photo posts: one doc per voter, changeable ──
+      match /votes/{voterId} {
+        function photoCount() {
+          return get(postPath()).data.get('morePhotos', []).size() + 1;
+        }
+        allow read: if signedIn();
+        allow create, update: if signedIn()
+          && voterId == me()
+          && request.resource.data.keys().hasOnly(['option', 'updatedAt'])
+          && photoCount() >= 2
+          && request.resource.data.option in ['A', 'B', 'C', 'D', 'E', 'F'][0:photoCount()];
+        allow delete: if signedIn() && (voterId == me() || get(postPath()).data.userId == me() || isAdmin());
+      }
+
       // ── Comments: posts/{postId}/comments/{cid} {userId, userName, userAvatar, text, createdAt} ──
       match /comments/{cid} {
         allow read: if signedIn();
         allow create: if signedIn()
           && exists(postPath())
-          && request.resource.data.keys().hasOnly(['userId', 'userName', 'userAvatar', 'text', 'createdAt'])
-          && request.resource.data.userId == me()
-          && request.resource.data.text is string
-          && request.resource.data.text.size() >= 1
-          && request.resource.data.text.size() <= 300
-          && request.resource.data.createdAt == request.time
-          && (request.resource.data.get('userAvatar', null) == null
-              || (request.resource.data.userAvatar is string
-                  && request.resource.data.userAvatar.size() <= 60000))
-          // Worst abusive words (the app filters a longer list before sending)
-          && !request.resource.data.text.lower().matches('(([a-z]|[^a-z])*[^a-z])?(fuck[a-z]*|motherfucker[a-z]*|bitch(es)?|cunts?|nigg(er|a)s?|faggots?|madarchod|behenchod|bhenchod|chutiy[ae]|bhosdike|lanja|lanjakodaka|dengu|puku|modda|randi|gandu|lavda)([^a-z]([a-z]|[^a-z])*)?');
+          && commentOk();
         allow update: if false;
         // Comment author, post owner or admin
         allow delete: if signedIn()

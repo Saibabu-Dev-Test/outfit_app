@@ -33,6 +33,14 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      # 4.5. AI stylist key from the GEMINI_API_KEY secret (empty when the secret is missing)
+      - name: Write AI config
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          node -e "require('fs').writeFileSync('src/config/ai.generated.ts', '// Written by CI. Do not commit.\nexport const GEMINI_API_KEY: string = ' + JSON.stringify(process.env.GEMINI_API_KEY || '') + ';\n')"
+          if [ -n "$GEMINI_API_KEY" ]; then echo "AI key: set"; else echo "AI key: missing (AI stylist shows coming soon)"; fi
+
       # 5. Make Gradle executable
       - name: Make Gradlew executable
         run: chmod +x android/gradlew

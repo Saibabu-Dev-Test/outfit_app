@@ -7,7 +7,7 @@ import {
 } from 'react-native';
 import { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { colors, fontSize, fontWeight, spacing } from '../../theme';
+import { colors, fontSize, fontWeight, spacing, themedStyles } from '../../theme';
 
 type TabItem = {
   name: string;
@@ -18,10 +18,11 @@ type TabItem = {
 
 const TABS: TabItem[] = [
   { name: 'Home', icon: '⌂', iconActive: '⌂', label: 'Home' },
+  { name: 'Feed', icon: '▦', iconActive: '▦', label: 'Feed' },
+  { name: 'Stylist', icon: '✦', iconActive: '✦', label: 'Style' },
   { name: 'Wardrobe', icon: '☰', iconActive: '☰', label: 'Wardrobe' },
-  { name: 'Stylist', icon: '✦', iconActive: '✦', label: 'Stylist' },
   { name: 'Circles', icon: '◎', iconActive: '◎', label: 'Circles' },
-  { name: 'Profile', icon: '⊙', iconActive: '⊙', label: 'Me' },
+  { name: 'Me', icon: '⊙', iconActive: '⊙', label: 'Me' },
 ];
 
 export default function CustomTabBar({ state, navigation }: BottomTabBarProps) {
@@ -83,7 +84,7 @@ export default function CustomTabBar({ state, navigation }: BottomTabBarProps) {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   container: {
     flexDirection: 'row',
     backgroundColor: colors.tabBackground,
@@ -148,10 +149,10 @@ const styles = StyleSheet.create({
   },
   stylistIcon: {
     fontSize: 22,
-    color: colors.textInverse,
+    color: colors.onPrimary,
   },
   stylistLabel: {
     color: colors.tabActive,
     fontWeight: fontWeight.bold,
   },
-});
+}));

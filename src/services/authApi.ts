@@ -578,6 +578,8 @@ export interface UserProfile {
   updatedAt?: string;
   stats?: ProfileStat[];
   styleDna?: string[];
+  stylePrefs?: string[];
+  isPublic?: boolean;
 }
 
 export interface ProfileResponse {

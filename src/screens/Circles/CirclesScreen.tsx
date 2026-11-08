@@ -19,7 +19,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
-import { colors, fontSize, fontWeight, spacing, borderRadius } from '../../theme';
+import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles, statusBarStyle } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
 import {
   Circle,
@@ -265,7 +265,7 @@ export default function CirclesScreen() {
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       <StatusBar
-        barStyle="dark-content"
+        barStyle={statusBarStyle()}
         {...(Platform.OS === 'android' ? { backgroundColor: colors.background } : {})}
       />
       <FlatList
@@ -396,7 +396,7 @@ export default function CirclesScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.background },
   flex1: { flex: 1 },
   listContent: { paddingBottom: spacing.xxxl },
@@ -590,4 +590,4 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   saveText: { color: colors.textInverse, fontWeight: fontWeight.bold },
-});
+}));

@@ -14,11 +14,11 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
-import { colors, fontSize, fontWeight, spacing, borderRadius } from '../../theme';
+import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles, statusBarStyle } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
 import { getWardrobeItems, deleteWardrobeItem, WardrobeItemResponse } from '../../services/wardrobeApi';
 
-import { getCategoriesForGender, categoryIcon, colorToHex, WEAR_TYPES } from '../../constants/wardrobe';
+import { getAllCategoriesSorted, inCategory, categoryIcon, colorToHex, WEAR_TYPES } from '../../constants/wardrobe';
 
 // "Modes": filter the list by wear type (All / Daily Wear / Formal / Casual)
 const MODES = ['All', ...WEAR_TYPES];
@@ -30,7 +30,6 @@ export default function WardrobeScreen({ navigation }: { navigation: any }) {
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [activeMode, setActiveMode] = useState<string>('All');
 
   const fetchItems = async (showLoading = true) => {
@@ -87,27 +86,22 @@ export default function WardrobeScreen({ navigation }: { navigation: any }) {
     );
   };
 
-  // Gender-wise categories (from profile gender; all when not set) + any extra categories in saved items
-  const baseCats = getCategoriesForGender(user?.gender);
-  const extraCats = Array.from(new Set(items.map(i => i.category).filter(c => c && !baseCats.includes(c))));
-  const categories = [...baseCats, ...extraCats].map(label => ({
+  // All categories (the user's gender-wise ones first); unknown ones count under Others
+  const categories = getAllCategoriesSorted(user?.gender).map(label => ({
     id: label,
     label,
     icon: categoryIcon(label),
-    count: items.filter(i => (i.category || '').toLowerCase() === label.toLowerCase()).length,
+    count: items.filter(i => inCategory(i.category, label)).length,
   }));
 
-  const visibleItems = items.filter(i =>
-    (!activeCategory || (i.category || '').toLowerCase() === activeCategory.toLowerCase()) &&
-    (activeMode === 'All' || i.wearType === activeMode),
-  );
+  const visibleItems = items.filter(i => activeMode === 'All' || i.wearType === activeMode);
 
   const totalItems = items.length;
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       <StatusBar
-        barStyle="dark-content"
+        barStyle={statusBarStyle()}
         {...(Platform.OS === 'android' ? { backgroundColor: colors.background } : {})}
       />
       <ScrollView
@@ -159,12 +153,11 @@ export default function WardrobeScreen({ navigation }: { navigation: any }) {
         <Text style={styles.sectionTitle}>Categories</Text>
         <View style={styles.categoryGrid}>
           {categories.map(cat => {
-            const active = activeCategory === cat.label;
             return (
               <TouchableOpacity
                 key={cat.id}
-                style={[styles.categoryCard, active && styles.categoryCardActive]}
-                onPress={() => setActiveCategory(active ? null : cat.label)}
+                style={styles.categoryCard}
+                onPress={() => navigation.navigate('WardrobeCategory', { category: cat.label })}
                 activeOpacity={0.8}>
                 <Text style={styles.categoryEmoji}>{cat.icon}</Text>
                 <Text style={styles.categoryLabel}>{cat.label}</Text>
@@ -193,8 +186,8 @@ export default function WardrobeScreen({ navigation }: { navigation: any }) {
 
         {/* Recent Items / Backend Data List */}
         <Text style={styles.sectionTitle}>
-          {activeCategory || activeMode !== 'All'
-            ? `${activeCategory || 'All'}${activeMode !== 'All' ? ` · ${activeMode}` : ''} (${visibleItems.length})`
+          {activeMode !== 'All'
+            ? `${activeMode} (${visibleItems.length})`
             : `My Items (${totalItems})`}
         </Text>
 
@@ -269,20 +262,19 @@ export default function WardrobeScreen({ navigation }: { navigation: any }) {
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
-const styles = StyleSheet.create({
-  categoryCardActive: { borderWidth: 2, borderColor: colors.primary },
+const styles = themedStyles(() => StyleSheet.create({
   modeRow: { paddingHorizontal: spacing.base, paddingBottom: spacing.sm, gap: 8 },
   modeChip: {
     paddingHorizontal: 14,
     paddingVertical: 7,
     borderRadius: 18,
     borderWidth: 1.5,
-    borderColor: '#E2E8F0',
-    backgroundColor: '#FFFFFF',
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
     marginRight: 8,
   },
   modeChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-  modeText: { fontSize: 13, fontWeight: '700', color: '#2D2D4A' },
+  modeText: { fontSize: 13, fontWeight: '700', color: colors.textPrimary },
   modeTextActive: { color: '#FFFFFF' },
   errorText: { color: colors.error, fontSize: 13, paddingHorizontal: spacing.base, marginBottom: spacing.sm },
   filterEmpty: { color: colors.textSecondary, fontSize: 14, paddingHorizontal: spacing.base, paddingVertical: spacing.md },
@@ -391,7 +383,7 @@ const styles = StyleSheet.create({
   actionBtn: {
     padding: 8,
     borderRadius: 10,
-    backgroundColor: '#F3F0FA',
+    backgroundColor: colors.divider,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -435,4 +427,4 @@ const styles = StyleSheet.create({
     borderRadius: borderRadius.full,
   },
   emptyAddBtnText: { color: colors.textInverse, fontWeight: fontWeight.bold, fontSize: fontSize.sm },
-});
+}));

@@ -73,3 +73,7 @@ yarn-error.log
 !.yarn/releases
 !.yarn/sdks
 !.yarn/versions
+
+# Written by CI from the GEMINI_API_KEY secret. The committed copy is an empty stub:
+# never commit a real key here (the repo is public).
+src/config/ai.generated.ts

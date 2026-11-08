@@ -1,17 +1,31 @@
 import 'react-native-gesture-handler';
 import React from 'react';
-import { StatusBar, useColorScheme } from 'react-native';
+import { StatusBar } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import RootNavigator from './src/navigation/RootNavigator';
+import NotificationGate from './src/components/NotificationGate';
+import { ThemeProvider, useTheme } from './src/theme';
+
+function Themed() {
+  const { isDark } = useTheme();
+  return (
+    <>
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
+      {/* Notifications must be on to use the app */}
+      <NotificationGate>
+        <RootNavigator />
+      </NotificationGate>
+    </>
+  );
+}
 
 function App() {
-  const isDarkMode = useColorScheme() === 'dark';
-
   return (
-    <SafeAreaProvider>
-      <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
-      <RootNavigator />
-    </SafeAreaProvider>
+    <ThemeProvider>
+      <SafeAreaProvider>
+        <Themed />
+      </SafeAreaProvider>
+    </ThemeProvider>
   );
 }
 

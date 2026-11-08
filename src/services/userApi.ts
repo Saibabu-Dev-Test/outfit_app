@@ -32,11 +32,40 @@ export interface StoredProfile {
   role?: string; // 'admin' is set by hand in the Firebase console; the app never writes it
   lastLoginDate?: string;
   streak?: number;
+  stylePrefs?: string[]; // multi-select style preference
 }
+
+// Style preference options (Profile > Style preference)
+export const STYLE_OPTIONS = [
+  'Casual',
+  'Formal',
+  'Ethnic / Traditional',
+  'Streetwear',
+  'Sporty',
+  'Party',
+  'Minimal',
+  'Trendy / Fashion-forward',
+  'Business casual',
+  'Bohemian',
+  'Classic',
+  'Indo-western',
+];
+
+// Age in years from 'YYYY-MM-DD' (null when missing or invalid)
+export const ageFromDob = (dob?: string | null, now: Date = new Date()): number | null => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec((dob || '').trim());
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]) - 1;
+  const d = Number(m[3]);
+  let age = now.getFullYear() - y;
+  if (now.getMonth() < mo || (now.getMonth() === mo && now.getDate() < d)) age -= 1;
+  return age >= 0 && age < 130 ? age : null;
+};
 
 const PROFILE_KEYS: (keyof StoredProfile)[] = [
   'name', 'phoneNumber', 'phone', 'dob', 'timeOfBirth', 'rashi', 'language', 'gender',
-  'bio', 'avatarUrl', 'isPublic', 'nameLower', 'role', 'lastLoginDate', 'streak',
+  'bio', 'avatarUrl', 'isPublic', 'nameLower', 'role', 'lastLoginDate', 'streak', 'stylePrefs',
 ];
 
 // Returns {} when missing or on error (never throws)
@@ -132,6 +161,7 @@ export interface PublicUser {
   rashi: string;
   avatarUrl: string | null;
   isPublic: boolean;
+  stylePrefs: string[];
 }
 
 const toPublicUser = (id: string, d: any): PublicUser => ({
@@ -141,6 +171,7 @@ const toPublicUser = (id: string, d: any): PublicUser => ({
   rashi: d?.rashi || '',
   avatarUrl: d?.avatarUrl || null,
   isPublic: d?.isPublic !== false,
+  stylePrefs: Array.isArray(d?.stylePrefs) ? d.stylePrefs.filter((x: any) => typeof x === 'string') : [],
 });
 
 export type PublicUserResult =

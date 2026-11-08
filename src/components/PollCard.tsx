@@ -1,8 +1,8 @@
 // Photo poll in a circle chat: live vote counts, the user's choice highlighted, tap to vote or change
 import React, { useEffect, useState } from 'react';
 import { View, Text, Image, TouchableOpacity, StyleSheet, Alert, ActivityIndicator } from 'react-native';
-import { colors, fontSize, fontWeight, spacing, borderRadius } from '../theme';
-import { ChatMessage, PollTally, castPollVote, subscribePollVotes } from '../services/circlesApi';
+import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles } from '../theme';
+import { ChatMessage, POLL_LETTERS, PollTally, castPollVote, subscribePollVotes } from '../services/circlesApi';
 
 interface Props {
   circleId: string;
@@ -83,7 +83,7 @@ export default function PollCard({ circleId, message, myUid, canVote, onLongPres
               )}
               <View style={styles.optionFooter}>
                 <Text style={styles.optionLabel} numberOfLines={1}>
-                  {o.label || `Option ${i + 1}`}
+                  {!o.label || o.label === POLL_LETTERS[i] ? POLL_LETTERS[i] : `${POLL_LETTERS[i]} · ${o.label}`}
                 </Text>
                 <View style={styles.barTrack}>
                   <View
@@ -115,7 +115,7 @@ export default function PollCard({ circleId, message, myUid, canVote, onLongPres
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   card: { width: 260 },
   question: { fontSize: fontSize.base, fontWeight: fontWeight.bold, color: colors.textPrimary, marginBottom: spacing.sm },
   grid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
@@ -161,4 +161,4 @@ const styles = StyleSheet.create({
   barMine: { backgroundColor: colors.accent },
   optionStats: { fontSize: 10, color: colors.textSecondary, marginTop: 3 },
   footer: { fontSize: fontSize.xs, color: colors.textSecondary },
-});
+}));

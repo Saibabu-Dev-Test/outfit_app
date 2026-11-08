@@ -1,6 +1,7 @@
 // Hour (1-12) / minute (00-59) / AM-PM picker built with ScrollViews
 import React, { useEffect, useState } from 'react';
 import { Modal, View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
+import { themedStyles, colors } from '../theme';
 
 interface Props {
   visible: boolean;
@@ -102,23 +103,23 @@ export default function TimePickerModal({ visible, value, onConfirm, onClose }: 
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   overlay: { flex: 1, backgroundColor: 'rgba(10,25,64,0.45)', justifyContent: 'center', padding: 24 },
-  card: { backgroundColor: '#FFFFFF', borderRadius: 18, padding: 18 },
-  sub: { fontSize: 11, fontWeight: '700', color: '#8E8EA8', letterSpacing: 1 },
-  title: { fontSize: 24, fontWeight: '800', color: '#0A1940', marginTop: 4, marginBottom: 12 },
+  card: { backgroundColor: colors.surface, borderRadius: 18, padding: 18 },
+  sub: { fontSize: 11, fontWeight: '700', color: colors.textSecondary, letterSpacing: 1 },
+  title: { fontSize: 24, fontWeight: '800', color: colors.textPrimary, marginTop: 4, marginBottom: 12 },
   row: { flexDirection: 'row', height: 240 },
   colWrap: { flex: 1, marginHorizontal: 4 },
-  colLabel: { fontSize: 12, fontWeight: '700', color: '#8E8EA8', textAlign: 'center', marginBottom: 6 },
-  col: { flex: 1, backgroundColor: '#F8F7FC', borderRadius: 12 },
+  colLabel: { fontSize: 12, fontWeight: '700', color: colors.textSecondary, textAlign: 'center', marginBottom: 6 },
+  col: { flex: 1, backgroundColor: colors.background, borderRadius: 12 },
   colContent: { paddingVertical: 4 },
   cell: { paddingVertical: 10, alignItems: 'center', marginHorizontal: 6, borderRadius: 10 },
   cellActive: { backgroundColor: '#6C5CE7' },
-  cellText: { fontSize: 16, color: '#2D2D4A' },
+  cellText: { fontSize: 16, color: colors.textPrimary },
   cellTextActive: { color: '#FFFFFF', fontWeight: '800' },
   actions: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 16 },
   cancelBtn: { paddingHorizontal: 16, paddingVertical: 10 },
-  cancelText: { color: '#8E8EA8', fontWeight: '700' },
+  cancelText: { color: colors.textSecondary, fontWeight: '700' },
   okBtn: { backgroundColor: '#6C5CE7', paddingHorizontal: 18, paddingVertical: 10, borderRadius: 12, marginLeft: 8 },
   okText: { color: '#FFFFFF', fontWeight: '800' },
-});
+}));

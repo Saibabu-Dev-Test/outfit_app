@@ -10,13 +10,35 @@ export const FEMALE_CATEGORIES = [
   'Lehengas', 'Jackets', 'Footwear', 'Accessories', 'Jewellery',
 ];
 
-export const ALL_CATEGORIES = Array.from(new Set([...MALE_CATEGORIES, ...FEMALE_CATEGORIES]));
+// Every category (the wardrobe tiles and the upload chip slider show all of them)
+export const ALL_CATEGORIES = Array.from(
+  new Set([
+    'Shirts', 'T-Shirts', 'Pants', 'Jeans', 'Shorts', 'Kurtas', 'Sarees', 'Dresses', 'Tops', 'Skirts',
+    'Jackets', 'Shoes', 'Accessories',
+    ...MALE_CATEGORIES,
+    ...FEMALE_CATEGORIES,
+    'Others',
+  ]),
+);
 
 export const getCategoriesForGender = (gender?: string | null): string[] => {
   const g = (gender || '').toLowerCase();
   if (g === 'male') return MALE_CATEGORIES;
   if (g === 'female') return FEMALE_CATEGORIES;
   return ALL_CATEGORIES; // Other / not set
+};
+
+// All categories, the user's gender-wise ones first
+export const getAllCategoriesSorted = (gender?: string | null): string[] => {
+  const first = getCategoriesForGender(gender);
+  return Array.from(new Set([...first, ...ALL_CATEGORIES.filter(c => c !== 'Others'), 'Others']));
+};
+
+// Item belongs to a tile (case-insensitive). "Others" also takes items with an unknown category.
+export const inCategory = (itemCategory: string | null | undefined, tile: string): boolean => {
+  const c = (itemCategory || '').toLowerCase();
+  if (tile === 'Others') return !c || c === 'others' || !ALL_CATEGORIES.some(x => x.toLowerCase() === c);
+  return c === tile.toLowerCase();
 };
 
 export const CATEGORY_ICONS: Record<string, string> = {
@@ -38,6 +60,9 @@ export const CATEGORY_ICONS: Record<string, string> = {
   'Skirts': '👗',
   'Lehengas': '👗',
   'Jewellery': '💍',
+  'Pants': '👖',
+  'Shoes': '👞',
+  'Others': '🧺',
 };
 
 export const categoryIcon = (c?: string | null): string => (c && CATEGORY_ICONS[c]) || '👕';

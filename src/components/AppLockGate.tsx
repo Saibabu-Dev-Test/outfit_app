@@ -27,6 +27,7 @@ import {
   wasUnlockedThisLaunch,
 } from '../native/appLock';
 import { signOutKeepLock } from '../services/authApi';
+import { themedStyles, colors } from '../theme';
 
 export default function AppLockGate() {
   const { isAuthenticated, freshLogin, clearFreshLogin } = useAuth();
@@ -163,14 +164,14 @@ export default function AppLockGate() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   overlay: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: '#FAF9FC',
+    backgroundColor: colors.background,
     alignItems: 'center',
     justifyContent: 'center',
     padding: 32,
@@ -178,8 +179,8 @@ const styles = StyleSheet.create({
     elevation: 1000,
   },
   icon: { fontSize: 48, marginBottom: 12 },
-  title: { fontSize: 22, fontWeight: '800', color: '#0A1940' },
-  sub: { fontSize: 13, color: '#6B6B8A', marginTop: 6, textAlign: 'center' },
+  title: { fontSize: 22, fontWeight: '800', color: colors.textPrimary },
+  sub: { fontSize: 13, color: colors.textSecondary, marginTop: 6, textAlign: 'center' },
   button: {
     marginTop: 24,
     backgroundColor: '#E91E63',
@@ -193,4 +194,4 @@ const styles = StyleSheet.create({
   buttonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
   linkButton: { marginTop: 18, padding: 8 },
   linkText: { color: '#E91E63', fontSize: 14, fontWeight: '600' },
-});
+}));

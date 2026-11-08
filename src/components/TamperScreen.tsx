@@ -5,6 +5,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import { signOut } from 'firebase/auth';
 import { auth } from '../config/firebaseConfig';
 import { googleSignOut } from '../services/googleAuth';
+import { themedStyles, colors } from '../theme';
 
 export default function TamperScreen() {
   useEffect(() => {
@@ -20,15 +21,15 @@ export default function TamperScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   wrap: {
     flex: 1,
-    backgroundColor: '#FAF9FC',
+    backgroundColor: colors.background,
     alignItems: 'center',
     justifyContent: 'center',
     padding: 32,
   },
   icon: { fontSize: 48, marginBottom: 12 },
-  title: { fontSize: 20, fontWeight: '800', color: '#0A1940', textAlign: 'center' },
-  sub: { fontSize: 14, color: '#6B6B8A', marginTop: 8, textAlign: 'center' },
-});
+  title: { fontSize: 20, fontWeight: '800', color: colors.textPrimary, textAlign: 'center' },
+  sub: { fontSize: 14, color: colors.textSecondary, marginTop: 8, textAlign: 'center' },
+}));

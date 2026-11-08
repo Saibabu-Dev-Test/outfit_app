@@ -1,23 +1,28 @@
+// Home. On app open it first shows ONLY today's colour vote; after voting (or Skip / Continue)
+// the rest shows: panchangam lucky colour, live results (tap Boys / Girls to see who voted),
+// achievements shortcut and the weekly celebrities. Daily tasks moved to Achievements.
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
   ScrollView,
-  StyleSheet,
   TouchableOpacity,
   Image,
   StatusBar,
   Platform,
   ActivityIndicator,
   Alert,
+  Modal,
+  FlatList,
+  StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
-import { spacing, borderRadius } from '../../theme';
+import { colors, spacing, borderRadius, fontSize, fontWeight, themedStyles, statusBarStyle } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
 import { doc, setDoc, serverTimestamp, collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../../config/firebaseConfig';
-import { getUserProfile, recordDailyLogin } from '../../services/userApi';
+import { ageFromDob, getUserProfile, recordDailyLogin } from '../../services/userApi';
 import { hasUploadedToday } from '../../services/wardrobeApi';
 import { getTodayVaaraColour, getRashiLuckyColour } from '../../utils/panchangam';
 import { localDateKey, greetingForNow } from '../../utils/date';
@@ -26,14 +31,12 @@ import Avatar from '../../components/Avatar';
 import {
   checkWeeklyStars,
   countFriendsJoined,
-  DayState,
   getDay,
   getLastWeekStars,
   getPoints,
   recordTask,
   REFERRAL_POINTS,
   setStarProfile,
-  TaskResult,
   WeeklyStar,
 } from '../../services/rewardsApi';
 
@@ -53,11 +56,21 @@ const VOTE_COLOURS = [
   { name: 'White', hex: '#EEEEEE' },
 ];
 
+interface Voter {
+  uid: string;
+  color: string;
+  gender: string; // 'male' | 'female' | ''
+  name: string;
+  age: number | null;
+}
+
 interface ColourTally {
   rank: number;
   name: string;
   hex: string;
   votes: number;
+  boys: number;
+  girls: number;
   men: string;
   women: string;
   percentage: string;
@@ -65,7 +78,7 @@ interface ColourTally {
 
 const pct = (n: number, total: number) => (total > 0 ? `${Math.round((n / total) * 100)}%` : '0%');
 
-type VoteMap = Map<string, { color: string; gender: string }>;
+type VoteMap = Map<string, Voter>;
 const colourIndex = (name: string) => VOTE_COLOURS.findIndex(c => c.name === name);
 
 // Tallies from one-vote-per-user map. Stable order: votes desc, then VOTE_COLOURS order.
@@ -87,6 +100,8 @@ const tally = (map: VoteMap): ColourTally[] => {
       name: col.name,
       hex: col.hex,
       votes: c.total,
+      boys: c.men,
+      girls: c.women,
       men: pct(c.men, c.total),
       women: pct(c.women, c.total),
       percentage: pct(c.total, total),
@@ -99,33 +114,44 @@ const tally = (map: VoteMap): ColourTally[] => {
   return results;
 };
 
+const emptyTally = (): ColourTally[] =>
+  VOTE_COLOURS.map((c, i) => ({ rank: i + 1, ...c, votes: 0, boys: 0, girls: 0, men: '0%', women: '0%', percentage: '0%' }));
+
+// The vote-first screen shows once per app open
+let voteGateDone = false;
+
 export default function HomeScreen() {
   const navigation = useNavigation<any>();
   const { user, updateUserData } = useAuth();
   const uid = user?.id;
-  const [topColours, setTopColours] = useState<ColourTally[]>(
-    VOTE_COLOURS.map((c, i) => ({ rank: i + 1, ...c, votes: 0, men: '0%', women: '0%', percentage: '0%' })),
-  );
+  const [gateDone, setGateDone] = useState<boolean>(voteGateDone);
+  const [topColours, setTopColours] = useState<ColourTally[]>(emptyTally());
   const [myVote, setMyVote] = useState<string | null>(null);
   const [voting, setVoting] = useState<string | null>(null);
   const [votesLoading, setVotesLoading] = useState<boolean>(true);
   const [streak, setStreak] = useState<number>(0);
-  const [day, setDay] = useState<DayState>({ opened: false, voted: false, uploaded: false });
   const [points, setPoints] = useState<number>(0);
   const [friends, setFriends] = useState<number>(0);
+  const [doneToday, setDoneToday] = useState<number>(0);
   const [stars, setStars] = useState<WeeklyStar[]>([]);
   const [flashName, setFlashName] = useState<string | null>(null);
+  const [voterList, setVoterList] = useState<{ title: string; voters: Voter[] } | null>(null);
   // Votes by userId, and our last write (a refetch must not undo it with stale data)
   const votesRef = useRef<VoteMap>(new Map());
   const lastWriteRef = useRef<{ color: string; date: string; at: number } | null>(null);
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const gateTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [greeting, setGreeting] = useState<string>(greetingForNow());
 
   const displayName = (user?.name || '').trim() || 'there';
   const firstName = displayName.split(' ')[0];
-  const initial = displayName === 'there' ? '🙂' : displayName.charAt(0).toUpperCase();
   const vaara = getTodayVaaraColour();
   const lucky = getRashiLuckyColour(user?.rashi);
+
+  const finishGate = useCallback(() => {
+    voteGateDone = true;
+    setGateDone(true);
+  }, []);
 
   const showVotes = useCallback(
     (map: VoteMap) => {
@@ -135,18 +161,20 @@ export default function HomeScreen() {
     [uid],
   );
 
-  // Applies a task result (day checklist + points)
-  const applyTask = useCallback(
-    (r: TaskResult) => {
-      setDay(r.day);
-      // Re-read the saved total (avoids double counting with a parallel load)
-      if (r.pointsAdded && uid) getPoints(uid).then(setPoints);
-    },
-    [uid],
-  );
+  const refreshPoints = useCallback(async () => {
+    if (!uid) return;
+    const [d, p, f] = await Promise.all([getDay(uid), getPoints(uid), countFriendsJoined(uid)]);
+    setDoneToday([d.opened, d.voted, d.uploaded].filter(Boolean).length);
+    setPoints(p);
+    setFriends(f);
+    // Uploaded before this build tracked it: tick the task now
+    if (!d.uploaded && (await hasUploadedToday(uid))) {
+      await recordTask(uid, 'uploaded');
+      setPoints(await getPoints(uid));
+    }
+  }, [uid]);
 
-  // Today's votes. Only docs with id top_colors_{today}_{userId} count (old builds used random ids),
-  // so each user counts once and "my vote" comes from my own doc.
+  // Today's votes. Only docs with id top_colors_{today}_{userId} count (old builds used random ids).
   const fetchVotes = useCallback(async () => {
     try {
       const today = localDateKey();
@@ -158,36 +186,35 @@ export default function HomeScreen() {
         const v: any = d.data();
         if (!v?.color || !v?.userId) return;
         if (d.id !== `top_colors_${today}_${v.userId}`) return;
-        map.set(v.userId, { color: v.color, gender: String(v.voterGender || '').toLowerCase() });
+        map.set(v.userId, {
+          uid: v.userId,
+          color: v.color,
+          gender: String(v.voterGender || '').toLowerCase(),
+          name: typeof v.voterName === 'string' && v.voterName.trim() ? v.voterName.trim() : 'Outfit user',
+          age: typeof v.voterAge === 'number' ? v.voterAge : null,
+        });
       });
       // Our own recent write wins over a stale read
       const lw = lastWriteRef.current;
       if (uid && lw && lw.date === today && Date.now() - lw.at < 30000 && map.get(uid)?.color !== lw.color) {
-        map.set(uid, { color: lw.color, gender: String(user?.gender || '').toLowerCase() });
+        map.set(uid, {
+          uid,
+          color: lw.color,
+          gender: String(user?.gender || '').toLowerCase(),
+          name: displayName,
+          age: ageFromDob(user?.dob),
+        });
       }
       votesRef.current = map;
       showVotes(map);
       // Voted earlier (or on another device): tick the daily task
-      if (uid && map.has(uid)) recordTask(uid, 'voted').then(applyTask);
+      if (uid && map.has(uid)) recordTask(uid, 'voted').then(() => refreshPoints());
     } catch (error: any) {
       console.warn('Error fetching votes:', error?.code, error?.message);
     } finally {
       setVotesLoading(false);
     }
-  }, [uid, user?.gender, showVotes, applyTask]);
-
-  // Day checklist, points and referral count
-  const refreshRewards = useCallback(async () => {
-    if (!uid) return;
-    const [d, p, f] = await Promise.all([getDay(uid), getPoints(uid), countFriendsJoined(uid)]);
-    setDay(d);
-    setPoints(p);
-    setFriends(f);
-    // Uploaded before this build tracked it: tick the task now
-    if (!d.uploaded && (await hasUploadedToday(uid))) {
-      applyTask(await recordTask(uid, 'uploaded'));
-    }
-  }, [uid, applyTask]);
+  }, [uid, user?.gender, user?.dob, displayName, showVotes, refreshPoints]);
 
   // Load profile + mark daily login once per user
   useEffect(() => {
@@ -206,6 +233,8 @@ export default function HomeScreen() {
             language: stored.language,
             timeOfBirth: stored.timeOfBirth,
             bio: stored.bio,
+            stylePrefs: stored.stylePrefs,
+            isPublic: stored.isPublic !== false,
           });
         }
       } catch (e: any) {
@@ -213,8 +242,8 @@ export default function HomeScreen() {
       }
       const res = await recordDailyLogin(uid);
       if (alive) setStreak(res.streak);
-      const opened = await recordTask(uid, 'opened');
-      if (alive) applyTask(opened);
+      await recordTask(uid, 'opened');
+      if (alive) refreshPoints();
       // Weekly celebrities: claim a finished week, then load last week's list
       await checkWeeklyStars(uid);
       const list = await getLastWeekStars();
@@ -226,16 +255,14 @@ export default function HomeScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uid]);
 
-  // Refresh votes/tasks/greeting whenever Home is shown
   useFocusEffect(
     useCallback(() => {
       setGreeting(greetingForNow());
       fetchVotes();
-      refreshRewards();
-    }, [fetchVotes, refreshRewards]),
+      refreshPoints();
+    }, [fetchVotes, refreshPoints]),
   );
 
-  // Celebrities card uses the current name/avatar
   useEffect(() => {
     setStarProfile({ name: user?.name, avatar: user?.avatarUrl });
   }, [user?.name, user?.avatarUrl]);
@@ -243,20 +270,26 @@ export default function HomeScreen() {
   useEffect(
     () => () => {
       if (flashTimer.current) clearTimeout(flashTimer.current);
+      if (gateTimer.current) clearTimeout(gateTimer.current);
     },
     [],
   );
 
   // Tapping a colour sets (or changes) today's vote. Overwrites the same doc, so the old vote is gone.
+  // voterName/voterAge are stored so the Boys/Girls lists need no extra reads.
   const handleVoteColor = async (colorName: string) => {
     if (!uid) {
       Alert.alert('Please login to vote!');
       return;
     }
-    if (colorName === myVote || voting) return;
+    if (colorName === myVote || voting) {
+      if (!gateDone && colorName === myVote) finishGate();
+      return;
+    }
     const today = localDateKey();
     const voteId = `top_colors_${today}_${uid}`;
     const previous = myVote;
+    const age = ageFromDob(user?.dob);
     setVoting(colorName);
     setMyVote(colorName); // optimistic
     try {
@@ -265,6 +298,8 @@ export default function HomeScreen() {
         color: colorName,
         userId: uid,
         voterGender: user?.gender || null,
+        voterName: displayName === 'there' ? 'Outfit user' : displayName.slice(0, 60),
+        voterAge: age,
         date: today,
         timestamp: serverTimestamp(),
       });
@@ -274,106 +309,250 @@ export default function HomeScreen() {
       setVoting(null);
       Alert.alert(
         'Vote not saved',
-        error?.code === 'permission-denied'
-          ? SERVER_SETUP_MESSAGE
-          : firestoreErrorMessage(error, 'Voting'),
+        error?.code === 'permission-denied' ? SERVER_SETUP_MESSAGE : firestoreErrorMessage(error, 'Voting'),
       );
       return;
     }
-    // Saved: show it now from the written value, even if the refetch fails
     lastWriteRef.current = { color: colorName, date: today, at: Date.now() };
     const map: VoteMap = new Map(votesRef.current);
-    map.set(uid, { color: colorName, gender: String(user?.gender || '').toLowerCase() });
+    map.set(uid, { uid, color: colorName, gender: String(user?.gender || '').toLowerCase(), name: displayName, age });
     votesRef.current = map;
     showVotes(map);
     setFlashName(colorName);
     if (flashTimer.current) clearTimeout(flashTimer.current);
     flashTimer.current = setTimeout(() => setFlashName(null), 1500);
     setVoting(null);
-    recordTask(uid, 'voted').then(applyTask);
-    fetchVotes(); // never throws; keeps our vote if the read is stale
+    recordTask(uid, 'voted').then(() => refreshPoints());
+    fetchVotes();
+    // First screen: show the rest of Home after a moment
+    if (!gateDone) {
+      if (gateTimer.current) clearTimeout(gateTimer.current);
+      gateTimer.current = setTimeout(finishGate, 900);
+    }
   };
 
-  const tasks = [
-    { id: 'opened', label: 'Open the app', done: day.opened },
-    { id: 'voted', label: "Vote today's colour", done: day.voted || !!myVote },
-    { id: 'uploaded', label: 'Upload one item (wardrobe or feed post)', done: day.uploaded },
-  ];
-  const doneCount = tasks.filter(t => t.done).length;
+  const openVoters = (colour: string, gender: 'male' | 'female') => {
+    const voters: Voter[] = [];
+    votesRef.current.forEach(v => {
+      if (v.color === colour && v.gender === gender) voters.push(v);
+    });
+    voters.sort((a, b) => a.name.localeCompare(b.name));
+    setVoterList({ title: `${gender === 'male' ? '👦 Boys' : '👧 Girls'} who voted ${colour}`, voters });
+  };
+
   const totalPoints = points + friends * REFERRAL_POINTS;
+  const totalVotes = topColours.reduce((n, c) => n + c.votes, 0);
+
+  const voteList = (
+    <View style={styles.topColoursCard}>
+      {votesLoading ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="small" color={colors.pink} />
+          <Text style={styles.loadingText}>Loading votes...</Text>
+        </View>
+      ) : (
+        topColours.map((item, index) => (
+          <React.Fragment key={item.name}>
+            <TouchableOpacity
+              style={[
+                styles.colorRow,
+                myVote === item.name && styles.colorRowVoted,
+                flashName === item.name && styles.colorRowFlash,
+              ]}
+              activeOpacity={0.7}
+              disabled={!!voting}
+              onPress={() => handleVoteColor(item.name)}>
+              <Text style={styles.colorRank}>{item.rank}</Text>
+              <View style={[styles.colorCircle, { backgroundColor: item.hex }]} />
+              <View style={styles.colorDetails}>
+                <Text style={styles.colorName}>
+                  {item.name}
+                  {myVote === item.name ? '  ✓ Your vote' : ''}
+                </Text>
+                <Text style={styles.votesCountText}>{item.votes.toLocaleString()} votes</Text>
+                <View style={styles.genderRow}>
+                  <TouchableOpacity
+                    style={styles.genderChip}
+                    disabled={!item.boys}
+                    onPress={() => openVoters(item.name, 'male')}
+                    hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}>
+                    <Text style={[styles.genderText, item.boys > 0 && styles.genderLink]}>
+                      👦 Boys {item.boys} ({item.men})
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.genderChip}
+                    disabled={!item.girls}
+                    onPress={() => openVoters(item.name, 'female')}
+                    hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}>
+                    <Text style={[styles.genderText, item.girls > 0 && styles.genderLink]}>
+                      👧 Girls {item.girls} ({item.women})
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+              {voting === item.name ? (
+                <ActivityIndicator size="small" color={colors.pink} />
+              ) : (
+                <Text style={styles.colorPercentage}>{item.percentage}</Text>
+              )}
+            </TouchableOpacity>
+            {index < topColours.length - 1 && <View style={styles.rowDivider} />}
+          </React.Fragment>
+        ))
+      )}
+    </View>
+  );
+
+  const voterModal = (
+    <Modal visible={!!voterList} transparent animationType="fade" onRequestClose={() => setVoterList(null)}>
+      <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setVoterList(null)}>
+        <View style={styles.modalCard}>
+          <Text style={styles.modalTitle}>{voterList?.title}</Text>
+          <FlatList
+            data={voterList?.voters || []}
+            keyExtractor={v => v.uid}
+            style={styles.modalList}
+            renderItem={({ item }) => (
+              <TouchableOpacity
+                style={styles.voterRow}
+                onPress={() => {
+                  setVoterList(null);
+                  navigation.navigate('UserProfile', { userId: item.uid });
+                }}>
+                <Text style={styles.voterName}>
+                  {item.name}
+                  {item.age !== null ? ` (${item.age})` : ''}
+                </Text>
+                <Text style={styles.voterArrow}>›</Text>
+              </TouchableOpacity>
+            )}
+            ListEmptyComponent={<Text style={styles.loadingText}>No votes yet.</Text>}
+          />
+          <TouchableOpacity style={styles.modalClose} onPress={() => setVoterList(null)}>
+            <Text style={styles.modalCloseText}>Close</Text>
+          </TouchableOpacity>
+        </View>
+      </TouchableOpacity>
+    </Modal>
+  );
+
+  const statusBar = (
+    <StatusBar barStyle={statusBarStyle()} {...(Platform.OS === 'android' ? { backgroundColor: colors.background } : {})} />
+  );
+
+  // ── First screen: only today's colour vote ──
+  if (!gateDone) {
+    return (
+      <SafeAreaView style={styles.safeArea} edges={['top']}>
+        {statusBar}
+        <View style={styles.gateHeader}>
+          <View style={styles.flex1}>
+            <Text style={styles.gateHello}>
+              {greeting}, {firstName} 👋
+            </Text>
+            <Text style={styles.gateTitle}>Vote today's colour</Text>
+          </View>
+          <TouchableOpacity onPress={finishGate} style={styles.skipBtn}>
+            <Text style={styles.skipText}>{myVote ? 'Continue ›' : 'Skip'}</Text>
+          </TouchableOpacity>
+        </View>
+        <View style={styles.gateLucky}>
+          {vaara.colours.map(c => (
+            <View key={c.name} style={[styles.luckyDot, { backgroundColor: c.hex }]} />
+          ))}
+          <Text style={styles.gateLuckyText}>Panchangam colour: {vaara.colours.map(c => c.name).join(' / ')}</Text>
+        </View>
+        <Text style={styles.voteHint}>
+          {myVote ? `Your vote: ${myVote}. Tap another colour to change it.` : 'Which colour will you wear today? Tap to vote.'}
+          {totalVotes ? `  ·  ${totalVotes} votes today` : ''}
+        </Text>
+        <ScrollView contentContainerStyle={styles.gateScroll} showsVerticalScrollIndicator={false}>
+          {voteList}
+          {myVote ? (
+            <TouchableOpacity style={styles.continueBtn} onPress={finishGate}>
+              <Text style={styles.continueText}>Continue to Home</Text>
+            </TouchableOpacity>
+          ) : null}
+        </ScrollView>
+        {voterModal}
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
-      <StatusBar
-        barStyle="dark-content"
-        {...(Platform.OS === 'android' ? { backgroundColor: '#FAF9FC' } : {})}
-      />
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}>
-
+      {statusBar}
+      <ScrollView style={styles.flex1} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         {/* Header */}
         <View style={styles.header}>
-          <View style={styles.headerLeft}>
-            {user?.avatarUrl ? (
-              <Image source={{ uri: user.avatarUrl }} style={styles.avatar} />
-            ) : (
-              <View style={[styles.avatar, styles.avatarFallback]}>
-                <Text style={styles.avatarInitial}>{initial}</Text>
-              </View>
-            )}
+          <TouchableOpacity style={styles.headerLeft} onPress={() => navigation.navigate('Me')} activeOpacity={0.8}>
+            <Avatar uri={user?.avatarUrl} name={displayName === 'there' ? '🙂' : displayName} size={40} />
             <Text style={styles.greeting} numberOfLines={1}>
               {greeting}, {firstName}
             </Text>
-          </View>
-          <TouchableOpacity style={styles.notifBadge} activeOpacity={0.7}>
-            <Text style={styles.notifIcon}>🔔</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.notifBadge} activeOpacity={0.7} onPress={() => navigation.navigate('Achievements')}>
+            <Text style={styles.notifIcon}>🏆</Text>
           </TouchableOpacity>
         </View>
 
-        {/* Public feed entry */}
-        <TouchableOpacity
-          style={styles.feedCard}
-          activeOpacity={0.85}
-          onPress={() => navigation.navigate('Feed')}>
-          <Text style={styles.feedEmoji}>📸</Text>
-          <View style={styles.feedTextWrap}>
-            <Text style={styles.feedTitle}>Style Feed</Text>
-            <Text style={styles.feedSub}>See today's looks from the community and share yours</Text>
+        {/* Panchangam colour */}
+        <View style={styles.plainHeaderRow}>
+          <Text style={styles.sectionTitle}>Today's lucky colour (Panchangam)</Text>
+        </View>
+        <View style={styles.card}>
+          <View style={styles.swatchRow}>
+            {vaara.colours.map(c => (
+              <View key={c.name} style={styles.swatchItem}>
+                <View style={[styles.swatchCircle, { backgroundColor: c.hex }]} />
+                <Text style={styles.swatchLabel}>{c.name}</Text>
+              </View>
+            ))}
           </View>
-          <Text style={styles.feedArrow}>›</Text>
+          <Text style={styles.panchangTitle}>
+            {vaara.weekday} · {vaara.vaara} · {vaara.graha}
+          </Text>
+          <Text style={styles.panchangWhy}>Why: {vaara.why}</Text>
+          {lucky ? (
+            <Text style={styles.panchangLucky}>
+              Your rashi ({lucky.rashi}) lord is {lucky.lord}: lucky colour {lucky.colour}.
+            </Text>
+          ) : null}
+          <Text style={styles.panchangNote}>Traditional guidance (weekday ruling planet)</Text>
+        </View>
+
+        {/* Achievements shortcut (today's tasks live there now) */}
+        <TouchableOpacity style={styles.achCard} activeOpacity={0.85} onPress={() => navigation.navigate('Achievements')}>
+          <Text style={styles.achEmoji}>🏅</Text>
+          <View style={styles.flex1}>
+            <Text style={styles.achTitle}>{totalPoints.toLocaleString()} points</Text>
+            <Text style={styles.achSub}>
+              {doneToday}/3 tasks today · 🔥 {streak} day streak · tap for achievements
+            </Text>
+          </View>
+          <Text style={styles.achArrow}>›</Text>
         </TouchableOpacity>
 
-        {/* Daily tasks */}
+        {/* Today's Top Colours */}
         <View style={styles.sectionHeaderRow}>
-          <Text style={styles.sectionTitle}>Today's tasks</Text>
-          <Text style={styles.streakText}>🔥 {streak} day streak</Text>
-        </View>
-        <View style={styles.tasksCard}>
-          {tasks.map(t => (
-            <View key={t.id} style={styles.taskRow}>
-              <View style={[styles.taskCheck, t.done && styles.taskCheckDone]}>
-                {t.done && <Text style={styles.taskCheckMark}>✓</Text>}
-              </View>
-              <Text style={[styles.taskLabel, t.done && styles.taskLabelDone]}>{t.label}</Text>
-            </View>
-          ))}
-          <Text style={styles.taskSummary}>
-            {doneCount}/3 done · 10 pts each, +20 for all 3
-          </Text>
-          <View style={styles.pointsRow}>
-            <Text style={styles.pointsValue}>🏅 {totalPoints.toLocaleString()} points</Text>
-            {friends > 0 && <Text style={styles.pointsSub}>incl. {friends} friend{friends === 1 ? '' : 's'} joined</Text>}
+          <Text style={styles.sectionTitle}>Today's Top Colours</Text>
+          <View style={styles.liveBadge}>
+            <View style={styles.liveDot} />
+            <Text style={styles.liveText}>LIVE RESULTS</Text>
           </View>
-          <Text style={styles.rewardsSoon}>Rewards coming soon for active members</Text>
         </View>
+        <Text style={styles.voteHint}>
+          {myVote ? `Your vote: ${myVote}. Tap another colour to change it.` : 'Tap a colour to vote for today.'} Tap Boys /
+          Girls to see who voted.
+        </Text>
+        {voteList}
 
         {/* Last week's celebrities */}
         <View style={styles.plainHeaderRow}>
           <Text style={styles.sectionTitle}>Congratulations! This week's celebrities ⭐</Text>
         </View>
-        <View style={styles.tasksCard}>
+        <View style={styles.card}>
           {stars.length === 0 ? (
             <Text style={styles.starsEmpty}>
               No celebrities yet. Finish all 3 tasks every day this week to be here next week!
@@ -396,182 +575,67 @@ export default function HomeScreen() {
           )}
         </View>
 
-        {/* Panchangam colour */}
-        <View style={styles.plainHeaderRow}>
-          <Text style={styles.sectionTitle}>Today's colour as per Panchangam</Text>
-        </View>
-        <View style={styles.panchangCard}>
-          <View style={styles.swatchRow}>
-            {vaara.colours.map(c => (
-              <View key={c.name} style={styles.swatchItem}>
-                <View style={[styles.swatchCircle, { backgroundColor: c.hex }]} />
-                <Text style={styles.swatchLabel}>{c.name}</Text>
-              </View>
-            ))}
+        {/* Feed entry */}
+        <TouchableOpacity style={styles.feedCard} activeOpacity={0.85} onPress={() => navigation.navigate('Feed')}>
+          <Text style={styles.feedEmoji}>📸</Text>
+          <View style={styles.flex1}>
+            <Text style={styles.feedTitle}>Style Feed</Text>
+            <Text style={styles.feedSub}>See today's looks from the community and vote A / B / C</Text>
           </View>
-          <Text style={styles.panchangTitle}>
-            {vaara.weekday} · {vaara.vaara} · {vaara.graha}
-          </Text>
-          <Text style={styles.panchangWhy}>{vaara.why}</Text>
-          {lucky ? (
-            <Text style={styles.panchangLucky}>
-              Your rashi ({lucky.rashi}) lord is {lucky.lord}: lucky colour {lucky.colour}.
-            </Text>
-          ) : null}
-          <Text style={styles.panchangNote}>Traditional guidance</Text>
-        </View>
-
-        {/* Today's Top Colours */}
-        <View style={styles.sectionHeaderRow}>
-          <Text style={styles.sectionTitle}>Today's Top Colours</Text>
-          <View style={styles.liveBadge}>
-            <View style={styles.liveDot} />
-            <Text style={styles.liveText}>LIVE RESULTS</Text>
-          </View>
-        </View>
-        <Text style={styles.voteHint}>
-          {myVote ? `Your vote: ${myVote}. Tap another colour to change it.` : 'Tap a colour to vote for today.'}
-        </Text>
-
-        <View style={styles.topColoursCard}>
-          {votesLoading ? (
-            <View style={styles.loadingContainer}>
-              <ActivityIndicator size="small" color="#E91E63" />
-              <Text style={styles.loadingText}>Loading votes...</Text>
-            </View>
-          ) : (
-            <ScrollView
-              style={styles.topColoursScroll}
-              nestedScrollEnabled={true}
-              showsVerticalScrollIndicator={true}>
-              {topColours.map((item, index) => (
-                <React.Fragment key={item.name}>
-                  <TouchableOpacity
-                    style={[
-                      styles.colorRow,
-                      myVote === item.name && styles.colorRowVoted,
-                      flashName === item.name && styles.colorRowFlash,
-                    ]}
-                    activeOpacity={0.7}
-                    disabled={!!voting}
-                    onPress={() => handleVoteColor(item.name)}>
-                    <Text style={styles.colorRank}>{item.rank}</Text>
-                    <View style={[styles.colorCircle, { backgroundColor: item.hex }]} />
-                    <View style={styles.colorDetails}>
-                      <Text style={styles.colorName}>
-                        {item.name}
-                        {myVote === item.name ? '  ✓ Your vote' : ''}
-                      </Text>
-                      <Text style={styles.votesCountText}>{item.votes.toLocaleString()} votes</Text>
-                      <View style={styles.genderRow}>
-                        <Text style={styles.genderText}>🧍‍♂️ Men: {item.men}</Text>
-                        <View style={styles.genderDivider} />
-                        <Text style={styles.genderText}>🧍‍♀️ Women: {item.women}</Text>
-                      </View>
-                    </View>
-                    {voting === item.name ? (
-                      <ActivityIndicator size="small" color="#E91E63" />
-                    ) : (
-                      <Text style={styles.colorPercentage}>{item.percentage}</Text>
-                    )}
-                  </TouchableOpacity>
-                  {index < topColours.length - 1 && <View style={styles.rowDivider} />}
-                </React.Fragment>
-              ))}
-            </ScrollView>
-          )}
-        </View>
+          <Text style={styles.feedArrow}>›</Text>
+        </TouchableOpacity>
 
         {/* What do you think? */}
         <View style={styles.plainHeaderRow}>
           <Text style={styles.sectionTitle}>What do you think?</Text>
         </View>
-
         <View style={styles.outfitCard}>
           <Image source={outfitA} style={styles.outfitImage} />
           <View style={styles.outfitBadge}>
             <Text style={styles.outfitBadgeText}>OUTFIT A</Text>
           </View>
         </View>
-
       </ScrollView>
+      {voterModal}
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  avatarFallback: {
-    backgroundColor: '#6C5CE7',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarInitial: { color: '#FFFFFF', fontSize: 18, fontWeight: '800' },
-  feedCard: {
+const styles = themedStyles(() => StyleSheet.create({
+  safeArea: { flex: 1, backgroundColor: colors.background },
+  flex1: { flex: 1 },
+  scrollContent: { paddingBottom: spacing.xxxl },
+  // Vote-first screen
+  gateHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.base, paddingTop: spacing.md },
+  gateHello: { fontSize: fontSize.sm, color: colors.textSecondary },
+  gateTitle: { fontSize: fontSize.xxl, fontWeight: fontWeight.extraBold, color: colors.textPrimary },
+  skipBtn: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
+  skipText: { color: colors.primary, fontWeight: fontWeight.bold, fontSize: fontSize.base },
+  gateLucky: {
     flexDirection: 'row',
     alignItems: 'center',
     marginHorizontal: spacing.base,
-    marginBottom: spacing.base,
-    padding: spacing.base,
-    borderRadius: borderRadius.lg,
-    backgroundColor: '#2D1F6E',
-  },
-  feedEmoji: { fontSize: 30, marginRight: spacing.md },
-  feedTextWrap: { flex: 1 },
-  feedTitle: { color: '#FFFFFF', fontSize: 17, fontWeight: '800' },
-  feedSub: { color: '#C4B5FD', fontSize: 13, marginTop: 2 },
-  feedArrow: { color: '#FFFFFF', fontSize: 28, marginLeft: spacing.sm },
-  streakText: { fontSize: 13, fontWeight: '700', color: '#F57C00' },
-  tasksCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    marginHorizontal: spacing.base,
+    marginTop: spacing.md,
+    marginBottom: spacing.sm,
+    padding: spacing.sm,
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: '#EBE9F3',
-    padding: spacing.base,
+    borderColor: colors.border,
   },
-  taskRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 6 },
-  taskCheck: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    borderWidth: 2,
-    borderColor: '#D0CBDF',
+  luckyDot: { width: 18, height: 18, borderRadius: 9, marginRight: 4, borderWidth: 1, borderColor: colors.border },
+  gateLuckyText: { fontSize: fontSize.sm, color: colors.textPrimary, fontWeight: fontWeight.semiBold, marginLeft: 4, flex: 1 },
+  gateScroll: { paddingBottom: spacing.xxxl },
+  continueBtn: {
+    marginHorizontal: spacing.base,
+    marginTop: spacing.lg,
+    backgroundColor: colors.primary,
+    borderRadius: borderRadius.full,
+    paddingVertical: spacing.md,
     alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 10,
   },
-  taskCheckDone: { backgroundColor: '#3FA73F', borderColor: '#3FA73F' },
-  taskCheckMark: { color: '#FFFFFF', fontSize: 12, fontWeight: '900' },
-  taskLabel: { fontSize: 14, color: '#0A1940', fontWeight: '600' },
-  taskLabelDone: { color: '#6B6B8A', textDecorationLine: 'line-through' },
-  taskSummary: { fontSize: 12, color: '#6B6B8A', marginTop: 6, textAlign: 'right' },
-  panchangCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    marginHorizontal: spacing.base,
-    borderWidth: 1,
-    borderColor: '#EBE9F3',
-    padding: spacing.base,
-  },
-  swatchRow: { flexDirection: 'row', marginBottom: 10 },
-  swatchItem: { alignItems: 'center', marginRight: 16 },
-  swatchCircle: { width: 44, height: 44, borderRadius: 22, borderWidth: 1, borderColor: '#E0DDEA' },
-  swatchLabel: { fontSize: 12, fontWeight: '700', color: '#0A1940', marginTop: 4 },
-  panchangTitle: { fontSize: 14, fontWeight: '800', color: '#0A1940', marginBottom: 4 },
-  panchangWhy: { fontSize: 13, color: '#4A4A6A', lineHeight: 19 },
-  panchangLucky: { fontSize: 13, color: '#6C5CE7', fontWeight: '600', marginTop: 6 },
-  panchangNote: { fontSize: 11, color: '#9E9EBA', marginTop: 8, fontStyle: 'italic' },
-  voteHint: { fontSize: 12, color: '#6B6B8A', paddingHorizontal: spacing.base, marginBottom: spacing.sm },
-  safeArea: {
-    flex: 1,
-    backgroundColor: '#FAF9FC',
-  },
-  scroll: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingBottom: spacing.xxxl,
-  },
+  continueText: { color: colors.onPrimary, fontWeight: fontWeight.bold, fontSize: fontSize.md },
+  // Home
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -580,32 +644,12 @@ const styles = StyleSheet.create({
     paddingTop: spacing.md,
     paddingBottom: spacing.base,
     borderBottomWidth: 1,
-    borderBottomColor: '#F5F2F8',
+    borderBottomColor: colors.divider,
   },
-  headerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    marginRight: spacing.md,
-  },
-  greeting: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: '#0A1940',
-  },
-  notifBadge: {
-    width: 40,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  notifIcon: {
-    fontSize: 20,
-  },
+  headerLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
+  greeting: { fontSize: 17, fontWeight: '700', color: colors.textPrimary, marginLeft: spacing.md, flex: 1 },
+  notifBadge: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  notifIcon: { fontSize: 20 },
   sectionHeaderRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -614,233 +658,108 @@ const styles = StyleSheet.create({
     marginTop: spacing.xl,
     marginBottom: spacing.sm,
   },
-  plainHeaderRow: {
-    paddingHorizontal: spacing.base,
-    marginTop: spacing.xl,
-    marginBottom: spacing.sm,
+  plainHeaderRow: { paddingHorizontal: spacing.base, marginTop: spacing.xl, marginBottom: spacing.sm },
+  sectionTitle: { fontSize: 18, fontWeight: '800', color: colors.textPrimary },
+  card: {
+    backgroundColor: colors.surface,
+    borderRadius: 16,
+    marginHorizontal: spacing.base,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.base,
   },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: '#0A1940',
+  swatchRow: { flexDirection: 'row', marginBottom: 10 },
+  swatchItem: { alignItems: 'center', marginRight: 16 },
+  swatchCircle: { width: 44, height: 44, borderRadius: 22, borderWidth: 1, borderColor: colors.border },
+  swatchLabel: { fontSize: 12, fontWeight: '700', color: colors.textPrimary, marginTop: 4 },
+  panchangTitle: { fontSize: 14, fontWeight: '800', color: colors.textPrimary, marginBottom: 4 },
+  panchangWhy: { fontSize: 13, color: colors.textSecondary, lineHeight: 19 },
+  panchangLucky: { fontSize: 13, color: colors.accent, fontWeight: '600', marginTop: 6 },
+  panchangNote: { fontSize: 11, color: colors.textMuted, marginTop: 8, fontStyle: 'italic' },
+  achCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: spacing.base,
+    marginTop: spacing.lg,
+    padding: spacing.base,
+    borderRadius: borderRadius.lg,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
+  achEmoji: { fontSize: 28, marginRight: spacing.md },
+  achTitle: { fontSize: fontSize.md, fontWeight: fontWeight.extraBold, color: colors.textPrimary },
+  achSub: { fontSize: fontSize.xs, color: colors.textSecondary, marginTop: 2 },
+  achArrow: { fontSize: 26, color: colors.textMuted, marginLeft: spacing.sm },
   liveBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#E91E63',
+    borderColor: colors.pink,
     borderRadius: borderRadius.full,
     paddingHorizontal: 10,
     paddingVertical: 4,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.surface,
   },
-  liveDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#E91E63',
-    marginRight: 6,
-  },
-  liveText: {
-    fontSize: 9,
-    fontWeight: 'bold',
-    color: '#E91E63',
-    letterSpacing: 0.5,
-  },
+  liveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.pink, marginRight: 6 },
+  liveText: { fontSize: 9, fontWeight: 'bold', color: colors.pink, letterSpacing: 0.5 },
+  voteHint: { fontSize: 12, color: colors.textSecondary, paddingHorizontal: spacing.base, marginBottom: spacing.sm },
   topColoursCard: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.surface,
     borderRadius: 16,
     marginHorizontal: spacing.base,
     borderWidth: 1,
-    borderColor: '#EBE9F3',
-    shadowColor: 'rgba(10, 25, 64, 0.04)',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 1,
-    shadowRadius: 12,
-    elevation: 2,
+    borderColor: colors.border,
     overflow: 'hidden',
   },
-  topColoursScroll: {
-    height: 254,
-  },
-  colorRowFlash: { backgroundColor: '#FFD6E7' },
-  pointsRow: { flexDirection: 'row', alignItems: 'baseline', marginTop: 10, flexWrap: 'wrap' },
-  pointsValue: { fontSize: 16, fontWeight: '800', color: '#0A1940', marginRight: 8 },
-  pointsSub: { fontSize: 12, color: '#6B6B8A' },
-  rewardsSoon: { fontSize: 12, color: '#6C5CE7', fontWeight: '600', marginTop: 4 },
-  starsEmpty: { fontSize: 13, color: '#6B6B8A', lineHeight: 19 },
-  starItem: { alignItems: 'center', width: 76, marginRight: 8 },
-  starName: { fontSize: 11, fontWeight: '700', color: '#0A1940', marginTop: 4, maxWidth: 76 },
-  colorRowVoted: {
-    backgroundColor: "#FFF0F5",
-    borderRadius: 12,
-  },
-  colorRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: spacing.base,
-  },
+  colorRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: spacing.base },
+  colorRowVoted: { backgroundColor: colors.pinkSoft },
+  colorRowFlash: { backgroundColor: colors.accentLight },
   colorRank: {
     fontSize: 22,
     fontWeight: '900',
-    color: '#0A1940',
+    color: colors.textPrimary,
     width: 24,
     textAlign: 'center',
     fontFamily: Platform.OS === 'ios' ? 'Georgia-Bold' : 'serif',
   },
-  colorCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    marginLeft: 12,
-    marginRight: 12,
-  },
-  colorDetails: {
-    flex: 1,
-  },
-  colorName: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#0A1940',
-    marginBottom: 2,
-  },
-  votesCountText: {
-    fontSize: 12,
-    color: '#6B6B8A',
-    fontWeight: '400',
-    marginBottom: 4,
-  },
-  genderRow: {
+  colorCircle: { width: 36, height: 36, borderRadius: 18, marginLeft: 12, marginRight: 12, borderWidth: 1, borderColor: colors.border },
+  colorDetails: { flex: 1 },
+  colorName: { fontSize: 16, fontWeight: '700', color: colors.textPrimary, marginBottom: 2 },
+  votesCountText: { fontSize: 12, color: colors.textSecondary, marginBottom: 4 },
+  genderRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' },
+  genderChip: { marginRight: spacing.md, paddingVertical: 2 },
+  genderText: { fontSize: 11, color: colors.textSecondary, fontWeight: '500' },
+  genderLink: { color: colors.primary, fontWeight: '700', textDecorationLine: 'underline' },
+  colorPercentage: { fontSize: 16, fontWeight: '800', color: colors.pink },
+  rowDivider: { height: 1, backgroundColor: colors.divider, marginHorizontal: spacing.base },
+  loadingContainer: { padding: spacing.xl, alignItems: 'center', justifyContent: 'center' },
+  loadingText: { marginTop: spacing.sm, fontSize: 13, color: colors.textSecondary, textAlign: 'center' },
+  starsEmpty: { fontSize: 13, color: colors.textSecondary, lineHeight: 19 },
+  starItem: { alignItems: 'center', width: 76, marginRight: 8 },
+  starName: { fontSize: 11, fontWeight: '700', color: colors.textPrimary, marginTop: 4, maxWidth: 76 },
+  feedCard: {
     flexDirection: 'row',
     alignItems: 'center',
-  },
-  genderText: {
-    fontSize: 11,
-    color: '#4A4A6A',
-    fontWeight: '500',
-  },
-  genderDivider: {
-    width: 1,
-    height: 8,
-    backgroundColor: '#E8E6F0',
-    marginHorizontal: spacing.sm,
-  },
-  colorPercentage: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: '#E91E63',
-  },
-  rowDivider: {
-    height: 1,
-    backgroundColor: '#FAF9FC',
     marginHorizontal: spacing.base,
-  },
-  styleCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    marginHorizontal: spacing.base,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: '#EBE9F3',
-    shadowColor: 'rgba(10, 25, 64, 0.04)',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 1,
-    shadowRadius: 12,
-    elevation: 2,
-  },
-  sageGreenBlock: {
-    height: 140,
-    backgroundColor: '#A8B5A0',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  sageGreenTitle: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#FFFFFF',
-    letterSpacing: 4,
-    fontFamily: Platform.OS === 'ios' ? 'Georgia' : 'serif',
-  },
-  sageGreenHex: {
-    fontSize: 11,
-    color: '#FFFFFF',
-    opacity: 0.8,
-    marginTop: 6,
-    letterSpacing: 2,
-    fontWeight: '600',
-  },
-  styleDescriptionBox: {
+    marginTop: spacing.xl,
     padding: spacing.base,
+    borderRadius: borderRadius.lg,
+    backgroundColor: colors.primary,
   },
-  styleDescriptionText: {
-    fontSize: 14,
-    color: '#4A4A6A',
-    lineHeight: 22,
-    fontWeight: '400',
-  },
-  whyColorCard: {
-    flexDirection: 'row',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    marginHorizontal: spacing.base,
-    padding: spacing.base,
-    borderWidth: 1.5,
-    borderColor: '#D8CFFC',
-    shadowColor: 'rgba(10, 25, 64, 0.03)',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 1,
-    shadowRadius: 12,
-    elevation: 2,
-  },
-  whyColorIconBox: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#4A148C',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 2,
-  },
-  whyColorIcon: {
-    fontSize: 18,
-  },
-  whyColorContent: {
-    flex: 1,
-    marginLeft: 12,
-  },
-  whyColorTextMain: {
-    fontSize: 13,
-    color: '#0A1940',
-    lineHeight: 19,
-    fontWeight: '500',
-    marginBottom: 6,
-  },
-  whyColorTextSub: {
-    fontSize: 12,
-    color: '#6B6B8A',
-    lineHeight: 18,
-    fontWeight: '400',
-  },
+  feedEmoji: { fontSize: 30, marginRight: spacing.md },
+  feedTitle: { color: colors.onPrimary, fontSize: 17, fontWeight: '800' },
+  feedSub: { color: colors.onPrimary, opacity: 0.8, fontSize: 13, marginTop: 2 },
+  feedArrow: { color: colors.onPrimary, fontSize: 28, marginLeft: spacing.sm },
   outfitCard: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.surface,
     borderRadius: 16,
     marginHorizontal: spacing.base,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: '#EBE9F3',
-    position: 'relative',
-    shadowColor: 'rgba(10, 25, 64, 0.04)',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 1,
-    shadowRadius: 12,
-    elevation: 2,
+    borderColor: colors.border,
   },
-  outfitImage: {
-    width: '100%',
-    height: 360,
-    resizeMode: 'cover',
-  },
+  outfitImage: { width: '100%', height: 360, resizeMode: 'cover' },
   outfitBadge: {
     position: 'absolute',
     top: 14,
@@ -850,21 +769,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
   },
-  outfitBadgeText: {
-    fontSize: 10,
-    fontWeight: '800',
-    color: '#0A1940',
-    letterSpacing: 1,
-  },
-  loadingContainer: {
-    padding: spacing.xl,
+  outfitBadgeText: { fontSize: 10, fontWeight: '800', color: '#0A1940', letterSpacing: 1 },
+  // Voter list modal
+  modalOverlay: { flex: 1, backgroundColor: colors.overlay, justifyContent: 'center', padding: spacing.xl },
+  modalCard: { backgroundColor: colors.surface, borderRadius: borderRadius.lg, padding: spacing.lg, maxHeight: '75%' },
+  modalTitle: { fontSize: fontSize.md, fontWeight: fontWeight.extraBold, color: colors.textPrimary, marginBottom: spacing.sm },
+  modalList: { flexGrow: 0 },
+  voterRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.divider,
   },
-  loadingText: {
-    marginTop: spacing.sm,
-    fontSize: 13,
-    color: '#6B6B8A',
-  },
-});
-
+  voterName: { flex: 1, fontSize: fontSize.base, color: colors.textPrimary, fontWeight: fontWeight.semiBold },
+  voterArrow: { fontSize: 22, color: colors.textMuted },
+  modalClose: { alignSelf: 'flex-end', marginTop: spacing.md, padding: spacing.sm },
+  modalCloseText: { color: colors.primary, fontWeight: fontWeight.bold },
+}));

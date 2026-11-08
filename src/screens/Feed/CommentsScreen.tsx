@@ -1,4 +1,4 @@
-// Comments on a feed post: live list, add (bad-word filtered), long-press to report or delete
+// Comments on a feed post, a public wardrobe photo or a circle photo post: live list, add (bad-word filtered), long-press to report or delete
 import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
@@ -14,25 +14,27 @@ import {
   StatusBar,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { colors, fontSize, fontWeight, spacing, borderRadius } from '../../theme';
+import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles, statusBarStyle } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
 import useIsAdmin from '../../hooks/useIsAdmin';
 import Avatar from '../../components/Avatar';
 import ReportModal, { ReportTarget } from '../../components/ReportModal';
+import { Comment, Post, MAX_COMMENT_CHARS, getPost, getWardrobeAsPost } from '../../services/feedApi';
 import {
-  Comment,
-  Post,
-  MAX_COMMENT_CHARS,
-  addComment,
-  deleteComment,
-  getPost,
-  subscribeComments,
-} from '../../services/feedApi';
+  CommentTarget,
+  addTargetComment,
+  deleteTargetComment,
+  subscribeTargetComments,
+} from '../../services/engagementApi';
 import { containsProfanity, RESPECT_MESSAGE } from '../../utils/profanity';
 import { timeAgo } from '../../utils/date';
 
 export default function CommentsScreen({ navigation, route }: { navigation: any; route: any }) {
-  const postId: string = route?.params?.postId || '';
+  // Old callers pass { postId }; new ones pass { target }
+  const target: CommentTarget | null =
+    route?.params?.target || (route?.params?.postId ? { kind: 'post', id: route.params.postId } : null);
+  const postId: string = target?.kind === 'post' ? target.id : '';
+  const targetKey = target ? `${target.kind}:${(target as any).circleId || ''}:${target.id}` : '';
   const highlightId: string | undefined = route?.params?.highlightId;
   const { user } = useAuth();
   const uid = user?.id;
@@ -48,12 +50,16 @@ export default function CommentsScreen({ navigation, route }: { navigation: any;
   const listRef = useRef<FlatList<Comment>>(null);
 
   useEffect(() => {
-    if (!postId) return;
-    getPost(postId)
-      .then(setPost)
-      .catch(() => setPost(null));
-    const unsub = subscribeComments(
-      postId,
+    if (!target) return;
+    if (target.kind === 'post') {
+      getPost(target.id)
+        .then(setPost)
+        .catch(() => setPost(null));
+    } else if (target.kind === 'wardrobe') {
+      getWardrobeAsPost(target.id).then(setPost);
+    }
+    const unsub = subscribeTargetComments(
+      target,
       list => {
         setComments(list);
         setError(null);
@@ -69,7 +75,8 @@ export default function CommentsScreen({ navigation, route }: { navigation: any;
         unsub();
       } catch {}
     };
-  }, [postId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targetKey]);
 
   // Admin opening a reported comment: scroll to it
   useEffect(() => {
@@ -93,7 +100,8 @@ export default function CommentsScreen({ navigation, route }: { navigation: any;
     }
     setSending(true);
     try {
-      await addComment(postId, { uid, name: user?.name, avatar: user?.avatarUrl }, t);
+      if (!target) return;
+      await addTargetComment(target, { uid, name: user?.name, avatar: user?.avatarUrl }, t);
       setText('');
       setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 300);
     } catch (e: any) {
@@ -107,7 +115,8 @@ export default function CommentsScreen({ navigation, route }: { navigation: any;
 
   const onLongPress = (c: Comment) => {
     const buttons: any[] = [];
-    if (c.userId !== uid) {
+    // Reports cover feed post comments (the admin screen opens them by post)
+    if (c.userId !== uid && postId) {
       buttons.push({ text: 'Report', onPress: () => setReportTarget({ postId, commentId: c.id }) });
     }
     if (canDelete(c)) {
@@ -116,7 +125,7 @@ export default function CommentsScreen({ navigation, route }: { navigation: any;
         style: 'destructive',
         onPress: async () => {
           try {
-            await deleteComment(postId, c.id);
+            if (target) await deleteTargetComment(target, c.id);
           } catch (e: any) {
             Alert.alert('Delete failed', e?.message || 'Please try again.');
           }
@@ -158,7 +167,7 @@ export default function CommentsScreen({ navigation, route }: { navigation: any;
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
       <StatusBar
-        barStyle="dark-content"
+        barStyle={statusBarStyle()}
         {...(Platform.OS === 'android' ? { backgroundColor: colors.surface } : {})}
       />
       <View style={styles.header}>
@@ -235,7 +244,7 @@ export default function CommentsScreen({ navigation, route }: { navigation: any;
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.surface },
   flex1: { flex: 1 },
   header: {
@@ -283,4 +292,4 @@ const styles = StyleSheet.create({
   sendBtn: { paddingLeft: spacing.md, minWidth: 48, alignItems: 'center' },
   send: { color: colors.primary, fontWeight: fontWeight.bold, fontSize: fontSize.base },
   sendOff: { opacity: 0.4 },
-});
+}));

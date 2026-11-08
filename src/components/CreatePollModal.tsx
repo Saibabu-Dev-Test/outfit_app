@@ -1,5 +1,5 @@
-// Build a photo poll: "Which should I buy?" / "Which should I wear?" with 2-4 photos
-import React, { useState } from 'react';
+// Build a photo poll: "Which should I buy?" / "Which should I wear?" with 2-6 photos labelled A-F
+import React, { useEffect, useState } from 'react';
 import {
   Modal,
   View,
@@ -14,20 +14,34 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
-import { colors, fontSize, fontWeight, spacing, borderRadius } from '../theme';
-import { pickImage, POLL_PICK } from '../utils/imagePicker';
-import { MAX_POLL_TOTAL_CHARS, POLL_QUESTIONS, PollKind, PollOption } from '../services/circlesApi';
+import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles } from '../theme';
+import { pickImage, pickImages, POLL_PICK } from '../utils/imagePicker';
+import {
+  MAX_POLL_OPTIONS,
+  MAX_POLL_TOTAL_CHARS,
+  POLL_LETTERS,
+  POLL_QUESTIONS,
+  PollKind,
+  PollOption,
+} from '../services/circlesApi';
 
 interface Props {
   visible: boolean;
   onClose: () => void;
   onSubmit: (kind: PollKind, options: PollOption[]) => Promise<void>;
+  initialImages?: string[]; // photos picked together in the chat
 }
 
-export default function CreatePollModal({ visible, onClose, onSubmit }: Props) {
+export default function CreatePollModal({ visible, onClose, onSubmit, initialImages }: Props) {
   const [kind, setKind] = useState<PollKind>('wear');
   const [options, setOptions] = useState<PollOption[]>([]);
   const [sending, setSending] = useState(false);
+
+  useEffect(() => {
+    if (visible && initialImages?.length) {
+      setOptions(initialImages.slice(0, MAX_POLL_OPTIONS).map(img => ({ imageData: img, label: '' })));
+    }
+  }, [visible, initialImages]);
 
   const reset = () => {
     setKind('wear');
@@ -44,15 +58,32 @@ export default function CreatePollModal({ visible, onClose, onSubmit }: Props) {
     try {
       const picked = await pickImage(source, POLL_PICK);
       if (!picked) return;
-      setOptions(prev => (prev.length >= 4 ? prev : [...prev, { imageData: picked.dataUri, label: '' }]));
+      setOptions(prev =>
+        prev.length >= MAX_POLL_OPTIONS ? prev : [...prev, { imageData: picked.dataUri, label: '' }],
+      );
     } catch (e: any) {
       Alert.alert('Photo problem', e?.message || 'Could not read that photo.');
+    }
+  };
+
+  const addSeveral = async () => {
+    try {
+      const room = MAX_POLL_OPTIONS - options.length;
+      const r = await pickImages(room);
+      if (r.skipped) Alert.alert('Some photos skipped', `${r.skipped} photo(s) were too large.`);
+      if (!r.images.length) return;
+      setOptions(prev =>
+        [...prev, ...r.images.map(p => ({ imageData: p.dataUri, label: '' }))].slice(0, MAX_POLL_OPTIONS),
+      );
+    } catch (e: any) {
+      Alert.alert('Photo problem', e?.message || 'Could not read those photos.');
     }
   };
 
   const askSource = () =>
     Alert.alert('Add a photo', undefined, [
       { text: 'Take Photo', onPress: () => addPhoto('camera') },
+      { text: 'Choose several', onPress: addSeveral },
       { text: 'Choose from Library', onPress: () => addPhoto('library') },
       { text: 'Cancel', style: 'cancel' },
     ]);
@@ -103,11 +134,14 @@ export default function CreatePollModal({ visible, onClose, onSubmit }: Props) {
               ))}
             </View>
 
-            <Text style={styles.hint}>Add 2 to 4 photos ({options.length}/4)</Text>
+            <Text style={styles.hint}>Add 2 to {MAX_POLL_OPTIONS} photos, labelled A-F ({options.length}/{MAX_POLL_OPTIONS})</Text>
             <View style={styles.grid}>
               {options.map((o, i) => (
                 <View key={i} style={styles.slot}>
                   <Image source={{ uri: o.imageData }} style={styles.slotImage} resizeMode="cover" />
+                  <View style={styles.letter}>
+                    <Text style={styles.letterText}>{POLL_LETTERS[i]}</Text>
+                  </View>
                   <TouchableOpacity
                     style={styles.remove}
                     onPress={() => setOptions(prev => prev.filter((_, j) => j !== i))}>
@@ -115,7 +149,7 @@ export default function CreatePollModal({ visible, onClose, onSubmit }: Props) {
                   </TouchableOpacity>
                   <TextInput
                     style={styles.labelInput}
-                    placeholder={`Label ${i + 1} (optional)`}
+                    placeholder={`Label ${POLL_LETTERS[i]} (optional)`}
                     placeholderTextColor={colors.textMuted}
                     value={o.label}
                     maxLength={40}
@@ -125,7 +159,7 @@ export default function CreatePollModal({ visible, onClose, onSubmit }: Props) {
                   />
                 </View>
               ))}
-              {options.length < 4 && (
+              {options.length < MAX_POLL_OPTIONS && (
                 <TouchableOpacity style={[styles.slot, styles.addSlot]} onPress={askSource}>
                   <Text style={styles.addPlus}>＋</Text>
                   <Text style={styles.addText}>Add photo</Text>
@@ -158,7 +192,7 @@ export default function CreatePollModal({ visible, onClose, onSubmit }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   overlay: { flex: 1, backgroundColor: colors.overlay, justifyContent: 'flex-end' },
   flex1: { flex: 1 },
   card: {
@@ -192,6 +226,18 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   slotImage: { width: '100%', aspectRatio: 0.8 },
+  letter: {
+    position: 'absolute',
+    top: 6,
+    left: 6,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  letterText: { color: colors.onPrimary, fontWeight: fontWeight.extraBold, fontSize: 12 },
   remove: {
     position: 'absolute',
     top: 6,
@@ -237,4 +283,4 @@ const styles = StyleSheet.create({
   },
   sendText: { color: colors.textInverse, fontWeight: fontWeight.bold },
   disabled: { opacity: 0.5 },
-});
+}));

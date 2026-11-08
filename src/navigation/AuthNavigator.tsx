@@ -1,6 +1,7 @@
 import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import LoginScreen from '../screens/Auth/LoginScreen';
+import { colors } from '../theme';
 
 // Login, sign up and forgot password all live in LoginScreen (Google + mobile + password)
 export type AuthStackParamList = {
@@ -18,7 +19,7 @@ export default function AuthNavigator({ onLoginSuccess }: AuthNavigatorProps) {
     <Stack.Navigator
       screenOptions={{
         headerShown: false,
-        contentStyle: { backgroundColor: '#FAF9FC' },
+        contentStyle: { backgroundColor: colors.background },
       }}>
       <Stack.Screen name="Login">
         {(props) => <LoginScreen {...props} onLoginSuccess={onLoginSuccess} />}

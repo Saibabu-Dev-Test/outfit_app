@@ -19,7 +19,7 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 import { db } from '../config/firebaseConfig';
-import { lastWeekKey, localDateKey, weekKeyFor } from '../utils/date';
+import { lastWeekKey, localDateKey, weekDayKeys, weekKeyFor } from '../utils/date';
 import { firestoreErrorMessage } from '../utils/firebaseErrors';
 import { inlineAvatar } from './userApi';
 
@@ -301,4 +301,29 @@ export const countFriendsJoined = async (uid: string): Promise<number> => {
     console.warn('countFriendsJoined failed:', e?.code, e?.message);
     return 0;
   }
+};
+
+// ── This week (Achievements) ────────────────────────────────────────────
+export interface WeekProgress {
+  week: string; // Monday key
+  fullDays: number; // days with all 3 tasks (counter doc)
+  days: { key: string; state: DayState }[]; // Mon..Sun
+}
+
+// Never throws
+export const getWeekProgress = async (uid: string): Promise<WeekProgress> => {
+  const week = weekKeyFor();
+  const keys = weekDayKeys(week);
+  const today = localDateKey();
+  const [w, days] = await Promise.all([
+    getDoc(weekRef(uid, week)).catch(() => null),
+    Promise.all(keys.map(k => (k <= today ? getDay(uid, k) : Promise.resolve({ ...EMPTY_DAY })))),
+  ]);
+  const counted = w && w.exists() ? Number((w.data() as any)?.fullDays) || 0 : 0;
+  const fromDays = days.filter(isFullDay).length;
+  return {
+    week,
+    fullDays: Math.max(counted, fromDays),
+    days: keys.map((key, i) => ({ key, state: days[i] })),
+  };
 };

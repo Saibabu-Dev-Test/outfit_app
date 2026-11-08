@@ -1,4 +1,4 @@
-// Traditional vaara (weekday) colours. Guidance only, not a computed panchangam.
+// Traditional vaara (weekday) colours by ruling graha. Guidance only: tithi/nakshatra are not computed.
 
 export interface VaaraColour {
   weekday: string;
@@ -17,7 +17,7 @@ const VAARA: VaaraColour[] = [
       { name: 'Red', hex: '#D32F2F' },
       { name: 'Orange', hex: '#F57C00' },
     ],
-    why: 'Sunday is ruled by Surya. Red and orange reflect the Sun\u2019s energy, confidence and vitality.',
+    why: 'Sunday is ruled by Surya (Sun); red and orange are his colours, believed to bring confidence, energy and success.',
   },
   {
     weekday: 'Monday',
@@ -27,7 +27,7 @@ const VAARA: VaaraColour[] = [
       { name: 'White', hex: '#F5F5F5' },
       { name: 'Silver', hex: '#B0BEC5' },
     ],
-    why: 'Monday is ruled by Chandra. White and silver echo moonlight and bring calm and clarity.',
+    why: 'Monday is ruled by Chandra (Moon); white and silver are his colours, believed to bring calm, peace and a clear mind.',
   },
   {
     weekday: 'Tuesday',
@@ -37,21 +37,21 @@ const VAARA: VaaraColour[] = [
       { name: 'Red', hex: '#C62828' },
       { name: 'Coral', hex: '#FF7043' },
     ],
-    why: 'Tuesday is ruled by Kuja. Red and coral stand for courage, strength and drive.',
+    why: 'Tuesday is ruled by Kuja / Mangala (Mars); red and coral are his colours, believed to bring courage and strength.',
   },
   {
     weekday: 'Wednesday',
     vaara: 'Budhavaram',
     graha: 'Budha (Mercury)',
     colours: [{ name: 'Green', hex: '#388E3C' }],
-    why: 'Wednesday is ruled by Budha. Green is linked to intellect, communication and growth.',
+    why: 'Wednesday is ruled by Budha (Mercury); green is his colour, believed to bring sharp thinking, good speech and growth.',
   },
   {
     weekday: 'Thursday',
     vaara: 'Guruvaram',
     graha: 'Guru / Brihaspati (Jupiter)',
     colours: [{ name: 'Yellow', hex: '#FBC02D' }],
-    why: 'Thursday is ruled by Guru. Yellow stands for wisdom, learning and good fortune.',
+    why: 'Thursday is ruled by Guru (Jupiter); yellow is his colour, believed to bring wisdom and luck.',
   },
   {
     weekday: 'Friday',
@@ -62,7 +62,7 @@ const VAARA: VaaraColour[] = [
       { name: 'Pink', hex: '#F48FB1' },
       { name: 'Light Blue', hex: '#81D4FA' },
     ],
-    why: 'Friday is ruled by Shukra. Soft whites, pinks and light blues reflect beauty, love and harmony.',
+    why: 'Friday is ruled by Shukra (Venus); white, pink and light blue are his colours, believed to bring beauty, love and harmony.',
   },
   {
     weekday: 'Saturday',
@@ -72,7 +72,7 @@ const VAARA: VaaraColour[] = [
       { name: 'Black', hex: '#212121' },
       { name: 'Dark Blue', hex: '#1A237E' },
     ],
-    why: 'Saturday is ruled by Shani. Black and dark blue are traditionally worn to honour Shani and stay grounded.',
+    why: 'Saturday is ruled by Shani (Saturn); black and dark blue are his colours, worn to honour Shani and stay steady and protected.',
   },
 ];
 

@@ -1,128 +1,24 @@
-// Instagram-style public feed: infinite scroll, pull to refresh, like (tap heart or double-tap the photo), comments
+// Feed tab, Instagram style: public posts + public wardrobe photos from public profiles,
+// newest first, infinite scroll, pull to refresh. Like, comment and A-F voting live in PostCard.
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
-  StyleSheet,
   TouchableOpacity,
   FlatList,
-  Image,
   RefreshControl,
   ActivityIndicator,
-  Alert,
-  Animated,
-  Pressable,
   StatusBar,
   Platform,
   useWindowDimensions,
+  StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { colors, fontSize, fontWeight, spacing, borderRadius } from '../../theme';
+import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles, statusBarStyle } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
 import useIsAdmin from '../../hooks/useIsAdmin';
-import Avatar from '../../components/Avatar';
-import ReportModal, { ReportTarget } from '../../components/ReportModal';
-import {
-  FeedCursor,
-  Post,
-  deletePost,
-  getFeedPage,
-  getLikedPostIds,
-  onCommentCountChange,
-  toggleLike,
-} from '../../services/feedApi';
-import { timeAgo } from '../../utils/date';
-
-interface PostCardProps {
-  post: Post;
-  liked: boolean;
-  width: number;
-  onToggleLike: (post: Post, forceLike?: boolean) => void;
-  onOpenProfile: (userId: string) => void;
-  onMenu: (post: Post) => void;
-  onOpenComments: (post: Post) => void;
-}
-
-function PostCard({ post, liked, width, onToggleLike, onOpenProfile, onMenu, onOpenComments }: PostCardProps) {
-  const lastTap = useRef(0);
-  const heart = useRef(new Animated.Value(0)).current;
-
-  const onImagePress = () => {
-    const now = Date.now();
-    if (now - lastTap.current < 300) {
-      lastTap.current = 0;
-      heart.setValue(0);
-      Animated.sequence([
-        Animated.spring(heart, { toValue: 1, useNativeDriver: true, friction: 4 }),
-        Animated.timing(heart, { toValue: 0, duration: 250, delay: 300, useNativeDriver: true }),
-      ]).start();
-      if (!liked) onToggleLike(post, true);
-    } else {
-      lastTap.current = now;
-    }
-  };
-
-  return (
-    <View style={styles.post}>
-      <View style={styles.postHeader}>
-        <TouchableOpacity style={styles.postUser} onPress={() => onOpenProfile(post.userId)}>
-          <Avatar uri={post.userAvatar} name={post.userName} size={34} />
-          <View style={styles.postUserText}>
-            <Text style={styles.postName} numberOfLines={1}>
-              {post.userName}
-            </Text>
-            <Text style={styles.postTime}>{timeAgo(post.createdAt)}</Text>
-          </View>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={() => onMenu(post)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-          <Text style={styles.menu}>⋯</Text>
-        </TouchableOpacity>
-      </View>
-
-      <Pressable onPress={onImagePress}>
-        <Image source={{ uri: post.imageData }} style={{ width, height: width }} resizeMode="cover" />
-        <Animated.Text
-          style={[
-            styles.bigHeart,
-            { opacity: heart, transform: [{ scale: heart.interpolate({ inputRange: [0, 1], outputRange: [0.5, 1.2] }) }] },
-          ]}>
-          ♥
-        </Animated.Text>
-      </Pressable>
-
-      <View style={styles.actions}>
-        <TouchableOpacity onPress={() => onToggleLike(post)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-          <Text style={[styles.heart, liked && styles.heartOn]}>{liked ? '♥' : '♡'}</Text>
-        </TouchableOpacity>
-        <Text style={styles.likes}>
-          {post.likeCount} {post.likeCount === 1 ? 'like' : 'likes'}
-        </Text>
-        <TouchableOpacity
-          style={styles.commentBtn}
-          onPress={() => onOpenComments(post)}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-          <Text style={styles.commentIcon}>💬</Text>
-          <Text style={styles.likes}>{post.commentCount}</Text>
-        </TouchableOpacity>
-      </View>
-      {post.caption ? (
-        <Text style={styles.caption}>
-          <Text style={styles.captionName} onPress={() => onOpenProfile(post.userId)}>
-            {post.userName}{' '}
-          </Text>
-          {post.caption}
-        </Text>
-      ) : null}
-      <TouchableOpacity onPress={() => onOpenComments(post)}>
-        <Text style={styles.viewComments}>
-          {post.commentCount > 0
-            ? `View all ${post.commentCount} ${post.commentCount === 1 ? 'comment' : 'comments'}`
-            : 'Add a comment...'}
-        </Text>
-      </TouchableOpacity>
-    </View>
-  );
-}
+import PostCard from '../../components/PostCard';
+import { FeedLoader, Post } from '../../services/feedApi';
 
 export default function FeedScreen({ navigation, route }: { navigation: any; route: any }) {
   const { user } = useAuth();
@@ -131,172 +27,90 @@ export default function FeedScreen({ navigation, route }: { navigation: any; rou
   const { width } = useWindowDimensions();
 
   const [posts, setPosts] = useState<Post[]>([]);
-  const [liked, setLiked] = useState<Set<string>>(new Set());
-  const [cursor, setCursor] = useState<FeedCursor>(null);
   const [hasMore, setHasMore] = useState(true);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [reportTarget, setReportTarget] = useState<ReportTarget | null>(null);
-  const liking = useRef<Set<string>>(new Set());
-
-  const markLiked = useCallback(
-    async (list: Post[]) => {
-      if (!uid || !list.length) return;
-      const ids = await getLikedPostIds(list.map(p => p.id), uid);
-      setLiked(prev => {
-        const next = new Set(prev);
-        list.forEach(p => (ids.has(p.id) ? next.add(p.id) : next.delete(p.id)));
-        return next;
-      });
-    },
-    [uid],
-  );
+  const loader = useRef<FeedLoader>(new FeedLoader(uid));
+  const busy = useRef(false);
 
   const loadFirst = useCallback(async () => {
+    busy.current = true;
+    loader.current = new FeedLoader(uid);
     try {
-      const page = await getFeedPage(null);
-      setPosts(page.posts);
-      setCursor(page.cursor);
-      setHasMore(page.hasMore);
+      const list = await loader.current.next();
+      setPosts(list);
+      setHasMore(loader.current.hasMore);
       setError(null);
-      markLiked(page.posts);
     } catch (e: any) {
       setError(e?.message || 'Could not load the feed.');
     } finally {
+      busy.current = false;
       setLoading(false);
       setRefreshing(false);
     }
-  }, [markLiked]);
+  }, [uid]);
 
   const loadMore = async () => {
-    if (loading || loadingMore || refreshing || !hasMore || !cursor) return;
+    if (busy.current || loading || refreshing || !hasMore) return;
+    busy.current = true;
     setLoadingMore(true);
     try {
-      const page = await getFeedPage(cursor);
+      const list = await loader.current.next();
       setPosts(prev => {
-        const seen = new Set(prev.map(p => p.id));
-        return [...prev, ...page.posts.filter(p => !seen.has(p.id))];
+        const seen = new Set(prev.map(p => `${p.kind}_${p.id}`));
+        return [...prev, ...list.filter(p => !seen.has(`${p.kind}_${p.id}`))];
       });
-      setCursor(page.cursor);
-      setHasMore(page.hasMore);
-      markLiked(page.posts);
+      setHasMore(loader.current.hasMore);
     } catch (e: any) {
       setError(e?.message || 'Could not load more posts.');
     } finally {
+      busy.current = false;
       setLoadingMore(false);
     }
   };
 
   // First load, and again after a new post (NewPost passes refreshAt)
   const refreshAt = route?.params?.refreshAt;
-
-  // Keep 💬 counts in step with the Comments screen
-  useEffect(
-    () =>
-      onCommentCountChange((postId, delta) =>
-        setPosts(prev =>
-          prev.map(p => (p.id === postId ? { ...p, commentCount: Math.max(0, p.commentCount + delta) } : p)),
-        ),
-      ),
-    [],
-  );
   useEffect(() => {
     loadFirst();
   }, [loadFirst, refreshAt]);
 
-  const handleToggleLike = async (post: Post, forceLike = false) => {
-    if (!uid) {
-      Alert.alert('Not signed in', 'Please sign in again to like posts.');
-      return;
-    }
-    const isLiked = liked.has(post.id);
-    if (forceLike && isLiked) return;
-    if (liking.current.has(post.id)) return;
-    liking.current.add(post.id);
-    // Optimistic
-    const apply = (nowLiked: boolean, count: number) => {
-      setLiked(prev => {
-        const next = new Set(prev);
-        if (nowLiked) next.add(post.id);
-        else next.delete(post.id);
-        return next;
-      });
-      setPosts(prev => prev.map(p => (p.id === post.id ? { ...p, likeCount: count } : p)));
-    };
-    apply(!isLiked, Math.max(0, post.likeCount + (isLiked ? -1 : 1)));
-    try {
-      const r = await toggleLike(post.id, uid);
-      apply(r.liked, r.likeCount);
-    } catch (e: any) {
-      apply(isLiked, post.likeCount);
-      Alert.alert('Like failed', e?.message || 'Please try again.');
-    } finally {
-      liking.current.delete(post.id);
-    }
-  };
-
-  const handleMenu = (post: Post) => {
-    const buttons: any[] = [];
-    if (post.userId !== uid) {
-      buttons.push({ text: 'Report', onPress: () => setReportTarget({ postId: post.id }) });
-    }
-    if (post.userId === uid || isAdmin) {
-      buttons.push({
-        text: post.userId === uid ? 'Delete post' : 'Delete post (admin)',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await deletePost(post.id);
-            setPosts(prev => prev.filter(p => p.id !== post.id));
-          } catch (e: any) {
-            Alert.alert('Delete failed', e?.message || 'Please try again.');
-          }
-        },
-      });
-    }
-    buttons.push({ text: 'Cancel', style: 'cancel' });
-    Alert.alert('Post', undefined, buttons);
-  };
-
-  const openComments = (post: Post) => navigation.navigate('Comments', { postId: post.id });
-
-  const openProfile = (userId: string) => {
-    if (userId) navigation.navigate('UserProfile', { userId });
-  };
-
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       <StatusBar
-        barStyle="dark-content"
+        barStyle={statusBarStyle()}
         {...(Platform.OS === 'android' ? { backgroundColor: colors.surface } : {})}
       />
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-          <Text style={styles.back}>‹</Text>
-        </TouchableOpacity>
+        {navigation.canGoBack() && route?.name !== 'Feed' ? (
+          <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+            <Text style={styles.back}>‹</Text>
+          </TouchableOpacity>
+        ) : null}
         <Text style={styles.title}>Feed</Text>
+        <TouchableOpacity style={styles.iconBtn} onPress={() => navigation.navigate('Likes')}>
+          <Text style={styles.iconText}>♡</Text>
+        </TouchableOpacity>
         <TouchableOpacity style={styles.iconBtn} onPress={() => navigation.navigate('UserSearch')}>
           <Text style={styles.iconText}>🔍</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.newBtn} onPress={() => navigation.navigate('NewPost')}>
-          <Text style={styles.newText}>＋ New post</Text>
+          <Text style={styles.newText}>＋ Post</Text>
         </TouchableOpacity>
       </View>
 
       <FlatList
         data={posts}
-        keyExtractor={p => p.id}
+        keyExtractor={p => `${p.kind}_${p.id}`}
         renderItem={({ item }) => (
           <PostCard
             post={item}
-            liked={liked.has(item.id)}
             width={width}
-            onToggleLike={handleToggleLike}
-            onOpenProfile={openProfile}
-            onMenu={handleMenu}
-            onOpenComments={openComments}
+            myUid={uid}
+            isAdmin={isAdmin}
+            onDeleted={p => setPosts(prev => prev.filter(x => !(x.id === p.id && x.kind === p.kind)))}
           />
         )}
         onEndReached={loadMore}
@@ -313,6 +127,7 @@ export default function FeedScreen({ navigation, route }: { navigation: any; rou
               loadFirst();
             }}
             tintColor={colors.primary}
+            colors={[colors.primary]}
           />
         }
         ListHeaderComponent={error ? <Text style={styles.error}>{error}</Text> : undefined}
@@ -337,12 +152,11 @@ export default function FeedScreen({ navigation, route }: { navigation: any; rou
           )
         }
       />
-      <ReportModal target={reportTarget} reporterId={uid} onClose={() => setReportTarget(null)} />
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.surface },
   header: {
     flexDirection: 'row',
@@ -355,7 +169,7 @@ const styles = StyleSheet.create({
   back: { fontSize: 34, color: colors.primary, marginRight: spacing.sm, lineHeight: 36 },
   title: { flex: 1, fontSize: fontSize.xl, fontWeight: fontWeight.extraBold, color: colors.textPrimary },
   iconBtn: { paddingHorizontal: spacing.sm },
-  iconText: { fontSize: 20 },
+  iconText: { fontSize: 22, color: colors.textPrimary },
   newBtn: {
     backgroundColor: colors.primary,
     borderRadius: borderRadius.full,
@@ -363,37 +177,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
     marginLeft: spacing.xs,
   },
-  newText: { color: colors.textInverse, fontWeight: fontWeight.bold, fontSize: fontSize.sm },
-  post: { marginBottom: spacing.base },
-  postHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-  },
-  postUser: { flex: 1, flexDirection: 'row', alignItems: 'center' },
-  postUserText: { marginLeft: spacing.sm, flex: 1 },
-  postName: { fontSize: fontSize.base, fontWeight: fontWeight.bold, color: colors.textPrimary },
-  postTime: { fontSize: fontSize.xs, color: colors.textMuted },
-  menu: { fontSize: 22, color: colors.textSecondary, paddingHorizontal: spacing.sm },
-  bigHeart: {
-    position: 'absolute',
-    alignSelf: 'center',
-    top: '35%',
-    fontSize: 96,
-    color: colors.textInverse,
-    textShadowColor: 'rgba(0,0,0,0.3)',
-    textShadowRadius: 12,
-  },
-  actions: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.md, paddingTop: spacing.sm },
-  heart: { fontSize: 28, color: colors.textPrimary, marginRight: spacing.sm },
-  heartOn: { color: '#E91E63' },
-  likes: { fontSize: fontSize.sm, fontWeight: fontWeight.bold, color: colors.textPrimary },
-  commentBtn: { flexDirection: 'row', alignItems: 'center', marginLeft: spacing.lg },
-  commentIcon: { fontSize: 20, marginRight: 4 },
-  viewComments: { fontSize: fontSize.sm, color: colors.textMuted, paddingHorizontal: spacing.md, paddingTop: 4 },
-  caption: { fontSize: fontSize.sm, color: colors.textPrimary, paddingHorizontal: spacing.md, paddingTop: 4, lineHeight: 19 },
-  captionName: { fontWeight: fontWeight.bold },
+  newText: { color: colors.onPrimary, fontWeight: fontWeight.bold, fontSize: fontSize.sm },
   error: { color: colors.error, textAlign: 'center', padding: spacing.md },
   footer: { marginVertical: spacing.xl },
   end: { textAlign: 'center', color: colors.textMuted, marginVertical: spacing.xl },
@@ -406,4 +190,4 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.sm,
   },
-});
+}));

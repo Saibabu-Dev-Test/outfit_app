@@ -1,18 +1,23 @@
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
-import { NavigationContainer } from '@react-navigation/native';
+import { DarkTheme, DefaultTheme, NavigationContainer, NavigationState } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import BottomTabNavigator from './BottomTabNavigator';
 import AuthNavigator from './AuthNavigator';
 import { AuthProvider, useAuth } from '../context/AuthContext';
 import CircleChatScreen from '../screens/Circles/CircleChatScreen';
 import CircleInfoScreen from '../screens/Circles/CircleInfoScreen';
-import FeedScreen from '../screens/Feed/FeedScreen';
 import NewPostScreen from '../screens/Feed/NewPostScreen';
 import CommentsScreen from '../screens/Feed/CommentsScreen';
 import UserProfileScreen from '../screens/Profile/UserProfileScreen';
 import UserSearchScreen from '../screens/Profile/UserSearchScreen';
 import AdminScreen from '../screens/Admin/AdminScreen';
+import ProfileScreen from '../screens/Profile/ProfileScreen';
+import AchievementsScreen from '../screens/Profile/AchievementsScreen';
+import LikesScreen from '../screens/Profile/LikesScreen';
+import FollowListScreen from '../screens/Profile/FollowListScreen';
+import PostDetailScreen from '../screens/Feed/PostDetailScreen';
+import { colors, themedStyles, useTheme } from '../theme';
 import AppLockGate from '../components/AppLockGate';
 import SessionLockScreen from '../components/SessionLockScreen';
 import TamperScreen from '../components/TamperScreen';
@@ -32,9 +37,24 @@ function useVaultStatus(): VaultStatus {
   return status;
 }
 
+// Kept across a theme switch (the tree remounts) so the user stays on the same screen
+let savedNavState: NavigationState | undefined;
+
 function NavigationContent() {
   const { isAuthenticated, initializing, login } = useAuth();
   const vault = useVaultStatus();
+  const { isDark } = useTheme();
+  const navTheme = {
+    ...(isDark ? DarkTheme : DefaultTheme),
+    colors: {
+      ...(isDark ? DarkTheme : DefaultTheme).colors,
+      primary: colors.primary,
+      background: colors.background,
+      card: colors.surface,
+      text: colors.textPrimary,
+      border: colors.border,
+    },
+  };
 
   // APK not signed with the official key: blocked, signed out
   if (vault === 'tampered') return <TamperScreen />;
@@ -55,8 +75,13 @@ function NavigationContent() {
   }
 
   return (
-    <>
-    <NavigationContainer>
+    <React.Fragment key={isDark ? 'dark' : 'light'}>
+    <NavigationContainer
+      theme={navTheme}
+      initialState={isAuthenticated ? savedNavState : undefined}
+      onStateChange={st => {
+        savedNavState = st;
+      }}>
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         {!isAuthenticated ? (
           <Stack.Screen name="Auth">
@@ -70,11 +95,15 @@ function NavigationContent() {
         ) : (
           <>
             <Stack.Screen name="MainApp" component={BottomTabNavigator} />
-            {/* Pushed over the tabs from Circles, Home, Profile and Feed */}
+            {/* Pushed over the tabs from Circles, Home, Me and Feed */}
             <Stack.Group screenOptions={{ animation: 'slide_from_right' }}>
               <Stack.Screen name="CircleChat" component={CircleChatScreen} />
               <Stack.Screen name="CircleInfo" component={CircleInfoScreen} />
-              <Stack.Screen name="Feed" component={FeedScreen} />
+              <Stack.Screen name="Settings" component={ProfileScreen} />
+              <Stack.Screen name="Achievements" component={AchievementsScreen} />
+              <Stack.Screen name="Likes" component={LikesScreen} />
+              <Stack.Screen name="PostDetail" component={PostDetailScreen} />
+              <Stack.Screen name="FollowList" component={FollowListScreen} />
               <Stack.Screen name="NewPost" component={NewPostScreen} />
               <Stack.Screen name="Comments" component={CommentsScreen} />
               <Stack.Screen name="UserProfile" component={UserProfileScreen} />
@@ -86,16 +115,16 @@ function NavigationContent() {
       </Stack.Navigator>
     </NavigationContainer>
     <AppLockGate />
-    </>
+    </React.Fragment>
   );
 }
 
-const styles = StyleSheet.create({
-  splash: { flex: 1, backgroundColor: '#FAF9FC', alignItems: 'center', justifyContent: 'center' },
+const styles = themedStyles(() => StyleSheet.create({
+  splash: { flex: 1, backgroundColor: colors.background, alignItems: 'center', justifyContent: 'center' },
   splashLogo: { fontSize: 44 },
-  splashName: { fontSize: 24, fontWeight: '900', color: '#0A1940', letterSpacing: 4, marginTop: 8 },
+  splashName: { fontSize: 24, fontWeight: '900', color: colors.textPrimary, letterSpacing: 4, marginTop: 8 },
   splashSpinner: { marginTop: 20 },
-});
+}));
 
 export default function RootNavigator() {
   return (

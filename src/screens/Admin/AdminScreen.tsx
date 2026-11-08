@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
-import { colors, fontSize, fontWeight, spacing, borderRadius } from '../../theme';
+import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles, statusBarStyle } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
 import { getMyRole } from '../../services/userApi';
 import { Report, getReports, deleteReport } from '../../services/moderationApi';
@@ -233,7 +233,7 @@ export default function AdminScreen({ navigation }: { navigation: any }) {
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       <StatusBar
-        barStyle="dark-content"
+        barStyle={statusBarStyle()}
         {...(Platform.OS === 'android' ? { backgroundColor: colors.background } : {})}
       />
       {header}
@@ -270,7 +270,7 @@ export default function AdminScreen({ navigation }: { navigation: any }) {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.background },
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
   back: { fontSize: 34, color: colors.primary, marginRight: spacing.sm, lineHeight: 36 },
@@ -317,4 +317,4 @@ const styles = StyleSheet.create({
   btnDanger: { borderColor: colors.error },
   btnDangerText: { color: colors.error, fontWeight: fontWeight.bold, fontSize: fontSize.sm },
   empty: { textAlign: 'center', color: colors.textMuted, padding: spacing.xxl },
-});
+}));

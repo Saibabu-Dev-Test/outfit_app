@@ -83,6 +83,9 @@ export const POLL_QUESTIONS: Record<PollKind, string> = {
 
 // A whole message doc must stay under Firestore's 1 MiB limit
 export const MAX_POLL_TOTAL_CHARS = 900000;
+// Photo polls / multi-photo posts: up to 6 photos labelled A-F
+export const MAX_POLL_OPTIONS = 6;
+export const POLL_LETTERS = ['A', 'B', 'C', 'D', 'E', 'F'];
 
 const CIRCLES = 'circles';
 const CODES = 'inviteCodes';
@@ -291,12 +294,15 @@ export const deleteCircle = async (circle: Circle): Promise<void> => {
     const msgs = await getDocs(collection(db, CIRCLES, circle.id, 'messages'));
     const refs: any[] = [];
     for (const m of msgs.docs) {
-      if ((m.data() as any)?.type === 'poll') {
-        try {
-          const votes = await getDocs(collection(m.ref, 'votes'));
-          votes.docs.forEach(v => refs.push(v.ref));
-        } catch (e: any) {
-          console.warn('deleteCircle votes:', e?.code, e?.message);
+      const t = (m.data() as any)?.type;
+      if (t === 'poll' || t === 'image') {
+        for (const sub of t === 'poll' ? ['votes', 'reactions', 'comments'] : ['reactions', 'comments']) {
+          try {
+            const docs = await getDocs(collection(m.ref, sub));
+            docs.docs.forEach(v => refs.push(v.ref));
+          } catch (e: any) {
+            console.warn(`deleteCircle ${sub}:`, e?.code, e?.message);
+          }
         }
       }
     }
@@ -404,7 +410,9 @@ export const sendPollMessage = async (
   kind: PollKind,
   options: PollOption[],
 ): Promise<void> => {
-  if (options.length < 2 || options.length > 4) throw new Error('A poll needs 2 to 4 photos.');
+  if (options.length < 2 || options.length > MAX_POLL_OPTIONS) {
+    throw new Error(`A poll needs 2 to ${MAX_POLL_OPTIONS} photos.`);
+  }
   options.forEach(o => checkImage(o.imageData));
   options.forEach(o => assertClean(o.label || '', 'Please keep poll labels respectful 🙏'));
   const total = options.reduce((n, o) => n + o.imageData.length, 0);
@@ -418,7 +426,11 @@ export const sendPollMessage = async (
       poll: {
         question: POLL_QUESTIONS[kind],
         kind,
-        options: options.map(o => ({ imageData: o.imageData, label: o.label.trim().slice(0, 40) })),
+        // Empty labels become A, B, C...
+        options: options.map((o, i) => ({
+          imageData: o.imageData,
+          label: (o.label || '').trim().slice(0, 40) || POLL_LETTERS[i],
+        })),
       },
     });
   } catch (e: any) {
@@ -430,12 +442,15 @@ export const sendPollMessage = async (
 // Author, circle owner or admin
 export const deleteMessage = async (circleId: string, message: ChatMessage): Promise<void> => {
   const ref = doc(db, CIRCLES, circleId, 'messages', message.id);
-  if (message.type === 'poll') {
-    try {
-      const votes = await getDocs(collection(ref, 'votes'));
-      await deleteInBatches(votes.docs.map(v => v.ref));
-    } catch (e: any) {
-      console.warn('deleteMessage votes cleanup:', e?.code, e?.message);
+  // Votes, reactions and comments under the message (best effort; no Cloud Functions)
+  if (message.type !== 'text') {
+    for (const sub of message.type === 'poll' ? ['votes', 'reactions', 'comments'] : ['reactions', 'comments']) {
+      try {
+        const docs = await getDocs(collection(ref, sub));
+        await deleteInBatches(docs.docs.map(v => v.ref));
+      } catch (e: any) {
+        console.warn(`deleteMessage ${sub} cleanup:`, e?.code, e?.message);
+      }
     }
   }
   try {

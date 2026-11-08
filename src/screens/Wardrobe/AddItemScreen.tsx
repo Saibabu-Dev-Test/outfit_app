@@ -17,7 +17,7 @@ import {
   Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { colors, fontSize, fontWeight, spacing, borderRadius } from '../../theme';
+import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles, statusBarStyle } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
 import {
   addWardrobeItem as apiAddWardrobeItem,
@@ -26,7 +26,7 @@ import {
 } from '../../services/wardrobeApi';
 import { pickImage } from '../../utils/imagePicker';
 import {
-  getCategoriesForGender,
+  getAllCategoriesSorted,
   categoryIcon,
   COLOR_SWATCHES,
   WEAR_TYPES,
@@ -54,7 +54,8 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
   const itemToEdit = route?.params?.itemToEdit;
   const isEditing = Boolean(itemToEdit?.id);
 
-  const categories = getCategoriesForGender(user?.gender);
+  // All categories in a swipeable chip slider (gender-wise ones first)
+  const categories = getAllCategoriesSorted(user?.gender);
   // Old items may hold a hex in color; normalise to a swatch name
   const initialColor: string | null = itemToEdit?.color
     ? (String(itemToEdit.color).startsWith('#') ? colorNameFromHex(itemToEdit.color) : itemToEdit.color)
@@ -63,11 +64,16 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
   // imageUri holds a base64 data URI (new photo) or the saved imageData
   const [imageUri, setImageUri]               = useState<string | null>(itemToEdit?.imageUrl || null);
   const [imageChanged, setImageChanged]       = useState(false);
-  const [isPublic, setIsPublic]               = useState<boolean>(itemToEdit?.isPublic === true);
+  // New items from a public profile default to the public feed
+  const [isPublic, setIsPublic]               = useState<boolean>(
+    itemToEdit ? itemToEdit.isPublic === true : user?.isPublic !== false,
+  );
   const [colorError, setColorError]           = useState(false);
   const [isPreviewVisible, setIsPreviewVisible] = useState(false);
   const [itemName, setItemName]               = useState(itemToEdit?.name || '');
-  const [selectedCategory, setSelectedCategory]   = useState<string | null>(itemToEdit?.category || null);
+  const [selectedCategory, setSelectedCategory]   = useState<string | null>(
+    itemToEdit?.category || route?.params?.category || null,
+  );
   const [selectedSubCategory] = useState<string | null>(itemToEdit?.subCategory || null);
   const [selectedWearType, setSelectedWearType]   = useState<string>(itemToEdit?.wearType || 'Daily Wear');
   const [selectedColor, setSelectedColor]       = useState<string | null>(initialColor);
@@ -221,7 +227,7 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <StatusBar
-        barStyle="dark-content"
+        barStyle={statusBarStyle()}
         {...(Platform.OS === 'android' ? { backgroundColor: '#FAFAFA' } : {})}
       />
 
@@ -320,7 +326,12 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
           {catError ? 'CATEGORY — please select one item' : 'CATEGORY'}
         </Text>
 
-        <View style={styles.categoryWrap}>
+        <Text style={styles.swipeHint}>Swipe to see all categories ›</Text>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.categorySlider}
+          contentContainerStyle={styles.categorySliderContent}>
           {categories.map(cat => {
             const isSelected = selectedCategory === cat;
             return (
@@ -341,7 +352,7 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
               </TouchableOpacity>
             );
           })}
-        </View>
+        </ScrollView>
 
         {/* WEAR TYPE Section */}
         <Text style={styles.mainSectionTitle}>WEAR TYPE</Text>
@@ -368,7 +379,7 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
           <TextInput
             style={styles.textInput}
             placeholder={selectedCategory ? `Name e.g. "My favourite ${selectedCategory}"` : 'Enter custom item name…'}
-            placeholderTextColor="#B0AECB"
+            placeholderTextColor={colors.textMuted}
             value={itemName}
             onChangeText={t => { setItemName(t); setNameError(''); }}
             returnKeyType="done"
@@ -495,8 +506,10 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
   );
 }
 
-const styles = StyleSheet.create({
-  categoryWrap: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: spacing.md },
+const styles = themedStyles(() => StyleSheet.create({
+  categorySlider: { marginBottom: spacing.md, marginHorizontal: -spacing.base },
+  categorySliderContent: { paddingHorizontal: spacing.base },
+  swipeHint: { fontSize: 11, color: colors.textMuted, marginBottom: 6 },
   categoryChip: { marginBottom: 8, marginRight: 8 },
   publicRow: {
     flexDirection: 'row',
@@ -504,8 +517,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginTop: spacing.base,
   },
-  publicLabel: { fontSize: 14, fontWeight: '600', color: '#0A1940' },
-  safe: { flex: 1, backgroundColor: '#FAFAFA' },
+  publicLabel: { fontSize: 14, fontWeight: '600', color: colors.textPrimary },
+  safe: { flex: 1, backgroundColor: colors.background },
   scroll: { flex: 1 },
   scrollContent: { paddingBottom: 48, paddingHorizontal: spacing.base },
 
@@ -517,35 +530,35 @@ const styles = StyleSheet.create({
     paddingTop: spacing.sm,
     paddingBottom: spacing.md,
     borderBottomWidth: 1,
-    borderBottomColor: '#EBE9F3',
-    backgroundColor: '#FAFAFA',
+    borderBottomColor: colors.border,
+    backgroundColor: colors.background,
   },
   backBtn: {
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: '#F0EDF8',
+    backgroundColor: colors.divider,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  backIcon: { fontSize: 18, color: '#3D3070', lineHeight: 20 },
+  backIcon: { fontSize: 18, color: colors.textPrimary, lineHeight: 20 },
   headerTitle: {
     fontSize: fontSize.md,
     fontWeight: fontWeight.bold,
-    color: '#0A1940',
+    color: colors.textPrimary,
     letterSpacing: 0.2,
   },
 
   fixedTopSection: {
     paddingHorizontal: spacing.base,
-    backgroundColor: '#FAFAFA',
+    backgroundColor: colors.background,
     borderBottomWidth: 1,
-    borderBottomColor: '#EBE9F3',
+    borderBottomColor: colors.border,
     paddingBottom: spacing.xs,
   },
   introText: {
     fontSize: 12,
-    color: '#8E8EA8',
+    color: colors.textSecondary,
     lineHeight: 18,
     marginTop: spacing.sm,
     marginBottom: spacing.xs,
@@ -553,11 +566,11 @@ const styles = StyleSheet.create({
 
   uploadZone: {
     borderWidth: 2,
-    borderColor: '#C8C0E8',
+    borderColor: colors.border,
     borderStyle: 'dashed',
     borderRadius: 16,
     height: 160,
-    backgroundColor: '#F8F6FF',
+    backgroundColor: colors.divider,
     marginBottom: spacing.xs,
     overflow: 'hidden',
     position: 'relative',
@@ -573,13 +586,13 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: '#EDE8FF',
+    backgroundColor: colors.divider,
     alignItems: 'center',
     justifyContent: 'center',
   },
   uploadIcon: { fontSize: 20 },
-  uploadTitle: { fontSize: fontSize.sm, fontWeight: fontWeight.bold, color: '#3D3070' },
-  uploadSubtitle: { fontSize: 11, color: '#9E9EBA' },
+  uploadTitle: { fontSize: fontSize.sm, fontWeight: fontWeight.bold, color: colors.textPrimary },
+  uploadSubtitle: { fontSize: 11, color: colors.textMuted },
 
   imagePreviewTouch: {
     width: '100%',
@@ -612,8 +625,8 @@ const styles = StyleSheet.create({
     fontSize: 11,
   },
   aiBadgeContainer: {
-    backgroundColor: '#F0EBFF',
-    borderColor: '#D1C4E9',
+    backgroundColor: colors.divider,
+    borderColor: colors.border,
     borderWidth: 1,
     borderRadius: 10,
     paddingVertical: 6,
@@ -698,7 +711,7 @@ const styles = StyleSheet.create({
   mainSectionTitle: {
     fontSize: 11,
     fontWeight: '800',
-    color: '#4A4A6A',
+    color: colors.textSecondary,
     letterSpacing: 1.2,
     textTransform: 'uppercase',
     marginTop: spacing.lg,
@@ -707,12 +720,12 @@ const styles = StyleSheet.create({
   sectionLabelError: { color: '#E91E63' },
 
   groupCard: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.surface,
     borderRadius: 16,
     padding: 14,
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: '#EAEAEA',
+    borderColor: colors.border,
     shadowColor: 'rgba(0,0,0,0.02)',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 1,
@@ -736,9 +749,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.surface,
     borderWidth: 1.5,
-    borderColor: '#E2E8F0',
+    borderColor: colors.border,
     borderRadius: 20,
     paddingHorizontal: 14,
     paddingVertical: 8,
@@ -768,9 +781,9 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 12,
     borderRadius: 12,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.surface,
     borderWidth: 1.5,
-    borderColor: '#E2E8F0',
+    borderColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -781,7 +794,7 @@ const styles = StyleSheet.create({
   wearTypeText: {
     fontSize: 13,
     fontWeight: '700',
-    color: '#1A1A1A',
+    color: colors.textPrimary,
   },
   wearTypeTextSelected: {
     color: '#FFFFFF',
@@ -789,15 +802,15 @@ const styles = StyleSheet.create({
 
   textInputWrap: {
     borderWidth: 1.5,
-    borderColor: '#E0DBF0',
+    borderColor: colors.border,
     borderRadius: borderRadius.md,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.surface,
     paddingHorizontal: spacing.md,
   },
   textInput: {
     paddingVertical: 12,
     fontSize: fontSize.base,
-    color: '#0A1940',
+    color: colors.textPrimary,
   },
   textInputError: { borderColor: '#F48FB1' },
   errorMsg: { fontSize: 11, color: '#E91E63', fontWeight: fontWeight.semiBold, marginTop: 4 },
@@ -805,7 +818,7 @@ const styles = StyleSheet.create({
   swatchGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 6 },
   swatch: { width: 32, height: 32, borderRadius: 16, borderWidth: 2 },
   swatchActive: { borderWidth: 3, borderColor: colors.primary, transform: [{ scale: 1.2 }] },
-  colorName: { fontSize: 11, color: '#6B6B8A', fontWeight: fontWeight.semiBold, marginBottom: spacing.sm },
+  colorName: { fontSize: 11, color: colors.textSecondary, fontWeight: fontWeight.semiBold, marginBottom: spacing.sm },
 
   fabricWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   fabricChip: {
@@ -813,22 +826,22 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 20,
     borderWidth: 1.5,
-    borderColor: '#E0DBF0',
-    backgroundColor: '#FFFFFF',
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
   },
   fabricChipActive: { backgroundColor: '#E91E63', borderColor: '#E91E63' },
-  fabricChipText: { fontSize: 12, fontWeight: fontWeight.semiBold, color: '#4A4A6A' },
+  fabricChipText: { fontSize: 12, fontWeight: fontWeight.semiBold, color: colors.textSecondary },
   fabricChipTextActive: { color: '#FFFFFF' },
 
   previewCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.surface,
     borderRadius: 14,
     padding: spacing.md,
     marginTop: spacing.lg,
     borderWidth: 1.5,
-    borderColor: '#EDE8FF',
+    borderColor: colors.border,
     shadowColor: 'rgba(10,25,64,0.06)',
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 1,
@@ -838,9 +851,9 @@ const styles = StyleSheet.create({
   previewThumb: { width: 50, height: 50, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   previewEmoji: { fontSize: 26 },
   previewInfo: { flex: 1, marginLeft: 12 },
-  previewName: { fontSize: fontSize.base, fontWeight: fontWeight.bold, color: '#0A1940' },
-  previewMeta: { fontSize: 12, color: '#6B6B8A', marginTop: 2 },
-  previewColorDot: { width: 20, height: 20, borderRadius: 10, borderWidth: 1.5, borderColor: '#E0DBF0' },
+  previewName: { fontSize: fontSize.base, fontWeight: fontWeight.bold, color: colors.textPrimary },
+  previewMeta: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
+  previewColorDot: { width: 20, height: 20, borderRadius: 10, borderWidth: 1.5, borderColor: colors.border },
 
   saveBtn: {
     backgroundColor: '#E91E63',
@@ -856,4 +869,4 @@ const styles = StyleSheet.create({
   },
   saveBtnText: { color: '#FFFFFF', fontSize: 14, fontWeight: fontWeight.bold, letterSpacing: 1.2 },
   saveBtnDisabled: { opacity: 0.65 },
-});
+}));

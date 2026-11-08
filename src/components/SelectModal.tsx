@@ -1,6 +1,7 @@
 // Simple dropdown: RN Modal + FlatList (no native deps)
 import React from 'react';
 import { Modal, View, Text, TouchableOpacity, FlatList, StyleSheet } from 'react-native';
+import { themedStyles, colors } from '../theme';
 
 interface Props {
   visible: boolean;
@@ -48,7 +49,7 @@ export default function SelectModal({ visible, title, options, selected, onSelec
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   overlay: {
     flex: 1,
     backgroundColor: 'rgba(10,25,64,0.45)',
@@ -56,7 +57,7 @@ const styles = StyleSheet.create({
     padding: 24,
   },
   card: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.surface,
     borderRadius: 18,
     paddingVertical: 16,
     maxHeight: '75%',
@@ -64,7 +65,7 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 16,
     fontWeight: '800',
-    color: '#0A1940',
+    color: colors.textPrimary,
     paddingHorizontal: 18,
     marginBottom: 8,
   },
@@ -76,10 +77,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingVertical: 13,
   },
-  optionActive: { backgroundColor: '#F3F0FF' },
-  optionText: { fontSize: 15, color: '#2D2D4A' },
+  optionActive: { backgroundColor: colors.divider },
+  optionText: { fontSize: 15, color: colors.textPrimary },
   optionTextActive: { color: '#6C5CE7', fontWeight: '700' },
   check: { color: '#6C5CE7', fontWeight: '800', fontSize: 16 },
   cancel: { alignSelf: 'flex-end', paddingHorizontal: 18, paddingTop: 10 },
-  cancelText: { color: '#8E8EA8', fontWeight: '700', fontSize: 14 },
-});
+  cancelText: { color: colors.textSecondary, fontWeight: '700', fontSize: 14 },
+}));

@@ -1,7 +1,7 @@
 // Round avatar: photo, or the first letter of the name
 import React from 'react';
 import { View, Text, Image, StyleSheet, StyleProp, ViewStyle } from 'react-native';
-import { colors, fontWeight } from '../theme';
+import { colors, fontWeight, themedStyles } from '../theme';
 
 interface Props {
   uri?: string | null;
@@ -27,8 +27,8 @@ export default function Avatar({ uri, name, size = 36, style }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   wrap: { overflow: 'hidden', backgroundColor: colors.divider },
   fallback: { backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' },
   initial: { color: colors.textInverse, fontWeight: fontWeight.extraBold },
-});
+}));

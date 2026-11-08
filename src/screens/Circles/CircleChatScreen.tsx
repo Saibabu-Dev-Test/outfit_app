@@ -16,12 +16,13 @@ import {
   StatusBar,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { colors, fontSize, fontWeight, spacing, borderRadius } from '../../theme';
+import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles, statusBarStyle } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
 import useIsAdmin from '../../hooks/useIsAdmin';
 import Avatar from '../../components/Avatar';
 import PollCard from '../../components/PollCard';
 import CreatePollModal from '../../components/CreatePollModal';
+import ReactionBar from '../../components/ReactionBar';
 import ReportModal, { ReportTarget } from '../../components/ReportModal';
 import {
   Circle,
@@ -35,7 +36,7 @@ import {
   deleteMessage,
   joinPublicCircle,
 } from '../../services/circlesApi';
-import { pickImage } from '../../utils/imagePicker';
+import { pickImage, pickImages } from '../../utils/imagePicker';
 import { clockTime } from '../../utils/date';
 
 export default function CircleChatScreen({ navigation, route }: { navigation: any; route: any }) {
@@ -52,6 +53,7 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [pollOpen, setPollOpen] = useState(false);
+  const [pollImages, setPollImages] = useState<string[] | undefined>(undefined);
   const [viewer, setViewer] = useState<string | null>(null);
   const [reportTarget, setReportTarget] = useState<ReportTarget | null>(null);
   const [joining, setJoining] = useState(false);
@@ -137,9 +139,39 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
     }
   };
 
+  // Several photos together: 1 = normal photo, 2-6 = A-F vote post
+  const sendSeveral = async () => {
+    try {
+      const r = await pickImages(6);
+      if (r.skipped) Alert.alert('Some photos skipped', `${r.skipped} photo(s) were too large.`);
+      if (!r.images.length) return;
+      if (r.images.length === 1) {
+        setSending(true);
+        await sendImageMessage(circleId, me, r.images[0].dataUri);
+        return;
+      }
+      setPollImages(r.images.map(i => i.dataUri));
+      setPollOpen(true);
+    } catch (e: any) {
+      Alert.alert('Photos not sent', e?.message || 'Please try again.');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const openComments = (m: ChatMessage) =>
+    navigation.navigate('Comments', { target: { kind: 'circle', circleId, id: m.id } });
+
   const openAttach = () =>
     Alert.alert('Share', undefined, [
-      { text: 'Photo poll', onPress: () => setPollOpen(true) },
+      { text: 'Several photos (A-F vote)', onPress: sendSeveral },
+      {
+        text: 'Photo poll',
+        onPress: () => {
+          setPollImages(undefined);
+          setPollOpen(true);
+        },
+      },
       { text: 'Take Photo', onPress: () => sendPhoto('camera') },
       { text: 'Choose from Library', onPress: () => sendPhoto('library') },
       { text: 'Cancel', style: 'cancel' },
@@ -234,6 +266,15 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
             />
           ) : null}
           {item.text ? <Text style={[styles.text, mine && styles.textMine]}>{item.text}</Text> : null}
+          {item.type !== 'text' ? (
+            <ReactionBar
+              circleId={circleId}
+              messageId={item.id}
+              myUid={uid}
+              canReact={isMember}
+              onOpenComments={() => openComments(item)}
+            />
+          ) : null}
           <Text style={[styles.time, mine && styles.timeMine]}>{clockTime(item.createdAt)}</Text>
         </TouchableOpacity>
       </View>
@@ -346,7 +387,7 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
       <StatusBar
-        barStyle="dark-content"
+        barStyle={statusBarStyle()}
         {...(Platform.OS === 'android' ? { backgroundColor: colors.surface } : {})}
       />
       {header}
@@ -359,7 +400,11 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
 
       <CreatePollModal
         visible={pollOpen}
-        onClose={() => setPollOpen(false)}
+        onClose={() => {
+          setPollOpen(false);
+          setPollImages(undefined);
+        }}
+        initialImages={pollImages}
         onSubmit={(kind, options) => sendPollMessage(circleId, me, kind, options)}
       />
       <ReportModal target={reportTarget} reporterId={uid} onClose={() => setReportTarget(null)} />
@@ -373,7 +418,7 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.background },
   flex1: { flex: 1 },
   header: {
@@ -466,4 +511,4 @@ const styles = StyleSheet.create({
   disabled: { opacity: 0.5 },
   viewer: { flex: 1, backgroundColor: 'rgba(0,0,0,0.92)', alignItems: 'center', justifyContent: 'center' },
   viewerImage: { width: '100%', height: '80%' },
-});
+}));

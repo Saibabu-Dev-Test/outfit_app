@@ -15,7 +15,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { spacing, borderRadius } from '../../theme';
+import { spacing, borderRadius, themedStyles, statusBarStyle, colors } from '../../theme';
 import SelectModal from '../../components/SelectModal';
 import {
   cancelAuthFlow,
@@ -379,8 +379,8 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar
-        barStyle="dark-content"
-        {...(Platform.OS === 'android' ? { backgroundColor: '#FAF9FC' } : {})}
+        barStyle={statusBarStyle()}
+        {...(Platform.OS === 'android' ? { backgroundColor: colors.background } : {})}
       />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -467,7 +467,7 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
                     <TextInput
                       style={styles.textInputBox}
                       placeholder="Your name"
-                      placeholderTextColor="#9E9EBA"
+                      placeholderTextColor={colors.textMuted}
                       autoCapitalize="words"
                       editable={!busy}
                       value={name}
@@ -498,7 +498,7 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
                     <TextInput
                       style={styles.textInputBox}
                       placeholder="Optional"
-                      placeholderTextColor="#9E9EBA"
+                      placeholderTextColor={colors.textMuted}
                       autoCapitalize="characters"
                       autoCorrect={false}
                       maxLength={6}
@@ -540,7 +540,7 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
                   <TextInput
                     style={styles.phoneInput}
                     placeholder="Mobile number"
-                    placeholderTextColor="#9E9EBA"
+                    placeholderTextColor={colors.textMuted}
                     keyboardType="phone-pad"
                     textContentType="telephoneNumber"
                     autoComplete="tel"
@@ -611,7 +611,7 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
                     ref={passwordRef}
                     style={styles.passwordInput}
                     placeholder={needsConfirm ? `Create password (min ${MIN_PASSWORD} chars)` : 'Enter password'}
-                    placeholderTextColor="#9E9EBA"
+                    placeholderTextColor={colors.textMuted}
                     secureTextEntry={!showPassword}
                     autoCapitalize="none"
                     autoCorrect={false}
@@ -658,7 +658,7 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
                         ref={confirmRef}
                         style={styles.passwordInput}
                         placeholder="Re-enter your password"
-                        placeholderTextColor="#9E9EBA"
+                        placeholderTextColor={colors.textMuted}
                         secureTextEntry={!showConfirmPassword}
                         autoCapitalize="none"
                         autoCorrect={false}
@@ -742,39 +742,39 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FAF9FC' },
+const styles = themedStyles(() => StyleSheet.create({
+  container: { flex: 1, backgroundColor: colors.background },
   flexOne: { flex: 1 },
   scrollContent: { flexGrow: 1, paddingHorizontal: spacing.base, paddingTop: spacing.md, paddingBottom: spacing.xxl },
   heroSection: { alignItems: 'center', marginTop: spacing.sm, marginBottom: spacing.lg },
-  logoBadge: { width: 64, height: 64, borderRadius: 32, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', marginBottom: spacing.xs, borderWidth: 1, borderColor: '#EBE9F3', shadowColor: 'rgba(10, 25, 64, 0.06)', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 1, shadowRadius: 12, elevation: 3 },
+  logoBadge: { width: 64, height: 64, borderRadius: 32, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center', marginBottom: spacing.xs, borderWidth: 1, borderColor: colors.border, shadowColor: 'rgba(10, 25, 64, 0.06)', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 1, shadowRadius: 12, elevation: 3 },
   logoIcon: { fontSize: 30 },
-  appName: { fontSize: 24, fontWeight: '900', color: '#0A1940', letterSpacing: 4 },
-  tagline: { fontSize: 12, color: '#6B6B8A', marginTop: 4, fontWeight: '500' },
-  card: { backgroundColor: '#FFFFFF', borderRadius: 20, padding: spacing.xl, borderWidth: 1, borderColor: '#EBE9F3', shadowColor: 'rgba(10, 25, 64, 0.05)', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 1, shadowRadius: 16, elevation: 3 },
-  tabContainer: { flexDirection: 'row', backgroundColor: '#F3EFFF', borderRadius: borderRadius.md, padding: 4, marginBottom: spacing.lg },
+  appName: { fontSize: 24, fontWeight: '900', color: colors.textPrimary, letterSpacing: 4 },
+  tagline: { fontSize: 12, color: colors.textSecondary, marginTop: 4, fontWeight: '500' },
+  card: { backgroundColor: colors.surface, borderRadius: 20, padding: spacing.xl, borderWidth: 1, borderColor: colors.border, shadowColor: 'rgba(10, 25, 64, 0.05)', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 1, shadowRadius: 16, elevation: 3 },
+  tabContainer: { flexDirection: 'row', backgroundColor: colors.divider, borderRadius: borderRadius.md, padding: 4, marginBottom: spacing.lg },
   tabButton: { flex: 1, paddingVertical: spacing.xs + 2, alignItems: 'center', borderRadius: borderRadius.sm },
-  tabButtonActive: { backgroundColor: '#FFFFFF', shadowColor: 'rgba(10, 25, 64, 0.08)', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 1, shadowRadius: 4, elevation: 2 },
-  tabText: { fontSize: 14, fontWeight: '600', color: '#6B6B8A' },
+  tabButtonActive: { backgroundColor: colors.surface, shadowColor: 'rgba(10, 25, 64, 0.08)', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 1, shadowRadius: 4, elevation: 2 },
+  tabText: { fontSize: 14, fontWeight: '600', color: colors.textSecondary },
   tabTextActive: { color: '#E91E63', fontWeight: '800' },
-  cardTitle: { fontSize: 22, fontWeight: '800', color: '#0A1940', marginBottom: 4 },
-  cardSubtitle: { fontSize: 13, color: '#6B6B8A', lineHeight: 18, marginBottom: spacing.md },
-  inputLabel: { fontSize: 12, fontWeight: '700', color: '#4A4A6A', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 },
+  cardTitle: { fontSize: 22, fontWeight: '800', color: colors.textPrimary, marginBottom: 4 },
+  cardSubtitle: { fontSize: 13, color: colors.textSecondary, lineHeight: 18, marginBottom: spacing.md },
+  inputLabel: { fontSize: 12, fontWeight: '700', color: colors.textSecondary, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 },
   labelSpacing: { marginTop: spacing.md },
-  inputRow: { flexDirection: 'row', alignItems: 'center', borderWidth: 1.5, borderColor: '#E0DBF0', borderRadius: borderRadius.md, backgroundColor: '#FAF9FC', height: 52, paddingHorizontal: spacing.sm },
+  inputRow: { flexDirection: 'row', alignItems: 'center', borderWidth: 1.5, borderColor: colors.border, borderRadius: borderRadius.md, backgroundColor: colors.background, height: 52, paddingHorizontal: spacing.sm },
   countryPickerButton: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.xs },
   flagText: { fontSize: 18, marginRight: 6 },
-  countryCodeText: { fontSize: 15, fontWeight: '700', color: '#0A1940', marginRight: 4 },
-  dropdownChevron: { fontSize: 12, color: '#6B6B8A' },
+  countryCodeText: { fontSize: 15, fontWeight: '700', color: colors.textPrimary, marginRight: 4 },
+  dropdownChevron: { fontSize: 12, color: colors.textSecondary },
   inputDivider: { width: 1, height: 24, backgroundColor: '#D0CBDF', marginHorizontal: spacing.sm },
-  phoneInput: { flex: 1, fontSize: 16, fontWeight: '600', color: '#0A1940', height: '100%' },
-  countryDropdown: { backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E0DBF0', borderRadius: borderRadius.md, marginTop: spacing.xs, overflow: 'hidden', elevation: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 8 },
-  countryOption: { paddingVertical: spacing.md, paddingHorizontal: spacing.base, borderBottomWidth: 1, borderBottomColor: '#F5F2F8' },
-  countryOptionSelected: { backgroundColor: '#F3EFFF' },
-  countryOptionText: { fontSize: 14, fontWeight: '600', color: '#0A1940' },
-  passwordRow: { flexDirection: 'row', alignItems: 'center', borderWidth: 1.5, borderColor: '#E0DBF0', borderRadius: borderRadius.md, backgroundColor: '#FAF9FC', height: 52, paddingHorizontal: spacing.md },
+  phoneInput: { flex: 1, fontSize: 16, fontWeight: '600', color: colors.textPrimary, height: '100%' },
+  countryDropdown: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: borderRadius.md, marginTop: spacing.xs, overflow: 'hidden', elevation: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 8 },
+  countryOption: { paddingVertical: spacing.md, paddingHorizontal: spacing.base, borderBottomWidth: 1, borderBottomColor: colors.border },
+  countryOptionSelected: { backgroundColor: colors.divider },
+  countryOptionText: { fontSize: 14, fontWeight: '600', color: colors.textPrimary },
+  passwordRow: { flexDirection: 'row', alignItems: 'center', borderWidth: 1.5, borderColor: colors.border, borderRadius: borderRadius.md, backgroundColor: colors.background, height: 52, paddingHorizontal: spacing.md },
   inputErrorBorder: { borderColor: '#F8B4B4' },
-  passwordInput: { flex: 1, fontSize: 15, fontWeight: '600', color: '#0A1940', height: '100%' },
+  passwordInput: { flex: 1, fontSize: 15, fontWeight: '600', color: colors.textPrimary, height: '100%' },
   eyeButton: { padding: spacing.xs },
   eyeIcon: { fontSize: 18 },
   hintError: { color: '#E91E63', fontSize: 12, marginTop: 4, fontWeight: '500' },
@@ -786,24 +786,24 @@ const styles = StyleSheet.create({
   buttonDisabled: { opacity: 0.7 },
   primaryButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700', letterSpacing: 0.5 },
   switchRow: { alignItems: 'center', marginTop: spacing.md },
-  switchText: { fontSize: 13, color: '#6B6B8A' },
-  termsText: { fontSize: 11, color: '#8E8EA8', textAlign: 'center', lineHeight: 17, marginTop: spacing.md },
-  termsLink: { color: '#0A1940', fontWeight: '700' },
-  googleButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', height: 52, borderRadius: borderRadius.md, borderWidth: 1.5, borderColor: '#E0DBF0', backgroundColor: '#FFFFFF' },
+  switchText: { fontSize: 13, color: colors.textSecondary },
+  termsText: { fontSize: 11, color: colors.textSecondary, textAlign: 'center', lineHeight: 17, marginTop: spacing.md },
+  termsLink: { color: colors.textPrimary, fontWeight: '700' },
+  googleButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', height: 52, borderRadius: borderRadius.md, borderWidth: 1.5, borderColor: colors.border, backgroundColor: colors.surface },
   googleG: { fontSize: 18, fontWeight: '900', color: '#4285F4', marginRight: spacing.sm },
-  googleButtonText: { fontSize: 15, fontWeight: '700', color: '#0A1940' },
+  googleButtonText: { fontSize: 15, fontWeight: '700', color: colors.textPrimary },
   googleChip: { flexDirection: 'row', alignItems: 'center', borderWidth: 1.5, borderColor: '#A5D6A7', backgroundColor: '#F1F8F2', borderRadius: borderRadius.md, paddingHorizontal: spacing.md, height: 52 },
-  googleChipText: { flex: 1, fontSize: 14, fontWeight: '700', color: '#0A1940' },
+  googleChipText: { flex: 1, fontSize: 14, fontWeight: '700', color: colors.textPrimary },
   changeLink: { fontSize: 13, fontWeight: '700', color: '#E91E63', paddingLeft: spacing.sm },
-  stepHint: { fontSize: 12, color: '#6B6B8A', marginTop: spacing.sm },
-  textInputBox: { borderWidth: 1.5, borderColor: '#E0DBF0', borderRadius: borderRadius.md, backgroundColor: '#FAF9FC', height: 52, paddingHorizontal: spacing.md, fontSize: 15, fontWeight: '600', color: '#0A1940' },
-  selectBox: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 1.5, borderColor: '#E0DBF0', borderRadius: borderRadius.md, backgroundColor: '#FAF9FC', height: 52, paddingHorizontal: spacing.md },
-  selectValue: { fontSize: 15, fontWeight: '600', color: '#0A1940' },
-  selectPlaceholder: { fontSize: 15, color: '#9E9EBA' },
+  stepHint: { fontSize: 12, color: colors.textSecondary, marginTop: spacing.sm },
+  textInputBox: { borderWidth: 1.5, borderColor: colors.border, borderRadius: borderRadius.md, backgroundColor: colors.background, height: 52, paddingHorizontal: spacing.md, fontSize: 15, fontWeight: '600', color: colors.textPrimary },
+  selectBox: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 1.5, borderColor: colors.border, borderRadius: borderRadius.md, backgroundColor: colors.background, height: 52, paddingHorizontal: spacing.md },
+  selectValue: { fontSize: 15, fontWeight: '600', color: colors.textPrimary },
+  selectPlaceholder: { fontSize: 15, color: colors.textMuted },
   phoneReadOnly: { textAlignVertical: 'center', lineHeight: 52 },
-  phonePlaceholder: { color: '#9E9EBA', fontWeight: '500', fontSize: 15 },
+  phonePlaceholder: { color: colors.textMuted, fontWeight: '500', fontSize: 15 },
   simButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', height: 46, borderRadius: borderRadius.md, borderWidth: 1.5, borderColor: '#E91E63', backgroundColor: '#FFF0F5', marginTop: spacing.sm },
   simButtonText: { fontSize: 14, fontWeight: '700', color: '#E91E63' },
   forgotRow: { alignSelf: 'flex-end', marginTop: spacing.sm },
   forgotText: { fontSize: 13, fontWeight: '700', color: '#E91E63' },
-});
+}));

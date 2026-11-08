@@ -1,62 +1,31 @@
-// Public profile: avatar, name, bio, rashi, posts grid and public wardrobe items
+// Another user's profile (Instagram style): counts, follow / unfollow, their posts as a
+// scrolling feed (like, comment, A-F vote) and their public wardrobe photos as a grid.
+// Private profiles show "This account is private".
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
-  StyleSheet,
   TouchableOpacity,
   ScrollView,
-  Image,
   ActivityIndicator,
-  Modal,
   RefreshControl,
   StatusBar,
   Platform,
+  Alert,
   useWindowDimensions,
+  StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { collection, getDocs, query, where } from 'firebase/firestore';
-import { db } from '../../config/firebaseConfig';
-import { colors, fontSize, fontWeight, spacing, borderRadius } from '../../theme';
+import { colors, fontSize, fontWeight, spacing, themedStyles, statusBarStyle } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
-import Avatar from '../../components/Avatar';
+import useIsAdmin from '../../hooks/useIsAdmin';
+import ProfileHeader, { headerButtonStyles as hb } from '../../components/ProfileHeader';
+import PhotoGrid from '../../components/PhotoGrid';
+import PostCard from '../../components/PostCard';
 import { getPublicUser, PublicUser } from '../../services/userApi';
-import { getUserPosts, Post } from '../../services/feedApi';
-import { firestoreErrorMessage } from '../../utils/firebaseErrors';
-import { toDate } from '../../utils/date';
+import { getUserPosts, getUserPublicWardrobePosts, Post } from '../../services/feedApi';
 import { isWeeklyStar } from '../../services/rewardsApi';
-
-interface PublicItem {
-  id: string;
-  name: string;
-  imageUrl: string | null;
-  category: string;
-  createdAt: number;
-}
-
-// wardrobe where userId == X and isPublic == true (two equalities: no composite index). Sorted here.
-const getPublicWardrobe = async (userId: string): Promise<PublicItem[]> => {
-  try {
-    const snap = await getDocs(
-      query(collection(db, 'wardrobe'), where('userId', '==', userId), where('isPublic', '==', true)),
-    );
-    return snap.docs
-      .map(d => {
-        const x: any = d.data();
-        return {
-          id: d.id,
-          name: x?.name || x?.subCategory || x?.category || 'Item',
-          imageUrl: x?.imageData || x?.imageUrl || null,
-          category: x?.category || '',
-          createdAt: toDate(x?.createdAt)?.getTime() || 0,
-        };
-      })
-      .sort((a, b) => b.createdAt - a.createdAt);
-  } catch (e: any) {
-    console.warn('getPublicWardrobe failed:', e?.code, e?.message);
-    throw new Error(firestoreErrorMessage(e, 'Loading wardrobe'));
-  }
-};
+import { follow, getProfileCounts, isFollowing, ProfileCounts, unfollow } from '../../services/socialApi';
 
 type TabKey = 'posts' | 'wardrobe';
 
@@ -64,17 +33,19 @@ export default function UserProfileScreen({ navigation, route }: { navigation: a
   const userId: string = route?.params?.userId || '';
   const { user: me } = useAuth();
   const isMe = !!me?.id && me.id === userId;
+  const { isAdmin } = useIsAdmin(me?.id);
   const { width } = useWindowDimensions();
-  const tile = Math.floor((width - 4) / 3);
 
   const [profile, setProfile] = useState<PublicUser | null>(null);
   const [status, setStatus] = useState<'loading' | 'ok' | 'private' | 'missing' | 'error'>('loading');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [posts, setPosts] = useState<Post[]>([]);
-  const [items, setItems] = useState<PublicItem[]>([]);
+  const [items, setItems] = useState<Post[]>([]);
+  const [counts, setCounts] = useState<ProfileCounts | null>(null);
+  const [following, setFollowing] = useState(false);
+  const [followBusy, setFollowBusy] = useState(false);
   const [tab, setTab] = useState<TabKey>('posts');
   const [refreshing, setRefreshing] = useState(false);
-  const [openPost, setOpenPost] = useState<Post | null>(null);
   const [sectionError, setSectionError] = useState<string | null>(null);
   const [isStar, setIsStar] = useState(false);
 
@@ -90,7 +61,6 @@ export default function UserProfileScreen({ navigation, route }: { navigation: a
       setRefreshing(false);
       return;
     }
-    // Private profiles are visible only to their owner
     if (!r.user.isPublic && !isMe) {
       setStatus('private');
       setRefreshing(false);
@@ -99,25 +69,30 @@ export default function UserProfileScreen({ navigation, route }: { navigation: a
     setProfile(r.user);
     setStatus('ok');
     const errs: string[] = [];
-    try {
-      setPosts(await getUserPosts(userId));
-    } catch (e: any) {
-      errs.push(e?.message);
-    }
-    try {
-      setItems(await getPublicWardrobe(userId));
-    } catch (e: any) {
-      errs.push(e?.message);
-    }
+    const [p, w, c, f] = await Promise.all([
+      getUserPosts(userId).catch(e => {
+        errs.push(e?.message);
+        return [] as Post[];
+      }),
+      getUserPublicWardrobePosts(userId).catch(e => {
+        errs.push(e?.message);
+        return [] as Post[];
+      }),
+      getProfileCounts(userId, isMe),
+      me?.id && !isMe ? isFollowing(me.id, userId) : Promise.resolve(false),
+    ]);
+    setPosts(p.map(x => ({ ...x, userName: r.user.name, userAvatar: r.user.avatarUrl || x.userAvatar })));
+    setItems(w);
+    setCounts(c);
+    setFollowing(f);
     setSectionError(errs.length ? errs[0] : null);
     setRefreshing(false);
-  }, [userId, isMe]);
+  }, [userId, isMe, me?.id]);
 
   useEffect(() => {
     load();
   }, [load]);
 
-  // ⭐ weekly celebrity badge
   useEffect(() => {
     let alive = true;
     isWeeklyStar(userId).then(v => alive && setIsStar(v));
@@ -125,6 +100,28 @@ export default function UserProfileScreen({ navigation, route }: { navigation: a
       alive = false;
     };
   }, [userId]);
+
+  const toggleFollow = async () => {
+    if (!me?.id || !profile || followBusy) return;
+    setFollowBusy(true);
+    const was = following;
+    setFollowing(!was);
+    setCounts(c => (c ? { ...c, followers: Math.max(0, c.followers + (was ? -1 : 1)) } : c));
+    try {
+      if (was) await unfollow(me.id, userId);
+      else
+        await follow(
+          { uid: me.id, name: me.name, avatar: me.avatarUrl },
+          { uid: userId, name: profile.name, avatar: profile.avatarUrl },
+        );
+    } catch (e: any) {
+      setFollowing(was);
+      setCounts(c => (c ? { ...c, followers: Math.max(0, c.followers + (was ? 1 : -1)) } : c));
+      Alert.alert(was ? 'Unfollow failed' : 'Follow failed', e?.message || 'Please try again.');
+    } finally {
+      setFollowBusy(false);
+    }
+  };
 
   const header = (
     <View style={styles.header}>
@@ -149,7 +146,7 @@ export default function UserProfileScreen({ navigation, route }: { navigation: a
               <Text style={styles.lockEmoji}>{status === 'private' ? '🔒' : '👤'}</Text>
               <Text style={styles.centerTitle}>
                 {status === 'private'
-                  ? 'This profile is private'
+                  ? 'This account is private'
                   : status === 'missing'
                   ? 'Profile not found'
                   : 'Could not load profile'}
@@ -162,13 +159,11 @@ export default function UserProfileScreen({ navigation, route }: { navigation: a
     );
   }
 
-  const grid = tab === 'posts' ? posts : items;
-
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       <StatusBar
-        barStyle="dark-content"
-        {...(Platform.OS === 'android' ? { backgroundColor: colors.background } : {})}
+        barStyle={statusBarStyle()}
+        {...(Platform.OS === 'android' ? { backgroundColor: colors.surface } : {})}
       />
       {header}
       <ScrollView
@@ -180,124 +175,93 @@ export default function UserProfileScreen({ navigation, route }: { navigation: a
               load();
             }}
             tintColor={colors.primary}
+            colors={[colors.primary]}
           />
         }>
-        <View style={styles.top}>
-          <Avatar uri={profile.avatarUrl} name={profile.name} size={86} />
-          <View style={styles.stats}>
-            <View style={styles.stat}>
-              <Text style={styles.statNum}>{posts.length}</Text>
-              <Text style={styles.statLabel}>Posts</Text>
-            </View>
-            <View style={styles.stat}>
-              <Text style={styles.statNum}>{items.length}</Text>
-              <Text style={styles.statLabel}>Wardrobe</Text>
-            </View>
-          </View>
-        </View>
-        <View style={styles.bioBox}>
-          <Text style={styles.name}>
-            {profile.name}
-            {isStar ? ' ⭐' : ''}
-          </Text>
-          {isStar && <Text style={styles.starBadge}>Weekly celebrity</Text>}
-          {profile.rashi ? <Text style={styles.rashi}>✨ {profile.rashi}</Text> : null}
-          {profile.bio ? <Text style={styles.bio}>{profile.bio}</Text> : null}
-          {isMe && !profile.isPublic ? (
-            <Text style={styles.privateNote}>🔒 Your profile is private. Only you can see this page.</Text>
-          ) : null}
-        </View>
+        <ProfileHeader
+          userId={userId}
+          name={profile.name}
+          avatarUrl={profile.avatarUrl}
+          bio={profile.bio}
+          stylePrefs={profile.stylePrefs}
+          counts={counts}
+          isStar={isStar}
+          isPrivate={!profile.isPublic}>
+          {isMe ? (
+            <TouchableOpacity style={hb.btn} onPress={() => navigation.navigate('Settings', { edit: true })}>
+              <Text style={hb.btnText}>Edit profile</Text>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              style={[hb.btn, !following && hb.btnPrimary]}
+              onPress={toggleFollow}
+              disabled={followBusy}>
+              <Text style={[hb.btnText, !following && hb.btnTextPrimary]}>{following ? 'Following ✓' : 'Follow'}</Text>
+            </TouchableOpacity>
+          )}
+        </ProfileHeader>
+        {profile.rashi ? <Text style={styles.rashi}>✨ {profile.rashi}</Text> : null}
 
         <View style={styles.tabs}>
-          {(['posts', 'wardrobe'] as TabKey[]).map(k => (
-            <TouchableOpacity key={k} style={[styles.tab, tab === k && styles.tabActive]} onPress={() => setTab(k)}>
-              <Text style={[styles.tabText, tab === k && styles.tabTextActive]}>
-                {k === 'posts' ? '▦ Posts' : '☰ Wardrobe'}
+          {(['posts', 'wardrobe'] as TabKey[]).map(t => (
+            <TouchableOpacity key={t} style={[styles.tab, tab === t && styles.tabOn]} onPress={() => setTab(t)}>
+              <Text style={[styles.tabText, tab === t && styles.tabTextOn]}>
+                {t === 'posts' ? `▤ Posts (${posts.length})` : `👗 Wardrobe (${items.length})`}
               </Text>
             </TouchableOpacity>
           ))}
         </View>
         {sectionError ? <Text style={styles.error}>{sectionError}</Text> : null}
 
-        <View style={styles.grid}>
-          {tab === 'posts'
-            ? posts.map(p => (
-                <TouchableOpacity key={p.id} onPress={() => setOpenPost(p)} activeOpacity={0.85}>
-                  <Image source={{ uri: p.imageData }} style={[styles.tile, { width: tile, height: tile }]} />
-                </TouchableOpacity>
-              ))
-            : items.map(i => (
-                <View key={i.id} style={{ width: tile }}>
-                  {i.imageUrl ? (
-                    <Image source={{ uri: i.imageUrl }} style={[styles.tile, { width: tile, height: tile }]} />
-                  ) : (
-                    <View style={[styles.tile, styles.tileEmpty, { width: tile, height: tile }]}>
-                      <Text style={styles.tileEmptyText}>👕</Text>
-                    </View>
-                  )}
-                  <Text style={styles.itemName} numberOfLines={1}>
-                    {i.name}
-                  </Text>
-                </View>
-              ))}
-        </View>
-        {!grid.length ? (
-          <Text style={styles.emptyText}>
-            {tab === 'posts' ? 'No posts yet.' : 'No public wardrobe items yet.'}
-          </Text>
-        ) : null}
+        {tab === 'posts' ? (
+          posts.length ? (
+            posts.map(p => (
+              <PostCard
+                key={p.id}
+                post={p}
+                width={width}
+                myUid={me?.id}
+                isAdmin={isAdmin}
+                onDeleted={d => setPosts(prev => prev.filter(x => x.id !== d.id))}
+              />
+            ))
+          ) : (
+            <Text style={styles.empty}>No posts yet.</Text>
+          )
+        ) : (
+          <PhotoGrid
+            items={items}
+            onPress={p => navigation.navigate('PostDetail', { kind: p.kind, id: p.id })}
+            empty="No public wardrobe items."
+          />
+        )}
       </ScrollView>
-
-      <Modal visible={!!openPost} transparent animationType="fade" onRequestClose={() => setOpenPost(null)}>
-        <TouchableOpacity style={styles.viewer} activeOpacity={1} onPress={() => setOpenPost(null)}>
-          {openPost ? (
-            <View style={styles.viewerCard}>
-              <Image source={{ uri: openPost.imageData }} style={{ width: width - 32, height: width - 32 }} />
-              <Text style={styles.viewerText}>
-                ♥ {openPost.likeCount}
-                {openPost.caption ? `   ${openPost.caption}` : ''}
-              </Text>
-            </View>
-          ) : null}
-        </TouchableOpacity>
-      </Modal>
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  starBadge: { fontSize: fontSize.xs, color: '#F57C00', fontWeight: fontWeight.bold, marginTop: 2 },
-  safeArea: { flex: 1, backgroundColor: colors.background },
-  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
+const styles = themedStyles(() => StyleSheet.create({
+  safeArea: { flex: 1, backgroundColor: colors.surface },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
   back: { fontSize: 34, color: colors.primary, marginRight: spacing.sm, lineHeight: 36 },
-  headerTitle: { flex: 1, fontSize: fontSize.lg, fontWeight: fontWeight.bold, color: colors.textPrimary },
+  headerTitle: { flex: 1, fontSize: fontSize.lg, fontWeight: fontWeight.extraBold, color: colors.textPrimary },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xxl },
   lockEmoji: { fontSize: 48, marginBottom: spacing.sm },
-  centerTitle: { fontSize: fontSize.lg, fontWeight: fontWeight.bold, color: colors.textPrimary },
+  centerTitle: { fontSize: fontSize.lg, fontWeight: fontWeight.bold, color: colors.textPrimary, textAlign: 'center' },
   centerText: { fontSize: fontSize.sm, color: colors.textSecondary, textAlign: 'center', marginTop: spacing.sm },
-  top: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.xl, paddingTop: spacing.sm },
-  stats: { flex: 1, flexDirection: 'row', justifyContent: 'space-around' },
-  stat: { alignItems: 'center' },
-  statNum: { fontSize: fontSize.lg, fontWeight: fontWeight.extraBold, color: colors.textPrimary },
-  statLabel: { fontSize: fontSize.xs, color: colors.textSecondary },
-  bioBox: { paddingHorizontal: spacing.xl, paddingVertical: spacing.md },
-  name: { fontSize: fontSize.md, fontWeight: fontWeight.bold, color: colors.textPrimary },
-  rashi: { fontSize: fontSize.sm, color: colors.accent, marginTop: 2, fontWeight: fontWeight.semiBold },
-  bio: { fontSize: fontSize.sm, color: colors.textPrimary, marginTop: 4, lineHeight: 19 },
-  privateNote: { fontSize: fontSize.xs, color: '#92400E', marginTop: spacing.sm },
-  tabs: { flexDirection: 'row', borderTopWidth: 1, borderTopColor: colors.border },
+  rashi: { fontSize: fontSize.sm, color: colors.accent, paddingHorizontal: spacing.base, marginBottom: spacing.sm },
+  tabs: { flexDirection: 'row', borderTopWidth: 1, borderTopColor: colors.border, borderBottomWidth: 1, borderBottomColor: colors.border },
   tab: { flex: 1, alignItems: 'center', paddingVertical: spacing.md },
-  tabActive: { borderTopWidth: 2, borderTopColor: colors.primary, marginTop: -1 },
-  tabText: { color: colors.textMuted, fontWeight: fontWeight.semiBold },
-  tabTextActive: { color: colors.primary, fontWeight: fontWeight.bold },
-  error: { color: colors.error, textAlign: 'center', padding: spacing.sm, fontSize: fontSize.sm },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 2 },
-  tile: { backgroundColor: colors.divider },
-  tileEmpty: { alignItems: 'center', justifyContent: 'center' },
-  tileEmptyText: { fontSize: 28 },
-  itemName: { fontSize: fontSize.xs, color: colors.textSecondary, padding: 4 },
-  emptyText: { textAlign: 'center', color: colors.textMuted, padding: spacing.xxl },
-  viewer: { flex: 1, backgroundColor: 'rgba(0,0,0,0.9)', alignItems: 'center', justifyContent: 'center' },
-  viewerCard: { alignItems: 'center', borderRadius: borderRadius.md, overflow: 'hidden' },
-  viewerText: { color: colors.textInverse, fontSize: fontSize.base, marginTop: spacing.md, paddingHorizontal: spacing.base },
-});
+  tabOn: { borderBottomWidth: 2, borderBottomColor: colors.textPrimary },
+  tabText: { fontSize: fontSize.sm, color: colors.textMuted, fontWeight: fontWeight.semiBold },
+  tabTextOn: { color: colors.textPrimary, fontWeight: fontWeight.bold },
+  error: { color: colors.error, textAlign: 'center', padding: spacing.sm },
+  empty: { textAlign: 'center', color: colors.textMuted, padding: spacing.xxl },
+}));

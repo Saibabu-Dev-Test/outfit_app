@@ -17,13 +17,14 @@ import {
   Share,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import { pickImage, AVATAR_PICK } from '../../utils/imagePicker';
-import { getUserProfile, saveUserProfile, uploadAvatar } from '../../services/userApi';
+import { getUserProfile, saveUserProfile, uploadAvatar, STYLE_OPTIONS } from '../../services/userApi';
+import { checkNotifications, openNotificationSettings } from '../../native/notifications';
 import { RASHIS } from '../../utils/panchangam';
 import SelectModal from '../../components/SelectModal';
 import TimePickerModal from '../../components/TimePickerModal';
-import { colors, fontSize, fontWeight, spacing, borderRadius } from '../../theme';
+import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles, statusBarStyle, useTheme, ThemeMode } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
 import {
   countFriendsJoined,
@@ -59,6 +60,7 @@ interface UserProfile {
   bio?: string;
   avatarUrl?: string | null;
   isPublic?: boolean;
+  stylePrefs?: string[];
   createdAt?: any;
   updatedAt?: any;
 }
@@ -68,25 +70,22 @@ const LANGUAGES = [
   'Marathi', 'Bengali', 'Gujarati', 'Punjabi', 'Odia', 'Urdu',
 ];
 
-const menuItems = [
-  { id: '1', icon: '🎨', label: 'Style Preferences', hasArrow: true },
-  { id: '2', icon: '🏆', label: 'Achievements', hasArrow: true },
-  { id: '3', icon: '🔔', label: 'Notifications', hasToggle: true },
-  { id: '4', icon: '🌙', label: 'Dark Mode', hasToggle: true },
-  { id: '5', icon: '❓', label: 'Help & Support', hasArrow: true },
-  { id: '6', icon: '📋', label: 'Terms & Conditions', hasArrow: true },
-];
+const THEME_LABEL: Record<ThemeMode, string> = { system: 'System', light: 'Light', dark: 'Dark' };
 
 export default function ProfileScreen() {
   const navigation = useNavigation<any>();
+  const route = useRoute<any>();
   const { user: authUser, logout, updateUserData } = useAuth();
+  const { mode: themeMode, isDark, setMode: setThemeMode } = useTheme();
+  const [stylePrefsOpen, setStylePrefsOpen] = useState(false);
+  const [editStylePrefs, setEditStylePrefs] = useState<string[]>([]);
+  const [savingStyles, setSavingStyles] = useState(false);
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
   const [editIsPublic, setEditIsPublic] = useState<boolean>(true);
   const [profileData, setProfileData] = useState<UserProfile | null>(authUser);
   const [loading, setLoading] = useState<boolean>(true);
   const [loggingOut, setLoggingOut] = useState<boolean>(false);
   const [notifEnabled, setNotifEnabled] = useState(true);
-  const [darkEnabled, setDarkEnabled] = useState(false);
   // App lock (fingerprint): hidden when the phone has no biometrics
   const [lockSupported, setLockSupported] = useState(false);
   const [lockOn, setLockOn] = useState(false);
@@ -244,6 +243,7 @@ const fetchProfile = async () => {
       gender: stored.gender || '',
       bio: stored.bio || '',
       isPublic: stored.isPublic !== false,
+      stylePrefs: Array.isArray(stored.stylePrefs) ? stored.stylePrefs : [],
     };
     setIsAdmin(stored.role === 'admin');
     setProfileData(merged);
@@ -260,6 +260,50 @@ const fetchProfile = async () => {
     fetchProfile();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authUser?.id]);
+
+  // Me > Edit profile opens the edit form directly
+  useEffect(() => {
+    if (route?.params?.edit && !loading) {
+      handleOpenEditModal();
+      navigation.setParams({ edit: undefined });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route?.params?.edit, loading]);
+
+  useEffect(() => {
+    checkNotifications().then(s => setNotifEnabled(s === 'on'));
+  }, []);
+
+  const pickTheme = () =>
+    Alert.alert('Dark mode', `Now: ${THEME_LABEL[themeMode]}${themeMode === 'system' ? (isDark ? ' (dark)' : ' (light)') : ''}`, [
+      { text: 'Follow system', onPress: () => setThemeMode('system') },
+      { text: 'Light', onPress: () => setThemeMode('light') },
+      { text: 'Dark', onPress: () => setThemeMode('dark') },
+    ]);
+
+  const openStylePrefs = () => {
+    setEditStylePrefs(profileData?.stylePrefs || []);
+    setStylePrefsOpen(true);
+  };
+
+  const toggleStylePref = (opt: string) =>
+    setEditStylePrefs(prev => (prev.includes(opt) ? prev.filter(x => x !== opt) : [...prev, opt]));
+
+  const saveStylePrefs = async () => {
+    const uid = authUser?.id;
+    if (!uid) return;
+    setSavingStyles(true);
+    try {
+      await saveUserProfile(uid, { stylePrefs: editStylePrefs });
+      setProfileData(prev => (prev ? { ...prev, stylePrefs: editStylePrefs } : prev));
+      updateUserData({ stylePrefs: editStylePrefs });
+      setStylePrefsOpen(false);
+    } catch (e: any) {
+      Alert.alert('Not saved', e?.message || 'Please try again.');
+    } finally {
+      setSavingStyles(false);
+    }
+  };
 
   // App lock, invite code, friends joined, ⭐ badge
   useEffect(() => {
@@ -344,6 +388,7 @@ const fetchProfile = async () => {
     bio: editBio.trim(),
     avatarUrl: profileData?.avatarUrl || null,
     isPublic: editIsPublic,
+    stylePrefs: profileData?.stylePrefs || [],
   };
 
   try {
@@ -385,7 +430,7 @@ const fetchProfile = async () => {
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       <StatusBar
-        barStyle="dark-content"
+        barStyle={statusBarStyle()}
         {...(Platform.OS === 'android' ? { backgroundColor: colors.background } : {})}
       />
       <ScrollView
@@ -395,7 +440,10 @@ const fetchProfile = async () => {
 
         {/* Header */}
         <View style={styles.header}>
-          <Text style={styles.headerTitle}>Profile</Text>
+          <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+            <Text style={styles.backArrow}>‹</Text>
+          </TouchableOpacity>
+          <Text style={[styles.headerTitle, styles.flexTitle]}>Settings</Text>
           <TouchableOpacity style={styles.editBtn} onPress={handleOpenEditModal} activeOpacity={0.7}>
             <Text style={styles.editBtnText}>Edit</Text>
           </TouchableOpacity>
@@ -502,7 +550,7 @@ const fetchProfile = async () => {
         {/* Community */}
         <View style={styles.menuSection}>
           {[
-            { id: 'feed', icon: '📰', label: 'Feed', onPress: () => navigation.navigate('Feed') },
+            { id: 'feed', icon: '📰', label: 'Feed', onPress: () => navigation.navigate('MainApp', { screen: 'Feed' }) },
             { id: 'search', icon: '🔍', label: 'Find people', onPress: () => navigation.navigate('UserSearch') },
             {
               id: 'me',
@@ -572,37 +620,64 @@ const fetchProfile = async () => {
 
         {/* Menu Section */}
         <View style={styles.menuSection}>
-          {menuItems.map(item => {
-            const toggle =
-              item.id === '3' ? notifEnabled :
-              item.id === '4' ? darkEnabled : false;
-            const setToggle =
-              item.id === '3' ? setNotifEnabled :
-              item.id === '4' ? setDarkEnabled : undefined;
-
-            return (
-              <TouchableOpacity
-                key={item.id}
-                style={styles.menuItem}
-                activeOpacity={item.hasArrow ? 0.7 : 1}>
-                <View style={styles.menuLeft}>
-                  <View style={styles.menuIconBox}>
-                    <Text style={styles.menuIcon}>{item.icon}</Text>
-                  </View>
-                  <Text style={styles.menuLabel}>{item.label}</Text>
+          {[
+            {
+              id: 'style',
+              icon: '🎨',
+              label: 'Style preference',
+              value: profileData?.stylePrefs?.length ? profileData.stylePrefs.join(', ') : 'Not set',
+              onPress: openStylePrefs,
+            },
+            { id: 'ach', icon: '🏆', label: 'Achievements', onPress: () => navigation.navigate('Achievements') },
+            { id: 'likes', icon: '♥', label: 'Likes', onPress: () => navigation.navigate('Likes') },
+            {
+              id: 'notif',
+              icon: '🔔',
+              label: 'Notifications',
+              value: notifEnabled ? 'On' : 'Off',
+              onPress: () => openNotificationSettings(),
+            },
+            {
+              id: 'dark',
+              icon: '🌙',
+              label: 'Dark mode',
+              value: THEME_LABEL[themeMode],
+              onPress: pickTheme,
+            },
+            { id: 'help', icon: '❓', label: 'Help & Support' },
+            { id: 'terms', icon: '📋', label: 'Terms & Conditions' },
+          ].map(item => (
+            <TouchableOpacity
+              key={item.id}
+              style={styles.menuItem}
+              onPress={item.onPress}
+              disabled={!item.onPress}
+              activeOpacity={0.7}>
+              <View style={[styles.menuLeft, styles.flexTitle]}>
+                <View style={styles.menuIconBox}>
+                  <Text style={styles.menuIcon}>{item.icon}</Text>
                 </View>
-                {item.hasArrow && <Text style={styles.menuArrow}>›</Text>}
-                {item.hasToggle && setToggle && (
-                  <Switch
-                    value={toggle}
-                    onValueChange={setToggle}
-                    trackColor={{ false: colors.border, true: colors.accent }}
-                    thumbColor={colors.textInverse}
-                  />
-                )}
-              </TouchableOpacity>
-            );
-          })}
+                <View style={styles.flexTitle}>
+                  <Text style={styles.menuLabel}>{item.label}</Text>
+                  {item.value ? (
+                    <Text style={styles.menuValue} numberOfLines={1}>
+                      {item.value}
+                    </Text>
+                  ) : null}
+                </View>
+              </View>
+              {item.id === 'dark' ? (
+                <Switch
+                  value={isDark}
+                  onValueChange={v => setThemeMode(v ? 'dark' : 'light')}
+                  trackColor={{ false: colors.border, true: colors.accent }}
+                  thumbColor={colors.textInverse}
+                />
+              ) : (
+                <Text style={styles.menuArrow}>›</Text>
+              )}
+            </TouchableOpacity>
+          ))}
         </View>
 
         {/* Sign Out */}
@@ -620,6 +695,46 @@ const fetchProfile = async () => {
 
         <Text style={styles.version}>Outfit Vote v1.0.0</Text>
       </ScrollView>
+
+      {/* Style preference (multi-select) */}
+      <Modal visible={stylePrefsOpen} transparent animationType="slide" onRequestClose={() => setStylePrefsOpen(false)}>
+        <View style={styles.modalOverlay}>
+          <TouchableOpacity style={styles.backdropPressable} activeOpacity={1} onPress={() => setStylePrefsOpen(false)} />
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Style preference</Text>
+              <TouchableOpacity onPress={() => setStylePrefsOpen(false)}>
+                <Text style={styles.modalCloseIcon}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.stylePrefHint}>Pick all that suit you</Text>
+            <View style={styles.stylePrefWrap}>
+              {STYLE_OPTIONS.map(opt => {
+                const on = editStylePrefs.includes(opt);
+                return (
+                  <TouchableOpacity
+                    key={opt}
+                    style={[styles.stylePrefChip, on && styles.stylePrefChipOn]}
+                    onPress={() => toggleStylePref(opt)}
+                    activeOpacity={0.8}>
+                    <Text style={[styles.stylePrefText, on && styles.stylePrefTextOn]}>
+                      {on ? '✓ ' : ''}
+                      {opt}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <TouchableOpacity style={styles.stylePrefSave} onPress={saveStylePrefs} disabled={savingStyles}>
+              {savingStyles ? (
+                <ActivityIndicator color={colors.onPrimary} />
+              ) : (
+                <Text style={styles.stylePrefSaveText}>Save ({editStylePrefs.length})</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       {/* Edit Profile Modal */}
       <Modal
@@ -994,7 +1109,33 @@ const fetchProfile = async () => {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
+  backArrow: { fontSize: 34, color: colors.primary, marginRight: spacing.sm, lineHeight: 36 },
+  flexTitle: { flex: 1 },
+  menuValue: { fontSize: fontSize.xs, color: colors.textSecondary, marginTop: 1 },
+  stylePrefHint: { fontSize: fontSize.sm, color: colors.textSecondary, marginBottom: spacing.md },
+  stylePrefWrap: { flexDirection: 'row', flexWrap: 'wrap' },
+  stylePrefChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 18,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    marginRight: 8,
+    marginBottom: 8,
+    backgroundColor: colors.surface,
+  },
+  stylePrefChipOn: { backgroundColor: colors.primary, borderColor: colors.primary },
+  stylePrefText: { fontSize: fontSize.sm, fontWeight: fontWeight.semiBold, color: colors.textPrimary },
+  stylePrefTextOn: { color: colors.onPrimary },
+  stylePrefSave: {
+    marginTop: spacing.lg,
+    backgroundColor: colors.primary,
+    borderRadius: borderRadius.full,
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+  },
+  stylePrefSaveText: { color: colors.onPrimary, fontWeight: fontWeight.bold, fontSize: fontSize.base },
   flexShrink: { flexShrink: 1 },
   publicRow: {
     flexDirection: 'row',
@@ -1626,4 +1767,4 @@ const styles = StyleSheet.create({
     fontWeight: fontWeight.bold,
     fontSize: fontSize.sm,
   },
-});
+}));
