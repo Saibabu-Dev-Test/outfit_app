@@ -1,5 +1,7 @@
 // OUTFIT offline shell. Caches the app files (same origin) so the app opens without internet.
 // Firebase / Google / Gemini requests are never cached (always live).
+/* eslint-env serviceworker */
+/* global self, caches */
 const CACHE = 'outfit-shell-__BUILD_ID__';
 const SHELL = ['./', './index.html', './manifest.json', './icons/icon-192.png', './icons/apple-touch-icon.png'];
 

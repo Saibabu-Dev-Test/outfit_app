@@ -1,4 +1,5 @@
 // Web (browser / PWA) entry. The Android app keeps using ../index.js.
+/* global __webpack_public_path__ */
 import { AppRegistry } from 'react-native';
 import './polyfills';
 import App from '../App';

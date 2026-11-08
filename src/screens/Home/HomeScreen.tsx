@@ -1,13 +1,13 @@
 // Home. On app open it first shows ONLY today's colour vote; after voting (or Skip / Continue)
-// the rest shows: panchangam lucky colour, live results (tap Boys / Girls to see who voted),
-// achievements shortcut and the weekly celebrities. Daily tasks moved to Achievements.
+// the rest shows: live results in one fixed-height box that scrolls inside itself (tap Boys / Girls
+// to see who voted), then today's lucky colour (Panchangam, IST date), the weekly celebrities and
+// the feed entry. Points / daily tasks live in Achievements (Me tab).
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
   ScrollView,
   TouchableOpacity,
-  Image,
   StatusBar,
   Platform,
   ActivityIndicator,
@@ -15,6 +15,7 @@ import {
   Modal,
   FlatList,
   StyleSheet,
+  useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
@@ -24,25 +25,20 @@ import { doc, setDoc, serverTimestamp, collection, query, where, getDocs } from 
 import { db } from '../../config/firebaseConfig';
 import { ageFromDob, getUserProfile, recordDailyLogin } from '../../services/userApi';
 import { hasUploadedToday } from '../../services/wardrobeApi';
-import { getTodayVaaraColour, getRashiLuckyColour } from '../../utils/panchangam';
+import { getTodayVaaraColour, getRashiLuckyColour, getTodayLuckyMessage } from '../../utils/panchangam';
 import { localDateKey, greetingForNow } from '../../utils/date';
 import { firestoreErrorMessage, SERVER_SETUP_MESSAGE } from '../../utils/firebaseErrors';
 import Avatar from '../../components/Avatar';
 import {
   checkWeeklyStars,
-  countFriendsJoined,
   getDay,
   getLastWeekStars,
-  getPoints,
   recordTask,
-  REFERRAL_POINTS,
   setStarProfile,
   WeeklyStar,
 } from '../../services/rewardsApi';
 
-const outfitA = require('../../assets/outfit_a.jpg');
-
-// Colours shown in the daily vote
+// Colours shown in the daily vote: exactly 10, ranked 1..10
 const VOTE_COLOURS = [
   { name: 'Blue', hex: '#1D92F3' },
   { name: 'Green', hex: '#3FA73F' },
@@ -129,10 +125,6 @@ export default function HomeScreen() {
   const [myVote, setMyVote] = useState<string | null>(null);
   const [voting, setVoting] = useState<string | null>(null);
   const [votesLoading, setVotesLoading] = useState<boolean>(true);
-  const [streak, setStreak] = useState<number>(0);
-  const [points, setPoints] = useState<number>(0);
-  const [friends, setFriends] = useState<number>(0);
-  const [doneToday, setDoneToday] = useState<number>(0);
   const [stars, setStars] = useState<WeeklyStar[]>([]);
   const [flashName, setFlashName] = useState<string | null>(null);
   const [voterList, setVoterList] = useState<{ title: string; voters: Voter[] } | null>(null);
@@ -146,7 +138,11 @@ export default function HomeScreen() {
   const displayName = (user?.name || '').trim() || 'there';
   const firstName = displayName.split(' ')[0];
   const vaara = getTodayVaaraColour();
+  const luckyMessage = getTodayLuckyMessage();
   const lucky = getRashiLuckyColour(user?.rashi);
+  // The results box never takes more than ~55% of the screen; it scrolls inside itself
+  const { height: windowHeight } = useWindowDimensions();
+  const voteBoxMaxHeight = Math.max(260, Math.round(windowHeight * 0.55));
 
   const finishGate = useCallback(() => {
     voteGateDone = true;
@@ -161,16 +157,14 @@ export default function HomeScreen() {
     [uid],
   );
 
+  // Daily tasks (shown in Achievements): uploaded before this build tracked it -> tick the task now
   const refreshPoints = useCallback(async () => {
     if (!uid) return;
-    const [d, p, f] = await Promise.all([getDay(uid), getPoints(uid), countFriendsJoined(uid)]);
-    setDoneToday([d.opened, d.voted, d.uploaded].filter(Boolean).length);
-    setPoints(p);
-    setFriends(f);
-    // Uploaded before this build tracked it: tick the task now
-    if (!d.uploaded && (await hasUploadedToday(uid))) {
-      await recordTask(uid, 'uploaded');
-      setPoints(await getPoints(uid));
+    try {
+      const d = await getDay(uid);
+      if (!d.uploaded && (await hasUploadedToday(uid))) await recordTask(uid, 'uploaded');
+    } catch (e: any) {
+      console.warn('Daily task check failed:', e?.message);
     }
   }, [uid]);
 
@@ -240,8 +234,7 @@ export default function HomeScreen() {
       } catch (e: any) {
         console.warn('Home profile load failed:', e?.message);
       }
-      const res = await recordDailyLogin(uid);
-      if (alive) setStreak(res.streak);
+      await recordDailyLogin(uid);
       await recordTask(uid, 'opened');
       if (alive) refreshPoints();
       // Weekly celebrities: claim a finished week, then load last week's list
@@ -340,66 +333,74 @@ export default function HomeScreen() {
     setVoterList({ title: `${gender === 'male' ? '👦 Boys' : '👧 Girls'} who voted ${colour}`, voters });
   };
 
-  const totalPoints = points + friends * REFERRAL_POINTS;
   const totalVotes = topColours.reduce((n, c) => n + c.votes, 0);
 
   const voteList = (
-    <View style={styles.topColoursCard}>
+    <View style={[styles.topColoursCard, { maxHeight: voteBoxMaxHeight }]}>
       {votesLoading ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="small" color={colors.pink} />
           <Text style={styles.loadingText}>Loading votes...</Text>
         </View>
       ) : (
-        topColours.map((item, index) => (
-          <React.Fragment key={item.name}>
-            <TouchableOpacity
-              style={[
-                styles.colorRow,
-                myVote === item.name && styles.colorRowVoted,
-                flashName === item.name && styles.colorRowFlash,
-              ]}
-              activeOpacity={0.7}
-              disabled={!!voting}
-              onPress={() => handleVoteColor(item.name)}>
-              <Text style={styles.colorRank}>{item.rank}</Text>
-              <View style={[styles.colorCircle, { backgroundColor: item.hex }]} />
-              <View style={styles.colorDetails}>
-                <Text style={styles.colorName}>
-                  {item.name}
-                  {myVote === item.name ? '  ✓ Your vote' : ''}
+        <ScrollView
+          nestedScrollEnabled
+          showsVerticalScrollIndicator
+          keyboardShouldPersistTaps="handled"
+          style={[styles.voteScroll, { maxHeight: voteBoxMaxHeight }]}
+          contentContainerStyle={styles.voteScrollContent}>
+          {topColours.map((item, index) => (
+            <React.Fragment key={item.name}>
+              <TouchableOpacity
+                style={[
+                  styles.colorRow,
+                  myVote === item.name && styles.colorRowVoted,
+                  flashName === item.name && styles.colorRowFlash,
+                ]}
+                activeOpacity={0.7}
+                disabled={!!voting}
+                onPress={() => handleVoteColor(item.name)}>
+                <Text style={styles.colorRank} numberOfLines={1}>
+                  {index + 1}
                 </Text>
-                <Text style={styles.votesCountText}>{item.votes.toLocaleString()} votes</Text>
-                <View style={styles.genderRow}>
-                  <TouchableOpacity
-                    style={styles.genderChip}
-                    disabled={!item.boys}
-                    onPress={() => openVoters(item.name, 'male')}
-                    hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}>
-                    <Text style={[styles.genderText, item.boys > 0 && styles.genderLink]}>
-                      👦 Boys {item.boys} ({item.men})
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.genderChip}
-                    disabled={!item.girls}
-                    onPress={() => openVoters(item.name, 'female')}
-                    hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}>
-                    <Text style={[styles.genderText, item.girls > 0 && styles.genderLink]}>
-                      👧 Girls {item.girls} ({item.women})
-                    </Text>
-                  </TouchableOpacity>
+                <View style={[styles.colorCircle, { backgroundColor: item.hex }]} />
+                <View style={styles.colorDetails}>
+                  <Text style={styles.colorName}>
+                    {item.name}
+                    {myVote === item.name ? '  ✓ Your vote' : ''}
+                  </Text>
+                  <Text style={styles.votesCountText}>{item.votes.toLocaleString()} votes</Text>
+                  <View style={styles.genderRow}>
+                    <TouchableOpacity
+                      style={styles.genderChip}
+                      disabled={!item.boys}
+                      onPress={() => openVoters(item.name, 'male')}
+                      hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}>
+                      <Text style={[styles.genderText, item.boys > 0 && styles.genderLink]}>
+                        👦 Boys {item.boys} ({item.men})
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.genderChip}
+                      disabled={!item.girls}
+                      onPress={() => openVoters(item.name, 'female')}
+                      hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}>
+                      <Text style={[styles.genderText, item.girls > 0 && styles.genderLink]}>
+                        👧 Girls {item.girls} ({item.women})
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
-              </View>
-              {voting === item.name ? (
-                <ActivityIndicator size="small" color={colors.pink} />
-              ) : (
-                <Text style={styles.colorPercentage}>{item.percentage}</Text>
-              )}
-            </TouchableOpacity>
-            {index < topColours.length - 1 && <View style={styles.rowDivider} />}
-          </React.Fragment>
-        ))
+                {voting === item.name ? (
+                  <ActivityIndicator size="small" color={colors.pink} />
+                ) : (
+                  <Text style={styles.colorPercentage}>{item.percentage}</Text>
+                )}
+              </TouchableOpacity>
+              {index < topColours.length - 1 && <View style={styles.rowDivider} />}
+            </React.Fragment>
+          ))}
+        </ScrollView>
       )}
     </View>
   );
@@ -497,43 +498,6 @@ export default function HomeScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Panchangam colour */}
-        <View style={styles.plainHeaderRow}>
-          <Text style={styles.sectionTitle}>Today's lucky colour (Panchangam)</Text>
-        </View>
-        <View style={styles.card}>
-          <View style={styles.swatchRow}>
-            {vaara.colours.map(c => (
-              <View key={c.name} style={styles.swatchItem}>
-                <View style={[styles.swatchCircle, { backgroundColor: c.hex }]} />
-                <Text style={styles.swatchLabel}>{c.name}</Text>
-              </View>
-            ))}
-          </View>
-          <Text style={styles.panchangTitle}>
-            {vaara.weekday} · {vaara.vaara} · {vaara.graha}
-          </Text>
-          <Text style={styles.panchangWhy}>Why: {vaara.why}</Text>
-          {lucky ? (
-            <Text style={styles.panchangLucky}>
-              Your rashi ({lucky.rashi}) lord is {lucky.lord}: lucky colour {lucky.colour}.
-            </Text>
-          ) : null}
-          <Text style={styles.panchangNote}>Traditional guidance (weekday ruling planet)</Text>
-        </View>
-
-        {/* Achievements shortcut (today's tasks live there now) */}
-        <TouchableOpacity style={styles.achCard} activeOpacity={0.85} onPress={() => navigation.navigate('Achievements')}>
-          <Text style={styles.achEmoji}>🏅</Text>
-          <View style={styles.flex1}>
-            <Text style={styles.achTitle}>{totalPoints.toLocaleString()} points</Text>
-            <Text style={styles.achSub}>
-              {doneToday}/3 tasks today · 🔥 {streak} day streak · tap for achievements
-            </Text>
-          </View>
-          <Text style={styles.achArrow}>›</Text>
-        </TouchableOpacity>
-
         {/* Today's Top Colours */}
         <View style={styles.sectionHeaderRow}>
           <Text style={styles.sectionTitle}>Today's Top Colours</Text>
@@ -547,6 +511,35 @@ export default function HomeScreen() {
           Girls to see who voted.
         </Text>
         {voteList}
+
+        {/* Today's lucky colour (Panchangam: weekday ruling planet, IST date) */}
+        <View style={styles.plainHeaderRow}>
+          <Text style={styles.sectionTitle}>Today's lucky colour</Text>
+        </View>
+        <View style={styles.card}>
+          <View style={styles.swatchRow}>
+            {vaara.colours.map(c => (
+              <View key={c.name} style={styles.swatchItem}>
+                <View style={[styles.swatchCircle, { backgroundColor: c.hex }]} />
+                <Text style={styles.swatchLabel}>{c.name}</Text>
+              </View>
+            ))}
+          </View>
+          <Text style={styles.luckyName}>{vaara.colours.map(c => c.name).join(' / ')}</Text>
+          <Text style={styles.panchangTitle}>
+            {vaara.weekday} · {vaara.vaara} · ruled by {vaara.graha}
+          </Text>
+          <Text style={styles.panchangWhy}>{vaara.why}</Text>
+          {lucky ? (
+            <Text style={styles.panchangLucky}>
+              Your rashi ({lucky.rashi}) lord is {lucky.lord}: lucky colour {lucky.colour}.
+            </Text>
+          ) : null}
+          <View style={styles.motivationBox}>
+            <Text style={styles.motivationText}>✨ {luckyMessage}</Text>
+          </View>
+          <Text style={styles.panchangNote}>Traditional Panchangam guidance (weekday ruling planet)</Text>
+        </View>
 
         {/* Last week's celebrities */}
         <View style={styles.plainHeaderRow}>
@@ -584,17 +577,6 @@ export default function HomeScreen() {
           </View>
           <Text style={styles.feedArrow}>›</Text>
         </TouchableOpacity>
-
-        {/* What do you think? */}
-        <View style={styles.plainHeaderRow}>
-          <Text style={styles.sectionTitle}>What do you think?</Text>
-        </View>
-        <View style={styles.outfitCard}>
-          <Image source={outfitA} style={styles.outfitImage} />
-          <View style={styles.outfitBadge}>
-            <Text style={styles.outfitBadgeText}>OUTFIT A</Text>
-          </View>
-        </View>
       </ScrollView>
       {voterModal}
     </SafeAreaView>
@@ -604,7 +586,7 @@ export default function HomeScreen() {
 const styles = themedStyles(() => StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.background },
   flex1: { flex: 1 },
-  scrollContent: { paddingBottom: spacing.xxxl },
+  scrollContent: { paddingBottom: spacing.xxxl + spacing.xl },
   // Vote-first screen
   gateHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.base, paddingTop: spacing.md },
   gateHello: { fontSize: fontSize.sm, color: colors.textSecondary },
@@ -675,22 +657,15 @@ const styles = themedStyles(() => StyleSheet.create({
   panchangTitle: { fontSize: 14, fontWeight: '800', color: colors.textPrimary, marginBottom: 4 },
   panchangWhy: { fontSize: 13, color: colors.textSecondary, lineHeight: 19 },
   panchangLucky: { fontSize: 13, color: colors.accent, fontWeight: '600', marginTop: 6 },
-  panchangNote: { fontSize: 11, color: colors.textMuted, marginTop: 8, fontStyle: 'italic' },
-  achCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginHorizontal: spacing.base,
-    marginTop: spacing.lg,
-    padding: spacing.base,
-    borderRadius: borderRadius.lg,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
+  luckyName: { fontSize: 16, fontWeight: '800', color: colors.textPrimary, marginBottom: 4 },
+  motivationBox: {
+    marginTop: 10,
+    padding: spacing.sm,
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.pinkSoft,
   },
-  achEmoji: { fontSize: 28, marginRight: spacing.md },
-  achTitle: { fontSize: fontSize.md, fontWeight: fontWeight.extraBold, color: colors.textPrimary },
-  achSub: { fontSize: fontSize.xs, color: colors.textSecondary, marginTop: 2 },
-  achArrow: { fontSize: 26, color: colors.textMuted, marginLeft: spacing.sm },
+  motivationText: { fontSize: 13, fontWeight: '700', color: colors.textPrimary, lineHeight: 19 },
+  panchangNote: { fontSize: 11, color: colors.textMuted, marginTop: 8, fontStyle: 'italic' },
   liveBadge: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -712,6 +687,8 @@ const styles = themedStyles(() => StyleSheet.create({
     borderColor: colors.border,
     overflow: 'hidden',
   },
+  voteScroll: { flexGrow: 0, flexShrink: 1 },
+  voteScrollContent: { paddingBottom: spacing.sm },
   colorRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: spacing.base },
   colorRowVoted: { backgroundColor: colors.pinkSoft },
   colorRowFlash: { backgroundColor: colors.accentLight },
@@ -719,7 +696,7 @@ const styles = themedStyles(() => StyleSheet.create({
     fontSize: 22,
     fontWeight: '900',
     color: colors.textPrimary,
-    width: 24,
+    minWidth: 34,
     textAlign: 'center',
     fontFamily: Platform.OS === 'ios' ? 'Georgia-Bold' : 'serif',
   },
@@ -751,25 +728,6 @@ const styles = themedStyles(() => StyleSheet.create({
   feedTitle: { color: colors.onPrimary, fontSize: 17, fontWeight: '800' },
   feedSub: { color: colors.onPrimary, opacity: 0.8, fontSize: 13, marginTop: 2 },
   feedArrow: { color: colors.onPrimary, fontSize: 28, marginLeft: spacing.sm },
-  outfitCard: {
-    backgroundColor: colors.surface,
-    borderRadius: 16,
-    marginHorizontal: spacing.base,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  outfitImage: { width: '100%', height: 360, resizeMode: 'cover' },
-  outfitBadge: {
-    position: 'absolute',
-    top: 14,
-    left: 14,
-    backgroundColor: 'rgba(255, 255, 255, 0.85)',
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  outfitBadgeText: { fontSize: 10, fontWeight: '800', color: '#0A1940', letterSpacing: 1 },
   // Voter list modal
   modalOverlay: { flex: 1, backgroundColor: colors.overlay, justifyContent: 'center', padding: spacing.xl },
   modalCard: { backgroundColor: colors.surface, borderRadius: borderRadius.lg, padding: spacing.lg, maxHeight: '75%' },
