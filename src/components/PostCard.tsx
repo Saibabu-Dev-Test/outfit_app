@@ -1,5 +1,5 @@
 // One feed item (post or public wardrobe photo), Instagram style:
-// header, photo(s), double-tap like, ♥ / 💬, caption. 2-6 photos = A-F vote post.
+// header, photo(s), double-tap like, 👍 / 👎 / 💬 / Follow / Share, caption. 2-6 photos = A-F vote post.
 import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
@@ -19,19 +19,24 @@ import { useNavigation } from '@react-navigation/native';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles } from '../theme';
 import Avatar from './Avatar';
 import ReportModal, { ReportTarget } from './ReportModal';
+import { useAuth } from '../context/AuthContext';
 import {
   OPTION_LABELS,
   Post,
   VoteTally,
   castPostVote,
   deletePost,
+  getDislikeState,
   getLikedPostIds,
   getPostVotes,
   getWardrobeStats,
   onCommentCountChange,
+  toggleDislike,
   toggleLike,
   toggleWardrobeLike,
 } from '../services/feedApi';
+import { follow, isFollowingCached, onFollowChange, unfollow } from '../services/socialApi';
+import { shareWithReferral } from '../utils/referralLink';
 import { timeAgo } from '../utils/date';
 
 interface Props {
@@ -44,8 +49,13 @@ interface Props {
 
 export default function PostCard({ post, width, myUid, isAdmin, onDeleted }: Props) {
   const navigation = useNavigation<any>();
+  const { user: me } = useAuth();
   const [liked, setLiked] = useState(false);
   const [likeCount, setLikeCount] = useState(post.likeCount);
+  const [disliked, setDisliked] = useState(false);
+  const [dislikeCount, setDislikeCount] = useState(0);
+  const [following, setFollowing] = useState(false);
+  const [followBusy, setFollowBusy] = useState(false);
   const [commentCount, setCommentCount] = useState(post.commentCount);
   const [page, setPage] = useState(0);
   const [votes, setVotes] = useState<VoteTally | null>(null);
@@ -55,6 +65,8 @@ export default function PostCard({ post, width, myUid, isAdmin, onDeleted }: Pro
   const lastTap = useRef(0);
   const heart = useRef(new Animated.Value(0)).current;
   const multi = post.kind === 'post' && post.photos.length > 1;
+  const isMine = !!myUid && post.userId === myUid;
+  const canFollow = !!myUid && !!post.userId && !isMine;
 
   // My like + counts
   useEffect(() => {
@@ -73,6 +85,33 @@ export default function PostCard({ post, width, myUid, isAdmin, onDeleted }: Pro
       alive = false;
     };
   }, [post.id, post.kind, myUid]);
+
+  // My dislike + dislike count
+  useEffect(() => {
+    let alive = true;
+    getDislikeState(post.kind, post.id, myUid).then(r => {
+      if (!alive) return;
+      setDisliked(r.disliked);
+      setDislikeCount(r.dislikeCount);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [post.id, post.kind, myUid]);
+
+  // Am I following the author (shared across cards; updates when I follow on another card)
+  useEffect(() => {
+    if (!canFollow || !myUid) return;
+    let alive = true;
+    isFollowingCached(myUid, post.userId).then(f => alive && setFollowing(f));
+    const off = onFollowChange((meUid, targetUid, f) => {
+      if (meUid === myUid && targetUid === post.userId) setFollowing(f);
+    });
+    return () => {
+      alive = false;
+      off();
+    };
+  }, [canFollow, myUid, post.userId]);
 
   useEffect(() => {
     setLikeCount(post.likeCount);
@@ -106,24 +145,95 @@ export default function PostCard({ post, width, myUid, isAdmin, onDeleted }: Pro
     liking.current = true;
     const was = liked;
     const wasCount = likeCount;
+    const wasDisliked = disliked;
+    const wasDislikeCount = dislikeCount;
+    const clearDislike = !was && wasDisliked; // like XOR dislike
     setLiked(!was);
     setLikeCount(Math.max(0, wasCount + (was ? -1 : 1)));
+    if (clearDislike) {
+      setDisliked(false);
+      setDislikeCount(Math.max(0, wasDislikeCount - 1));
+    }
     try {
       if (post.kind === 'post') {
-        const r = await toggleLike(post.id, myUid);
+        const r = await toggleLike(post.id, myUid, clearDislike);
         setLiked(r.liked);
         setLikeCount(r.likeCount);
       } else {
-        const now = await toggleWardrobeLike(post.id, myUid, was);
+        const now = await toggleWardrobeLike(post.id, myUid, was, clearDislike);
         setLiked(now);
       }
     } catch (e: any) {
       setLiked(was);
       setLikeCount(wasCount);
+      setDisliked(wasDisliked);
+      setDislikeCount(wasDislikeCount);
       Alert.alert('Like failed', e?.message || 'Please try again.');
     } finally {
       liking.current = false;
     }
+  };
+
+  const dislike = async () => {
+    if (!myUid) {
+      Alert.alert('Not signed in', 'Please sign in again to react to posts.');
+      return;
+    }
+    if (liking.current) return;
+    liking.current = true;
+    const was = disliked;
+    const wasCount = dislikeCount;
+    const wasLiked = liked;
+    const wasLikeCount = likeCount;
+    setDisliked(!was);
+    setDislikeCount(Math.max(0, wasCount + (was ? -1 : 1)));
+    if (!was && wasLiked) {
+      setLiked(false);
+      setLikeCount(Math.max(0, wasLikeCount - 1));
+    }
+    try {
+      const r = await toggleDislike(post.kind, post.id, myUid, was, wasLiked);
+      setDisliked(r.disliked);
+      setLiked(r.liked);
+      if (typeof r.likeCount === 'number') setLikeCount(r.likeCount);
+    } catch (e: any) {
+      setDisliked(was);
+      setDislikeCount(wasCount);
+      setLiked(wasLiked);
+      setLikeCount(wasLikeCount);
+      Alert.alert('Not saved', e?.message || 'Please try again.');
+    } finally {
+      liking.current = false;
+    }
+  };
+
+  const toggleFollow = async () => {
+    if (!canFollow || !myUid || followBusy) return;
+    setFollowBusy(true);
+    const was = following;
+    setFollowing(!was);
+    try {
+      if (was) await unfollow(myUid, post.userId);
+      else
+        await follow(
+          { uid: myUid, name: me?.name, avatar: me?.avatarUrl },
+          { uid: post.userId, name: post.userName, avatar: post.userAvatar },
+        );
+    } catch (e: any) {
+      setFollowing(was);
+      Alert.alert(was ? 'Unfollow failed' : 'Follow failed', e?.message || 'Please try again.');
+    } finally {
+      setFollowBusy(false);
+    }
+  };
+
+  // App link with my referral code + a short line about this post
+  const share = () => {
+    const who = isMine ? 'my' : `${post.userName}'s`;
+    const what = post.kind === 'wardrobe' ? 'wardrobe pick' : multi ? 'outfit vote (help pick one!)' : 'look';
+    const cap = post.caption.trim();
+    const line = `Check out ${who} ${what} on Outfit Vote${cap ? `: "${cap.length > 80 ? `${cap.slice(0, 77)}...` : cap}"` : ''}`;
+    shareWithReferral(myUid, line);
   };
 
   const onImagePress = () => {
@@ -284,15 +394,48 @@ export default function PostCard({ post, width, myUid, isAdmin, onDeleted }: Pro
       ) : null}
 
       <View style={styles.actions}>
-        <TouchableOpacity onPress={() => like()} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-          <Text style={[styles.heart, liked && styles.heartOn]}>{liked ? '♥' : '♡'}</Text>
+        <TouchableOpacity
+          style={[styles.pill, liked && styles.pillOn]}
+          onPress={() => like()}
+          accessibilityLabel={`Like, ${likeCount}`}
+          hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}>
+          <Text style={[styles.pillIcon, liked && styles.pillIconOn]}>👍</Text>
+          <Text style={[styles.pillCount, liked && styles.pillCountOn]}>{likeCount}</Text>
         </TouchableOpacity>
-        <Text style={styles.likes}>
-          {likeCount} {likeCount === 1 ? 'like' : 'likes'}
-        </Text>
-        <TouchableOpacity style={styles.commentBtn} onPress={openComments} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-          <Text style={styles.commentIcon}>💬</Text>
-          <Text style={styles.likes}>{commentCount}</Text>
+        <TouchableOpacity
+          style={[styles.pill, disliked && styles.pillOn]}
+          onPress={dislike}
+          accessibilityLabel={`Dislike, ${dislikeCount}`}
+          hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}>
+          <Text style={[styles.pillIcon, disliked && styles.pillIconOn]}>👎</Text>
+          <Text style={[styles.pillCount, disliked && styles.pillCountOn]}>{dislikeCount}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.pill}
+          onPress={openComments}
+          accessibilityLabel={`Comments, ${commentCount}`}
+          hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}>
+          <Text style={[styles.pillIcon, styles.pillIconOn]}>💬</Text>
+          <Text style={styles.pillCount}>{commentCount}</Text>
+        </TouchableOpacity>
+        <View style={styles.spacer} />
+        {canFollow ? (
+          <TouchableOpacity
+            style={[styles.followBtn, following && styles.followBtnOn]}
+            onPress={toggleFollow}
+            disabled={followBusy}
+            activeOpacity={0.8}>
+            <Text style={[styles.followText, following && styles.followTextOn]}>
+              {following ? 'Following ✓' : 'Follow'}
+            </Text>
+          </TouchableOpacity>
+        ) : null}
+        <TouchableOpacity
+          style={styles.shareBtn}
+          onPress={share}
+          accessibilityLabel="Share"
+          hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}>
+          <Text style={styles.shareText}>↗ Share</Text>
         </TouchableOpacity>
       </View>
       {post.caption ? (
@@ -373,11 +516,37 @@ const styles = themedStyles(() => StyleSheet.create({
   voteLetterMine: { color: colors.onPrimary },
   voteTotal: { fontSize: fontSize.xs, color: colors.textMuted },
   actions: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.md, paddingTop: spacing.sm },
-  heart: { fontSize: 28, color: colors.textPrimary, marginRight: spacing.sm },
-  heartOn: { color: colors.pink },
-  likes: { fontSize: fontSize.sm, fontWeight: fontWeight.bold, color: colors.textPrimary },
-  commentBtn: { flexDirection: 'row', alignItems: 'center', marginLeft: spacing.lg },
-  commentIcon: { fontSize: 20, marginRight: 4 },
+  pill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 5,
+    paddingHorizontal: 9,
+    borderRadius: borderRadius.full,
+    backgroundColor: colors.divider,
+    borderWidth: 1.5,
+    borderColor: 'transparent',
+    marginRight: 6,
+  },
+  pillOn: { borderColor: colors.accent },
+  pillIcon: { fontSize: 16, opacity: 0.6 },
+  pillIconOn: { opacity: 1 },
+  pillCount: { fontSize: fontSize.sm, fontWeight: fontWeight.bold, color: colors.textSecondary, marginLeft: 4 },
+  pillCountOn: { color: colors.accent },
+  spacer: { flex: 1 },
+  followBtn: {
+    paddingVertical: 5,
+    paddingHorizontal: 12,
+    borderRadius: borderRadius.full,
+    backgroundColor: colors.primary,
+    borderWidth: 1.5,
+    borderColor: colors.primary,
+    marginRight: 6,
+  },
+  followBtnOn: { backgroundColor: colors.surface, borderColor: colors.border },
+  followText: { fontSize: fontSize.xs, fontWeight: fontWeight.bold, color: colors.onPrimary },
+  followTextOn: { color: colors.textPrimary },
+  shareBtn: { paddingVertical: 5, paddingHorizontal: 4 },
+  shareText: { fontSize: fontSize.sm, fontWeight: fontWeight.bold, color: colors.primary },
   viewComments: { fontSize: fontSize.sm, color: colors.textMuted, paddingHorizontal: spacing.md, paddingTop: 4 },
   caption: { fontSize: fontSize.sm, color: colors.textPrimary, paddingHorizontal: spacing.md, paddingTop: 4, lineHeight: 19 },
   captionName: { fontWeight: fontWeight.bold },

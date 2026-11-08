@@ -23,6 +23,7 @@ import { getLikedItems, getUserPosts, Post } from '../../services/feedApi';
 import { getWardrobeItems } from '../../services/wardrobeApi';
 import { getUserProfile } from '../../services/userApi';
 import { isWeeklyStar } from '../../services/rewardsApi';
+import { getMyReferralCode, shareReferral } from '../../utils/referralLink';
 
 type Tab = 'posts' | 'wardrobe' | 'likes';
 
@@ -102,6 +103,13 @@ export default function MeScreen({ navigation }: { navigation: any }) {
     }
   };
 
+  // Invite friends to download the app (link with my referral code)
+  const invite = async () => {
+    const code = await getMyReferralCode(uid);
+    if (code) shareReferral(code);
+    else navigation.navigate('Settings');
+  };
+
   const open = (p: Post) => navigation.navigate('PostDetail', { kind: p.kind, id: p.id });
   const grid = tab === 'posts' ? posts : tab === 'wardrobe' ? wardrobe : likes || [];
 
@@ -117,6 +125,9 @@ export default function MeScreen({ navigation }: { navigation: any }) {
         </Text>
         <TouchableOpacity style={styles.barBtn} onPress={() => navigation.navigate('NewPost')}>
           <Text style={styles.barIcon}>＋</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.barBtn} onPress={invite} accessibilityLabel="Invite friends to download the app">
+          <Text style={styles.barIcon}>🎁</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.barBtn} onPress={() => navigation.navigate('Achievements')}>
           <Text style={styles.barIcon}>🏆</Text>

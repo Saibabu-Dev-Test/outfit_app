@@ -280,6 +280,16 @@ service cloud.firestore {
         allow delete: if signedIn() && likerId == me();
         allow update: if false;
       }
+      // ── Dislikes: one doc per user; can't be created while the user's like exists
+      //    (the app removes the like in the same batch: like XOR dislike) ──
+      match /dislikes/{dislikerId} {
+        allow read: if signedIn() && itemVisible();
+        allow create: if signedIn() && dislikerId == me() && itemVisible()
+          && request.resource.data.keys().hasOnly(['createdAt'])
+          && !existsAfter(/databases/$(db)/documents/wardrobe/$(itemId)/likes/$(request.auth.uid));
+        allow delete: if signedIn() && dislikerId == me();
+        allow update: if false;
+      }
       match /comments/{cid} {
         allow read: if signedIn() && itemVisible();
         allow create: if signedIn() && itemVisible() && commentOk();
@@ -450,6 +460,18 @@ service cloud.firestore {
       match /likes/{likerId} {
         allow read: if signedIn();
         allow create, delete: if signedIn() && likerId == me();
+        allow update: if false;
+      }
+
+      // ── Dislikes: one doc per user; can't be created while the user's like exists
+      //    (the app removes the like + likeCount in the same transaction: like XOR dislike) ──
+      match /dislikes/{dislikerId} {
+        allow read: if signedIn();
+        allow create: if signedIn() && dislikerId == me()
+          && exists(postPath())
+          && request.resource.data.keys().hasOnly(['createdAt'])
+          && !existsAfter(likePath());
+        allow delete: if signedIn() && dislikerId == me();
         allow update: if false;
       }
 

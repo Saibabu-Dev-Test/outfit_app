@@ -1,4 +1,5 @@
-// Public feed: posts/{id} with likes at posts/{id}/likes/{uid} and comments at posts/{id}/comments/{cid}. Photo is a base64 data URI (no Storage).
+// Public feed: posts/{id} with likes at posts/{id}/likes/{uid}, dislikes at posts/{id}/dislikes/{uid}
+// and comments at posts/{id}/comments/{cid}. Photo is a base64 data URI (no Storage).
 import {
   collection,
   doc,
@@ -195,13 +196,16 @@ export const getLikedPostIds = async (postIds: string[], uid: string): Promise<S
   return liked;
 };
 
-// Like / unlike in one transaction: like doc + likeCount stay in step
+// Like / unlike in one transaction: like doc + likeCount stay in step.
+// clearDislike: the user has disliked this post, so liking also removes the dislike (like XOR dislike).
 export const toggleLike = async (
   postId: string,
   uid: string,
+  clearDislike = false,
 ): Promise<{ liked: boolean; likeCount: number }> => {
   const postRef = doc(db, POSTS, postId);
   const likeRef = doc(db, POSTS, postId, 'likes', uid);
+  const dislikeRef = doc(db, POSTS, postId, 'dislikes', uid);
   try {
     return await runTransaction(db, async tx => {
       const post = await tx.get(postRef);
@@ -219,6 +223,7 @@ export const toggleLike = async (
       tx.set(likeRef, { createdAt: serverTimestamp() });
       tx.update(postRef, { likeCount: increment(1) });
       tx.set(mineRef, { kind: 'post', refId: postId, createdAt: serverTimestamp() });
+      if (clearDislike) tx.delete(dislikeRef);
       return { liked: true, likeCount: current + 1 };
     });
   } catch (e: any) {
@@ -432,7 +437,12 @@ export const getWardrobeStats = async (
   return { likeCount, commentCount, liked };
 };
 
-export const toggleWardrobeLike = async (itemId: string, uid: string, likedNow: boolean): Promise<boolean> => {
+export const toggleWardrobeLike = async (
+  itemId: string,
+  uid: string,
+  likedNow: boolean,
+  clearDislike = false,
+): Promise<boolean> => {
   const b = writeBatch(db);
   const likeRef = doc(db, 'wardrobe', itemId, 'likes', uid);
   const mineRef = doc(db, 'users', uid, 'liked', likedKey('wardrobe', itemId));
@@ -442,12 +452,86 @@ export const toggleWardrobeLike = async (itemId: string, uid: string, likedNow: 
   } else {
     b.set(likeRef, { createdAt: serverTimestamp() });
     b.set(mineRef, { kind: 'wardrobe', refId: itemId, createdAt: serverTimestamp() });
+    if (clearDislike) b.delete(doc(db, 'wardrobe', itemId, 'dislikes', uid));
   }
   try {
     await b.commit();
     return !likedNow;
   } catch (e: any) {
     return fail(e, 'Liking');
+  }
+};
+
+// ── Dislikes (posts and wardrobe photos): {posts|wardrobe}/{id}/dislikes/{uid} {createdAt} ──
+// One doc per user. Like XOR dislike: disliking removes the user's like in the same write,
+// liking removes the dislike (toggleLike / toggleWardrobeLike with clearDislike).
+const dislikeRef = (kind: FeedKind, id: string, uid: string) =>
+  doc(db, kind === 'post' ? POSTS : 'wardrobe', id, 'dislikes', uid);
+
+// Dislike count + my dislike. Never throws.
+export const getDislikeState = async (
+  kind: FeedKind,
+  id: string,
+  uid?: string,
+): Promise<{ dislikeCount: number; disliked: boolean }> => {
+  const [dislikeCount, disliked] = await Promise.all([
+    countOf(collection(db, kind === 'post' ? POSTS : 'wardrobe', id, 'dislikes')),
+    uid
+      ? getDoc(dislikeRef(kind, id, uid))
+          .then(s => s.exists())
+          .catch(() => false)
+      : Promise.resolve(false),
+  ]);
+  return { dislikeCount, disliked };
+};
+
+// Dislike / un-dislike. Returns the new state; likeCount only for posts (wardrobe counts are queries).
+export const toggleDislike = async (
+  kind: FeedKind,
+  id: string,
+  uid: string,
+  dislikedNow: boolean,
+  likedNow: boolean,
+): Promise<{ disliked: boolean; liked: boolean; likeCount?: number }> => {
+  const ref = dislikeRef(kind, id, uid);
+  try {
+    if (kind === 'post') {
+      const postRef = doc(db, POSTS, id);
+      const likeRef = doc(db, POSTS, id, 'likes', uid);
+      return await runTransaction(db, async tx => {
+        const post = await tx.get(postRef);
+        if (!post.exists()) throw new Error('This post was deleted.');
+        const like = await tx.get(likeRef);
+        const current = Math.max(0, Number((post.data() as any)?.likeCount) || 0);
+        if (dislikedNow) {
+          tx.delete(ref);
+          return { disliked: false, liked: like.exists(), likeCount: current };
+        }
+        tx.set(ref, { createdAt: serverTimestamp() });
+        if (like.exists()) {
+          tx.delete(likeRef);
+          tx.update(postRef, { likeCount: increment(-1) });
+          tx.delete(doc(db, 'users', uid, 'liked', likedKey('post', id)));
+          return { disliked: true, liked: false, likeCount: Math.max(0, current - 1) };
+        }
+        return { disliked: true, liked: false, likeCount: current };
+      });
+    }
+    const b = writeBatch(db);
+    if (dislikedNow) {
+      b.delete(ref);
+    } else {
+      b.set(ref, { createdAt: serverTimestamp() });
+      if (likedNow) {
+        b.delete(doc(db, 'wardrobe', id, 'likes', uid));
+        b.delete(doc(db, 'users', uid, 'liked', likedKey('wardrobe', id)));
+      }
+    }
+    await b.commit();
+    return { disliked: !dislikedNow, liked: dislikedNow ? likedNow : false };
+  } catch (e: any) {
+    if (!e?.code && e instanceof Error) throw e;
+    return fail(e, 'Disliking');
   }
 };
 

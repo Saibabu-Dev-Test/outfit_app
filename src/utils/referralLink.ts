@@ -2,6 +2,7 @@
 // Opening the link prefills the code on the sign-up screen (web) and is kept until sign-up.
 import { Alert, Linking, Platform, Share } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { ensureReferralCode } from '../services/rewardsApi';
 
 export const APP_WEB_URL = 'https://saibabu-dev-test.github.io/outfit_app/';
 const PENDING_KEY = 'pendingReferralCode';
@@ -60,9 +61,8 @@ const copyText = async (text: string): Promise<boolean> => {
   return false;
 };
 
-// Phone share sheet; on a desktop browser with no share sheet, copies the link instead.
-export const shareReferral = async (code: string) => {
-  const message = referralMessage(code);
+// Phone share sheet; on a desktop browser with no share sheet, runs onNoShareSheet instead.
+const shareText = async (message: string, onNoShareSheet: () => Promise<void>) => {
   try {
     if (Platform.OS === 'web') {
       const nav: any = typeof navigator !== 'undefined' ? navigator : null;
@@ -70,13 +70,46 @@ export const shareReferral = async (code: string) => {
         await nav.share({ title: 'Outfit Vote', text: message });
         return;
       }
-      await copyReferralLink(code);
+      await onNoShareSheet();
       return;
     }
     await Share.share({ message });
   } catch (e: any) {
     if (e?.name !== 'AbortError') console.warn('Share failed:', e?.message);
   }
+};
+
+// On a desktop browser with no share sheet, copies the link instead.
+export const shareReferral = async (code: string) =>
+  shareText(referralMessage(code), () => copyReferralLink(code));
+
+// My referral code, loaded once per session. null when it can't be loaded (never throws).
+let myCode: { uid: string; p: Promise<string | null> } | null = null;
+export const getMyReferralCode = (uid: string | undefined): Promise<string | null> => {
+  if (!uid) return Promise.resolve(null);
+  if (!myCode || myCode.uid !== uid) {
+    const p = ensureReferralCode(uid).catch(() => null);
+    myCode = { uid, p };
+    // Don't keep a failure: try again next time
+    p.then(c => {
+      if (!c && myCode?.p === p) myCode = null;
+    });
+  }
+  return myCode.p;
+};
+
+// "<line>" + app link with my referral code (plain app link if the code can't be loaded).
+// Used by Share on posts and "Share profile".
+export const shareWithReferral = async (uid: string | undefined, line: string) => {
+  const code = await getMyReferralCode(uid);
+  const link = code ? referralLink(code) : APP_WEB_URL;
+  const message = `${line}\nGet Outfit Vote, your AI stylist & daily colour guide: ${link}${
+    code ? `\n(referral code ${code})` : ''
+  }`;
+  await shareText(message, async () => {
+    const ok = await copyText(message);
+    if (Platform.OS === 'web' && typeof window !== 'undefined') window.alert(ok ? 'Link copied' : link);
+  });
 };
 
 export const shareReferralOnWhatsApp = async (code: string) => {

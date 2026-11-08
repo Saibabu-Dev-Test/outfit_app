@@ -439,6 +439,14 @@ const fetchProfile = async () => {
             <Text style={styles.backArrow}>‹</Text>
           </TouchableOpacity>
           <Text style={[styles.headerTitle, styles.flexTitle]}>Settings</Text>
+          <TouchableOpacity
+            style={[styles.editBtn, styles.inviteHeaderBtn, !referralCode && styles.inviteShareOff]}
+            onPress={handleShareInvite}
+            disabled={!referralCode}
+            accessibilityLabel="Invite friends to download the app"
+            activeOpacity={0.7}>
+            <Text style={styles.editBtnText}>🎁 Invite</Text>
+          </TouchableOpacity>
           <TouchableOpacity style={styles.editBtn} onPress={handleOpenEditModal} activeOpacity={0.7}>
             <Text style={styles.editBtnText}>Edit</Text>
           </TouchableOpacity>
@@ -1191,6 +1199,7 @@ const styles = themedStyles(() => StyleSheet.create({
     paddingBottom: spacing.base,
   },
   headerTitle: { fontSize: fontSize.xl, fontWeight: fontWeight.extraBold, color: colors.textPrimary, letterSpacing: -0.5 },
+  inviteHeaderBtn: { marginRight: spacing.sm },
   editBtn: {
     borderWidth: 1.5,
     borderColor: colors.primary,

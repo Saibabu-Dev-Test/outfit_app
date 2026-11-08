@@ -1,4 +1,4 @@
-// Another user's profile (Instagram style): counts, follow / unfollow, their posts as a
+// Another user's profile (Instagram style): counts, Follow / Unfollow, Share profile, their posts as a
 // scrolling feed (like, comment, A-F vote) and their public wardrobe photos as a grid.
 // Private profiles show "This account is private".
 import React, { useCallback, useEffect, useState } from 'react';
@@ -26,6 +26,7 @@ import { getPublicUser, PublicUser } from '../../services/userApi';
 import { getUserPosts, getUserPublicWardrobePosts, Post } from '../../services/feedApi';
 import { isWeeklyStar } from '../../services/rewardsApi';
 import { follow, getProfileCounts, isFollowing, ProfileCounts, unfollow } from '../../services/socialApi';
+import { shareWithReferral } from '../../utils/referralLink';
 
 type TabKey = 'posts' | 'wardrobe';
 
@@ -123,6 +124,15 @@ export default function UserProfileScreen({ navigation, route }: { navigation: a
     }
   };
 
+  // App link with my referral code, so friends download the app and find this profile
+  const shareProfile = () => {
+    if (!profile) return;
+    const line = isMe
+      ? 'Follow me on Outfit Vote! Search for "' + profile.name + '" in the app.'
+      : 'Check out ' + profile.name + "'s outfits on Outfit Vote! Search for \"" + profile.name + '" in the app.';
+    shareWithReferral(me?.id, line);
+  };
+
   const header = (
     <View style={styles.header}>
       <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
@@ -195,10 +205,18 @@ export default function UserProfileScreen({ navigation, route }: { navigation: a
             <TouchableOpacity
               style={[hb.btn, !following && hb.btnPrimary]}
               onPress={toggleFollow}
-              disabled={followBusy}>
-              <Text style={[hb.btnText, !following && hb.btnTextPrimary]}>{following ? 'Following ✓' : 'Follow'}</Text>
+              disabled={followBusy}
+              accessibilityLabel={following ? 'Unfollow' : 'Follow'}>
+              {followBusy ? (
+                <ActivityIndicator size="small" color={following ? colors.primary : colors.onPrimary} />
+              ) : (
+                <Text style={[hb.btnText, !following && hb.btnTextPrimary]}>{following ? 'Unfollow' : 'Follow'}</Text>
+              )}
             </TouchableOpacity>
           )}
+          <TouchableOpacity style={hb.btn} onPress={shareProfile}>
+            <Text style={hb.btnText}>↗ Share profile</Text>
+          </TouchableOpacity>
         </ProfileHeader>
         {profile.rashi ? <Text style={styles.rashi}>✨ {profile.rashi}</Text> : null}
 
