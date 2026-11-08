@@ -71,6 +71,23 @@ jobs:
           done
           echo "Could not download Gradle $VER"; exit 1
 
+      # 4.9. CI only: resolve Maven Central from repo1.maven.org first
+      # (repo.maven.apache.org redirects some Kotlin jars to GitHub downloads, which returned 504)
+      - name: Maven mirror for Gradle
+        run: |
+          mkdir -p ~/.gradle/init.d
+          cat > ~/.gradle/init.d/maven-mirror.gradle <<'GRADLE'
+          def mirror = 'https://repo1.maven.org/maven2/'
+          beforeSettings { s ->
+            s.pluginManagement.repositories.maven { url = mirror; name = 'Repo1Mirror' }
+            s.dependencyResolutionManagement.repositories.maven { url = mirror; name = 'Repo1Mirror' }
+          }
+          allprojects { p ->
+            p.buildscript.repositories.maven { url = mirror; name = 'Repo1Mirror' }
+          }
+          GRADLE
+          cat ~/.gradle/init.d/maven-mirror.gradle
+
       # 5. Make Gradle executable
       - name: Make Gradlew executable
         run: chmod +x android/gradlew
@@ -85,7 +102,14 @@ jobs:
       # 6. Build Android Debug APK
       - name: Build APK
         working-directory: android
-        run: ./gradlew assembleRelease
+        # Retries: dependency downloads sometimes hit 504s; finished downloads stay cached between tries
+        run: |
+          for attempt in 1 2 3; do
+            if ./gradlew assembleRelease; then exit 0; fi
+            echo "Build attempt $attempt failed; retrying in 60 s"
+            sleep 60
+          done
+          exit 1
       # 7. Upload generated APK
       - name: Upload APK
         uses: actions/upload-artifact@v4
