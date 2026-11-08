@@ -28,6 +28,8 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
+          # Keeps the Gradle distribution + dependencies between runs
+          cache: gradle
 
       # 4. Install JavaScript dependencies
       - name: Install dependencies
@@ -40,6 +42,34 @@ jobs:
         run: |
           node -e "require('fs').writeFileSync('src/config/ai.generated.ts', '// Written by CI. Do not commit.\nexport const GEMINI_API_KEY: string = ' + JSON.stringify(process.env.GEMINI_API_KEY || '') + ';\n')"
           if [ -n "$GEMINI_API_KEY" ]; then echo "AI key: set"; else echo "AI key: missing (AI stylist shows coming soon)"; fi
+
+      # 4.8. Gradle distribution with retries and mirrors (services.gradle.org sometimes returns 504)
+      - name: Fetch Gradle distribution
+        run: |
+          PROPS=android/gradle/wrapper/gradle-wrapper.properties
+          URL=$(grep '^distributionUrl=' "$PROPS" | cut -d= -f2- | sed 's#\\:#:#g')
+          FILE=$(basename "$URL")
+          VER=$(echo "$FILE" | sed -E 's/gradle-(.*)-bin\.zip/\1/')
+          if ls ~/.gradle/wrapper/dists/gradle-$VER-bin/*/gradle-$VER/bin/gradle >/dev/null 2>&1; then
+            echo "Gradle $VER already in cache"; exit 0
+          fi
+          DEST="$HOME/gradle-dl/$FILE"
+          mkdir -p "$HOME/gradle-dl"
+          for attempt in 1 2 3 4 5 6; do
+            for u in "$URL" \
+                     "https://mirrors.cloud.tencent.com/gradle/$FILE" \
+                     "https://github.com/gradle/gradle-distributions/releases/download/v$VER/$FILE"; do
+              echo "Try $attempt: $u"
+              if curl -fsSL --connect-timeout 20 --max-time 300 -o "$DEST" "$u" && unzip -tq "$DEST" >/dev/null; then
+                echo "Downloaded from $u"
+                sed -i "s#^distributionUrl=.*#distributionUrl=file\\:$DEST#; s#^validateDistributionUrl=.*#validateDistributionUrl=false#" "$PROPS"
+                grep '^distributionUrl=' "$PROPS"
+                exit 0
+              fi
+            done
+            sleep 30
+          done
+          echo "Could not download Gradle $VER"; exit 1
 
       # 5. Make Gradle executable
       - name: Make Gradlew executable
