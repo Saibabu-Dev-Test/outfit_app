@@ -31,7 +31,8 @@ import {
   WRONG_PASSWORD,
 } from '../utils/firebaseErrors';
 import { lookupReferralCode, saveReferral } from './rewardsApi';
-import { getGoogleAccount, googleSignOut } from './googleAuth';
+import { consumeRedirectSignIn, getGoogleAccount, googleSignOut } from './googleAuth';
+import { Platform } from 'react-native';
 import { wipeForPasswordLogin } from '../native/sessionVault';
 
 export interface AuthResponse {
@@ -189,7 +190,8 @@ const googleFirebaseSignIn = async (
     const cred = await signInWithCredential(auth, GoogleAuthProvider.credential(g.idToken));
     return {
       user: cred.user,
-      isNew: !!getAdditionalUserInfo(cred)?.isNewUser,
+      // Web: the Google popup already created the Firebase user, so ask it too
+      isNew: !!getAdditionalUserInfo(cred)?.isNewUser || !!g.isNew,
       email: g.email,
       name: g.name,
     };
@@ -429,6 +431,11 @@ export const completeSignUp = async ({
   };
   if (name?.trim()) profile.name = name.trim();
   if (gender) profile.gender = gender;
+  if (Platform.OS === 'web') {
+    // A browser can't read the SIM: the number was typed, not checked
+    profile.phoneVerified = false;
+    profile.signupSource = 'web';
+  }
   try {
     await setDoc(doc(db, 'users', user.uid), profile, { merge: true });
   } catch (e: any) {
@@ -594,6 +601,11 @@ export type RestoreResult =
   | { status: 'none' };
 
 export const restoreSession = async (user: User): Promise<RestoreResult> => {
+  // Web: a session that only came back from a Google redirect is not a finished login
+  if (await consumeRedirectSignIn()) {
+    await silentSignOut();
+    return { status: 'none' };
+  }
   const provider = await tokenProvider(user, false);
   if (provider !== 'google.com') {
     console.warn('Restored session is not a Google session:', provider);

@@ -1,0 +1,69 @@
+name: Web (PWA) to GitHub Pages
+
+# Builds the browser version of the same app (react-native-web) and publishes it free on
+# GitHub Pages: https://saibabu-dev-test.github.io/outfit_app/
+# The Android APK build stays in main.yml.
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      # AI stylist key from the GEMINI_API_KEY secret, same as main.yml (empty when missing)
+      - name: Write AI config
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          node -e "require('fs').writeFileSync('src/config/ai.generated.ts', '// Written by CI. Do not commit.\nexport const GEMINI_API_KEY: string = ' + JSON.stringify(process.env.GEMINI_API_KEY || '') + ';\n')"
+          if [ -n "$GEMINI_API_KEY" ]; then echo "AI key: set"; else echo "AI key: missing (AI stylist shows coming soon)"; fi
+
+      - name: Build web app
+        env:
+          PUBLIC_PATH: /outfit_app/
+        run: |
+          npm run web:build
+          # Unknown paths open the app instead of a GitHub 404
+          cp web/dist/index.html web/dist/404.html
+          touch web/dist/.nojekyll
+          ls -la web/dist
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: web/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

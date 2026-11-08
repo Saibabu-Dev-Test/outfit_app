@@ -69,6 +69,9 @@ const writeGuard = (g: Guard) => AsyncStorage.setItem(GUARD_KEY, JSON.stringify(
 const getErrorMessage = (err: any, fallback: string): string =>
   err?.response?.data?.message || err?.data?.message || err?.message || fallback;
 
+// Web (browser) build: no SIM picker, the mobile number is typed
+const IS_WEB = Platform.OS === 'web';
+
 const TITLES: Record<AuthMode, { title: string; subtitle: string; button: string }> = {
   login: {
     title: 'Welcome Back',
@@ -77,12 +80,16 @@ const TITLES: Record<AuthMode, { title: string; subtitle: string; button: string
   },
   register: {
     title: 'Get Started',
-    subtitle: 'Step 1: continue with Google. Step 2: select the SIM number in this phone & set a password',
+    subtitle: IS_WEB
+      ? 'Step 1: continue with Google. Step 2: enter your mobile number & set a password'
+      : 'Step 1: continue with Google. Step 2: select the SIM number in this phone & set a password',
     button: 'Create Account',
   },
   forgot: {
     title: 'Reset Password',
-    subtitle: 'Continue with the same Google account, select the SIM number in this phone, then set a new password',
+    subtitle: IS_WEB
+      ? 'Continue with the same Google account, enter your registered mobile number, then set a new password'
+      : 'Continue with the same Google account, select the SIM number in this phone, then set a new password',
     button: 'Change Password',
   },
 };
@@ -120,7 +127,8 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
   const isRegister = authMode === 'register';
   const isForgot = authMode === 'forgot';
   const needsConfirm = isRegister || isForgot; // new password typed twice
-  const needsSim = isRegister || isForgot; // SIM must be in this phone
+  // SIM must be in this phone (Android). The web can't read a SIM, so the number is typed there.
+  const needsSim = (isRegister || isForgot) && !IS_WEB;
   const busy = loading || googleLoading || simLoading;
   const copy = TITLES[authMode];
   const locked = authMode === 'login' && lockLeft > 0;
@@ -454,7 +462,9 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
 
             {!googleEmail && (
               <Text style={styles.stepHint}>
-                Use the Gmail account on this phone. No OTP or SMS needed.
+                {IS_WEB
+                  ? 'Sign in with your Gmail account. No OTP or SMS needed.'
+                  : 'Use the Gmail account on this phone. No OTP or SMS needed.'}
               </Text>
             )}
 

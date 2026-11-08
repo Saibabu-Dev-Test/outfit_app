@@ -1,0 +1,28 @@
+// Web build: no fingerprint lock (the browser keeps the Firebase session, see firebaseConfig.web.ts)
+export {
+  enableHardwareLock,
+  disableHardwareLock,
+  verifyFingerprint,
+  wipeForPasswordLogin,
+  wasUnlockedThisLaunch,
+  setPrivacy,
+  FINGERPRINTS_CHANGED_MESSAGE,
+  LOCK_ENABLED_KEY,
+} from './sessionVault.web';
+export type { LockChange, VerifyResult } from './sessionVault.web';
+
+export const LOCK_ASKED_KEY = 'outfit:appLockAsked';
+export const LOCK_AFTER_MS = 30 * 1000;
+
+export const isLockSupported = async (): Promise<boolean> => false;
+export const isLockEnabled = async (): Promise<boolean> => false;
+export const setLockEnabled = async (_on: boolean): Promise<void> => {};
+export const wasLockAsked = async (): Promise<boolean> => true;
+export const markLockAsked = async (): Promise<void> => {};
+
+export type UnlockResult = 'success' | 'cancelled' | 'password' | 'invalidated' | 'error';
+export const authenticate = async (
+  _title?: string,
+  _subtitle?: string,
+  _negativeText?: string,
+): Promise<UnlockResult> => 'error';

@@ -24,7 +24,11 @@ export interface GoogleAccountResult {
   name?: string | null;
   message?: string; // set when it failed
   cancelled?: boolean;
+  isNew?: boolean; // web only: Firebase user was created by the Google popup itself
 }
+
+// Web only (redirect sign-in). The Android app never signs in through a redirect.
+export const consumeRedirectSignIn = async (): Promise<boolean> => false;
 
 // Native error -> message the user can act on ('' = cancelled, show nothing)
 export const googleErrorMessage = (error: any): string => {
