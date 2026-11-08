@@ -78,7 +78,7 @@ jobs:
           mkdir -p ~/.gradle/init.d
           cat > ~/.gradle/init.d/maven-mirror.gradle <<'GRADLE'
           // Central mirrors that serve jars directly (no GitHub redirect)
-          def mirrors = ['https://repo1.maven.org/maven2/', 'https://maven.aliyun.com/repository/public/']
+          def mirrors = ['https://maven.aliyun.com/repository/public/', 'https://mirrors.cloud.tencent.com/nexus/repository/maven-public/', 'https://repo1.maven.org/maven2/']
           def addFirst = { repos ->
             mirrors.reverse().eachWithIndex { u, i ->
               def m = repos.maven { url = u; name = "CentralMirror${i}" }
