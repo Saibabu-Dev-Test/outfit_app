@@ -71,19 +71,27 @@ jobs:
           done
           echo "Could not download Gradle $VER"; exit 1
 
-      # 4.9. CI only: resolve Maven Central from repo1.maven.org first
+      # 4.9. CI only: resolve Maven Central from mirrors first (all repository lists)
       # (repo.maven.apache.org redirects some Kotlin jars to GitHub downloads, which returned 504)
       - name: Maven mirror for Gradle
         run: |
           mkdir -p ~/.gradle/init.d
           cat > ~/.gradle/init.d/maven-mirror.gradle <<'GRADLE'
-          def mirror = 'https://repo1.maven.org/maven2/'
+          // Central mirrors that serve jars directly (no GitHub redirect)
+          def mirrors = ['https://repo1.maven.org/maven2/', 'https://maven.aliyun.com/repository/public/']
+          def addFirst = { repos ->
+            mirrors.reverse().eachWithIndex { u, i ->
+              def m = repos.maven { url = u; name = "CentralMirror${i}" }
+              repos.remove(m); repos.add(0, m)
+            }
+          }
           beforeSettings { s ->
-            s.pluginManagement.repositories.maven { url = mirror; name = 'Repo1Mirror' }
-            s.dependencyResolutionManagement.repositories.maven { url = mirror; name = 'Repo1Mirror' }
+            addFirst(s.pluginManagement.repositories)
+            addFirst(s.dependencyResolutionManagement.repositories)
           }
           allprojects { p ->
-            p.buildscript.repositories.maven { url = mirror; name = 'Repo1Mirror' }
+            addFirst(p.buildscript.repositories)
+            addFirst(p.repositories)
           }
           GRADLE
           cat ~/.gradle/init.d/maven-mirror.gradle
