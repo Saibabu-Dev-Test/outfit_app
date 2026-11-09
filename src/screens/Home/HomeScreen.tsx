@@ -27,6 +27,7 @@ import { ageFromDob, getUserProfile, recordDailyLogin } from '../../services/use
 import { hasUploadedToday } from '../../services/wardrobeApi';
 import { getTodayVaaraColour, getRashiLuckyColour, getTodayLuckyMessage } from '../../utils/panchangam';
 import { localDateKey, greetingForNow } from '../../utils/date';
+import { useDayKey } from '../../hooks/useDayKey';
 import { firestoreErrorMessage, SERVER_SETUP_MESSAGE } from '../../utils/firebaseErrors';
 import Avatar from '../../components/Avatar';
 import {
@@ -137,6 +138,8 @@ export default function HomeScreen() {
 
   const displayName = (user?.name || '').trim() || 'there';
   const firstName = displayName.split(' ')[0];
+  // Changes at 12:00 AM local time: today's colour votes start again from 0
+  const dayKey = useDayKey();
   const vaara = getTodayVaaraColour();
   const luckyMessage = getTodayLuckyMessage();
   const lucky = getRashiLuckyColour(user?.rashi);
@@ -255,6 +258,25 @@ export default function HomeScreen() {
       refreshPoints();
     }, [fetchVotes, refreshPoints]),
   );
+
+  // Midnight while Home is open (or the app comes back on a new day): clear yesterday's tallies and
+  // my vote, show the vote-first screen again, then load the new day's votes (none yet = all 0).
+  const dayKeyRef = useRef(dayKey);
+  useEffect(() => {
+    if (dayKeyRef.current === dayKey) return;
+    dayKeyRef.current = dayKey;
+    votesRef.current = new Map();
+    lastWriteRef.current = null;
+    setTopColours(emptyTally());
+    setMyVote(null);
+    setVoterList(null);
+    setGreeting(greetingForNow());
+    voteGateDone = false;
+    setGateDone(false);
+    fetchVotes();
+    refreshPoints();
+    if (uid) recordTask(uid, 'opened').then(() => refreshPoints());
+  }, [dayKey, fetchVotes, refreshPoints, uid]);
 
   useEffect(() => {
     setStarProfile({ name: user?.name, avatar: user?.avatarUrl });

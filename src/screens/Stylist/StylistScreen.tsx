@@ -21,6 +21,7 @@ import { useAuth } from '../../context/AuthContext';
 import { getWardrobeItems, WardrobeItemResponse } from '../../services/wardrobeApi';
 import { categoryIcon } from '../../constants/wardrobe';
 import { getTodayVaaraColour } from '../../utils/panchangam';
+import { useDayKey } from '../../hooks/useDayKey';
 import { AI_DAILY_LIMIT, isAiConfigured } from '../../config/ai';
 import {
   AI_LANGUAGES,
@@ -72,6 +73,7 @@ export default function StylistScreen() {
   const { user } = useAuth();
   const uid = user?.id;
   const aiOn = isAiConfigured();
+  useDayKey(); // re-render at midnight so the day's colour updates
   const vaara = getTodayVaaraColour();
 
   const [language, setLanguage] = useState<AiLanguage>(defaultAiLanguage(user?.language));
