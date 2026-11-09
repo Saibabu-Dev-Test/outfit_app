@@ -34,6 +34,7 @@ import {
   REFERRAL_POINTS,
 } from '../../services/rewardsApi';
 import { getLockCapability, isLockEnabled, isLockSupported, isSoftLockOn } from '../../native/appLock';
+import { isAutoUpdateOn, isUpdateSupported, setAutoUpdate } from '../../native/appUpdate';
 
 // "+91 98765 43210" from users/{uid}.phone (10 digits), else the saved phoneNumber
 const phoneLabel = (p?: { phone?: string; phoneNumber?: string } | null): string => {
@@ -85,6 +86,15 @@ export default function ProfileScreen() {
   // App lock (fingerprint): hidden when the phone has no biometrics
   const [lockSupported, setLockSupported] = useState(false);
   const [lockOn, setLockOn] = useState(false);
+  // Automatic updates: user's choice, OFF by default
+  const [autoUpdate, setAutoUpdateState] = useState(false);
+  useEffect(() => {
+    isAutoUpdateOn().then(setAutoUpdateState);
+  }, []);
+  const toggleAutoUpdate = (on: boolean) => {
+    setAutoUpdateState(on);
+    setAutoUpdate(on);
+  };
   // Referrals + weekly celebrity badge
   const [referralCode, setReferralCode] = useState<string | null>(null);
   const [referralError, setReferralError] = useState('');
@@ -635,6 +645,17 @@ const fetchProfile = async () => {
               value: THEME_LABEL[themeMode],
               onPress: pickTheme,
             },
+            ...(isUpdateSupported()
+              ? [
+                  {
+                    id: 'updates',
+                    icon: '🔄',
+                    label: 'Automatic updates',
+                    value: autoUpdate ? 'On: tells you when a new version is ready' : 'Off',
+                    onPress: () => toggleAutoUpdate(!autoUpdate),
+                  },
+                ]
+              : []),
             {
               id: 'feedback',
               icon: '💌',
@@ -668,6 +689,13 @@ const fetchProfile = async () => {
                 <Switch
                   value={isDark}
                   onValueChange={v => setThemeMode(v ? 'dark' : 'light')}
+                  trackColor={{ false: colors.border, true: colors.accent }}
+                  thumbColor={colors.textInverse}
+                />
+              ) : item.id === 'updates' ? (
+                <Switch
+                  value={autoUpdate}
+                  onValueChange={toggleAutoUpdate}
                   trackColor={{ false: colors.border, true: colors.accent }}
                   thumbColor={colors.textInverse}
                 />

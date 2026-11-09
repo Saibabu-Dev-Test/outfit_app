@@ -21,6 +21,38 @@ export const GET_PAGE_URL = APP_GET_URL;
 // Not under "outfit:" so logout's storage cleanup keeps it
 const LAST_CHECK_KEY = 'outfitupdate:lastCheck';
 const CHECK_EVERY_MS = 6 * 60 * 60 * 1000;
+// Automatic update check is the user's choice: OFF until they turn it on (Settings or the
+// one-time first-launch question). Not under "outfit:" so logout keeps the choice.
+const ENABLED_KEY = 'outfitupdate:enabled';
+const ASKED_KEY = 'outfitupdate:asked';
+
+export const isAutoUpdateOn = async (): Promise<boolean> => {
+  try {
+    return (await AsyncStorage.getItem(ENABLED_KEY)) === '1';
+  } catch {
+    return false;
+  }
+};
+
+export const setAutoUpdate = async (on: boolean): Promise<void> => {
+  try {
+    await AsyncStorage.multiSet([
+      [ENABLED_KEY, on ? '1' : '0'],
+      [ASKED_KEY, '1'],
+    ]);
+  } catch {}
+};
+
+// True once the user has answered the first-launch question (or changed the Settings switch)
+export const wasAutoUpdateAsked = async (): Promise<boolean> => {
+  try {
+    return (await AsyncStorage.getItem(ASKED_KEY)) === '1';
+  } catch {
+    return true;
+  }
+};
+
+export const isUpdateSupported = (): boolean => !!Native;
 
 export interface UpdateInfo {
   build: number; // N of build-N
@@ -32,6 +64,8 @@ export interface UpdateInfo {
 export const checkForUpdate = async (force = false): Promise<UpdateInfo | null> => {
   if (!Native) return null;
   try {
+    // Never contacts GitHub unless the user turned automatic updates on (or asked manually)
+    if (!force && !(await isAutoUpdateOn())) return null;
     if (!force) {
       const last = Number(await AsyncStorage.getItem(LAST_CHECK_KEY)) || 0;
       if (Date.now() - last < CHECK_EVERY_MS) return null;
