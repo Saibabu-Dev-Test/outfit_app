@@ -1,4 +1,7 @@
-// "New update available (build N)": non-blocking modal on launch (Android, max once per 6 h).
+// Automatic updates are opt-in (OFF by default). First launch only: one question,
+// "Check for updates automatically?" Yes turns it on; "No, I'll decide later" leaves it off
+// (Settings > Automatic updates can change it any time).
+// When on: "New update available (build N)": non-blocking modal on launch (Android, max once per 6 h).
 // Update now = download the APK inside the app and open the Android installer
 // (asks for "Install unknown apps" first). Web: never shows (checkForUpdate is a no-op there).
 import React, { useEffect, useRef, useState } from 'react';
@@ -10,18 +13,27 @@ import {
   checkForUpdate,
   downloadAndInstall,
   openInstallSettings,
+  isUpdateSupported,
+  setAutoUpdate,
+  wasAutoUpdateAsked,
 } from '../native/appUpdate';
 
 export default function UpdatePrompt() {
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState('');
+  const [askOptIn, setAskOptIn] = useState(false);
   const waitingPermission = useRef(false);
 
   useEffect(() => {
     let alive = true;
-    // Let the first screen settle before checking
-    const t = setTimeout(() => {
+    // Let the first screen settle before asking or checking
+    const t = setTimeout(async () => {
+      if (!isUpdateSupported()) return;
+      if (!(await wasAutoUpdateAsked())) {
+        if (alive) setAskOptIn(true);
+        return;
+      }
       checkForUpdate().then(u => alive && u && setUpdate(u));
     }, 4000);
     return () => {
@@ -72,6 +84,35 @@ export default function UpdatePrompt() {
     return () => sub.remove();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [update]);
+
+  const answerOptIn = async (on: boolean) => {
+    setAskOptIn(false);
+    await setAutoUpdate(on);
+    if (on) checkForUpdate(true).then(u => u && setUpdate(u));
+  };
+
+  if (askOptIn) {
+    return (
+      <Modal transparent animationType="fade" visible onRequestClose={() => answerOptIn(false)}>
+        <View style={styles.backdrop}>
+          <View style={styles.card}>
+            <Text style={styles.emoji}>🔄</Text>
+            <Text style={styles.title}>Check for updates automatically?</Text>
+            <Text style={styles.sub}>
+              Outfit can tell you when a new version is ready. Nothing is downloaded or installed unless you tap Update now.
+              You can change this any time in Settings › Automatic updates.
+            </Text>
+            <TouchableOpacity style={styles.primary} onPress={() => answerOptIn(true)} activeOpacity={0.85}>
+              <Text style={styles.primaryText}>Yes</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.later} onPress={() => answerOptIn(false)} activeOpacity={0.7}>
+              <Text style={styles.laterText}>No, I'll decide later</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+    );
+  }
 
   if (!update) return null;
   return (

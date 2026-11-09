@@ -191,8 +191,8 @@
         copyRef().then(once, function () { once(false); });
         setTimeout(function () { once(false); }, 1200);
       }
-      if (document.readyState === 'complete') setTimeout(autoStart, 300);
-      else window.addEventListener('load', function () { setTimeout(autoStart, 300); });
+      // No automatic download: the APK downloads only when the user taps a Download button.
+      void autoStart;
     })();
   </script>
 </body>

@@ -8,3 +8,15 @@
 #   http://developer.android.com/guide/developing/tools/proguard.html
 
 # Add any project specific keep options here:
+
+# Outfit native modules (called from JavaScript by name)
+-keep class com.outfit.** { *; }
+# React Native / Hermes
+-keep class com.facebook.react.** { *; }
+-keep class com.facebook.hermes.** { *; }
+-keep class com.facebook.jni.** { *; }
+-keep class com.facebook.soloader.** { *; }
+-dontwarn com.facebook.**
+# Google Sign-In / Play services
+-keep class com.google.android.gms.auth.** { *; }
+-dontwarn com.google.android.gms.**

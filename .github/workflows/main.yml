@@ -107,9 +107,22 @@ jobs:
           chmod +x gradlew
           ./gradlew signingReport | grep "SHA1" | head -n 1
 
-      # 6. Build Android Debug APK
+      # 5.8. Your own release key (outfit-release.p12, unlocked by the OUTFIT_KEYSTORE_PASSWORD secret)
+      - name: Release signing key
+        env:
+          OUTFIT_KEYSTORE_PASSWORD: ${{ secrets.OUTFIT_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -z "$OUTFIT_KEYSTORE_PASSWORD" ]; then
+            echo "::error::Add the OUTFIT_KEYSTORE_PASSWORD secret. Without it the APK would be signed with the public debug key and Play Protect blocks it."
+            exit 1
+          fi
+          echo "Release key: set"
+
+      # 6. Build Android release APK
       - name: Build APK
         working-directory: android
+        env:
+          OUTFIT_KEYSTORE_PASSWORD: ${{ secrets.OUTFIT_KEYSTORE_PASSWORD }}
         # Retries: dependency downloads sometimes hit 504s; finished downloads stay cached between tries
         run: |
           for attempt in 1 2 3; do
@@ -124,7 +137,7 @@ jobs:
           OUT=android/app/build/outputs/apk/release
           ls -la "$OUT"
           mkdir -p apks
-          for abi in arm64-v8a armeabi-v7a x86_64 universal; do
+          for abi in arm64-v8a armeabi-v7a universal; do
             f=$(ls "$OUT"/*-"$abi"-release.apk 2>/dev/null | head -n 1)
             if [ -z "$f" ]; then echo "Missing $abi APK"; exit 1; fi
             cp "$f" "apks/app-$abi-release.apk"
@@ -156,6 +169,5 @@ jobs:
             apks/Outfit-universal.apk
             apks/app-arm64-v8a-release.apk
             apks/app-armeabi-v7a-release.apk
-            apks/app-x86_64-release.apk
             apks/app-universal-release.apk
             apks/app-release.apk
