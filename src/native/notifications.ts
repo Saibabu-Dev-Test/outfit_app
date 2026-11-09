@@ -2,7 +2,13 @@
 import { Linking, NativeModules, PermissionsAndroid, Platform } from 'react-native';
 
 const Native:
-  | { areNotificationsEnabled?: () => Promise<boolean>; openNotificationSettings?: () => Promise<boolean> }
+  | {
+      areNotificationsEnabled?: () => Promise<boolean>;
+      openNotificationSettings?: () => Promise<boolean>;
+      scheduleDaily?: () => Promise<boolean>;
+      cancelDaily?: () => Promise<boolean>;
+      postNotification?: (title: string, body: string) => Promise<boolean>;
+    }
   | undefined = NativeModules.OutfitNotifications;
 
 const POST = (PermissionsAndroid.PERMISSIONS as any).POST_NOTIFICATIONS || 'android.permission.POST_NOTIFICATIONS';
@@ -49,3 +55,24 @@ export const openNotificationSettings = async (): Promise<void> => {
 };
 
 export const canAskAgain = needsRuntimePermission;
+
+// Daily reminders at 8 AM, 1 PM and 7 PM local time (OutfitNotifier.kt). Idempotent: called on
+// every launch once notifications are on. Never throws.
+export const scheduleDaily = async (): Promise<void> => {
+  if (Platform.OS !== 'android') return;
+  try {
+    await Native?.scheduleDaily?.();
+  } catch (e: any) {
+    console.warn('scheduleDaily failed:', e?.message);
+  }
+};
+
+// A local notification on the "activity" channel. false when it could not be shown. Never throws.
+export const postNotification = async (title: string, body: string): Promise<boolean> => {
+  if (Platform.OS !== 'android') return false;
+  try {
+    return !!(await Native?.postNotification?.(title, body));
+  } catch {
+    return false;
+  }
+};

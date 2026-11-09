@@ -49,6 +49,39 @@ class NotificationsModule(private val ctx: ReactApplicationContext) : ReactConte
     }
   }
 
+  // Daily reminders at 8:00, 13:00 and 19:00 local time. Idempotent: call on every launch.
+  @ReactMethod
+  fun scheduleDaily(promise: Promise) {
+    try {
+      OutfitNotifier.scheduleDaily(ctx)
+      promise.resolve(true)
+    } catch (e: Exception) {
+      promise.resolve(false)
+    }
+  }
+
+  @ReactMethod
+  fun cancelDaily(promise: Promise) {
+    try {
+      OutfitNotifier.cancelDaily(ctx)
+      promise.resolve(true)
+    } catch (e: Exception) {
+      promise.resolve(false)
+    }
+  }
+
+  // Activity notification (likes, comments, follows, feedback) on the "activity" channel.
+  // Resolves false when notifications are off.
+  @ReactMethod
+  fun postNotification(title: String, body: String, promise: Promise) {
+    try {
+      val id = 8000 + ((System.currentTimeMillis() / 1000L) % 100000L).toInt()
+      promise.resolve(OutfitNotifier.post(ctx, OutfitNotifier.CHANNEL_ACTIVITY, id, title, body))
+    } catch (e: Exception) {
+      promise.resolve(false)
+    }
+  }
+
   companion object {
     const val NAME = "OutfitNotifications"
   }

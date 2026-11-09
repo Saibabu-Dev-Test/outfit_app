@@ -11,6 +11,7 @@ import {
   checkNotifications,
   openNotificationSettings,
   requestNotifications,
+  scheduleDaily,
 } from '../native/notifications';
 
 const ASKED_KEY = 'outfit.notifAsked';
@@ -36,6 +37,8 @@ export default function NotificationGate({ children }: { children: React.ReactNo
         }
       }
       setState(s);
+      // Notifications on: (re)arm the 8 AM / 1 PM / 7 PM reminders (idempotent)
+      if (s === 'on') scheduleDaily();
     } finally {
       busy.current = false;
     }
@@ -62,6 +65,7 @@ export default function NotificationGate({ children }: { children: React.ReactNo
     const s = await checkNotifications();
     if (s === 'on') {
       setState('on');
+      scheduleDaily();
       return;
     }
     await openNotificationSettings();

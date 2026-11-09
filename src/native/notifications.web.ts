@@ -24,3 +24,18 @@ export const requestNotifications = async (): Promise<'granted' | 'denied' | 'bl
 
 export const openNotificationSettings = async (): Promise<void> => {};
 export const canAskAgain = (): boolean => browserPermission() === 'default';
+
+// Daily reminders: Android only
+export const scheduleDaily = async (): Promise<void> => {};
+
+// Browser notification when permission was granted (tab open); false otherwise. Never throws.
+export const postNotification = async (title: string, body: string): Promise<boolean> => {
+  try {
+    if (browserPermission() !== 'granted') return false;
+    // eslint-disable-next-line no-new
+    new (N())(title, { body, icon: '/icons/icon-192.png' });
+    return true;
+  } catch {
+    return false;
+  }
+};
