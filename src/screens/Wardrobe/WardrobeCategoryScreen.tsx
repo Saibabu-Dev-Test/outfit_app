@@ -20,20 +20,23 @@ import { useFocusEffect } from '@react-navigation/native';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles, statusBarStyle } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
 import { deleteWardrobeItem, getWardrobeItems, WardrobeItemResponse } from '../../services/wardrobeApi';
-import { categoryIcon, colorToHex, inCategory, itemSubType, normalizeCategory, subTypesFor } from '../../constants/wardrobe';
+import { categoryIcon, colorToHex, inCategory, isForGender, itemSubType, normalizeCategory, subTypesFor } from '../../constants/wardrobe';
 
 export default function WardrobeCategoryScreen({ navigation, route }: { navigation: any; route: any }) {
   // Old names map in (Footwear -> Shoes, Jewellery -> Accessories)
   const category: string = normalizeCategory(route?.params?.category || 'Others');
   // Shoes / Accessories: filter by type. Items without a type show under All and Other.
-  const types = subTypesFor(category);
+  const { user } = useAuth();
+  const [items, setItems] = useState<WardrobeItemResponse[]>([]);
+  // Only the user's gender's types (plus unisex), and any type that already holds items
+  const types = subTypesFor(category).filter(
+    t => isForGender(t, user?.gender) || items.some(i => itemSubType(i) === t) || route?.params?.subType === t,
+  );
   const [activeType, setActiveType] = useState<string>(
     route?.params?.subType && types.includes(route.params.subType) ? route.params.subType : 'All',
   );
-  const { user } = useAuth();
   const { width } = useWindowDimensions();
   const tile = Math.floor((width - spacing.base * 2 - spacing.sm) / 2);
-  const [items, setItems] = useState<WardrobeItemResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);

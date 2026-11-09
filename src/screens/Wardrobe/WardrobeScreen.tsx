@@ -22,6 +22,7 @@ import {
   CATEGORY_GROUPS,
   groupCategoriesSorted,
   inCategory,
+  isForGender,
   itemSubType,
   categoryIcon,
   colorToHex,
@@ -96,7 +97,17 @@ export default function WardrobeScreen({ navigation }: { navigation: any }) {
 
   // Sections: Tops / Bottoms / Ethnic & Dresses / Shoes / Accessories / Others (old names map in)
   const countIn = (cat: string) => items.filter(i => inCategory(i.category, cat)).length;
-  const sections = CATEGORY_GROUPS.map(g => ({ group: g, cats: groupCategoriesSorted(g, user?.gender) }));
+  // Only the user's gender's categories (plus unisex); a category or type that already holds items
+  // stays visible so nothing saved earlier disappears.
+  const sections = CATEGORY_GROUPS.map(g => {
+    const cats = g.categories.filter(c => groupCategoriesSorted(g, user?.gender).includes(c) || countIn(c) > 0);
+    const subTypes = g.subTypes
+      ? g.subTypes.filter(
+          t => isForGender(t, user?.gender) || items.some(i => inCategory(i.category, g.categories[0]) && itemSubType(i) === t),
+        )
+      : undefined;
+    return { group: { ...g, subTypes }, cats };
+  }).filter(s => s.group.subTypes || s.cats.length > 0);
 
   const visibleItems = items.filter(i => activeMode === 'All' || i.wearType === activeMode);
 

@@ -19,14 +19,14 @@ export const SHOE_TYPES = [
 ];
 
 export const ACCESSORY_TYPES = [
-  'Watches', 'Belts', 'Sunglasses', 'Caps / Hats', 'Bags', 'Wallets', 'Jewellery', 'Ties',
+  'Watches', 'Belts', 'Sunglasses', 'Caps / Hats', 'Bags', 'Handbags', 'Wallets', 'Jewellery', 'Ties',
   'Scarves / Stoles', 'Socks',
 ];
 
 export const CATEGORY_GROUPS: CategoryGroup[] = [
-  { key: 'tops', label: 'Tops', icon: '👕', categories: ['Shirts', 'T-Shirts', 'Tops', 'Kurtas', 'Kurtis', 'Jackets', 'Hoodies & Sweatshirts'] },
+  { key: 'tops', label: 'Tops', icon: '👕', categories: ['Shirts', 'T-Shirts', 'Tops', 'Kurtas', 'Kurtis', 'Jackets', 'Blazers', 'Hoodies & Sweatshirts'] },
   { key: 'bottoms', label: 'Bottoms', icon: '👖', categories: ['Pants', 'Jeans', 'Trousers', 'Shorts', 'Skirts', 'Leggings', 'Track Pants'] },
-  { key: 'ethnic', label: 'Ethnic & Dresses', icon: '🥻', categories: ['Sarees', 'Dresses', 'Lehengas', 'Ethnic'] },
+  { key: 'ethnic', label: 'Ethnic & Dresses', icon: '🥻', categories: ['Sarees', 'Dresses', 'Lehengas', 'Dupattas', 'Sherwanis', 'Ethnic'] },
   { key: 'shoes', label: 'Shoes', icon: '👟', categories: ['Shoes'], subTypes: SHOE_TYPES },
   { key: 'accessories', label: 'Accessories', icon: '⌚', categories: ['Accessories'], subTypes: ACCESSORY_TYPES },
   { key: 'others', label: 'Others', icon: '🧺', categories: ['Others'] },
@@ -41,7 +41,7 @@ const ALIASES: Record<string, { category: string; subType?: string }> = {
   't-shirt': { category: 'T-Shirts' }, 'tshirt': { category: 'T-Shirts' }, 'tshirts': { category: 'T-Shirts' }, 't shirts': { category: 'T-Shirts' }, 't shirt': { category: 'T-Shirts' },
   'top': { category: 'Tops' }, 'blouse': { category: 'Tops' },
   'kurta': { category: 'Kurtas' }, 'kurti': { category: 'Kurtis' },
-  'jacket': { category: 'Jackets' }, 'blazer': { category: 'Jackets' }, 'coat': { category: 'Jackets' },
+  'jacket': { category: 'Jackets' }, 'blazer': { category: 'Blazers' }, 'coat': { category: 'Jackets' },
   'hoodie': { category: 'Hoodies & Sweatshirts' }, 'hoodies': { category: 'Hoodies & Sweatshirts' },
   'sweatshirt': { category: 'Hoodies & Sweatshirts' }, 'sweatshirts': { category: 'Hoodies & Sweatshirts' },
   'sweater': { category: 'Hoodies & Sweatshirts' }, 'sweaters': { category: 'Hoodies & Sweatshirts' },
@@ -50,7 +50,7 @@ const ALIASES: Record<string, { category: string; subType?: string }> = {
   'legging': { category: 'Leggings' },
   'track pant': { category: 'Track Pants' }, 'trackpants': { category: 'Track Pants' }, 'joggers': { category: 'Track Pants' },
   'saree': { category: 'Sarees' }, 'sari': { category: 'Sarees' }, 'dress': { category: 'Dresses' },
-  'lehenga': { category: 'Lehengas' }, 'ethnic wear': { category: 'Ethnic' },
+  'lehenga': { category: 'Lehengas' }, 'dupatta': { category: 'Dupattas' }, 'sherwani': { category: 'Sherwanis' }, 'ethnic wear': { category: 'Ethnic' },
   'shoe': { category: 'Shoes' }, 'footwear': { category: 'Shoes' },
   'accessory': { category: 'Accessories' },
   'other': { category: 'Others' },
@@ -61,7 +61,7 @@ Object.assign(ALIASES, {
   'jewelry': { category: 'Accessories', subType: 'Jewellery' },
   'watch': { category: 'Accessories', subType: 'Watches' },
   'belt': { category: 'Accessories', subType: 'Belts' },
-  'bag': { category: 'Accessories', subType: 'Bags' }, 'handbag': { category: 'Accessories', subType: 'Bags' },
+  'bag': { category: 'Accessories', subType: 'Bags' }, 'handbag': { category: 'Accessories', subType: 'Handbags' }, 'purse': { category: 'Accessories', subType: 'Handbags' },
   'wallet': { category: 'Accessories', subType: 'Wallets' },
   'cap': { category: 'Accessories', subType: 'Caps / Hats' }, 'hat': { category: 'Accessories', subType: 'Caps / Hats' },
   'tie': { category: 'Accessories', subType: 'Ties' }, 'scarf': { category: 'Accessories', subType: 'Scarves / Stoles' },
@@ -104,24 +104,54 @@ export const itemSubType = (item: { category?: string | null; subType?: string |
   return undefined;
 };
 
-// Gender-wise categories in a group come first
-export const MALE_CATEGORIES = ['Shirts', 'T-Shirts', 'Kurtas', 'Jackets', 'Hoodies & Sweatshirts', 'Jeans', 'Trousers', 'Pants', 'Shorts', 'Track Pants', 'Ethnic'];
-export const FEMALE_CATEGORIES = ['Tops', 'Kurtis', 'Sarees', 'Dresses', 'Lehengas', 'Jeans', 'Leggings', 'Skirts', 'Jackets'];
-
-export const getCategoriesForGender = (gender?: string | null): string[] => {
-  const g = (gender || '').toLowerCase();
-  if (g === 'male') return MALE_CATEGORIES;
-  if (g === 'female') return FEMALE_CATEGORIES;
-  return ALL_CATEGORIES;
+// ── Gender-wise categories ──────────────────────────────────────────────────
+// Only gender-specific values are listed; everything else is unisex and shows for everyone.
+// Users see only their registered gender's (users/{uid}.gender 'Male' / 'Female') plus unisex;
+// a missing or other gender sees all.
+const GENDER_OF: Record<string, 'male' | 'female'> = {
+  // categories
+  'Shirts': 'male', 'Kurtas': 'male', 'Trousers': 'male', 'Blazers': 'male', 'Sherwanis': 'male',
+  'Tops': 'female', 'Kurtis': 'female', 'Sarees': 'female', 'Dresses': 'female', 'Lehengas': 'female',
+  'Leggings': 'female', 'Skirts': 'female', 'Dupattas': 'female',
+  // shoe / accessory types
+  'Heels': 'female', 'Flats': 'female', 'Handbags': 'female', 'Jewellery': 'female', 'Ties': 'male',
 };
 
-// A group's categories, the user's gender-wise ones first
-export const groupCategoriesSorted = (group: CategoryGroup, gender?: string | null): string[] => {
-  const first = getCategoriesForGender(gender);
-  return [...group.categories.filter(c => first.includes(c)), ...group.categories.filter(c => !first.includes(c))];
+export const genderKey = (gender?: string | null): 'male' | 'female' | null => {
+  const g = (gender || '').trim().toLowerCase();
+  if (g === 'male' || g === 'm' || g === 'man' || g === 'boy') return 'male';
+  if (g === 'female' || g === 'f' || g === 'woman' || g === 'girl') return 'female';
+  return null;
 };
 
-// All categories (gender-wise first inside each group)
+// Is this category / type shown for this gender? (unisex, or same gender, or gender unknown)
+export const isForGender = (value: string, gender?: string | null): boolean => {
+  const g = genderKey(gender);
+  const v = GENDER_OF[value];
+  return !g || !v || v === g;
+};
+
+export const MALE_CATEGORIES = ALL_CATEGORIES.filter(c => isForGender(c, 'male'));
+export const FEMALE_CATEGORIES = ALL_CATEGORIES.filter(c => isForGender(c, 'female'));
+
+export const getCategoriesForGender = (gender?: string | null): string[] =>
+  ALL_CATEGORIES.filter(c => isForGender(c, gender));
+
+// A group's categories for this gender only (name kept for older callers)
+export const groupCategoriesSorted = (group: CategoryGroup, gender?: string | null): string[] =>
+  group.categories.filter(c => isForGender(c, gender));
+
+// A group's sub-types (shoe / accessory types) for this gender
+export const groupSubTypesFor = (group: CategoryGroup, gender?: string | null): string[] | undefined =>
+  group.subTypes ? group.subTypes.filter(t => isForGender(t, gender)) : undefined;
+
+// Groups with their categories and sub-types narrowed to this gender (empty groups dropped)
+export const categoryGroupsForGender = (gender?: string | null): CategoryGroup[] =>
+  CATEGORY_GROUPS.map(g => ({ ...g, categories: groupCategoriesSorted(g, gender), subTypes: groupSubTypesFor(g, gender) })).filter(
+    g => g.categories.length > 0,
+  );
+
+// All categories for this gender
 export const getAllCategoriesSorted = (gender?: string | null): string[] =>
   CATEGORY_GROUPS.flatMap(g => groupCategoriesSorted(g, gender));
 
@@ -147,6 +177,9 @@ export const CATEGORY_ICONS: Record<string, string> = {
   'Sarees': '🥻',
   'Dresses': '👗',
   'Lehengas': '👗',
+  'Dupattas': '🧣',
+  'Sherwanis': '🤵',
+  'Blazers': '🧥',
   'Ethnic': '🧣',
   'Shoes': '👟',
   'Footwear': '👟',
@@ -169,7 +202,8 @@ export const CATEGORY_ICONS: Record<string, string> = {
   'Belts': '🪢',
   'Sunglasses': '🕶️',
   'Caps / Hats': '🧢',
-  'Bags': '👜',
+  'Bags': '🎒',
+  'Handbags': '👜',
   'Wallets': '👛',
   'Ties': '👔',
   'Scarves / Stoles': '🧣',

@@ -27,11 +27,11 @@ import {
 import { pickImage } from '../../utils/imagePicker';
 import {
   CATEGORY_GROUPS,
+  categoryGroupsForGender,
   ALL_CATEGORIES,
   SHOE_TYPES,
   ACCESSORY_TYPES,
   groupOfCategory,
-  groupCategoriesSorted,
   normalizeCategory,
   resolveCategory,
   itemSubType,
@@ -77,6 +77,15 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
     ? (String(itemToEdit.color).startsWith('#') ? colorNameFromHex(itemToEdit.color) : itemToEdit.color)
     : null;
 
+  // Only the user's registered gender's categories (plus unisex). Editing an item saved under a
+  // category outside that list shows every category, so the item keeps its own.
+  const groups = React.useMemo(() => {
+    const gs = categoryGroupsForGender(user?.gender);
+    if (initialCategory && !gs.some(g => g.categories.includes(initialCategory))) return CATEGORY_GROUPS;
+    if (initialSubType && !gs.some(g => !g.subTypes || g.subTypes.includes(initialSubType))) return CATEGORY_GROUPS;
+    return gs;
+  }, [user?.gender, initialCategory, initialSubType]);
+
   // imageUri holds a base64 data URI (new photo) or the saved imageData
   const [imageUri, setImageUri]               = useState<string | null>(itemToEdit?.imageUrl || null);
   const [imageChanged, setImageChanged]       = useState(false);
@@ -88,7 +97,7 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
   const [isPreviewVisible, setIsPreviewVisible] = useState(false);
   const [itemName, setItemName]               = useState(itemToEdit?.name || '');
   const [selectedGroupKey, setSelectedGroupKey]   = useState<string>(
-    initialCategory ? groupOfCategory(initialCategory).key : CATEGORY_GROUPS[0].key,
+    initialCategory ? groupOfCategory(initialCategory).key : groups[0].key,
   );
   const [selectedCategory, setSelectedCategory]   = useState<string | null>(initialCategory);
   const [selectedSubType, setSelectedSubType]     = useState<string | null>(initialSubType);
@@ -103,7 +112,7 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
   const [aiStatusMsg, setAiStatusMsg]         = useState<string | null>(null);
 
   const getSelectedIcon = () => categoryIcon(selectedSubType || selectedCategory);
-  const selectedGroup = CATEGORY_GROUPS.find(g => g.key === selectedGroupKey) || CATEGORY_GROUPS[0];
+  const selectedGroup = groups.find(g => g.key === selectedGroupKey) || groups[0];
   const selectedLabel = selectedSubType || selectedCategory;
 
   // Auto-fill the item name from the pick unless the user typed their own
@@ -113,7 +122,7 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
   };
 
   const pickGroup = (key: string) => {
-    const g = CATEGORY_GROUPS.find(x => x.key === key);
+    const g = groups.find(x => x.key === key);
     if (!g) return;
     setSelectedGroupKey(key);
     if (selectedCategory && g.categories.includes(selectedCategory)) return;
@@ -397,7 +406,7 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
           showsHorizontalScrollIndicator={false}
           style={styles.chipSlider}
           contentContainerStyle={styles.chipSliderContent}>
-          {CATEGORY_GROUPS.map(g => {
+          {groups.map(g => {
             const isSelected = selectedGroupKey === g.key;
             return (
               <TouchableOpacity
@@ -422,7 +431,7 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
               showsHorizontalScrollIndicator={false}
               style={styles.chipSlider}
               contentContainerStyle={styles.chipSliderContent}>
-              {(selectedGroup.subTypes || groupCategoriesSorted(selectedGroup, user?.gender)).map(t => {
+              {(selectedGroup.subTypes || selectedGroup.categories).map(t => {
                 const isSelected = selectedGroup.subTypes ? selectedSubType === t : selectedCategory === t;
                 return (
                   <TouchableOpacity
