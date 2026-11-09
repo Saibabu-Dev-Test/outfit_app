@@ -49,7 +49,8 @@ export const wasAutoUpdateAsked = async (): Promise<boolean> => {
   }
 };
 
-export const isUpdateSupported = (): boolean => !!Native;
+// Update checks are switched off for now (owner's call, Nov 2026).
+export const isUpdateSupported = (): boolean => false;
 
 export interface UpdateInfo {
   build: number; // N of build-N
