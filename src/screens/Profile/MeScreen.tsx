@@ -22,7 +22,7 @@ import { getProfileCounts, ProfileCounts } from '../../services/socialApi';
 import { getLikedItems, getUserPosts, Post } from '../../services/feedApi';
 import { getWardrobeItems } from '../../services/wardrobeApi';
 import { getUserProfile } from '../../services/userApi';
-import { isWeeklyStar } from '../../services/rewardsApi';
+import { countFriendsJoined, isWeeklyStar, joinedWithLinkText } from '../../services/rewardsApi';
 import { shareMyReferral } from '../../utils/referralLink';
 
 type Tab = 'posts' | 'wardrobe' | 'likes';
@@ -38,6 +38,7 @@ export default function MeScreen({ navigation }: { navigation: any }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [isStar, setIsStar] = useState(false);
+  const [joined, setJoined] = useState<number | null>(null); // people who signed up with my link
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -81,6 +82,7 @@ export default function MeScreen({ navigation }: { navigation: any }) {
     setLoading(false);
     setRefreshing(false);
     isWeeklyStar(uid).then(setIsStar);
+    countFriendsJoined(uid).then(setJoined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uid]);
 
@@ -164,6 +166,14 @@ export default function MeScreen({ navigation }: { navigation: any }) {
           </TouchableOpacity>
         </ProfileHeader>
 
+        {/* Invite: how many people signed up with my link (referral code) */}
+        <TouchableOpacity style={styles.invite} onPress={invite} activeOpacity={0.8}>
+          <Text style={styles.inviteText} numberOfLines={1}>
+            🎁 {joined === null ? 'Invite friends' : joinedWithLinkText(joined)}
+          </Text>
+          <Text style={styles.inviteCta}>Invite</Text>
+        </TouchableOpacity>
+
         <View style={styles.tabs}>
           {(['posts', 'wardrobe', 'likes'] as Tab[]).map(t => (
             <TouchableOpacity key={t} style={[styles.tab, tab === t && styles.tabOn]} onPress={() => openTab(t)}>
@@ -205,6 +215,19 @@ const styles = themedStyles(() => StyleSheet.create({
   barTitle: { flex: 1, fontSize: fontSize.xl, fontWeight: fontWeight.extraBold, color: colors.textPrimary },
   barBtn: { paddingHorizontal: spacing.sm, paddingVertical: 4 },
   barIcon: { fontSize: 22, color: colors.textPrimary },
+  invite: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: spacing.base,
+    marginTop: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  inviteText: { flex: 1, fontSize: fontSize.sm, color: colors.textPrimary, fontWeight: fontWeight.semiBold },
+  inviteCta: { fontSize: fontSize.sm, color: colors.primary, fontWeight: fontWeight.bold, marginLeft: spacing.sm },
   tabs: { flexDirection: 'row', borderTopWidth: 1, borderTopColor: colors.border, marginTop: spacing.sm },
   tab: { flex: 1, alignItems: 'center', paddingVertical: spacing.md },
   tabOn: { borderBottomWidth: 2, borderBottomColor: colors.textPrimary },

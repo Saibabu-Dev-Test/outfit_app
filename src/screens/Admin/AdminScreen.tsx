@@ -1,4 +1,5 @@
-// Moderation for users/{uid}.role == 'admin': reports, every circle (private ones too) and user feedback
+// Moderation for users/{uid}.role == 'admin': reports, every circle (private ones too), user feedback
+// and Stats (users by gender and age group, read once when the tab opens)
 import React, { useCallback, useState } from 'react';
 import {
   View,
@@ -12,6 +13,7 @@ import {
   StatusBar,
   Platform,
   Image,
+  ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
@@ -24,9 +26,17 @@ import { deletePost, deleteComment } from '../../services/feedApi';
 import { timeAgo } from '../../utils/date';
 import { Feedback, FeedbackStatus, getFeedback, setFeedbackStatus } from '../../services/feedbackApi';
 import { registerAdmin } from '../../services/adminConfig';
+import {
+  AGE_GROUPS,
+  AGE_LABEL,
+  GENDER_GROUPS,
+  GENDER_LABEL,
+  getUserStats,
+  UserStats,
+} from '../../services/adminStats';
 
-type TabKey = 'reports' | 'circles' | 'feedback';
-const TAB_KEYS: TabKey[] = ['reports', 'circles', 'feedback'];
+type TabKey = 'reports' | 'circles' | 'feedback' | 'stats';
+const TAB_KEYS: TabKey[] = ['reports', 'circles', 'feedback', 'stats'];
 const FEEDBACK_ICON: Record<string, string> = { Suggestion: '💡', Complaint: '😕', Bug: '🐞', Other: '💬' };
 
 export default function AdminScreen({ navigation }: { navigation: any }) {
@@ -42,6 +52,27 @@ export default function AdminScreen({ navigation }: { navigation: any }) {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  // Stats tab: loaded on first open and on pull-to-refresh there (one read per user)
+  const [stats, setStats] = useState<UserStats | null>(null);
+  const [statsLoading, setStatsLoading] = useState(false);
+  const [statsError, setStatsError] = useState<string | null>(null);
+
+  const loadStats = useCallback(async () => {
+    setStatsLoading(true);
+    setStatsError(null);
+    try {
+      setStats(await getUserStats());
+    } catch (e: any) {
+      setStatsError(e?.message || 'Could not load stats.');
+    }
+    setStatsLoading(false);
+    setRefreshing(false);
+  }, []);
+
+  const openTab = (k: TabKey) => {
+    setTab(k);
+    if (k === 'stats' && !stats && !statsLoading) loadStats();
+  };
 
   const load = useCallback(async () => {
     const r = await getMyRole(uid);
@@ -260,6 +291,81 @@ export default function AdminScreen({ navigation }: { navigation: any }) {
     );
   };
 
+  const pct = (n: number, of: number) => (of ? ` · ${Math.round((n * 100) / of)}%` : '');
+
+  const renderStats = () => {
+    if (statsLoading && !stats) return <ActivityIndicator style={styles.spinner} color={colors.primary} />;
+    if (statsError && !stats) {
+      return (
+        <View>
+          <Text style={styles.error}>{statsError}</Text>
+          <TouchableOpacity style={[styles.btn, styles.statsRetry]} onPress={loadStats}>
+            <Text style={styles.btnText}>Try again</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+    if (!stats) return null;
+    const base = stats.counted;
+    return (
+      <View>
+        <View style={styles.card}>
+          <Text style={styles.kind}>Users</Text>
+          <Text style={styles.statBig}>{stats.total}</Text>
+          <Text style={styles.meta}>
+            Updated {timeAgo(stats.at)}
+            {stats.counted !== stats.total ? ` · breakdown of ${stats.counted} read` : ''} · pull down to refresh
+          </Text>
+          {statsError ? <Text style={styles.error}>{statsError}</Text> : null}
+        </View>
+
+        <View style={styles.card}>
+          <Text style={styles.kind}>By gender</Text>
+          {GENDER_GROUPS.map(g => (
+            <View key={g} style={styles.statRow}>
+              <Text style={styles.statLabel}>{GENDER_LABEL[g]}</Text>
+              <Text style={styles.statValue}>
+                {stats.gender[g]}
+                <Text style={styles.statPct}>{pct(stats.gender[g], base)}</Text>
+              </Text>
+            </View>
+          ))}
+        </View>
+
+        <View style={styles.card}>
+          <Text style={styles.kind}>By age (everyone)</Text>
+          {AGE_GROUPS.map(a => (
+            <View key={a} style={styles.statRow}>
+              <Text style={styles.statLabel}>{AGE_LABEL[a]}</Text>
+              <Text style={styles.statValue}>
+                {stats.age[a]}
+                <Text style={styles.statPct}>{pct(stats.age[a], base)}</Text>
+              </Text>
+            </View>
+          ))}
+        </View>
+
+        {GENDER_GROUPS.map(g => (
+          <View key={g} style={styles.card}>
+            <Text style={styles.kind}>
+              {GENDER_LABEL[g]} by age ({stats.gender[g]})
+            </Text>
+            {AGE_GROUPS.map(a => (
+              <View key={a} style={styles.statRow}>
+                <Text style={styles.statLabel}>{AGE_LABEL[a]}</Text>
+                <Text style={styles.statValue}>
+                  {stats.ageByGender[g][a]}
+                  <Text style={styles.statPct}>{pct(stats.ageByGender[g][a], stats.gender[g])}</Text>
+                </Text>
+              </View>
+            ))}
+          </View>
+        ))}
+        <Text style={styles.meta}>Age is worked out from the date of birth on each profile (YYYY-MM-DD).</Text>
+      </View>
+    );
+  };
+
   const header = (
     <View style={styles.header}>
       <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
@@ -296,18 +402,36 @@ export default function AdminScreen({ navigation }: { navigation: any }) {
       {header}
       <View style={styles.tabs}>
         {TAB_KEYS.map(k => (
-          <TouchableOpacity key={k} style={[styles.tab, tab === k && styles.tabActive]} onPress={() => setTab(k)}>
-            <Text style={[styles.tabText, tab === k && styles.tabTextActive]}>
+          <TouchableOpacity key={k} style={[styles.tab, tab === k && styles.tabActive]} onPress={() => openTab(k)}>
+            <Text style={[styles.tabText, tab === k && styles.tabTextActive]} numberOfLines={1} adjustsFontSizeToFit>
               {k === 'reports'
                 ? `Reports (${reports.length})`
                 : k === 'circles'
                 ? `Circles (${circles.length})`
-                : `Feedback (${feedback.filter(f => f.status === 'new').length})`}
+                : k === 'feedback'
+                ? `Feedback (${feedback.filter(f => f.status === 'new').length})`
+                : '📊 Stats'}
             </Text>
           </TouchableOpacity>
         ))}
       </View>
-      {error ? <Text style={styles.error}>{error}</Text> : null}
+      {error && tab !== 'stats' ? <Text style={styles.error}>{error}</Text> : null}
+      {tab === 'stats' ? (
+        <ScrollView
+          contentContainerStyle={styles.list}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => {
+                setRefreshing(true);
+                loadStats();
+              }}
+              tintColor={colors.primary}
+            />
+          }>
+          {renderStats()}
+        </ScrollView>
+      ) : (
       <FlatList<any>
         data={tab === 'reports' ? reports : tab === 'circles' ? circles : feedback}
         keyExtractor={x => x.id}
@@ -329,6 +453,7 @@ export default function AdminScreen({ navigation }: { navigation: any }) {
           </Text>
         }
       />
+      )}
     </SafeAreaView>
   );
 }
@@ -383,4 +508,17 @@ const styles = themedStyles(() => StyleSheet.create({
   btnDanger: { borderColor: colors.error },
   btnDangerText: { color: colors.error, fontWeight: fontWeight.bold, fontSize: fontSize.sm },
   empty: { textAlign: 'center', color: colors.textMuted, padding: spacing.xxl },
+  statBig: { fontSize: 40, fontWeight: fontWeight.extraBold, color: colors.textPrimary, marginTop: 2 },
+  statRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 6,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  statLabel: { fontSize: fontSize.base, color: colors.textPrimary },
+  statValue: { fontSize: fontSize.base, fontWeight: fontWeight.bold, color: colors.textPrimary },
+  statPct: { fontSize: fontSize.sm, fontWeight: fontWeight.regular, color: colors.textMuted },
+  statsRetry: { alignSelf: 'center', marginTop: spacing.sm },
 }));

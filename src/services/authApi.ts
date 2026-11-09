@@ -595,7 +595,9 @@ export interface ProfileResponse {
 }
 
 // Saved session on app start: the persisted Firebase user, if sign-up was finished and
-// the token was minted by Google sign-in. Anything else signs out -> login screen.
+// the token was minted by Google sign-in. Login once: a finished account stays signed in on every
+// launch until Logout. Only a session that is known to be wrong (not Google, half-finished sign-up)
+// is signed out; a check that merely fails (offline, slow token refresh, server error) keeps it.
 export type RestoreResult =
   | { status: 'ok'; user: UserProfile & { email?: string } }
   | { status: 'none' };
@@ -607,15 +609,17 @@ export const restoreSession = async (user: User): Promise<RestoreResult> => {
     return { status: 'none' };
   }
   const provider = await tokenProvider(user, false);
-  if (provider !== 'google.com') {
+  // null = couldn't be read (offline, no cached token): not a reason to sign out
+  if (provider && provider !== 'google.com') {
     console.warn('Restored session is not a Google session:', provider);
     await silentSignOut();
     return { status: 'none' };
   }
   const { data, code } = await readUserDoc(user.uid);
   if (data === undefined) {
-    // Offline etc.: trust a finished account (password linked), fill the profile later
-    if (code !== 'permission-denied' && hasPasswordProvider(user)) {
+    // Offline / server error: trust a finished account (password linked), fill the profile later
+    if (hasPasswordProvider(user)) {
+      console.warn('Profile read failed at start, keeping the session:', code);
       return { status: 'ok', user: { id: user.uid, phoneNumber: '', email: user.email ?? undefined } };
     }
     return { status: 'none' };

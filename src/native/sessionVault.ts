@@ -561,6 +561,36 @@ export const enableHardwareLock = async (): Promise<LockChange> => {
   }
 };
 
+// App lock is optional now (it used to be required). One-time switch-off for a lock that the old
+// required-lock build turned on: only when no fingerprint is needed to do it safely, i.e. the
+// session was already unlocked with the fingerprint this launch (it is in memory) or there is no
+// saved session at all. The session is then stored normally again. Returns true when it is off.
+export const releaseLockWithoutPrompt = async (): Promise<boolean> => {
+  if (!Native || tampered) return false;
+  if (!(await flagOn()) && mode === 'plain') return true;
+  if (status === 'locked' || status === 'unlocking') return false;
+  if (mode === 'secure' && !unlockedThisLaunch) {
+    // Encrypted session not opened this launch: it can't be moved without a prompt
+    if (Object.keys(cache).length || (await AsyncStorage.getItem(BLOB_KEY))) return false;
+  }
+  try {
+    await enqueue(async () => {
+      const entries = Object.entries(cache);
+      mode = 'plain';
+      cache = {};
+      if (entries.length) await AsyncStorage.multiSet(entries);
+      await AsyncStorage.removeItem(BLOB_KEY);
+      await AsyncStorage.removeItem(LOCK_ENABLED_KEY);
+    });
+    await Native.deleteKey().catch(() => undefined);
+    setPrivacy(false, false);
+    return true;
+  } catch (e: any) {
+    console.warn('Release lock failed:', e?.message);
+    return false;
+  }
+};
+
 // Turn the lock OFF: one fingerprint, then the session is stored as plaintext again.
 export const disableHardwareLock = async (): Promise<LockChange> => {
   if (!Native) {

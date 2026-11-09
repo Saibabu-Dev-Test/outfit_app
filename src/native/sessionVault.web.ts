@@ -42,3 +42,4 @@ export const verifyFingerprint = async (
 export const wipeForPasswordLogin = async () => {};
 export const enableHardwareLock = async (): Promise<LockChange> => ({ ok: false, message: NO_LOCK });
 export const disableHardwareLock = async (): Promise<LockChange> => ({ ok: true });
+export const releaseLockWithoutPrompt = async (): Promise<boolean> => true;

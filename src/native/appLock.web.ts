@@ -6,6 +6,7 @@ export {
   wipeForPasswordLogin,
   wasUnlockedThisLaunch,
   setPrivacy,
+  releaseLockWithoutPrompt,
   FINGERPRINTS_CHANGED_MESSAGE,
   LOCK_ENABLED_KEY,
 } from './sessionVault.web';
@@ -29,7 +30,7 @@ export const authenticate = async (
   _negativeText?: string,
 ): Promise<UnlockResult> => 'error';
 
-// Mandatory app lock: no-op on web
+// Optional app lock: no-op on web
 export type LockCapability = 'biometric' | 'screenlock' | 'none' | 'unsupported';
 export const SOFT_LOCK_KEY = 'outfit:appLockSoft';
 export const getLockCapability = async (): Promise<LockCapability> => 'unsupported';
@@ -37,3 +38,12 @@ export const openSecuritySettings = async (): Promise<void> => {};
 export const isSoftLockOn = async (): Promise<boolean> => false;
 export const setSoftLock = async (_on: boolean): Promise<void> => {};
 export const takeNoLockNotice = async (_uid: string): Promise<boolean> => false;
+export const migrateToOptionalLock = async (): Promise<void> => {};
+export const isAppLockOn = async (): Promise<boolean> => false;
+export const turnOnAppLock = async (_uid?: string | null): Promise<{ ok: boolean; message?: string; invalidated?: boolean }> => ({
+  ok: false,
+  message: 'App lock is only in the Android app.',
+});
+export const turnOffAppLock = async (_uid?: string | null): Promise<{ ok: boolean; message?: string; invalidated?: boolean }> => ({
+  ok: true,
+});
