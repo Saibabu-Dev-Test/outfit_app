@@ -12,12 +12,14 @@
 # same build to it too. A name already taken by another Firebase project stops with an error.
 #
 # The APK bytes don't count against the Hosting free transfer (360 MB/day), only the tiny redirect does.
-# The only file served is hosting-public/robots.txt (no index.html, so "/" reaches the redirect).
+# Files served: hosting-public/robots.txt and sw.js (no index.html, so "/" reaches the redirect).
 set -euo pipefail
 P=outfit-vote-9edca
 SITE="${SITE:-}"
 rm -rf /tmp/webdist && mkdir -p /tmp/webdist
 printf 'User-agent: *\nDisallow: /\n' > /tmp/webdist/robots.txt
+# Kill-switch for the old PWA service worker (cached website in browsers that visited before)
+curl -sfL https://raw.githubusercontent.com/Saibabu-Dev-Test/outfit_app/main/hosting-public/sw.js -o /tmp/webdist/sw.js
 export TOKEN=$(gcloud auth print-access-token) P SITE
 python3 - <<'PY'
 import os, re, gzip, hashlib, json, urllib.request
