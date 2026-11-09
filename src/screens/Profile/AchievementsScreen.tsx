@@ -24,6 +24,7 @@ import {
   TASK_POINTS,
   WEEKLY_REQUIRED_DAYS,
   WeekProgress,
+  countAwardedReferrals,
   countFriendsJoined,
   ensureReferralCode,
   getDay,
@@ -53,6 +54,7 @@ export default function AchievementsScreen({ navigation }: { navigation: any }) 
   const [day, setDay] = useState<DayState | null>(null);
   const [points, setPoints] = useState(0);
   const [friends, setFriends] = useState(0);
+  const [awarded, setAwarded] = useState(0); // referrals already inside points
   const [week, setWeek] = useState<WeekProgress | null>(null);
   const [streak, setStreak] = useState(0);
   const [star, setStar] = useState(false);
@@ -61,10 +63,11 @@ export default function AchievementsScreen({ navigation }: { navigation: any }) 
 
   const load = useCallback(async () => {
     if (!uid) return;
-    const [d, p, f, w, prof, s] = await Promise.all([
+    const [d, p, f, a, w, prof, s] = await Promise.all([
       getDay(uid),
       getPoints(uid),
       countFriendsJoined(uid),
+      countAwardedReferrals(uid),
       getWeekProgress(uid),
       getUserProfile(uid),
       isWeeklyStar(uid),
@@ -72,6 +75,7 @@ export default function AchievementsScreen({ navigation }: { navigation: any }) 
     setDay(d);
     setPoints(p);
     setFriends(f);
+    setAwarded(Math.min(a, f));
     setWeek(w);
     setStreak(prof.lastLoginDate === localDateKey() ? prof.streak || 1 : prof.streak || 0);
     setStar(s);
@@ -143,7 +147,8 @@ export default function AchievementsScreen({ navigation }: { navigation: any }) 
     : [];
   const pending = items.filter(i => !i.done);
   const completed = items.filter(i => i.done);
-  const total = points + friends * REFERRAL_POINTS;
+  // Referral points are written into users.points now; older referrals (before that) are added here
+  const total = points + Math.max(0, friends - awarded) * REFERRAL_POINTS;
   const todayPts = day
     ? (day.opened ? TASK_POINTS : 0) + (day.voted ? TASK_POINTS : 0) + (day.uploaded ? TASK_POINTS : 0) + (isFullDay(day) ? ALL_TASKS_BONUS : 0)
     : 0;

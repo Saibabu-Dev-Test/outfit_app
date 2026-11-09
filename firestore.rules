@@ -125,6 +125,16 @@ service cloud.firestore {
         && phoneOk(resource.data.get('phone', null))
         && pointsOk()
         && referralCodeOk();
+      // Referral reward: a newly signed-up user adds exactly REFERRAL_POINTS (50) to the referrer's
+      // points, only in the same write that creates referrals/{newUid} naming this referrer
+      // (that doc is create-only, so it happens once per new user; never to yourself)
+      allow update: if signedIn() && me() != uid
+        && onlyChanged(['points'])
+        && request.resource.data.get('points', 0) == resource.data.get('points', 0) + 50
+        && !exists(/databases/$(db)/documents/referrals/$(request.auth.uid))
+        && existsAfter(/databases/$(db)/documents/referrals/$(request.auth.uid))
+        && getAfter(/databases/$(db)/documents/referrals/$(request.auth.uid)).data.referrerId == uid
+        && getAfter(/databases/$(db)/documents/referrals/$(request.auth.uid)).data.get('pointsAwarded', false) == true;
       allow delete: if signedIn() && me() == uid;
     }
 
@@ -174,7 +184,7 @@ service cloud.firestore {
         && request.resource.data.actorId == me()
         && uid != me()
         && request.resource.data.keys().hasOnly(['type', 'actorId', 'actorName', 'actorAvatar', 'targetKind', 'targetId', 'thumbnail', 'text', 'createdAt'])
-        && request.resource.data.type in ['like', 'dislike', 'comment', 'follow', 'feedback']
+        && request.resource.data.type in ['like', 'dislike', 'comment', 'follow', 'feedback', 'referral']
         && request.resource.data.createdAt == request.time
         && (request.resource.data.get('actorName', null) == null
             || (request.resource.data.actorName is string && request.resource.data.actorName.size() <= 60))
@@ -556,13 +566,18 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
-    // ── Referrals: referrals/{newUid} {referrerId, code, createdAt}, written once by the new user ──
-    // The referrer counts these (count query); nothing is written to the referrer's docs.
+    // ── Referrals: referrals/{newUid} {referrerId, code, createdAt, pointsAwarded}, written once by
+    // the new user, together with +50 on users/{referrerId}.points (see the users rule).
     match /referrals/{newUid} {
       allow get: if signedIn() && (me() == newUid || resource.data.referrerId == me());
       allow list: if signedIn() && resource.data.referrerId == me();
       allow create: if signedIn() && me() == newUid
-        && request.resource.data.keys().hasOnly(['referrerId', 'code', 'createdAt'])
+        && request.resource.data.keys().hasOnly(['referrerId', 'code', 'createdAt', 'pointsAwarded'])
+        // pointsAwarded: true only when the referrer's points go up by 50 in the same write
+        && (request.resource.data.get('pointsAwarded', false) == false
+            || (request.resource.data.pointsAwarded == true
+                && getAfter(/databases/$(db)/documents/users/$(request.resource.data.referrerId)).data.get('points', 0)
+                   == get(/databases/$(db)/documents/users/$(request.resource.data.referrerId)).data.get('points', 0) + 50))
         && request.resource.data.referrerId is string
         && request.resource.data.referrerId != me()
         && request.resource.data.code is string

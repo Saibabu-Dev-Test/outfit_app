@@ -24,7 +24,7 @@ import { inlineAvatar } from './userApi';
 import { getUserLite } from './userCache';
 import type { FeedKind } from './feedApi';
 
-export type ActivityType = 'like' | 'dislike' | 'comment' | 'follow' | 'feedback';
+export type ActivityType = 'like' | 'dislike' | 'comment' | 'follow' | 'feedback' | 'referral';
 
 export interface ActivityItem {
   id: string;
@@ -100,7 +100,7 @@ export const logActivity = (...args: Parameters<typeof recordActivity>): void =>
 
 const toItem = (id: string, d: any): ActivityItem => ({
   id,
-  type: ['like', 'dislike', 'comment', 'follow', 'feedback'].includes(d?.type) ? d.type : 'like',
+  type: ['like', 'dislike', 'comment', 'follow', 'feedback', 'referral'].includes(d?.type) ? d.type : 'like',
   actorId: String(d?.actorId || ''),
   actorName: d?.actorName || 'Outfit user',
   actorAvatar: d?.actorAvatar || null,
@@ -122,7 +122,7 @@ export const getMyActivity = async (uid: string, max = ACTIVITY_LIMIT): Promise<
     snap.docs.forEach(d => {
       const a = toItem(d.id, d.data({ serverTimestamps: 'estimate' }));
       // Comments are all different; likes / follows only count once
-      const key = a.type === 'comment' || a.type === 'feedback' ? a.id : `${a.type}:${a.actorId}:${a.targetKind}:${a.targetId}`;
+      const key = a.type === 'comment' || a.type === 'feedback' || a.type === 'referral' ? a.id : `${a.type}:${a.actorId}:${a.targetKind}:${a.targetId}`;
       if (seen.has(key)) return;
       seen.add(key);
       out.push(a);
@@ -151,6 +151,8 @@ export const activityLine = (a: ActivityItem): string => {
       return `${a.actorName} commented on your ${what}${a.text ? `: "${a.text}"` : ''}`;
     case 'follow':
       return `${a.actorName} started following you`;
+    case 'referral':
+      return `${a.actorName} joined with your code${a.text ? `, ${a.text}` : ''}`;
     case 'feedback':
       return `${a.actorName} sent feedback${a.text ? `: "${a.text}"` : ''}`;
     default:

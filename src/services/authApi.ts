@@ -445,7 +445,7 @@ export const completeSignUp = async ({
 
   // 5) Referral (create-only, never blocks sign-up)
   if (referrerId && referralCode) {
-    await saveReferral(user.uid, referralCode, referrerId);
+    await saveReferral(user.uid, referralCode, referrerId, name);
   }
   clearFlowState();
 

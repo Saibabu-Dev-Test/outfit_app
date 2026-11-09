@@ -2,7 +2,8 @@
 //   users/{uid}/days/{yyyy-mm-dd}  {opened, voted, uploaded, updatedAt}
 //   users/{uid}/weeks/{mondayKey}  {fullDays, lastDay, updatedAt}  (days with all 3 tasks)
 //   users/{uid}.points             increment(), only together with a day doc change (rules check it)
-//   referralCodes/{code} -> {uid}  referrals/{newUid} {referrerId, code, createdAt}
+//   referralCodes/{code} -> {uid}  referrals/{newUid} {referrerId, code, createdAt, pointsAwarded}
+//   users/{referrerId}.points      +REFERRAL_POINTS by the new user, in the same batch as referrals/{newUid}
 //   weeklyStars/{mondayKey}/members/{uid} {name, avatar, completedDays, createdAt}
 import {
   collection,
@@ -22,12 +23,15 @@ import { db } from '../config/firebaseConfig';
 import { lastWeekKey, localDateKey, weekDayKeys, weekKeyFor } from '../utils/date';
 import { firestoreErrorMessage } from '../utils/firebaseErrors';
 import { inlineAvatar } from './userApi';
+import { recordActivity } from './activityApi';
 
 export type DailyTask = 'opened' | 'voted' | 'uploaded';
 export const DAILY_TASKS: DailyTask[] = ['opened', 'voted', 'uploaded'];
 export const TASK_POINTS = 10;
 export const ALL_TASKS_BONUS = 20;
-export const REFERRAL_POINTS = 50; // per friend who joined (counted, never written)
+// Per friend who joined. Written to the referrer's users.points together with referrals/{newUid}
+// (pointsAwarded: true); older referrals without it are still counted on top of points.
+export const REFERRAL_POINTS = 50;
 // Days in a Mon-Sun week with all 3 tasks done to become a weekly celebrity.
 // If you change this, change WEEKLY_REQUIRED_DAYS in firestore.rules too.
 export const WEEKLY_REQUIRED_DAYS = 7;
@@ -274,15 +278,38 @@ export const lookupReferralCode = async (code: string, selfUid?: string): Promis
   }
 };
 
-// referrals/{newUid}: create-only, written by the new user. Never throws.
-export const saveReferral = async (newUid: string, code: string, referrerId: string): Promise<boolean> => {
+// referrals/{newUid}: create-only, written by the new user, once (the doc is the guard).
+// Same batch: the referrer's points + REFERRAL_POINTS (rules tie the two together). If that is
+// refused (rules not published yet), the referral is still saved without points; the display
+// then counts it as before. Never throws. Returns whether the referral was saved.
+export const saveReferral = async (
+  newUid: string,
+  code: string,
+  referrerId: string,
+  newName?: string | null,
+): Promise<boolean> => {
   if (!referrerId || referrerId === newUid) return false;
+  const c = normalizeReferralCode(code);
   try {
-    await setDoc(doc(db, 'referrals', newUid), {
+    const batch = writeBatch(db);
+    batch.set(doc(db, 'referrals', newUid), {
       referrerId,
-      code: normalizeReferralCode(code),
+      code: c,
+      pointsAwarded: true,
       createdAt: serverTimestamp(),
     });
+    batch.update(doc(db, 'users', referrerId), { points: increment(REFERRAL_POINTS) });
+    await batch.commit();
+    // "X joined with your code, +50 points" in the referrer's activity (best effort)
+    recordActivity(referrerId, { uid: newUid, name: newName }, 'referral', null, `+${REFERRAL_POINTS} points`).catch(
+      () => undefined,
+    );
+    return true;
+  } catch (e: any) {
+    console.warn('saveReferral with points failed, saving without:', e?.code, e?.message);
+  }
+  try {
+    await setDoc(doc(db, 'referrals', newUid), { referrerId, code: c, createdAt: serverTimestamp() });
     return true;
   } catch (e: any) {
     console.warn('saveReferral failed:', e?.code, e?.message);
@@ -299,6 +326,19 @@ export const countFriendsJoined = async (uid: string): Promise<number> => {
     return snap.data().count;
   } catch (e: any) {
     console.warn('countFriendsJoined failed:', e?.code, e?.message);
+    return 0;
+  }
+};
+
+// Friends whose REFERRAL_POINTS are already inside users.points. Never throws.
+export const countAwardedReferrals = async (uid: string): Promise<number> => {
+  try {
+    const snap = await getCountFromServer(
+      query(collection(db, 'referrals'), where('referrerId', '==', uid), where('pointsAwarded', '==', true)),
+    );
+    return snap.data().count;
+  } catch (e: any) {
+    console.warn('countAwardedReferrals failed:', e?.code, e?.message);
     return 0;
   }
 };
