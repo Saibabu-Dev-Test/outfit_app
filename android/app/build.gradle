@@ -90,7 +90,7 @@ android {
 
     namespace "com.outfit"
     defaultConfig {
-        applicationId "com.outfit"
+        applicationId "com.saibabu.outfit"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         // CI build number (build-N release): every APK has a higher versionCode, so a new

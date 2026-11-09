@@ -33,6 +33,35 @@
           ]
         }
       }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:791853722614:android:eed780c8889b530049b5d7",
+        "android_client_info": {
+          "package_name": "com.saibabu.outfit"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "791853722614-o1h6cd69kp84opf0c7nlcv6sc0hehfpb.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAUd8LJ3Cl5-vmEOYSlHS6CS2CfVfatjcU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "791853722614-o1h6cd69kp84opf0c7nlcv6sc0hehfpb.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
     }
   ],
   "configuration_version": "1"
