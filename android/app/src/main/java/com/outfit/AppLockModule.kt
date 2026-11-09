@@ -66,6 +66,53 @@ class AppLockModule(private val ctx: ReactApplicationContext) : ReactContextBase
     }
   }
 
+  // What lock this phone can give (mandatory app lock):
+  //   "biometric"   strong biometric (fingerprint) enrolled -> hardware-bound session lock
+  //   "screenlock"  PIN / pattern / password set, no strong biometric -> prompt-only lock
+  //   "none"        nothing set yet, but the phone supports a screen lock -> must set one
+  //   "unsupported" the phone has no secure lock screen at all
+  @ReactMethod
+  fun lockCapability(promise: Promise) {
+    try {
+      val bio = try {
+        BiometricManager.from(ctx).canAuthenticate(BIOMETRIC_STRONG) == BiometricManager.BIOMETRIC_SUCCESS
+      } catch (e: Exception) {
+        false
+      }
+      val result = when {
+        bio -> "biometric"
+        deviceSecure() -> "screenlock"
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+          !ctx.packageManager.hasSystemFeature(PackageManager.FEATURE_SECURE_LOCK_SCREEN) -> "unsupported"
+        ctx.getSystemService(Context.KEYGUARD_SERVICE) == null -> "unsupported"
+        else -> "none"
+      }
+      promise.resolve(result)
+    } catch (e: Exception) {
+      promise.resolve("none")
+    }
+  }
+
+  // Opens the phone's screen lock / security settings
+  @ReactMethod
+  fun openSecuritySettings(promise: Promise) {
+    val tries = listOf(
+      android.provider.Settings.ACTION_SECURITY_SETTINGS,
+      android.provider.Settings.ACTION_SETTINGS,
+    )
+    for (action in tries) {
+      try {
+        val i = android.content.Intent(action).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        ctx.startActivity(i)
+        promise.resolve(true)
+        return
+      } catch (e: Exception) {
+        // try the next one
+      }
+    }
+    promise.resolve(false)
+  }
+
   // Plain fingerprint prompt (no crypto). Strong biometric only, never the device PIN.
   // Resolves "success", "cancelled", "password" (negative button), "lockout" or "error:<message>"
   @ReactMethod

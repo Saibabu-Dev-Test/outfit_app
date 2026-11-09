@@ -33,14 +33,7 @@ import {
   isWeeklyStar,
   REFERRAL_POINTS,
 } from '../../services/rewardsApi';
-import {
-  disableHardwareLock,
-  enableHardwareLock,
-  isLockEnabled,
-  isLockSupported,
-  setUserLockPref,
-} from '../../native/appLock';
-import { signOutKeepLock } from '../../services/authApi';
+import { getLockCapability, isLockEnabled, isLockSupported, isSoftLockOn } from '../../native/appLock';
 
 // "+91 98765 43210" from users/{uid}.phone (10 digits), else the saved phoneNumber
 const phoneLabel = (p?: { phone?: string; phoneNumber?: string } | null): string => {
@@ -313,8 +306,10 @@ const fetchProfile = async () => {
     const uid = authUser?.id;
     let alive = true;
     (async () => {
-      const supported = await isLockSupported();
-      const on = supported && (await isLockEnabled());
+      // Shown on Android whenever the phone can be locked; the lock itself is enforced by AppLockGate
+      const cap = await getLockCapability();
+      const supported = Platform.OS === 'android' && cap !== 'unsupported';
+      const on = ((await isLockSupported()) && (await isLockEnabled())) || (await isSoftLockOn());
       if (alive) {
         setLockSupported(supported);
         setLockOn(on);
@@ -333,19 +328,6 @@ const fetchProfile = async () => {
       alive = false;
     };
   }, [authUser?.id]);
-
-  // ON: new Keystore key + one fingerprint, session moved to encrypted storage.
-  // OFF: one fingerprint, session stored normally again.
-  const handleToggleLock = async (value: boolean) => {
-    const r = value ? await enableHardwareLock() : await disableHardwareLock();
-    if (r.ok) {
-      setLockOn(value);
-      await setUserLockPref(authUser?.id, value); // this user's choice, kept across sign-out
-      return;
-    }
-    if (r.message) Alert.alert('Fingerprint lock', r.message);
-    if (r.invalidated) await signOutKeepLock();
-  };
 
   const handleShareInvite = () => {
     if (referralCode) shareReferral(referralCode);
@@ -624,7 +606,7 @@ const fetchProfile = async () => {
           </View>
         </View>
 
-        {/* App lock (only when the phone has a fingerprint) */}
+        {/* App lock: required for everyone on Android (no switch to turn it off) */}
         {lockSupported && (
           <View style={styles.menuSection}>
             <View style={styles.menuItem}>
@@ -632,14 +614,9 @@ const fetchProfile = async () => {
                 <View style={styles.menuIconBox}>
                   <Text style={styles.menuIcon}>🔒</Text>
                 </View>
-                <Text style={styles.menuLabel}>App lock (fingerprint)</Text>
+                <Text style={styles.menuLabel}>App lock</Text>
               </View>
-              <Switch
-                value={lockOn}
-                onValueChange={handleToggleLock}
-                trackColor={{ false: colors.border, true: colors.accent }}
-                thumbColor={colors.textInverse}
-              />
+              <Text style={styles.lockValue}>{lockOn ? 'On (required)' : 'Required'}</Text>
             </View>
           </View>
         )}
@@ -1433,6 +1410,7 @@ const styles = themedStyles(() => StyleSheet.create({
   },
   menuIcon: { fontSize: 18 },
   menuLabel: { fontSize: fontSize.base, color: colors.textPrimary, fontWeight: fontWeight.medium },
+  lockValue: { fontSize: fontSize.sm, color: colors.textSecondary, fontWeight: fontWeight.semiBold },
   menuArrow: { fontSize: 22, color: colors.textMuted, fontWeight: fontWeight.regular },
   signOutBtn: {
     marginHorizontal: spacing.base,

@@ -104,3 +104,60 @@ export const authenticate = async (
   if (r === 'lockout') return 'error';
   return r;
 };
+
+// ── Mandatory app lock ───────────────────────────────────────────────────────
+// 'biometric'   fingerprint enrolled: hardware-bound session lock (enableHardwareLock)
+// 'screenlock'  only a PIN / pattern / password: prompt-only lock (SOFT_LOCK_KEY)
+// 'none'        no screen lock yet: the user must set one before using the app
+// 'unsupported' the phone has no secure lock screen at all: allowed, with a one-time notice
+export type LockCapability = 'biometric' | 'screenlock' | 'none' | 'unsupported';
+
+const Cap: { lockCapability?: () => Promise<string>; openSecuritySettings?: () => Promise<boolean> } | undefined =
+  NativeModules.OutfitAppLock;
+
+export const SOFT_LOCK_KEY = 'outfit:appLockSoft';
+const noLockNoticeKey = (uid: string) => `outfitlock:nolocknotice:${uid}`;
+
+export const getLockCapability = async (): Promise<LockCapability> => {
+  if (Platform.OS !== 'android') return 'unsupported';
+  try {
+    if (Cap?.lockCapability) {
+      const r = String(await Cap.lockCapability());
+      if (r === 'biometric' || r === 'screenlock' || r === 'none' || r === 'unsupported') return r;
+    }
+  } catch {}
+  // Older native build: fall back to the fingerprint check only
+  return (await isLockSupported()) ? 'biometric' : 'unsupported';
+};
+
+export const openSecuritySettings = async (): Promise<void> => {
+  try {
+    await Cap?.openSecuritySettings?.();
+  } catch {}
+};
+
+export const isSoftLockOn = async (): Promise<boolean> => {
+  try {
+    return (await AsyncStorage.getItem(SOFT_LOCK_KEY)) === '1';
+  } catch {
+    return false;
+  }
+};
+
+export const setSoftLock = async (on: boolean): Promise<void> => {
+  try {
+    if (on) await AsyncStorage.setItem(SOFT_LOCK_KEY, '1');
+    else await AsyncStorage.removeItem(SOFT_LOCK_KEY);
+  } catch {}
+};
+
+// Shown once per user on a phone that cannot have a screen lock
+export const takeNoLockNotice = async (uid: string): Promise<boolean> => {
+  try {
+    if ((await AsyncStorage.getItem(noLockNoticeKey(uid))) === '1') return false;
+    await AsyncStorage.setItem(noLockNoticeKey(uid), '1');
+    return true;
+  } catch {
+    return false;
+  }
+};

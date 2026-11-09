@@ -1,14 +1,19 @@
-// Fingerprint app lock: covers the app after > 1 min in background (cold start is handled by
-// SessionLockScreen, which decrypts the hardware-bound session before Firebase can read it).
-// Fallback: the phone's PIN / pattern. "Sign out" on the lock screen.
-// After a login on Android: asks each user once whether to turn it on, and turns it back on
-// for a user who had it on (sign-out clears the device lock; the per-user choice is kept).
+// App lock (required for every signed-in user on Android). Covers the app after > 1 min in
+// background (cold start with a fingerprint is handled by SessionLockScreen, which decrypts the
+// hardware-bound session before Firebase can read it). Fallback: the phone's PIN / pattern.
+// After sign-in (and on every return to the app) it makes sure a lock is on:
+//   fingerprint enrolled  -> hardware-bound lock (enableHardwareLock); app blocked until it is on
+//   only PIN / pattern    -> prompt-only lock with the screen lock
+//   no screen lock        -> blocking screen asking to set one (opens security settings)
+//   no lock hardware      -> allowed, with a one-time notice
+// Web: no-op (appLock.web.ts).
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   AppState,
   AppStateStatus,
+  Platform,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -19,28 +24,39 @@ import {
   authenticate,
   enableHardwareLock,
   FINGERPRINTS_CHANGED_MESSAGE,
+  getLockCapability,
   isLockEnabled,
   isLockSupported,
+  isSoftLockOn,
   LOCK_AFTER_MS,
-  markLockAsked,
-  getUserLockPref,
-  setUserLockPref,
+  openSecuritySettings,
   setLockEnabled,
   setPrivacy,
-  wasLockAsked,
+  setSoftLock,
+  setUserLockPref,
+  takeNoLockNotice,
   wasUnlockedThisLaunch,
 } from '../native/appLock';
 import { signOutKeepLock } from '../services/authApi';
 import { themedStyles, colors } from '../theme';
 
+// What blocks the app until the lock requirement is met
+type Need = null | 'setup' | 'screenlock';
+
+const lockIsOn = async (): Promise<boolean> =>
+  ((await isLockEnabled()) && (await isLockSupported())) || (await isSoftLockOn());
+
 export default function AppLockGate() {
   const { isAuthenticated, freshLogin, clearFreshLogin, user } = useAuth();
   const uid = user?.id;
   const [locked, setLocked] = useState(false);
+  const [need, setNeed] = useState<Need>(null);
   const [checking, setChecking] = useState(false);
+  const [setupError, setSetupError] = useState('');
   const enabledRef = useRef(false);
   const backgroundAt = useRef<number | null>(null);
   const prompting = useRef(false);
+  const ensuring = useRef(false);
 
   const unlock = useCallback(async () => {
     if (prompting.current) return;
@@ -58,36 +74,120 @@ export default function AppLockGate() {
       setLocked(false);
       await signOutKeepLock();
       Alert.alert('Sign in again', FINGERPRINTS_CHANGED_MESSAGE);
-    } else if (r === 'error' && !(await isLockSupported())) {
-      // Fingerprint removed from the phone: don't trap the user
-      await setLockEnabled(false);
-      enabledRef.current = false;
-      setLocked(false);
+    } else if (r === 'error') {
+      // Fingerprint / screen lock removed from the phone: don't trap the user here; the
+      // requirement check below asks them to set a lock again
+      const cap = await getLockCapability();
+      if (cap !== 'biometric') {
+        await setLockEnabled(false);
+        if (cap !== 'screenlock') await setSoftLock(false);
+        enabledRef.current = false;
+        setLocked(false);
+      }
     }
   }, []);
 
-  // Cold start / after login: lock if enabled
+  // Turn the required lock on with what this phone has. Never offers "Not now".
+  const ensureLock = useCallback(async () => {
+    if (Platform.OS !== 'android' || !isAuthenticated || !uid || ensuring.current || prompting.current) return;
+    ensuring.current = true;
+    try {
+      const cap = await getLockCapability();
+      if (cap === 'biometric') {
+        if ((await isLockEnabled()) && (await isLockSupported())) {
+          enabledRef.current = true;
+          setNeed(null);
+          return;
+        }
+        // Fingerprint added since (or first sign-in): needs the hardware lock turned on
+        setNeed('setup');
+        return;
+      }
+      // No fingerprint: the hardware lock can't stay on
+      if (await isLockEnabled()) await setLockEnabled(false);
+      if (cap === 'screenlock') {
+        await setSoftLock(true);
+        await setUserLockPref(uid, true);
+        enabledRef.current = true;
+        setNeed(null);
+        return;
+      }
+      await setSoftLock(false);
+      enabledRef.current = false;
+      if (cap === 'none') {
+        setNeed('screenlock');
+        return;
+      }
+      // 'unsupported': allowed, tell them once
+      setNeed(null);
+      if (await takeNoLockNotice(uid)) {
+        Alert.alert(
+          'App lock not available',
+          'This phone has no screen lock, so Outfit can\'t be locked. Anyone holding your phone can open the app.',
+        );
+      }
+    } finally {
+      ensuring.current = false;
+    }
+  }, [isAuthenticated, uid]);
+
+  const turnOnHardwareLock = useCallback(async () => {
+    if (prompting.current) return;
+    prompting.current = true;
+    setChecking(true);
+    setSetupError('');
+    // New Keystore key + one fingerprint, then the session is stored encrypted
+    const r = await enableHardwareLock();
+    prompting.current = false;
+    setChecking(false);
+    if (r.ok) {
+      enabledRef.current = true;
+      await setSoftLock(false);
+      await setUserLockPref(uid, true);
+      setNeed(null);
+      return;
+    }
+    if (r.message) setSetupError(r.message);
+    else setSetupError('App lock is required. Tap "Turn on app lock" and confirm with your fingerprint.');
+    // Phone changed under us (fingerprint removed): re-check what it can do
+    ensureLock();
+  }, [uid, ensureLock]);
+
+  // Cold start / after login: lock if on, then make sure the required lock is set up
   useEffect(() => {
     if (!isAuthenticated) {
       enabledRef.current = false;
       setLocked(false);
+      setNeed(null);
       return;
     }
     let alive = true;
     (async () => {
-      const on = (await isLockEnabled()) && (await isLockSupported());
+      const on = await lockIsOn();
       enabledRef.current = on;
       // A fresh login just proved who this is, and a cold start already asked for the
       // fingerprint to decrypt the session; lock only a restored session that skipped both
       if (alive && on && !freshLogin && !wasUnlockedThisLaunch()) setLocked(true);
+      if (freshLogin) clearFreshLogin();
+      if (alive) ensureLock();
     })();
     return () => {
       alive = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAuthenticated]);
+  }, [isAuthenticated, uid]);
 
-  // Background > 1 min: lock again
+  // First time on the setup screen: show the fingerprint prompt right away
+  const autoPrompted = useRef(false);
+  useEffect(() => {
+    if (need === 'setup' && !autoPrompted.current && !locked) {
+      autoPrompted.current = true;
+      turnOnHardwareLock();
+    }
+  }, [need, locked, turnOnHardwareLock]);
+
+  // Background > 1 min: lock again. Every return: re-check the requirement (a screen lock may
+  // have just been set in Settings, or removed).
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state: AppStateStatus) => {
       if (prompting.current) return; // the fingerprint prompt can background the app
@@ -96,17 +196,18 @@ export default function AppLockGate() {
       } else if (state === 'active') {
         const since = backgroundAt.current;
         backgroundAt.current = null;
-        if (isAuthenticated && since && Date.now() - since > LOCK_AFTER_MS) {
-          // Re-read the setting: it may have been switched in Profile since login
-          isLockEnabled().then(on => {
+        if (!isAuthenticated) return;
+        if (since && Date.now() - since > LOCK_AFTER_MS) {
+          lockIsOn().then(on => {
             enabledRef.current = on;
             if (on) setLocked(true);
           });
         }
+        ensureLock();
       }
     });
     return () => sub.remove();
-  }, [isAuthenticated]);
+  }, [isAuthenticated, ensureLock]);
 
   // Show the prompt right away when locked; no screenshots / recents preview of the lock screen
   useEffect(() => {
@@ -114,70 +215,81 @@ export default function AppLockGate() {
     if (locked) unlock();
   }, [locked, unlock]);
 
-  // After a login: ask this user once, or turn the lock back on if they had it on
-  useEffect(() => {
-    if (!isAuthenticated || !freshLogin || !uid) return;
-    clearFreshLogin();
-    (async () => {
-      if (!(await isLockSupported())) return;
-      if (await isLockEnabled()) {
-        // Kept through "Sign out" on the lock screen: already on for this session
-        if ((await getUserLockPref(uid)) !== false) await setUserLockPref(uid, true);
-        return;
-      }
-      const turnOn = async () => {
-        prompting.current = true;
-        // New Keystore key + one fingerprint, then the session is stored encrypted
-        const r = await enableHardwareLock();
-        prompting.current = false;
-        if (r.ok) {
-          enabledRef.current = true;
-          await setUserLockPref(uid, true);
-        } else if (r.message) Alert.alert('Fingerprint lock', r.message);
-      };
-      const pref = await getUserLockPref(uid);
-      if (pref === true) {
-        await turnOn();
-        return;
-      }
-      if (pref === false || (await wasLockAsked(uid))) return;
-      await markLockAsked(uid);
-      Alert.alert(
-        'Use fingerprint to unlock Outfit?',
-        'Each time you open Outfit, unlock it with your fingerprint (or your phone PIN / pattern). You can change this in Profile.',
-        [
-          { text: 'Not now', style: 'cancel', onPress: () => setUserLockPref(uid, false) },
-          { text: 'Use fingerprint', onPress: turnOn },
-        ],
-      );
-    })();
-  }, [isAuthenticated, freshLogin, clearFreshLogin, uid]);
+  if (!isAuthenticated) return null;
 
-  if (!locked || !isAuthenticated) return null;
-  return (
-    <View style={styles.overlay}>
-      <Text style={styles.icon}>🔒</Text>
-      <Text style={styles.title}>Outfit is locked</Text>
-      <Text style={styles.sub}>Unlock with your fingerprint or phone PIN / pattern</Text>
-      <TouchableOpacity style={styles.button} onPress={unlock} disabled={checking} activeOpacity={0.8}>
-        {checking ? (
-          <ActivityIndicator color="#FFFFFF" size="small" />
-        ) : (
-          <Text style={styles.buttonText}>Unlock</Text>
-        )}
-      </TouchableOpacity>
-      <TouchableOpacity
-        style={styles.linkButton}
-        onPress={async () => {
-          setLocked(false);
-          await signOutKeepLock();
-        }}
-        disabled={checking}
-        activeOpacity={0.7}>
-        <Text style={styles.linkText}>Sign out</Text>
-      </TouchableOpacity>
-    </View>
-  );
+  if (locked) {
+    return (
+      <View style={styles.overlay}>
+        <Text style={styles.icon}>🔒</Text>
+        <Text style={styles.title}>Outfit is locked</Text>
+        <Text style={styles.sub}>Unlock with your fingerprint or phone PIN / pattern</Text>
+        <TouchableOpacity style={styles.button} onPress={unlock} disabled={checking} activeOpacity={0.8}>
+          {checking ? (
+            <ActivityIndicator color="#FFFFFF" size="small" />
+          ) : (
+            <Text style={styles.buttonText}>Unlock</Text>
+          )}
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.linkButton}
+          onPress={async () => {
+            setLocked(false);
+            await signOutKeepLock();
+          }}
+          disabled={checking}
+          activeOpacity={0.7}>
+          <Text style={styles.linkText}>Sign out</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  if (need === 'setup') {
+    return (
+      <View style={styles.overlay}>
+        <Text style={styles.icon}>🔐</Text>
+        <Text style={styles.title}>Turn on app lock</Text>
+        <Text style={styles.sub}>
+          App lock is required for everyone. Outfit will open with your fingerprint (or your phone PIN / pattern).
+        </Text>
+        {!!setupError && <Text style={styles.error}>{setupError}</Text>}
+        <TouchableOpacity style={styles.button} onPress={turnOnHardwareLock} disabled={checking} activeOpacity={0.8}>
+          {checking ? (
+            <ActivityIndicator color="#FFFFFF" size="small" />
+          ) : (
+            <Text style={styles.buttonText}>Turn on app lock</Text>
+          )}
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.linkButton} onPress={() => signOutKeepLock()} disabled={checking} activeOpacity={0.7}>
+          <Text style={styles.linkText}>Sign out</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  if (need === 'screenlock') {
+    return (
+      <View style={styles.overlay}>
+        <Text style={styles.icon}>📱</Text>
+        <Text style={styles.title}>Set a screen lock</Text>
+        <Text style={styles.sub}>
+          Outfit needs your phone to have a screen lock (fingerprint, PIN, pattern or password) so only you can open
+          the app. Set one in your phone settings, then come back.
+        </Text>
+        <TouchableOpacity style={styles.button} onPress={openSecuritySettings} activeOpacity={0.8}>
+          <Text style={styles.buttonText}>Open security settings</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.linkButton} onPress={ensureLock} activeOpacity={0.7}>
+          <Text style={styles.linkText}>I've set it, check again</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.linkButton} onPress={() => signOutKeepLock()} activeOpacity={0.7}>
+          <Text style={styles.linkText}>Sign out</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  return null;
 }
 
 const styles = themedStyles(() => StyleSheet.create({
@@ -208,6 +320,7 @@ const styles = themedStyles(() => StyleSheet.create({
     paddingHorizontal: 24,
   },
   buttonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
+  error: { fontSize: 13, color: '#D32F2F', marginTop: 12, textAlign: 'center' },
   linkButton: { marginTop: 18, padding: 8 },
   linkText: { color: '#E91E63', fontSize: 14, fontWeight: '600' },
 }));

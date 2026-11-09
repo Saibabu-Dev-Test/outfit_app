@@ -28,3 +28,12 @@ export const authenticate = async (
   _subtitle?: string,
   _negativeText?: string,
 ): Promise<UnlockResult> => 'error';
+
+// Mandatory app lock: no-op on web
+export type LockCapability = 'biometric' | 'screenlock' | 'none' | 'unsupported';
+export const SOFT_LOCK_KEY = 'outfit:appLockSoft';
+export const getLockCapability = async (): Promise<LockCapability> => 'unsupported';
+export const openSecuritySettings = async (): Promise<void> => {};
+export const isSoftLockOn = async (): Promise<boolean> => false;
+export const setSoftLock = async (_on: boolean): Promise<void> => {};
+export const takeNoLockNotice = async (_uid: string): Promise<boolean> => false;
