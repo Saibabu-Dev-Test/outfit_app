@@ -20,6 +20,7 @@ import FollowListScreen from '../screens/Profile/FollowListScreen';
 import PostDetailScreen from '../screens/Feed/PostDetailScreen';
 import { colors, themedStyles, useTheme } from '../theme';
 import AppLockGate from '../components/AppLockGate';
+import ActivityWatcher from '../components/ActivityWatcher';
 import SessionLockScreen from '../components/SessionLockScreen';
 import TamperScreen from '../components/TamperScreen';
 import { getVaultStatus, subscribeVault, VaultStatus } from '../native/sessionVault';
@@ -117,6 +118,7 @@ function NavigationContent() {
       </Stack.Navigator>
     </NavigationContainer>
     <AppLockGate />
+    <ActivityWatcher />
     </React.Fragment>
   );
 }

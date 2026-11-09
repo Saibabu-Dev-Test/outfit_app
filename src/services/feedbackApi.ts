@@ -17,6 +17,8 @@ import { db } from '../config/firebaseConfig';
 import { firestoreErrorMessage } from '../utils/firebaseErrors';
 import { toDate } from '../utils/date';
 import { assertClean } from '../utils/profanity';
+import { getAdminUids } from './adminConfig';
+import { recordActivity } from './activityApi';
 
 export const FEEDBACK_TYPES = ['Suggestion', 'Complaint', 'Bug', 'Other'] as const;
 export type FeedbackType = (typeof FEEDBACK_TYPES)[number];
@@ -72,6 +74,16 @@ export const submitFeedback = async (input: {
     console.warn('submitFeedback failed:', e?.code, e?.message);
     throw new Error(firestoreErrorMessage(e, 'Sending feedback'));
   }
+  // Tell the admin(s): an activity doc each (config/admins; skipped when it's missing). Best effort.
+  getAdminUids()
+    .then(admins =>
+      Promise.all(
+        admins
+          .filter(a => a !== input.uid)
+          .map(a => recordActivity(a, { uid: input.uid, name: input.name }, 'feedback', null, `${input.type}: ${text}`)),
+      ),
+    )
+    .catch(() => undefined);
 };
 
 // Admin only (rules)

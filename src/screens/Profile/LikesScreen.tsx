@@ -19,6 +19,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles, statusBarStyle } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
+import { markActivitySeen } from '../../services/activityWatcher';
 import PhotoGrid from '../../components/PhotoGrid';
 import Avatar from '../../components/Avatar';
 import { getLikedItems, Post } from '../../services/feedApi';
@@ -89,7 +90,8 @@ export default function LikesScreen({ navigation, route }: { navigation: any; ro
   useFocusEffect(
     useCallback(() => {
       load();
-    }, [load]),
+      markActivitySeen(user?.id); // clears the ♡ badge
+    }, [load, user?.id]),
   );
 
   const refresh = (

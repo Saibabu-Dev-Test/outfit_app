@@ -174,7 +174,7 @@ service cloud.firestore {
         && request.resource.data.actorId == me()
         && uid != me()
         && request.resource.data.keys().hasOnly(['type', 'actorId', 'actorName', 'actorAvatar', 'targetKind', 'targetId', 'thumbnail', 'text', 'createdAt'])
-        && request.resource.data.type in ['like', 'dislike', 'comment', 'follow']
+        && request.resource.data.type in ['like', 'dislike', 'comment', 'follow', 'feedback']
         && request.resource.data.createdAt == request.time
         && (request.resource.data.get('actorName', null) == null
             || (request.resource.data.actorName is string && request.resource.data.actorName.size() <= 60))
@@ -189,6 +189,19 @@ service cloud.firestore {
         && (request.resource.data.get('text', null) == null
             || (request.resource.data.text is string && request.resource.data.text.size() <= 120));
       allow update: if false;
+    }
+
+    // ── Public list of admin uids: config/admins {uids, updatedAt} ──
+    // Read by any signed-in user (feedback notifies the admins); written only by an admin
+    // (AdminScreen adds the admin who opens it).
+    match /config/admins {
+      allow read: if signedIn();
+      allow create, update: if isAdmin()
+        && request.resource.data.keys().hasOnly(['uids', 'updatedAt'])
+        && request.resource.data.uids is list
+        && request.resource.data.uids.size() <= 20
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if false;
     }
 
     // ── Follow: users/{target}/followers/{follower} + users/{follower}/following/{target} ──

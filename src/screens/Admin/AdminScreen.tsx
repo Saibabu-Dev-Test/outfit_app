@@ -23,6 +23,7 @@ import { Circle, getAllCircles, deleteCircle, deleteMessageById } from '../../se
 import { deletePost, deleteComment } from '../../services/feedApi';
 import { timeAgo } from '../../utils/date';
 import { Feedback, FeedbackStatus, getFeedback, setFeedbackStatus } from '../../services/feedbackApi';
+import { registerAdmin } from '../../services/adminConfig';
 
 type TabKey = 'reports' | 'circles' | 'feedback';
 const TAB_KEYS: TabKey[] = ['reports', 'circles', 'feedback'];
@@ -50,6 +51,8 @@ export default function AdminScreen({ navigation }: { navigation: any }) {
       setRefreshing(false);
       return;
     }
+    // Put me in config/admins so feedback notifies me (no-op when already there)
+    registerAdmin(uid);
     const errs: string[] = [];
     try {
       setReports(await getReports());

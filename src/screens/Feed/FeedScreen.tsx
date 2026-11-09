@@ -19,6 +19,7 @@ import { useAuth } from '../../context/AuthContext';
 import useIsAdmin from '../../hooks/useIsAdmin';
 import PostCard from '../../components/PostCard';
 import { FeedLoader, Post } from '../../services/feedApi';
+import { subscribeUnreadActivity } from '../../services/activityWatcher';
 
 export default function FeedScreen({ navigation, route }: { navigation: any; route: any }) {
   const { user } = useAuth();
@@ -27,6 +28,9 @@ export default function FeedScreen({ navigation, route }: { navigation: any; rou
   const { width } = useWindowDimensions();
 
   const [posts, setPosts] = useState<Post[]>([]);
+  // New likes / comments / follows since Likes was last opened (badge on ♡)
+  const [unreadActivity, setUnreadActivity] = useState(0);
+  useEffect(() => subscribeUnreadActivity(setUnreadActivity), []);
   const [hasMore, setHasMore] = useState(true);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -92,6 +96,11 @@ export default function FeedScreen({ navigation, route }: { navigation: any; rou
         <Text style={styles.title}>Feed</Text>
         <TouchableOpacity style={styles.iconBtn} onPress={() => navigation.navigate('Likes')}>
           <Text style={styles.iconText}>♡</Text>
+          {unreadActivity > 0 ? (
+            <View style={styles.badge}>
+              <Text style={styles.badgeText}>{unreadActivity > 99 ? '99+' : unreadActivity}</Text>
+            </View>
+          ) : null}
         </TouchableOpacity>
         <TouchableOpacity style={styles.iconBtn} onPress={() => navigation.navigate('UserSearch')}>
           <Text style={styles.iconText}>🔍</Text>
@@ -169,6 +178,19 @@ const styles = themedStyles(() => StyleSheet.create({
   back: { fontSize: 34, color: colors.primary, marginRight: spacing.sm, lineHeight: 36 },
   title: { flex: 1, fontSize: fontSize.xl, fontWeight: fontWeight.extraBold, color: colors.textPrimary },
   iconBtn: { paddingHorizontal: spacing.sm },
+  badge: {
+    position: 'absolute',
+    top: -4,
+    right: 0,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    paddingHorizontal: 4,
+    backgroundColor: '#E91E63',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badgeText: { color: '#FFFFFF', fontSize: 10, fontWeight: '800' },
   iconText: { fontSize: 22, color: colors.textPrimary },
   newBtn: {
     backgroundColor: colors.primary,
