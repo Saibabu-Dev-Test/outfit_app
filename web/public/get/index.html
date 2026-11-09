@@ -4,10 +4,25 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#2D1F6E" />
-  <title>Get OUTFIT 👗 Outfit Vote app</title>
-  <meta name="description" content="Download Outfit Vote, your AI stylist &amp; daily colour guide." />
-  <meta property="og:title" content="Get the Outfit Vote app 👗" />
-  <meta property="og:description" content="Your AI stylist &amp; daily colour guide. Download the Android app." />
+  <title>Outfit</title>
+  <meta name="description" content="Download Outfit – vote on outfits with friends" />
+  <!-- Link previews (WhatsApp, Telegram, SMS). __SHARE_BASE__ is filled in by web/webpack.config.js
+       from SHARE_BASE in src/config/links.ts -->
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Outfit" />
+  <meta property="og:title" content="Outfit" />
+  <meta property="og:description" content="Download Outfit – vote on outfits with friends" />
+  <meta property="og:url" content="__SHARE_BASE__/get/" />
+  <meta property="og:image" content="__SHARE_BASE__/icons/og.png" />
+  <meta property="og:image:secure_url" content="__SHARE_BASE__/icons/og.png" />
+  <meta property="og:image:type" content="image/png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="Outfit" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Outfit" />
+  <meta name="twitter:description" content="Download Outfit – vote on outfits with friends" />
+  <meta name="twitter:image" content="__SHARE_BASE__/icons/og.png" />
   <link rel="icon" href="/icons/favicon-32.png" />
   <style>
     :root { --p: #2D1F6E; --p2: #6C5CE7; --bg: #F5F4FA; --t: #1E1B2E; --m: #6B6880; }
@@ -41,23 +56,25 @@
   <main>
     <div class="logo">👗</div>
     <h1>OUTFIT</h1>
-    <p class="tag">Outfit Vote · your AI stylist &amp; daily colour guide</p>
+    <p class="tag">Vote on outfits with friends · your AI stylist &amp; daily colour guide</p>
 
     <div class="code" id="codeBox" hidden>Your friend's referral code<b id="code"></b></div>
 
     <!-- Android: the app (APK) -->
     <div id="android" hidden>
-      <a class="btn" id="dl" href="https://github.com/Saibabu-Dev-Test/outfit_app/releases/latest/download/app-arm64-v8a-release.apk">⬇ Download Android app</a>
+      <!-- /Outfit.apk and /Outfit-universal.apk are Hosting redirects (firebase.json,
+           scripts/deploy-hosting.sh) to the latest release file, so only the Outfit address shows -->
+      <a class="btn" id="dl" href="/Outfit.apk" download="Outfit.apk">⬇ Download Outfit</a>
       <p class="note" id="note"></p>
-      <a class="small" id="dlOld" href="https://github.com/Saibabu-Dev-Test/outfit_app/releases/latest/download/app-universal-release.apk">Older phone? Download this version</a>
+      <a class="small" id="dlOld" href="/Outfit-universal.apk" download="Outfit.apk">Older phone? Download this version</a>
 
       <div class="steps">
         <h2>How to install</h2>
         <ol>
-          <li>Tap <b>Download Android app</b> and open the file when it finishes.</li>
+          <li>Tap <b>Download Outfit</b> and open the file when it finishes.</li>
           <li>If asked, allow <b>install from this source</b> (Settings → Install unknown apps), then go back and tap <b>Install</b>.</li>
           <li>If you see <b>"package appears to be invalid"</b>, delete the old download and download again in <b>Chrome</b>.</li>
-          <li>Open OUTFIT and create your account. The referral code is filled in for you.</li>
+          <li>Open Outfit and create your account. The referral code is filled in for you.</li>
         </ol>
       </div>
       <span class="browser">Trouble installing? <a id="webSmall" href="/?web=1">Open in browser</a></span>
@@ -102,6 +119,14 @@
         return; // no download on these devices
       }
       document.getElementById('android').hidden = false;
+
+      // A copy of this page served without the Hosting redirects (e.g. a static mirror):
+      // link the release files directly
+      if (!/\.web\.app$|\.firebaseapp\.com$/.test(location.hostname)) {
+        var rel = 'https://github.com/Saibabu-Dev-Test/outfit_app/releases/latest/download/';
+        document.getElementById('dl').href = rel + 'Outfit.apk';
+        document.getElementById('dlOld').href = rel + 'Outfit-universal.apk';
+      }
 
       // Copies OUTFITREF:CODE so the app can fill the code after install (no Play Install Referrer)
       function fallbackCopy(text) {
@@ -155,10 +180,10 @@
         var note = document.getElementById('note');
         function go(ok) {
           note.textContent = ok
-            ? 'Code ' + code + ' saved. Your download is starting… If it doesn\'t, tap Download Android app.'
+            ? 'Code ' + code + ' saved. Your download is starting… If it doesn\'t, tap Download Outfit.'
             : code
-              ? 'Your download is starting… Tap Download Android app if it doesn\'t, so your code ' + code + ' is saved too.'
-              : 'Your download is starting… If it doesn\'t, tap Download Android app.';
+              ? 'Your download is starting… Tap Download Outfit if it doesn\'t, so your code ' + code + ' is saved too.'
+              : 'Your download is starting… If it doesn\'t, tap Download Outfit.';
           location.href = url;
         }
         var fired = false;

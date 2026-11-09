@@ -1,7 +1,7 @@
 {
-  "name": "OUTFIT",
-  "short_name": "OUTFIT",
-  "description": "AI personal stylist and daily colour guide",
+  "name": "Outfit",
+  "short_name": "Outfit",
+  "description": "Vote on outfits with friends",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

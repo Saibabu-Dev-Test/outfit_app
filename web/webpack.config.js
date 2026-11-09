@@ -9,6 +9,11 @@ const CopyWebpackPlugin = require('copy-webpack-plugin');
 const root = path.resolve(__dirname, '..');
 const publicPath = process.env.PUBLIC_PATH || '/outfit_app/';
 const buildId = process.env.GITHUB_SHA ? process.env.GITHUB_SHA.slice(0, 12) : String(Date.now());
+// Public site address for Open Graph tags: SHARE_BASE in src/config/links.ts (one source of truth)
+const linksTs = require('fs').readFileSync(path.join(root, 'src', 'config', 'links.ts'), 'utf8');
+const shareBaseMatch = /export const SHARE_BASE = '([^']+)'/.exec(linksTs);
+if (!shareBaseMatch) throw new Error('SHARE_BASE not found in src/config/links.ts');
+const shareBase = shareBaseMatch[1].replace(/\/+$/, '');
 
 // RN packages ship untranspiled JSX / Flow / TS and must go through Babel
 const compileModules = [
@@ -84,14 +89,18 @@ module.exports = (env, argv) => {
       }),
       new HtmlWebpackPlugin({
         template: path.join(__dirname, 'public', 'index.html'),
-        templateParameters: { publicPath },
+        templateParameters: { publicPath, shareBase },
       }),
       new CopyWebpackPlugin({
         patterns: [
           { from: path.join(__dirname, 'public', 'manifest.json') },
           { from: path.join(__dirname, 'public', 'icons'), to: 'icons' },
           // Static app download page (/get/?ref=CODE); Firebase Hosting serves it before the SPA rewrite
-          { from: path.join(__dirname, 'public', 'get'), to: 'get' },
+          {
+            from: path.join(__dirname, 'public', 'get'),
+            to: 'get',
+            transform: c => c.toString().replace(/__SHARE_BASE__/g, shareBase),
+          },
           {
             from: path.join(__dirname, 'public', 'sw.js'),
             transform: c => c.toString().replace('__BUILD_ID__', buildId),
