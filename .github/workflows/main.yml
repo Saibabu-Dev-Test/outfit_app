@@ -131,29 +131,22 @@ jobs:
             sleep 60
           done
           exit 1
-      # 6.5. Split APKs (one per CPU type) + universal; app-release.apk = universal copy for old links
-      - name: Collect APKs
+      # 6.5. One APK only (arm64-v8a) -> Outfit.apk
+      - name: Collect APK
         run: |
           OUT=android/app/build/outputs/apk/release
           ls -la "$OUT"
           mkdir -p apks
-          for abi in arm64-v8a armeabi-v7a universal; do
-            f=$(ls "$OUT"/*-"$abi"-release.apk 2>/dev/null | head -n 1)
-            if [ -z "$f" ]; then echo "Missing $abi APK"; exit 1; fi
-            cp "$f" "apks/app-$abi-release.apk"
-          done
-          cp apks/app-universal-release.apk apks/app-release.apk
-          # Branded names for the /get/ page and in-app updates (old names kept for older installs)
-          cp apks/app-arm64-v8a-release.apk apks/Outfit.apk
-          cp apks/app-universal-release.apk apks/Outfit-universal.apk
+          if [ ! -f "$OUT/app-release.apk" ]; then echo "Missing app-release.apk"; exit 1; fi
+          cp "$OUT/app-release.apk" apks/Outfit.apk
           ls -la apks
 
       # 7. Upload generated APKs
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: outfit-app-release-apks
-          path: apks/*.apk
+          name: Outfit-apk
+          path: apks/Outfit.apk
           retention-days: 3
 
       # 8. Create GitHub Release (not a prerelease, so /releases/latest/download/<name> points here)
@@ -166,8 +159,3 @@ jobs:
           make_latest: true
           files: |
             apks/Outfit.apk
-            apks/Outfit-universal.apk
-            apks/app-arm64-v8a-release.apk
-            apks/app-armeabi-v7a-release.apk
-            apks/app-universal-release.apk
-            apks/app-release.apk

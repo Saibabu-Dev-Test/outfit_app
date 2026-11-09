@@ -62,11 +62,10 @@
 
     <!-- Android: the app (APK) -->
     <div id="android" hidden>
-      <!-- /Outfit.apk and /Outfit-universal.apk are Hosting redirects (firebase.json,
+      <!-- /Outfit.apk is a Hosting redirect (firebase.json,
            scripts/deploy-hosting.sh) to the latest release file, so only the Outfit address shows -->
       <a class="btn" id="dl" href="/Outfit.apk" download="Outfit.apk">⬇ Download Outfit</a>
       <p class="note" id="note"></p>
-      <a class="small" id="dlOld" href="/Outfit-universal.apk" download="Outfit.apk">Older phone? Download this version</a>
 
       <div class="steps">
         <h2>How to install</h2>
@@ -125,7 +124,6 @@
       if (!/\.web\.app$|\.firebaseapp\.com$/.test(location.hostname)) {
         var rel = 'https://github.com/Saibabu-Dev-Test/outfit_app/releases/latest/download/';
         document.getElementById('dl').href = rel + 'Outfit.apk';
-        document.getElementById('dlOld').href = rel + 'Outfit-universal.apk';
       }
 
       // Copies OUTFITREF:CODE so the app can fill the code after install (no Play Install Referrer)
@@ -171,7 +169,6 @@
         setTimeout(function () { go(false); }, 1500); // never block the download
       }
       document.getElementById('dl').addEventListener('click', startDownload);
-      document.getElementById('dlOld').addEventListener('click', startDownload);
 
       // Start the (arm64) download as soon as the page opens. Browsers usually block clipboard
       // writes without a tap; if the copy fails, the big button still copies + downloads.
