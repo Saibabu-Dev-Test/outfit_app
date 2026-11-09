@@ -20,7 +20,7 @@ export const getApproxLocation = async (): Promise<LocationResult> => {
     if (!(await PermissionsAndroid.check(perm))) {
       const r = await PermissionsAndroid.request(perm, {
         title: 'Find circles near you',
-        message: 'Outfit uses your approximate location (about 100 m) to show public circles within 5 km.',
+        message: 'Outfit uses your approximate location (about 100 m) to show public circles within 3 km.',
         buttonPositive: 'Allow',
         buttonNegative: 'Not now',
       });

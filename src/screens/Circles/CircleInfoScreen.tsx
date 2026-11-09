@@ -1,4 +1,5 @@
-// Circle info: members, invite code, report, leave, delete (owner or admin)
+// Circle info: members, invite code, report, leave, delete (owner or admin), and Public / Private +
+// "Show in Nearby" settings for the owner (admins too, once firestore.rules allows admin edits)
 import React, { useEffect, useState } from 'react';
 import {
   View,
@@ -10,6 +11,7 @@ import {
   ActivityIndicator,
   StatusBar,
   Platform,
+  Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles, statusBarStyle } from '../../theme';
@@ -17,7 +19,16 @@ import { useAuth } from '../../context/AuthContext';
 import useIsAdmin from '../../hooks/useIsAdmin';
 import Avatar from '../../components/Avatar';
 import ReportModal, { ReportTarget } from '../../components/ReportModal';
-import { Circle, subscribeCircle, leaveCircle, deleteCircle } from '../../services/circlesApi';
+import {
+  Circle,
+  subscribeCircle,
+  leaveCircle,
+  deleteCircle,
+  updateCircleVisibility,
+  removeCircleLocation,
+  NEARBY_KM,
+} from '../../services/circlesApi';
+import { getApproxLocation } from '../../native/location';
 import { getPublicUser } from '../../services/userApi';
 import { PRIVATE_NOTICE } from './CirclesScreen';
 import { shareWithReferral } from '../../utils/referralLink';
@@ -90,6 +101,55 @@ export default function CircleInfoScreen({ navigation, route }: { navigation: an
 
   const isMember = !!uid && !!circle && circle.memberIds.includes(uid);
   const isOwner = !!uid && !!circle && circle.ownerId === uid;
+
+  const canEdit = isOwner || isAdmin;
+
+  // Public <-> Private. Going private drops the location (out of Discover and Nearby).
+  const changeVisibility = (makePrivate: boolean) => {
+    if (!circle || makePrivate === circle.isPrivate) return;
+    const title = makePrivate ? 'Make circle private?' : 'Make circle public?';
+    const body = makePrivate
+      ? 'It will be hidden from Discover and Nearby. Members stay, and new people join with the invite code.'
+      : 'It will be listed in Discover and anyone can join. Turn on "Show in Nearby" to let people near you find it.';
+    Alert.alert(title, body, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: makePrivate ? 'Make private' : 'Make public',
+        onPress: async () => {
+          setBusy(true);
+          try {
+            await updateCircleVisibility(circle.id, makePrivate);
+          } catch (e: any) {
+            Alert.alert('Could not change', e?.message || 'Please try again.');
+          } finally {
+            setBusy(false);
+          }
+        },
+      },
+    ]);
+  };
+
+  // Public circles: show / hide in Nearby (saves this phone's approximate location, ~100 m)
+  const changeNearby = async (on: boolean) => {
+    if (!circle || circle.isPrivate) return;
+    setBusy(true);
+    try {
+      if (on) {
+        const loc = await getApproxLocation();
+        if (!loc.ok) {
+          Alert.alert('Location not added', loc.message);
+          return;
+        }
+        await updateCircleVisibility(circle.id, false, loc.coords);
+      } else {
+        await removeCircleLocation(circle.id);
+      }
+    } catch (e: any) {
+      Alert.alert('Could not change', e?.message || 'Please try again.');
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const shareCode = async () => {
     if (!circle) return;
@@ -182,6 +242,48 @@ export default function CircleInfoScreen({ navigation, route }: { navigation: an
               </View>
               <Text style={styles.hint}>Friends enter this in Circles › Join with code.</Text>
               {circle.isPrivate && <Text style={styles.notice}>{PRIVATE_NOTICE}</Text>}
+            </View>
+          ) : null}
+
+          {canEdit ? (
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Circle settings{isOwner ? '' : ' (admin)'}</Text>
+              <View style={styles.settingRow}>
+                <View style={styles.flex1}>
+                  <Text style={styles.settingTitle}>{circle.isPrivate ? '🔒 Private' : '🌍 Public'}</Text>
+                  <Text style={styles.hint}>
+                    {circle.isPrivate
+                      ? 'Hidden from Discover and Nearby. People join with the invite code.'
+                      : 'Listed in Discover. Anyone can join.'}
+                  </Text>
+                </View>
+                <Switch
+                  value={circle.isPrivate}
+                  onValueChange={changeVisibility}
+                  disabled={busy}
+                  trackColor={{ false: colors.border, true: colors.accent }}
+                  thumbColor={colors.textInverse}
+                />
+              </View>
+              {!circle.isPrivate && (
+                <View style={styles.settingRow}>
+                  <View style={styles.flex1}>
+                    <Text style={styles.settingTitle}>📍 Show in Nearby</Text>
+                    <Text style={styles.hint}>
+                      {circle.location
+                        ? `People within ${NEARBY_KM} km of this spot can find and join it.`
+                        : `Saves your approximate location (about 100 m) so people within ${NEARBY_KM} km find it.`}
+                    </Text>
+                  </View>
+                  <Switch
+                    value={!!circle.location}
+                    onValueChange={changeNearby}
+                    disabled={busy}
+                    trackColor={{ false: colors.border, true: colors.accent }}
+                    thumbColor={colors.textInverse}
+                  />
+                </View>
+              )}
             </View>
           ) : null}
 
@@ -280,6 +382,9 @@ const styles = themedStyles(() => StyleSheet.create({
     paddingHorizontal: spacing.sm,
     paddingVertical: 2,
   },
+  flex1: { flex: 1 },
+  settingRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: spacing.sm, gap: spacing.md },
+  settingTitle: { fontSize: fontSize.base, fontWeight: fontWeight.semiBold, color: colors.textPrimary },
   action: { paddingVertical: spacing.md },
   actionText: { fontSize: fontSize.base, fontWeight: fontWeight.semiBold, color: colors.textPrimary },
   danger: { color: colors.error },

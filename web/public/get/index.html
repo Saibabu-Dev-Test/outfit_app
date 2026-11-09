@@ -40,15 +40,14 @@
       background: linear-gradient(135deg, var(--p), var(--p2)); color: #fff; font-size: 19px; font-weight: 800;
       text-decoration: none; cursor: pointer; box-shadow: 0 8px 22px rgba(45,31,110,.28); }
     .btn:active { transform: scale(.98); }
+    .btn-sm { font-size: 16px; padding: 15px 14px; }
     .small { display: inline-block; margin-top: 14px; color: var(--p2); font-size: 14px; font-weight: 600; }
-    .note { min-height: 20px; margin: 12px 0 0; font-size: 13px; color: #2E7D32; }
+    .note { min-height: 20px; margin: 0 0 14px; font-size: 14px; color: #2E7D32; }
     .steps { margin: 26px 0 0; padding: 16px 18px; text-align: left; background: #fff; border-radius: 16px;
       font-size: 14px; color: var(--t); line-height: 1.5; }
     .steps h2 { margin: 0 0 8px; font-size: 15px; color: var(--p); }
     .steps ol { margin: 0; padding-left: 20px; }
     .steps li { margin-bottom: 6px; }
-    .browser { display: block; margin-top: 22px; color: var(--m); font-size: 13px; }
-    .browser a { color: var(--p2); font-weight: 700; }
     [hidden] { display: none !important; }
   </style>
 </head>
@@ -60,38 +59,27 @@
 
     <div class="code" id="codeBox" hidden>Your friend's referral code<b id="code"></b></div>
 
-    <!-- Android: the app (APK) -->
+    <!-- Android: the APK download starts by itself when this page opens -->
     <div id="android" hidden>
-      <!-- /Outfit.apk is a Hosting redirect (firebase.json,
-           scripts/deploy-hosting.sh) to the latest release file, so only the Outfit address shows -->
-      <a class="btn" id="dl" href="/Outfit.apk" download="Outfit.apk">⬇ Download Outfit</a>
-      <p class="note" id="note"></p>
+      <p class="note" id="note">Your download is starting…</p>
+      <!-- /Outfit.apk is a Hosting redirect (firebase.json) to the latest release file -->
+      <a class="btn btn-sm" id="dl" href="/Outfit.apk" download="Outfit.apk">⬇ Tap here if the download didn't start</a>
 
       <div class="steps">
         <h2>How to install</h2>
         <ol>
-          <li>Tap <b>Download Outfit</b> and open the file when it finishes.</li>
+          <li>When <b>Outfit.apk</b> finishes downloading, tap it (or open it from <b>Downloads</b>).</li>
           <li>If asked, allow <b>install from this source</b> (Settings → Install unknown apps), then go back and tap <b>Install</b>.</li>
           <li>If you see <b>"package appears to be invalid"</b>, delete the old download and download again in <b>Chrome</b>.</li>
-          <li>Open Outfit and create your account. The referral code is filled in for you.</li>
+          <li>Open Outfit and create your account. Your friend's referral code is filled in for you.</li>
         </ol>
       </div>
-      <span class="browser">Trouble installing? <a id="webSmall" href="/?web=1">Open in browser</a></span>
     </div>
 
-    <!-- iPhone / iPad / computer: the web app (no APK) -->
+    <!-- iPhone / iPad / computer: sent to the web app (shown only if that redirect is slow) -->
     <div id="other" hidden>
-      <a class="btn" id="web" href="/">Open Outfit in browser</a>
-      <p class="note">Create your account there. The referral code is filled in for you.</p>
-      <div class="steps" id="iosSteps" hidden>
-        <h2>Add Outfit to your Home Screen</h2>
-        <ol>
-          <li>Open this page in <b>Safari</b>.</li>
-          <li>Tap <b>Open Outfit in browser</b>.</li>
-          <li>Tap the <b>Share</b> button (square with an arrow ↑) at the bottom.</li>
-          <li>Scroll and tap <b>Add to Home Screen</b>, then <b>Add</b>. Outfit opens like an app from your Home Screen.</li>
-        </ol>
-      </div>
+      <a class="btn" id="web" href="/">Open Outfit</a>
+      <p class="note">Opening Outfit… Create your account there. The referral code is filled in for you.</p>
     </div>
   </main>
   <script>
@@ -105,28 +93,42 @@
         code = '';
       }
 
-      // Android gets the APK; iPhone / iPad / computers get the web app (never the APK)
+      // Site root: "/" on Firebase Hosting, "/outfit_app/" on the GitHub Pages copy
+      var base = location.pathname.replace(/get\/?(index\.html)?$/, '') || '/';
+      var webUrl = base + '?' + (code ? 'ref=' + encodeURIComponent(code) + '&' : '') + 'web=1';
+      document.getElementById('web').href = webUrl;
+
+      // iPhone / iPad / computers: straight to the web app (PWA), never the APK
       var ua = navigator.userAgent || '';
       var isAndroid = /Android/i.test(ua);
-      var isIOS = /iPhone|iPad|iPod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-      var webUrl = '/?' + (code ? 'ref=' + encodeURIComponent(code) + '&' : '') + 'web=1';
-      document.getElementById('web').href = webUrl;
-      document.getElementById('webSmall').href = webUrl;
       if (!isAndroid) {
         document.getElementById('other').hidden = false;
-        if (isIOS) document.getElementById('iosSteps').hidden = false;
-        return; // no download on these devices
+        location.replace(webUrl);
+        return;
       }
+
+      // Android in-app browsers (Instagram, Facebook...: "; wv)") often can't download files:
+      // reopen this page in Chrome once (falls back to this page with chrome=0 if Chrome is missing)
+      if (/; wv\)/.test(ua) && !/[?&]chrome=0/.test(location.search)) {
+        var back = location.href + (location.search ? '&' : '?') + 'chrome=0';
+        location.href = 'intent://' + location.host + location.pathname + location.search +
+          '#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=' +
+          encodeURIComponent(back) + ';end';
+        return;
+      }
+
       document.getElementById('android').hidden = false;
+      var dl = document.getElementById('dl');
+      var note = document.getElementById('note');
 
-      // A copy of this page served without the Hosting redirects (e.g. a static mirror):
-      // link the release files directly
+      // A copy of this page served without the Hosting redirects (e.g. GitHub Pages):
+      // link the release file directly
       if (!/\.web\.app$|\.firebaseapp\.com$/.test(location.hostname)) {
-        var rel = 'https://github.com/Saibabu-Dev-Test/outfit_app/releases/latest/download/';
-        document.getElementById('dl').href = rel + 'Outfit.apk';
+        dl.href = 'https://github.com/Saibabu-Dev-Test/outfit_app/releases/latest/download/Outfit.apk';
       }
 
-      // Copies OUTFITREF:CODE so the app can fill the code after install (no Play Install Referrer)
+      // Copies OUTFITREF:CODE so the app fills the code after install (sideloaded APKs get no
+      // Play Install Referrer). The app reads it on first launch / on the sign-up screen.
       function fallbackCopy(text) {
         try {
           var ta = document.createElement('textarea');
@@ -152,44 +154,30 @@
         }
         return Promise.resolve(fallbackCopy(text));
       }
-      function startDownload(e) {
-        var url = this.href;
-        if (!code) return; // plain link
-        e.preventDefault();
-        var done = false;
+      // Copy the code (never waits more than a moment), then start the download
+      function download(fromTap) {
+        var fired = false;
         function go(ok) {
-          if (done) return;
-          done = true;
-          document.getElementById('note').textContent = ok
-            ? 'Code ' + code + ' saved. Your download is starting…'
-            : 'Your download is starting… Enter code ' + code + ' when you sign up.';
-          location.href = url;
+          if (fired) return;
+          fired = true;
+          note.textContent = !code
+            ? 'Your download is starting…'
+            : ok
+              ? 'Code ' + code + ' saved. Your download is starting…'
+              : fromTap
+                ? 'Your download is starting… Enter code ' + code + ' when you sign up if it isn\'t filled in.'
+                : 'Your download is starting… Tap the button below if it doesn\'t, so your code ' + code + ' is saved too.';
+          location.href = dl.href;
         }
         copyRef().then(go, function () { go(false); });
-        setTimeout(function () { go(false); }, 1500); // never block the download
+        setTimeout(function () { go(false); }, fromTap ? 1500 : 1000);
       }
-      document.getElementById('dl').addEventListener('click', startDownload);
-
-      // Start the (arm64) download as soon as the page opens. Browsers usually block clipboard
-      // writes without a tap; if the copy fails, the big button still copies + downloads.
-      function autoStart() {
-        var url = document.getElementById('dl').href;
-        var note = document.getElementById('note');
-        function go(ok) {
-          note.textContent = ok
-            ? 'Code ' + code + ' saved. Your download is starting… If it doesn\'t, tap Download Outfit.'
-            : code
-              ? 'Your download is starting… Tap Download Outfit if it doesn\'t, so your code ' + code + ' is saved too.'
-              : 'Your download is starting… If it doesn\'t, tap Download Outfit.';
-          location.href = url;
-        }
-        var fired = false;
-        function once(ok) { if (!fired) { fired = true; go(ok); } }
-        copyRef().then(once, function () { once(false); });
-        setTimeout(function () { once(false); }, 1200);
-      }
-      // No automatic download: the APK downloads only when the user taps a Download button.
-      void autoStart;
+      dl.addEventListener('click', function (e) {
+        e.preventDefault();
+        download(true);
+      });
+      // Start the APK download as soon as the page opens
+      download(false);
     })();
   </script>
 </body>

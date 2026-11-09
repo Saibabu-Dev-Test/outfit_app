@@ -1,5 +1,5 @@
 // Circles: My Circles / Discover / Nearby tabs, join with an invite code, create a public or private
-// circle (public ones can be pinned to an approximate location so people within 5 km find them)
+// circle (public ones can be pinned to an approximate location so people within 3 km find them)
 import React, { useCallback, useState } from 'react';
 import {
   View,
@@ -69,7 +69,7 @@ export default function CirclesScreen() {
   const [newNearby, setNewNearby] = useState(false); // public circle: save approximate location
   const [creating, setCreating] = useState(false);
 
-  // Nearby (public circles within 5 km)
+  // Nearby (public circles within 3 km, NEARBY_KM)
   const [nearby, setNearby] = useState<Circle[]>([]);
   const [nearbyLoaded, setNearbyLoaded] = useState(false);
   const [nearbyLoading, setNearbyLoading] = useState(false);
@@ -136,10 +136,15 @@ export default function CirclesScreen() {
     [uid],
   );
 
+  // Back on this screen: reload; Nearby re-checks too (a circle may have gone private or moved)
+  const tabRef = React.useRef<TabKey>(tab);
+  tabRef.current = tab;
   useFocusEffect(
     useCallback(() => {
       load(false);
-    }, [load]),
+      if (tabRef.current === 'nearby') loadNearby();
+      else setNearbyLoaded(false);
+    }, [load, loadNearby]),
   );
 
   const openCircle = (c: Circle) => navigation.navigate('CircleChat', { circleId: c.id });
@@ -320,7 +325,7 @@ export default function CirclesScreen() {
             key={k}
             style={[styles.tab, tab === k && styles.tabActive]}
             onPress={() => openTab(k)}>
-            <Text style={[styles.tabText, tab === k && styles.tabTextActive]}>
+            <Text style={[styles.tabText, tab === k && styles.tabTextActive]} numberOfLines={1} adjustsFontSizeToFit>
               {k === 'mine' ? `Mine (${mine.length})` : k === 'discover' ? 'Discover' : '📍 Nearby'}
             </Text>
           </TouchableOpacity>

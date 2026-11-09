@@ -3,7 +3,15 @@
 // The session encryption itself lives in sessionVault.ts.
 import { NativeModules, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { LOCK_ENABLED_KEY, Native, verifyFingerprint } from './sessionVault';
+import {
+  disableHardwareLock,
+  enableHardwareLock,
+  LOCK_ENABLED_KEY,
+  LockChange,
+  Native,
+  releaseLockWithoutPrompt,
+  verifyFingerprint,
+} from './sessionVault';
 
 export {
   enableHardwareLock,
@@ -12,6 +20,7 @@ export {
   wipeForPasswordLogin,
   wasUnlockedThisLaunch,
   setPrivacy,
+  releaseLockWithoutPrompt,
   FINGERPRINTS_CHANGED_MESSAGE,
 } from './sessionVault';
 export type { LockChange, VerifyResult } from './sessionVault';
@@ -105,7 +114,7 @@ export const authenticate = async (
   return r;
 };
 
-// ── Mandatory app lock ───────────────────────────────────────────────────────
+// ── Optional app lock (off by default; Settings → App lock) ─────────────────────
 // 'biometric'   fingerprint enrolled: hardware-bound session lock (enableHardwareLock)
 // 'screenlock'  only a PIN / pattern / password: prompt-only lock (SOFT_LOCK_KEY)
 // 'none'        no screen lock yet: the user must set one before using the app
@@ -160,4 +169,76 @@ export const takeNoLockNotice = async (uid: string): Promise<boolean> => {
   } catch {
     return false;
   }
+};
+
+// ── Optional app lock ──────────────────────────────────────────────────────────
+// Off by default. The user turns it on in Settings:
+//   fingerprint enrolled -> hardware-bound session lock (enableHardwareLock)
+//   only PIN / pattern   -> prompt-only lock with the screen lock (SOFT_LOCK_KEY)
+// Builds before this one forced the lock on for everyone; migrateToOptionalLock() switches that
+// forced lock off once per phone (not under "outfit:", so logout keeps the marker).
+const OPTIONAL_MIGRATED_KEY = 'outfitlock:optional:v1';
+
+const markMigrated = async () => {
+  try {
+    await AsyncStorage.setItem(OPTIONAL_MIGRATED_KEY, '1');
+  } catch {}
+};
+
+// One time: turn off a lock that the old build forced on. Never prompts, never throws.
+export const migrateToOptionalLock = async (): Promise<void> => {
+  if (Platform.OS !== 'android') return;
+  try {
+    if ((await AsyncStorage.getItem(OPTIONAL_MIGRATED_KEY)) === '1') return;
+    await setSoftLock(false);
+    if (await isLockEnabled()) {
+      // Needs the session already unlocked this launch; otherwise try again next launch
+      if (!(await releaseLockWithoutPrompt())) return;
+    }
+    await markMigrated();
+  } catch {}
+};
+
+// App lock on or off right now (hardware or screen-lock lock)
+export const isAppLockOn = async (): Promise<boolean> =>
+  ((await isLockEnabled()) && (await isLockSupported())) || (await isSoftLockOn());
+
+// Settings switch ON. Uses what this phone has. Never throws.
+export const turnOnAppLock = async (uid?: string | null): Promise<LockChange> => {
+  await markMigrated();
+  const cap = await getLockCapability();
+  if (cap === 'biometric') {
+    const r = await enableHardwareLock();
+    if (r.ok) {
+      await setSoftLock(false);
+      await setUserLockPref(uid, true);
+    }
+    return r;
+  }
+  if (cap === 'screenlock') {
+    const r = await authenticate('Turn on app lock', 'Confirm with your screen lock', 'Cancel');
+    if (r !== 'success') return { ok: false };
+    await setSoftLock(true);
+    await setUserLockPref(uid, true);
+    return { ok: true };
+  }
+  if (cap === 'none') {
+    return { ok: false, message: 'Set a screen lock (fingerprint, PIN, pattern or password) in your phone settings first.' };
+  }
+  return { ok: false, message: 'This phone has no screen lock, so Outfit can\'t be locked.' };
+};
+
+// Settings switch OFF: one fingerprint / screen-lock check. Never throws.
+export const turnOffAppLock = async (uid?: string | null): Promise<LockChange> => {
+  await markMigrated();
+  if (await isLockEnabled()) {
+    const r = await disableHardwareLock();
+    if (!r.ok) return r;
+  } else if (await isSoftLockOn()) {
+    const r = await authenticate('Turn off app lock', 'Confirm with your screen lock', 'Cancel');
+    if (r !== 'success' && r !== 'error') return { ok: false };
+  }
+  await setSoftLock(false);
+  await setUserLockPref(uid, false);
+  return { ok: true };
 };

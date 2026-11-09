@@ -330,6 +330,10 @@ export const countFriendsJoined = async (uid: string): Promise<number> => {
   }
 };
 
+// "3 people joined with your link" (referrals/{newUid} docs naming me, counted on the server)
+export const joinedWithLinkText = (n: number): string =>
+  n === 1 ? '1 person joined with your link' : `${n} people joined with your link`;
+
 // Friends whose REFERRAL_POINTS are already inside users.points. Never throws.
 export const countAwardedReferrals = async (uid: string): Promise<number> => {
   try {

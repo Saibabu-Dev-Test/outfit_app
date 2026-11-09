@@ -50,7 +50,7 @@ const cellSize = (precision: number) => {
 
 // Geohash prefixes (at this precision) of every cell that touches the box of radiusKm around
 // (lat, lng): the cell itself plus its neighbours (more columns near the poles / for big radii)
-export const geohashNeighbours = (lat: number, lng: number, precision: number, radiusKm = 5): string[] => {
+export const geohashNeighbours = (lat: number, lng: number, precision: number, radiusKm = 3): string[] => {
   const { dLat, dLng } = cellSize(precision);
   const kmLat = radiusKm / 111.32;
   const kmLng = radiusKm / (111.32 * Math.max(0.01, Math.cos((lat * Math.PI) / 180)));

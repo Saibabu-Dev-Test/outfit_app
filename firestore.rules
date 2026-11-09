@@ -383,8 +383,13 @@ service cloud.firestore {
             || (request.resource.data.location.lat is number && request.resource.data.location.lng is number));
 
       allow update: if signedIn() && (
-        // Owner: anything except ownership
+        // Owner: anything except ownership (incl. Public <-> Private and the Nearby location)
         (resource.data.ownerId == me() && request.resource.data.ownerId == resource.data.ownerId)
+        // Admin: only Public <-> Private and the Nearby location (isPublic must match isPrivate)
+        || (isAdmin()
+            && onlyChanged(['isPrivate', 'isPublic', 'location', 'geohash'])
+            && request.resource.data.isPrivate is bool
+            && request.resource.data.get('isPublic', !request.resource.data.isPrivate) == !request.resource.data.isPrivate)
         // Join: add only yourself. Private circles need lastJoin = {uid: me, code: inviteCode}
         || (onlyChanged(['memberIds', 'lastJoin'])
             && request.resource.data.memberIds.toSet() == resource.data.memberIds.toSet().union([me()].toSet())

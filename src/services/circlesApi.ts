@@ -4,7 +4,9 @@
 //   circles/{id}/messages/{msgId}/votes/{uid}   one poll vote per user
 //   inviteCodes/{code}                    -> { circleId } so private circles can be joined by code
 // Nearby: circles/{id}.isPublic (= !isPrivate), optional location {lat, lng} rounded to ~100 m and
-// geohash (precision 6). Nearby = geohash range queries (precision-5 cells around me) + 5 km filter.
+// geohash (precision 6). Nearby = geohash range queries (precision-5 cells around me) + 3 km filter.
+// The owner can switch a circle between public and private later (updateCircleVisibility); a
+// private circle has no location / geohash, so it drops out of Nearby.
 import {
   collection,
   doc,
@@ -13,6 +15,7 @@ import {
   addDoc,
   updateDoc,
   deleteDoc,
+  deleteField,
   setDoc,
   writeBatch,
   query,
@@ -232,10 +235,10 @@ export const getDiscoverCircles = async (): Promise<Circle[]> => {
   }
 };
 
-export const NEARBY_KM = 5;
+export const NEARBY_KM = 3;
 
-// Public circles within NEARBY_KM of me, nearest first. Geohash prefix range queries over the
-// precision-5 cells covering the 5 km box (index: isPrivate + geohash), then an exact distance
+// Public circles within NEARBY_KM (3 km) of me, nearest first. Geohash prefix range queries over the
+// precision-5 cells covering the 3 km box (index: isPrivate + geohash), then an exact distance
 // filter. If that index isn't deployed yet, falls back to all public circles filtered on the phone.
 // (The query uses isPrivate == false because the read rule is written on isPrivate.)
 export const getNearbyCircles = async (lat: number, lng: number): Promise<Circle[]> => {
@@ -276,6 +279,39 @@ export const getNearbyCircles = async (lat: number, lng: number): Promise<Circle
     return within(snap.docs.map(d => toCircle(d.id, d.data())));
   } catch (e: any) {
     return fail(e, 'Loading nearby circles');
+  }
+};
+
+// Owner (or admin, once the rules allow it): switch public <-> private after creation.
+// Private: removes location + geohash (no longer in Discover or Nearby; invite code still works).
+// Public: optional approximate location (rounded to ~100 m) so it shows in Nearby again.
+export const updateCircleVisibility = async (
+  circleId: string,
+  isPrivate: boolean,
+  location?: { lat: number; lng: number } | null,
+): Promise<void> => {
+  const data: any = { isPrivate, isPublic: !isPrivate };
+  if (isPrivate) {
+    data.location = deleteField();
+    data.geohash = deleteField();
+  } else if (location) {
+    const loc = { lat: roundCoord(location.lat), lng: roundCoord(location.lng) };
+    data.location = loc;
+    data.geohash = encodeGeohash(loc.lat, loc.lng, 6);
+  }
+  try {
+    await updateDoc(doc(db, CIRCLES, circleId), data);
+  } catch (e: any) {
+    fail(e, 'Updating circle');
+  }
+};
+
+// Owner: stop showing a public circle in Nearby (keeps it public / in Discover)
+export const removeCircleLocation = async (circleId: string): Promise<void> => {
+  try {
+    await updateDoc(doc(db, CIRCLES, circleId), { location: deleteField(), geohash: deleteField() });
+  } catch (e: any) {
+    fail(e, 'Updating circle');
   }
 };
 

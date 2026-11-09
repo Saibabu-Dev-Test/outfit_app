@@ -29,11 +29,13 @@ import { useAuth } from '../../context/AuthContext';
 import { copyReferralLink, referralLink, shareMyReferral, shareReferral, shareReferralOnWhatsApp } from '../../utils/referralLink';
 import {
   countFriendsJoined,
+  joinedWithLinkText,
   ensureReferralCode,
   isWeeklyStar,
   REFERRAL_POINTS,
 } from '../../services/rewardsApi';
-import { getLockCapability, isLockEnabled, isLockSupported, isSoftLockOn } from '../../native/appLock';
+import { getLockCapability, isAppLockOn, turnOffAppLock, turnOnAppLock } from '../../native/appLock';
+import { signOutKeepLock } from '../../services/authApi';
 import { isAutoUpdateOn, isUpdateSupported, setAutoUpdate } from '../../native/appUpdate';
 
 // "+91 98765 43210" from users/{uid}.phone (10 digits), else the saved phoneNumber
@@ -316,10 +318,10 @@ const fetchProfile = async () => {
     const uid = authUser?.id;
     let alive = true;
     (async () => {
-      // Shown on Android whenever the phone can be locked; the lock itself is enforced by AppLockGate
+      // Optional app lock (off by default): switch shown on Android when the phone can be locked
       const cap = await getLockCapability();
       const supported = Platform.OS === 'android' && cap !== 'unsupported';
-      const on = ((await isLockSupported()) && (await isLockEnabled())) || (await isSoftLockOn());
+      const on = await isAppLockOn();
       if (alive) {
         setLockSupported(supported);
         setLockOn(on);
@@ -338,6 +340,25 @@ const fetchProfile = async () => {
       alive = false;
     };
   }, [authUser?.id]);
+
+  // App lock switch. ON: fingerprint (session encrypted) or, without one, the phone's screen lock.
+  // OFF: one fingerprint / screen-lock check, then the app opens straight in again.
+  const [lockBusy, setLockBusy] = useState(false);
+  const handleToggleLock = async (value: boolean) => {
+    if (lockBusy) return;
+    setLockBusy(true);
+    try {
+      const r = value ? await turnOnAppLock(authUser?.id) : await turnOffAppLock(authUser?.id);
+      if (r.ok) {
+        setLockOn(value);
+        return;
+      }
+      if (r.message) Alert.alert('App lock', r.message);
+      if (r.invalidated) await signOutKeepLock();
+    } finally {
+      setLockBusy(false);
+    }
+  };
 
   const handleShareInvite = () => {
     if (referralCode) shareReferral(referralCode);
@@ -600,11 +621,11 @@ const fetchProfile = async () => {
               </>
             )}
             {!!referralError && <Text style={styles.inviteError}>{referralError}</Text>}
-            <Text style={styles.inviteFriends}>Friends joined: {friendsJoined}</Text>
+            <Text style={styles.inviteFriends}>👥 {joinedWithLinkText(friendsJoined)}</Text>
           </View>
         </View>
 
-        {/* App lock: required for everyone on Android (no switch to turn it off) */}
+        {/* App lock: optional, off by default */}
         {lockSupported && (
           <View style={styles.menuSection}>
             <View style={styles.menuItem}>
@@ -612,9 +633,18 @@ const fetchProfile = async () => {
                 <View style={styles.menuIconBox}>
                   <Text style={styles.menuIcon}>🔒</Text>
                 </View>
-                <Text style={styles.menuLabel}>App lock</Text>
+                <View>
+                  <Text style={styles.menuLabel}>App lock (fingerprint)</Text>
+                  <Text style={styles.lockValue}>{lockOn ? 'On: asks when Outfit opens' : 'Off: Outfit opens straight in'}</Text>
+                </View>
               </View>
-              <Text style={styles.lockValue}>{lockOn ? 'On (required)' : 'Required'}</Text>
+              <Switch
+                value={lockOn}
+                onValueChange={handleToggleLock}
+                disabled={lockBusy}
+                trackColor={{ false: colors.border, true: colors.accent }}
+                thumbColor={colors.textInverse}
+              />
             </View>
           </View>
         )}
