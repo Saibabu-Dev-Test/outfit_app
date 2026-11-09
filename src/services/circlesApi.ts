@@ -7,6 +7,11 @@
 // geohash (precision 6). Nearby = geohash range queries (precision-5 cells around me) + 3 km filter.
 // The owner can switch a circle between public and private later (updateCircleVisibility); a
 // private circle has no location / geohash, so it drops out of Nearby.
+// Distance limit: a public circle may have radiusKm (1 / 3 / 5 / 10 km, default 3). Such a circle
+// needs a location, is left out of Discover, shows in Nearby only within radiusKm of the user, and
+// joining it from Nearby needs the user's location (lastJoin = {uid, lat, lng}, checked by the rules
+// with cosLat). Its invite code (shared by a member) still lets anyone join from anywhere.
+// No radiusKm = visible to everyone in Discover and anyone can join.
 import {
   collection,
   doc,
@@ -35,6 +40,7 @@ import { toDate } from '../utils/date';
 import { inlineAvatar } from './userApi';
 import { assertClean } from '../utils/profanity';
 import { encodeGeohash, geohashNeighbours, haversineKm, roundCoord } from '../utils/geo';
+import { getApproxLocation } from '../native/location';
 
 export interface Circle {
   id: string;
@@ -49,6 +55,8 @@ export interface Circle {
   lastMessageAt: Date | null;
   location: { lat: number; lng: number } | null;
   geohash: string | null;
+  // Distance limit in km (null = no limit: everyone can see and join it)
+  radiusKm: number | null;
   distanceKm?: number; // Nearby list only
 }
 
@@ -116,6 +124,7 @@ const toCircle = (id: string, d: any): Circle => ({
       ? { lat: d.location.lat, lng: d.location.lng }
       : null,
   geohash: typeof d?.geohash === 'string' ? d.geohash : null,
+  radiusKm: typeof d?.radiusKm === 'number' && d.radiusKm > 0 ? d.radiusKm : null,
 });
 
 const toMessage = (id: string, d: any): ChatMessage => {
@@ -153,12 +162,41 @@ const randomCode = (): string => {
 
 export const normalizeCode = (code: string): string => code.replace(/\s/g, '').toUpperCase();
 
+// Circle invite link (opens the app on Android): outfit://join/CODE
+export const circleInviteLink = (code: string) => `outfit://join/${normalizeCode(code)}`;
+
+// Invite code from a link or pasted text (outfit://join/CODE, ...?circle=CODE, or the bare code). '' when none.
+export const codeFromInvite = (text: string | null | undefined): string => {
+  if (!text) return '';
+  const m =
+    text.match(/outfit:\/\/join\/([A-Za-z0-9]{6})\b/) ||
+    text.match(/[?&]circle=([A-Za-z0-9]{6})\b/) ||
+    text.trim().match(/^([A-Za-z0-9]{6})$/);
+  return m ? m[1].toUpperCase() : '';
+};
+
 const fail = (e: any, action: string): never => {
   console.warn(`${action} failed:`, e?.code, e?.message);
   throw new Error(firestoreErrorMessage(e, action));
 };
 
 // ── Circles ────────────────────────────────────────────────────────────────
+
+// Distance limits the creator can pick (km). DEFAULT_RADIUS_KM is preselected.
+export const RADIUS_OPTIONS = [1, 3, 5, 10];
+export const DEFAULT_RADIUS_KM = 3;
+export const MAX_RADIUS_KM = 10;
+
+// Location fields saved on a circle (rounded to ~100 m). cosLat lets the rules check a join
+// distance without trigonometry.
+const locationFields = (loc: { lat: number; lng: number }) => ({
+  location: loc,
+  geohash: encodeGeohash(loc.lat, loc.lng, 6),
+  cosLat: Math.round(Math.cos((loc.lat * Math.PI) / 180) * 10000) / 10000,
+});
+
+export const formatKm = (km: number): string =>
+  km < 1 ? `${Math.round(km * 1000)} m` : `${km.toFixed(1)} km`;
 
 export const createCircle = async (
   input: {
@@ -168,11 +206,17 @@ export const createCircle = async (
     isPrivate: boolean;
     // Optional: shown in Nearby (public circles only). Rounded to ~100 m before saving.
     location?: { lat: number; lng: number } | null;
+    // Optional distance limit (public circles only; needs location). null = no limit.
+    radiusKm?: number | null;
   },
   uid: string,
 ): Promise<Circle> => {
   const name = input.name.trim();
   if (!name) throw new Error('Please give your circle a name.');
+  const radiusKm = !input.isPrivate && input.radiusKm ? input.radiusKm : null;
+  if (radiusKm && !input.location) {
+    throw new Error('A distance limit needs your location. Turn on Location, or choose "No limit".');
+  }
   try {
     // Pick an unused invite code
     let code = '';
@@ -194,7 +238,8 @@ export const createCircle = async (
       emoji: input.emoji || '👗',
       isPrivate: input.isPrivate,
       isPublic: !input.isPrivate,
-      ...(loc ? { location: loc, geohash: encodeGeohash(loc.lat, loc.lng, 6) } : {}),
+      ...(loc ? locationFields(loc) : {}),
+      ...(loc && radiusKm ? { radiusKm } : {}),
       ownerId: uid,
       memberIds: [uid],
       inviteCode: code,
@@ -227,8 +272,10 @@ export const getMyCircles = async (uid: string): Promise<Circle[]> => {
 export const getDiscoverCircles = async (): Promise<Circle[]> => {
   try {
     const snap = await getDocs(query(collection(db, CIRCLES), where('isPrivate', '==', false), limit(100)));
+    // Circles with a distance limit only show in Nearby (to people within that distance)
     return snap.docs
       .map(d => toCircle(d.id, d.data()))
+      .filter(c => !c.radiusKm)
       .sort((a, b) => b.memberIds.length - a.memberIds.length || byRecent(a, b));
   } catch (e: any) {
     return fail(e, 'Loading circles');
@@ -237,9 +284,11 @@ export const getDiscoverCircles = async (): Promise<Circle[]> => {
 
 export const NEARBY_KM = 3;
 
-// Public circles within NEARBY_KM (3 km) of me, nearest first. Geohash prefix range queries over the
-// precision-5 cells covering the 3 km box (index: isPrivate + geohash), then an exact distance
-// filter. If that index isn't deployed yet, falls back to all public circles filtered on the phone.
+// Public circles near me, nearest first. A circle with a distance limit shows only when I am within
+// its radiusKm; one without a limit (older "Show in Nearby" circles) shows within NEARBY_KM.
+// Geohash prefix range queries over the precision-5 cells covering the MAX_RADIUS_KM box
+// (index: isPrivate + geohash), then an exact distance filter. If that index isn't deployed yet,
+// falls back to all public circles filtered on the phone.
 // (The query uses isPrivate == false because the read rule is written on isPrivate.)
 export const getNearbyCircles = async (lat: number, lng: number): Promise<Circle[]> => {
   const col = collection(db, CIRCLES);
@@ -250,12 +299,12 @@ export const getNearbyCircles = async (lat: number, lng: number): Promise<Circle
       if (seen.has(c.id) || c.isPrivate || !c.location) return;
       seen.add(c.id);
       const km = haversineKm(lat, lng, c.location.lat, c.location.lng);
-      if (km <= NEARBY_KM) out.push({ ...c, distanceKm: km });
+      if (km <= (c.radiusKm ?? NEARBY_KM)) out.push({ ...c, distanceKm: km });
     });
     return out.sort((a, b) => (a.distanceKm || 0) - (b.distanceKm || 0));
   };
   try {
-    const cells = geohashNeighbours(lat, lng, 5, NEARBY_KM);
+    const cells = geohashNeighbours(lat, lng, 5, MAX_RADIUS_KM);
     const snaps = await Promise.all(
       cells.map(h =>
         getDocs(
@@ -283,21 +332,26 @@ export const getNearbyCircles = async (lat: number, lng: number): Promise<Circle
 };
 
 // Owner (or admin, once the rules allow it): switch public <-> private after creation.
-// Private: removes location + geohash (no longer in Discover or Nearby; invite code still works).
-// Public: optional approximate location (rounded to ~100 m) so it shows in Nearby again.
+// Private: removes location, geohash and the distance limit (no longer in Discover or Nearby;
+// invite code still works).
+// Public: optional approximate location (rounded to ~100 m) and distance limit (radiusKm, needs the
+// location; null = no limit).
 export const updateCircleVisibility = async (
   circleId: string,
   isPrivate: boolean,
   location?: { lat: number; lng: number } | null,
+  radiusKm?: number | null,
 ): Promise<void> => {
   const data: any = { isPrivate, isPublic: !isPrivate };
   if (isPrivate) {
     data.location = deleteField();
     data.geohash = deleteField();
+    data.cosLat = deleteField();
+    data.radiusKm = deleteField();
   } else if (location) {
     const loc = { lat: roundCoord(location.lat), lng: roundCoord(location.lng) };
-    data.location = loc;
-    data.geohash = encodeGeohash(loc.lat, loc.lng, 6);
+    Object.assign(data, locationFields(loc));
+    data.radiusKm = radiusKm ? radiusKm : deleteField();
   }
   try {
     await updateDoc(doc(db, CIRCLES, circleId), data);
@@ -306,10 +360,15 @@ export const updateCircleVisibility = async (
   }
 };
 
-// Owner: stop showing a public circle in Nearby (keeps it public / in Discover)
+// Owner: no distance limit and out of Nearby (keeps it public / in Discover for everyone)
 export const removeCircleLocation = async (circleId: string): Promise<void> => {
   try {
-    await updateDoc(doc(db, CIRCLES, circleId), { location: deleteField(), geohash: deleteField() });
+    await updateDoc(doc(db, CIRCLES, circleId), {
+      location: deleteField(),
+      geohash: deleteField(),
+      cosLat: deleteField(),
+      radiusKm: deleteField(),
+    });
   } catch (e: any) {
     fail(e, 'Updating circle');
   }
@@ -354,9 +413,41 @@ export const joinPublicCircle = async (circleId: string, uid: string): Promise<v
   }
 };
 
+// Join from Discover / Nearby / the circle screen. A circle with a distance limit needs the user's
+// location (Location on) and the user within radiusKm; the approximate location (~100 m) goes into
+// lastJoin so the rules can check it. Far away: join with the invite code a member shares instead.
+export const joinCircle = async (circle: Circle, uid: string): Promise<void> => {
+  if (circle.isPrivate) throw new Error('This circle is private. Join it with an invite code.');
+  if (!circle.radiusKm || !circle.location) return joinPublicCircle(circle.id, uid);
+  const loc = await getApproxLocation();
+  if (!loc.ok) {
+    throw new Error(
+      `${circle.name} is only for people within ${circle.radiusKm} km. Turn on Location to join.\n${loc.message}`,
+    );
+  }
+  const km = haversineKm(loc.coords.lat, loc.coords.lng, circle.location.lat, circle.location.lng);
+  if (km > circle.radiusKm) {
+    throw new Error(
+      `${circle.name} is only for people within ${circle.radiusKm} km, and you are about ${formatKm(km)} away. Ask a member for the invite link or code.`,
+    );
+  }
+  try {
+    await updateDoc(doc(db, CIRCLES, circle.id), {
+      memberIds: arrayUnion(uid),
+      lastJoin: { uid, lat: roundCoord(loc.coords.lat), lng: roundCoord(loc.coords.lng) },
+    });
+  } catch (e: any) {
+    if (e?.code === 'permission-denied') {
+      throw new Error(`You need to be within ${circle.radiusKm} km of ${circle.name} to join. Ask a member for the invite code.`);
+    }
+    fail(e, 'Joining circle');
+  }
+};
+
 // Join any circle (private or public) with its 6-character code. Returns the circle id.
 export const joinWithCode = async (rawCode: string, uid: string): Promise<string> => {
-  const code = normalizeCode(rawCode);
+  // Accepts the bare code or a pasted invite link / message (outfit://join/CODE)
+  const code = codeFromInvite(rawCode) || normalizeCode(rawCode);
   if (code.length !== 6) throw new Error('Invite codes have 6 characters.');
   let circleId = '';
   try {

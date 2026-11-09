@@ -1,4 +1,5 @@
-// Build a photo poll: "Which should I buy?" / "Which should I wear?" with 2-6 photos labelled A-F
+// Build a photo poll: "Which should I buy?" / "Which should I wear?" with 2-6 photos labelled A-F.
+// Add photo: From Wardrobe / Take photo / Several photos (A-F vote) / Cancel (ActionSheet).
 import React, { useEffect, useState } from 'react';
 import {
   Modal,
@@ -16,6 +17,8 @@ import {
 } from 'react-native';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles } from '../theme';
 import { pickImage, pickImages, POLL_PICK } from '../utils/imagePicker';
+import ActionSheet from './ActionSheet';
+import WardrobePickerModal from './WardrobePickerModal';
 import {
   MAX_POLL_OPTIONS,
   MAX_POLL_TOTAL_CHARS,
@@ -30,12 +33,18 @@ interface Props {
   onClose: () => void;
   onSubmit: (kind: PollKind, options: PollOption[]) => Promise<void>;
   initialImages?: string[]; // photos picked together in the chat
+  userId?: string; // for "From Wardrobe"
 }
 
-export default function CreatePollModal({ visible, onClose, onSubmit, initialImages }: Props) {
+// Per-photo limit for a poll option (several photos share one Firestore doc)
+export const POLL_PHOTO_MAX_CHARS = POLL_PICK.maxChars ?? 145000;
+
+export default function CreatePollModal({ visible, onClose, onSubmit, initialImages, userId }: Props) {
   const [kind, setKind] = useState<PollKind>('wear');
   const [options, setOptions] = useState<PollOption[]>([]);
   const [sending, setSending] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [wardrobeOpen, setWardrobeOpen] = useState(false);
 
   useEffect(() => {
     if (visible && initialImages?.length) {
@@ -80,13 +89,12 @@ export default function CreatePollModal({ visible, onClose, onSubmit, initialIma
     }
   };
 
-  const askSource = () =>
-    Alert.alert('Add a photo', undefined, [
-      { text: 'Take Photo', onPress: () => addPhoto('camera') },
-      { text: 'Choose several', onPress: addSeveral },
-      { text: 'Choose from Library', onPress: () => addPhoto('library') },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
+  const addFromWardrobe = (images: string[]) =>
+    setOptions(prev =>
+      [...prev, ...images.map(img => ({ imageData: img, label: '' }))].slice(0, MAX_POLL_OPTIONS),
+    );
+
+  const askSource = () => setSheetOpen(true);
 
   const total = options.reduce((n, o) => n + o.imageData.length, 0);
   const tooBig = total > MAX_POLL_TOTAL_CHARS;
@@ -188,6 +196,30 @@ export default function CreatePollModal({ visible, onClose, onSubmit, initialIma
           </ScrollView>
         </View>
       </KeyboardAvoidingView>
+      <ActionSheet
+        visible={sheetOpen}
+        title="Add photos to the poll"
+        onClose={() => setSheetOpen(false)}
+        actions={[
+          { icon: '👗', label: 'From Wardrobe', hint: 'Pick clothes you already added', onPress: () => setWardrobeOpen(true) },
+          { icon: '📷', label: 'Take photo', onPress: () => addPhoto('camera') },
+          {
+            icon: '🖼️',
+            label: 'Several photos (A–F vote)',
+            hint: `Pick up to ${MAX_POLL_OPTIONS - options.length} from your gallery`,
+            onPress: addSeveral,
+          },
+        ]}
+      />
+      <WardrobePickerModal
+        visible={wardrobeOpen}
+        userId={userId}
+        max={MAX_POLL_OPTIONS - options.length}
+        startIndex={options.length}
+        maxChars={POLL_PHOTO_MAX_CHARS}
+        onClose={() => setWardrobeOpen(false)}
+        onDone={addFromWardrobe}
+      />
     </Modal>
   );
 }

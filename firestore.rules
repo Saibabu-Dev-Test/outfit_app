@@ -363,6 +363,31 @@ service cloud.firestore {
 
     // ── Circles ─────────────────────────────────────────────────────────
     match /circles/{cid} {
+      // Optional distance limit: public circles only, needs a location, 1-50 km
+      function validRadius(d) {
+        return d.get('radiusKm', null) == null
+          || (d.radiusKm is number && d.radiusKm > 0 && d.radiusKm <= 50
+              && d.isPrivate == false
+              && d.get('location', null) != null
+              && d.get('cosLat', null) is number);
+      }
+      function joinedWithCode() {
+        let j = request.resource.data.get('lastJoin', {});
+        return j.get('uid', '') == me() && j.get('code', '') == resource.data.inviteCode;
+      }
+      // Approximate distance (equirectangular, cosLat stored with the location) with ~0.5 km slack
+      // for the ~100 m rounding of both points. The location comes from the phone.
+      function joinedNearby() {
+        let j = request.resource.data.get('lastJoin', {});
+        let c = resource.data;
+        let r = c.get('radiusKm', 0) + 0.5;
+        return j.get('uid', '') == me()
+          && j.get('lat', null) is number && j.get('lng', null) is number
+          && c.get('location', null) != null
+          && math.pow((j.lat - c.location.lat) * 111.32, 2)
+             + math.pow((j.lng - c.location.lng) * 111.32 * c.get('cosLat', 1.0), 2) <= r * r;
+      }
+
       allow read: if signedIn()
         && (resource.data.isPrivate == false || me() in resource.data.memberIds || isAdmin());
 
@@ -380,22 +405,28 @@ service cloud.firestore {
         && (request.resource.data.get('geohash', null) == null
             || (request.resource.data.geohash is string && request.resource.data.geohash.size() <= 12))
         && (request.resource.data.get('location', null) == null
-            || (request.resource.data.location.lat is number && request.resource.data.location.lng is number));
+            || (request.resource.data.location.lat is number && request.resource.data.location.lng is number))
+        && validRadius(request.resource.data);
 
       allow update: if signedIn() && (
         // Owner: anything except ownership (incl. Public <-> Private and the Nearby location)
-        (resource.data.ownerId == me() && request.resource.data.ownerId == resource.data.ownerId)
+        (resource.data.ownerId == me() && request.resource.data.ownerId == resource.data.ownerId
+            && validRadius(request.resource.data))
         // Admin: only Public <-> Private and the Nearby location (isPublic must match isPrivate)
         || (isAdmin()
-            && onlyChanged(['isPrivate', 'isPublic', 'location', 'geohash'])
+            && onlyChanged(['isPrivate', 'isPublic', 'location', 'geohash', 'cosLat', 'radiusKm'])
             && request.resource.data.isPrivate is bool
-            && request.resource.data.get('isPublic', !request.resource.data.isPrivate) == !request.resource.data.isPrivate)
-        // Join: add only yourself. Private circles need lastJoin = {uid: me, code: inviteCode}
+            && request.resource.data.get('isPublic', !request.resource.data.isPrivate) == !request.resource.data.isPrivate
+            && validRadius(request.resource.data))
+        // Join: add only yourself.
+        //   Invite code (any circle, any distance): lastJoin = {uid: me, code: inviteCode}
+        //   Public, no distance limit: anyone
+        //   Public with radiusKm: lastJoin = {uid: me, lat, lng} within radiusKm of the circle
         || (onlyChanged(['memberIds', 'lastJoin'])
             && request.resource.data.memberIds.toSet() == resource.data.memberIds.toSet().union([me()].toSet())
-            && (resource.data.isPrivate == false
-                || (request.resource.data.lastJoin.uid == me()
-                    && request.resource.data.lastJoin.code == resource.data.inviteCode)))
+            && ((resource.data.isPrivate == false && resource.data.get('radiusKm', null) == null)
+                || joinedWithCode()
+                || (resource.data.isPrivate == false && joinedNearby())))
         // Leave: remove only yourself (the owner deletes instead of leaving)
         || (onlyChanged(['memberIds'])
             && me() in resource.data.memberIds

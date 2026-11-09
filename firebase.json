@@ -1,6 +1,6 @@
 {
   "hosting": {
-    "public": "web/dist",
+    "public": "hosting-public",
     "ignore": ["firebase.json", "**/.*"],
     "redirects": [
       {
@@ -12,9 +12,18 @@
         "source": "/Outfit-universal.apk",
         "destination": "https://github.com/Saibabu-Dev-Test/outfit_app/releases/latest/download/Outfit-universal.apk",
         "type": 302
+      },
+      {
+        "source": "/",
+        "destination": "https://github.com/Saibabu-Dev-Test/outfit_app/releases/latest/download/Outfit.apk",
+        "type": 302
+      },
+      {
+        "source": "**",
+        "destination": "https://github.com/Saibabu-Dev-Test/outfit_app/releases/latest/download/Outfit.apk",
+        "type": 302
       }
-    ],
-    "rewrites": [{ "source": "**", "destination": "/index.html" }]
+    ]
   },
   "firestore": {
     "rules": "firestore.rules",

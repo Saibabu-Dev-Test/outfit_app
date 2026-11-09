@@ -1,4 +1,6 @@
 // Auth: Google account on the device + mobile number + password. No OTP, no SMS.
+// Sign up: pick the Gmail once (Google account picker) -> mobile number from the Android phone number
+// hint picker (SIM), or typed when the picker has no number -> Password + Confirm Password.
 import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
@@ -49,7 +51,7 @@ const COUNTRY_CODES = [
 ];
 
 const GENDER_OPTIONS = ['Male', 'Female', 'Other'];
-const MIN_PASSWORD = 6;
+const MIN_PASSWORD = 8; // new passwords (sign-up / reset); sign-in accepts older 6+ ones
 
 // Brute-force guard: 5 wrong passwords -> Sign In locked for 60 s (survives app restart).
 // Not 'outfit:' prefixed, so logout doesn't clear it.
@@ -83,7 +85,7 @@ const TITLES: Record<AuthMode, { title: string; subtitle: string; button: string
     title: 'Get Started',
     subtitle: IS_WEB
       ? 'Step 1: continue with Google. Step 2: enter your mobile number & set a password'
-      : 'Step 1: continue with Google. Step 2: select the SIM number in this phone & set a password',
+      : 'Step 1: pick your Gmail. Step 2: select the SIM number in this phone (or type it) & set a password',
     button: 'Create Account',
   },
   forgot: {
@@ -116,6 +118,9 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
   // Register/reset: the number must come from the SIM picker (not typed)
   const [simPicked, setSimPicked] = useState(false);
   const [simLoading, setSimLoading] = useState(false);
+  // Sign-up only: the phone number hint picker had no number (no SIM / not supported), so the
+  // number is typed instead (saved as phoneVerified: false)
+  const [manualPhone, setManualPhone] = useState(false);
   // Brute-force lock (login only)
   const [lockedUntil, setLockedUntil] = useState(0);
   const [lockLeft, setLockLeft] = useState(0); // seconds
@@ -129,7 +134,8 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
   const isForgot = authMode === 'forgot';
   const needsConfirm = isRegister || isForgot; // new password typed twice
   // SIM must be in this phone (Android). The web can't read a SIM, so the number is typed there.
-  const needsSim = (isRegister || isForgot) && !IS_WEB;
+  // Sign-up can fall back to typing the number; reset always needs the registered SIM.
+  const needsSim = ((isRegister && !manualPhone) || isForgot) && !IS_WEB;
   const busy = loading || googleLoading || simLoading;
   const copy = TITLES[authMode];
   const locked = authMode === 'login' && lockLeft > 0;
@@ -193,6 +199,7 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
     setShowPassword(false);
     setShowConfirmPassword(false);
     setSimPicked(false);
+    setManualPhone(false);
     if (mode !== 'login') {
       // Number must be picked from the SIM again
       setPhoneNumber('');
@@ -237,6 +244,14 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
       if (!res.ok) {
         setSimPicked(false);
         setPhoneNumber('');
+        if (isRegister) {
+          // No number from the picker: let the user type it (closing the picker shows a link instead)
+          if (!res.cancelled) {
+            setManualPhone(true);
+            setError('Could not read a number from this phone. Type your mobile number instead.');
+          }
+          return;
+        }
         setError(isForgot ? SIM_RESET_MESSAGE : SIM_REQUIRED_MESSAGE);
         return;
       }
@@ -342,6 +357,7 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
           name,
           gender,
           referralCode: referralCode.trim() || undefined,
+          phoneFromSim: !IS_WEB && simPicked && !manualPhone,
         });
         if (!regRes?.user) {
           setError(regRes?.message || 'Could not create your account. Please try again.');
@@ -599,7 +615,34 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
                     <Text style={styles.stepHint}>
                       The SIM card of this number must be in this phone.
                     </Text>
+                    {isRegister && (
+                      <TouchableOpacity
+                        style={styles.simLink}
+                        onPress={() => {
+                          setError('');
+                          setSimPicked(false);
+                          setPhoneNumber('');
+                          setManualPhone(true);
+                        }}
+                        disabled={busy}
+                        accessibilityRole="button">
+                        <Text style={styles.forgotText}>No number shown? Type it instead</Text>
+                      </TouchableOpacity>
+                    )}
                   </>
+                )}
+
+                {isRegister && manualPhone && !IS_WEB && (
+                  <TouchableOpacity
+                    onPress={() => {
+                      setManualPhone(false);
+                      setPhoneNumber('');
+                      handlePickSim();
+                    }}
+                    disabled={busy}
+                    accessibilityRole="button">
+                    <Text style={[styles.forgotText, styles.simLink]}>📱 Pick the number from the SIM instead</Text>
+                  </TouchableOpacity>
                 )}
 
                 {showCountryPicker && (
@@ -658,6 +701,12 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
                     <Text style={styles.eyeIcon}>{showPassword ? '👁️' : '🙈'}</Text>
                   </TouchableOpacity>
                 </View>
+
+                {needsConfirm && !!password && password.length < MIN_PASSWORD && (
+                  <Text style={styles.hintError}>
+                    At least {MIN_PASSWORD} characters ({MIN_PASSWORD - password.length} more)
+                  </Text>
+                )}
 
                 {authMode === 'login' && (
                   <TouchableOpacity
@@ -828,4 +877,5 @@ const styles = themedStyles(() => StyleSheet.create({
   simButtonText: { fontSize: 14, fontWeight: '700', color: '#E91E63' },
   forgotRow: { alignSelf: 'flex-end', marginTop: spacing.sm },
   forgotText: { fontSize: 13, fontWeight: '700', color: '#E91E63' },
+  simLink: { marginTop: spacing.sm },
 }));

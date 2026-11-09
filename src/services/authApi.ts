@@ -332,13 +332,20 @@ export const completeSignUp = async ({
   name,
   gender,
   referralCode,
+  phoneFromSim,
 }: {
   phoneNumber: string;
   password: string;
   name?: string;
   gender?: string;
   referralCode?: string;
+  // true when the number came from the Android phone number hint (SIM) picker, false when typed
+  phoneFromSim?: boolean;
 }): Promise<AuthResponse> => {
+  if (password.length < 6) {
+    // Firebase's own minimum; the sign-up screen asks for more
+    return { message: 'Password must be at least 6 characters.' };
+  }
   const user = auth.currentUser;
   const email = user?.email?.toLowerCase();
   if (!user || !email) {
@@ -431,11 +438,9 @@ export const completeSignUp = async ({
   };
   if (name?.trim()) profile.name = name.trim();
   if (gender) profile.gender = gender;
-  if (Platform.OS === 'web') {
-    // A browser can't read the SIM: the number was typed, not checked
-    profile.phoneVerified = false;
-    profile.signupSource = 'web';
-  }
+  // Typed number (web, or no SIM number from the picker): not checked against the SIM
+  profile.phoneVerified = Platform.OS !== 'web' && phoneFromSim === true;
+  if (Platform.OS === 'web') profile.signupSource = 'web';
   try {
     await setDoc(doc(db, 'users', user.uid), profile, { merge: true });
   } catch (e: any) {
@@ -573,6 +578,7 @@ export interface ProfileStat {
 export interface UserProfile {
   id: string;
   phoneNumber: string;
+  email?: string; // Gmail the user signed in with (Firebase Auth)
   name?: string;
   dob?: string;
   timeOfBirth?: string;

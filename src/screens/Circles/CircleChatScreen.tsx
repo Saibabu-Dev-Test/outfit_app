@@ -22,6 +22,8 @@ import useIsAdmin from '../../hooks/useIsAdmin';
 import Avatar from '../../components/Avatar';
 import PollCard from '../../components/PollCard';
 import CreatePollModal from '../../components/CreatePollModal';
+import ActionSheet from '../../components/ActionSheet';
+import WardrobePickerModal from '../../components/WardrobePickerModal';
 import ReactionBar from '../../components/ReactionBar';
 import ReportModal, { ReportTarget } from '../../components/ReportModal';
 import {
@@ -34,9 +36,9 @@ import {
   sendImageMessage,
   sendPollMessage,
   deleteMessage,
-  joinPublicCircle,
+  joinCircle,
 } from '../../services/circlesApi';
-import { pickImage, pickImages } from '../../utils/imagePicker';
+import { MAX_BASE64_CHARS, pickImage, pickImages } from '../../utils/imagePicker';
 import { clockTime } from '../../utils/date';
 
 export default function CircleChatScreen({ navigation, route }: { navigation: any; route: any }) {
@@ -57,6 +59,8 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
   const [viewer, setViewer] = useState<string | null>(null);
   const [reportTarget, setReportTarget] = useState<ReportTarget | null>(null);
   const [joining, setJoining] = useState(false);
+  const [attachOpen, setAttachOpen] = useState(false);
+  const [wardrobeOpen, setWardrobeOpen] = useState(false);
 
   const isMember = !!uid && !!circle && circle.memberIds.includes(uid);
   const isOwner = !!uid && !!circle && circle.ownerId === uid;
@@ -162,26 +166,33 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
   const openComments = (m: ChatMessage) =>
     navigation.navigate('Comments', { target: { kind: 'circle', circleId, id: m.id } });
 
-  const openAttach = () =>
-    Alert.alert('Share', undefined, [
-      { text: 'Several photos (A-F vote)', onPress: sendSeveral },
-      {
-        text: 'Photo poll',
-        onPress: () => {
-          setPollImages(undefined);
-          setPollOpen(true);
-        },
-      },
-      { text: 'Take Photo', onPress: () => sendPhoto('camera') },
-      { text: 'Choose from Library', onPress: () => sendPhoto('library') },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
+  // Wardrobe photos: 1 = normal photo, 2-6 = A-F vote (poll editor opens with them)
+  const sendFromWardrobe = async (images: string[]) => {
+    if (images.length === 1) {
+      setSending(true);
+      try {
+        await sendImageMessage(circleId, me, images[0]);
+      } catch (e: any) {
+        Alert.alert('Photo not sent', e?.message || 'Please try again.');
+      } finally {
+        setSending(false);
+      }
+      return;
+    }
+    setPollImages(images);
+    setPollOpen(true);
+  };
+
+  // Attach: From Wardrobe / Take photo / Several photos (A-F vote) / Cancel.
+  // (Android's Alert shows only 3 buttons, so this is an ActionSheet.)
+  const openAttach = () => setAttachOpen(true);
 
   const handleJoin = async () => {
-    if (!uid) return;
+    if (!uid || !circle) return;
     setJoining(true);
     try {
-      await joinPublicCircle(circleId, uid);
+      // Distance-limited circles check the user's location (see joinCircle)
+      await joinCircle(circle, uid);
     } catch (e: any) {
       Alert.alert('Could not join', e?.message || 'Please try again.');
     } finally {
@@ -405,7 +416,36 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
           setPollImages(undefined);
         }}
         initialImages={pollImages}
+        userId={uid}
         onSubmit={(kind, options) => sendPollMessage(circleId, me, kind, options)}
+      />
+      <ActionSheet
+        visible={attachOpen}
+        title="Share photos"
+        onClose={() => setAttachOpen(false)}
+        actions={[
+          {
+            icon: '👗',
+            label: 'From Wardrobe',
+            hint: 'One photo, or 2-6 for an A–F vote',
+            onPress: () => setWardrobeOpen(true),
+          },
+          { icon: '📷', label: 'Take photo', onPress: () => sendPhoto('camera') },
+          {
+            icon: '🖼️',
+            label: 'Several photos (A–F vote)',
+            hint: 'Pick up to 6 from your gallery, labelled A–F',
+            onPress: sendSeveral,
+          },
+        ]}
+      />
+      <WardrobePickerModal
+        visible={wardrobeOpen}
+        userId={uid}
+        max={6}
+        maxChars={MAX_BASE64_CHARS}
+        onClose={() => setWardrobeOpen(false)}
+        onDone={sendFromWardrobe}
       />
       <ReportModal target={reportTarget} reporterId={uid} onClose={() => setReportTarget(null)} />
 

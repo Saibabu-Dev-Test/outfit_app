@@ -1,5 +1,7 @@
 // Circles: My Circles / Discover / Nearby tabs, join with an invite code, create a public or private
-// circle (public ones can be pinned to an approximate location so people within 3 km find them)
+// circle. A public circle can have a distance limit (default 3 km): then only people within that
+// distance see it (in Nearby) and can join it from there; others join with a member's invite link/code.
+// No limit = listed in Discover for everyone.
 import React, { useCallback, useState } from 'react';
 import {
   View,
@@ -29,9 +31,12 @@ import {
   getDiscoverCircles,
   getMyCircles,
   getNearbyCircles,
-  NEARBY_KM,
-  joinPublicCircle,
+  DEFAULT_RADIUS_KM,
+  RADIUS_OPTIONS,
+  formatKm,
+  joinCircle,
   joinWithCode,
+  codeFromInvite,
 } from '../../services/circlesApi';
 import { timeAgo } from '../../utils/date';
 import { getApproxLocation } from '../../native/location';
@@ -66,10 +71,11 @@ export default function CirclesScreen() {
   const [newDesc, setNewDesc] = useState('');
   const [newEmoji, setNewEmoji] = useState(EMOJIS[0]);
   const [newPrivate, setNewPrivate] = useState(false);
-  const [newNearby, setNewNearby] = useState(false); // public circle: save approximate location
+  // Public circle: distance limit in km (null = no limit, visible to everyone)
+  const [newRadius, setNewRadius] = useState<number | null>(DEFAULT_RADIUS_KM);
   const [creating, setCreating] = useState(false);
 
-  // Nearby (public circles within 3 km, NEARBY_KM)
+  // Nearby (public circles within their distance limit of me)
   const [nearby, setNearby] = useState<Circle[]>([]);
   const [nearbyLoaded, setNearbyLoaded] = useState(false);
   const [nearbyLoading, setNearbyLoading] = useState(false);
@@ -153,7 +159,7 @@ export default function CirclesScreen() {
     if (!uid) return;
     setJoiningId(c.id);
     try {
-      await joinPublicCircle(c.id, uid);
+      await joinCircle(c, uid);
       setNearby(prev => prev.map(x => (x.id === c.id ? { ...x, memberIds: [...x.memberIds, uid] } : x)));
       await load(false);
       openCircle(c);
@@ -184,7 +190,7 @@ export default function CirclesScreen() {
     setNewDesc('');
     setNewEmoji(EMOJIS[0]);
     setNewPrivate(false);
-    setNewNearby(false);
+    setNewRadius(DEFAULT_RADIUS_KM);
   };
 
   const handleCreate = async () => {
@@ -198,15 +204,23 @@ export default function CirclesScreen() {
     }
     setCreating(true);
     try {
-      // Public + "Show in Nearby": approximate location (rounded to ~100 m in createCircle)
+      // Public + distance limit: approximate location (rounded to ~100 m in createCircle).
+      // Without the location the limit can't work, so nothing is created.
       let location: { lat: number; lng: number } | null = null;
-      if (!newPrivate && newNearby) {
+      const radiusKm = newPrivate ? null : newRadius;
+      if (radiusKm) {
         const loc = await getApproxLocation();
-        if (loc.ok) location = loc.coords;
-        else Alert.alert('Location not added', `${loc.message}\nYour circle is created without a location.`);
+        if (!loc.ok) {
+          Alert.alert(
+            'Location needed',
+            `${loc.message}\nA ${radiusKm} km limit needs your location. Turn on Location, or choose "No limit".`,
+          );
+          return;
+        }
+        location = loc.coords;
       }
       const c = await createCircle(
-        { name: newName, description: newDesc, emoji: newEmoji, isPrivate: newPrivate, location },
+        { name: newName, description: newDesc, emoji: newEmoji, isPrivate: newPrivate, location, radiusKm },
         uid,
       );
       if (location) setNearbyLoaded(false); // show it next time Nearby opens
@@ -254,7 +268,7 @@ export default function CirclesScreen() {
           {tab === 'nearby' && item.location ? (
             <View style={styles.nearRow}>
               <Text style={styles.nearDist}>
-                📍 {item.distanceKm != null && item.distanceKm < 1 ? `${Math.round(item.distanceKm * 1000)} m` : `${(item.distanceKm || 0).toFixed(1)} km`} away
+                📍 {formatKm(item.distanceKm || 0)} away{item.radiusKm ? ` · within ${item.radiusKm} km only` : ''}
               </Text>
               <TouchableOpacity onPress={() => openInMaps(item)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
                 <Text style={styles.mapsLink}>Open in Maps</Text>
@@ -301,10 +315,10 @@ export default function CirclesScreen() {
           placeholder="Join with code"
           placeholderTextColor={colors.textMuted}
           value={code}
-          onChangeText={t => setCode(t.toUpperCase())}
+          // A pasted invite link / message (outfit://join/CODE) becomes just the code
+          onChangeText={t => setCode(codeFromInvite(t) || t.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6))}
           autoCapitalize="characters"
           autoCorrect={false}
-          maxLength={6}
         />
         <TouchableOpacity
           style={[styles.codeBtn, (code.trim().length !== 6 || joiningCode) && styles.disabled]}
@@ -334,7 +348,7 @@ export default function CirclesScreen() {
       {error ? <Text style={styles.error}>{error}</Text> : null}
       {tab === 'nearby' ? (
         <View style={styles.nearHead}>
-          <Text style={styles.nearHint}>Public circles within {NEARBY_KM} km of you</Text>
+          <Text style={styles.nearHint}>Public circles near you (each within its distance limit)</Text>
           <TouchableOpacity onPress={loadNearby} disabled={nearbyLoading}>
             <Text style={styles.mapsLink}>{nearbyLoading ? 'Finding…' : '↻ Refresh'}</Text>
           </TouchableOpacity>
@@ -378,8 +392,8 @@ export default function CirclesScreen() {
                   ? 'You have not joined any circles yet. Create one, join with a code, or look in Discover.'
                   : tab === 'nearby'
                   ? nearbyError
-                    ? 'Nearby needs your approximate location.'
-                    : `No public circles within ${NEARBY_KM} km yet. Create one and turn on "Show in Nearby"!`
+                    ? 'Turn on Location to see circles near you. Circles with a distance limit only show to people within that distance.'
+                    : `No circles near you yet. Create one with a distance limit (like ${DEFAULT_RADIUS_KM} km)!`
                   : 'No public circles yet. Create the first one!'}
               </Text>
             </View>
@@ -456,20 +470,26 @@ export default function CirclesScreen() {
               </View>
               {newPrivate && <Text style={styles.notice}>{PRIVATE_NOTICE}</Text>}
               {!newPrivate && (
-                <View style={styles.visRow}>
-                  <View style={styles.flex1}>
-                    <Text style={styles.visTitle}>📍 Show in Nearby</Text>
-                    <Text style={styles.visHint}>
-                      People within {NEARBY_KM} km can find and join it. Saves your approximate location (about 100 m).
-                    </Text>
+                <>
+                  <Text style={styles.label}>📍 Distance limit</Text>
+                  <View style={styles.radiusRow}>
+                    {[null, ...RADIUS_OPTIONS].map(r => (
+                      <TouchableOpacity
+                        key={String(r)}
+                        style={[styles.radiusChip, newRadius === r && styles.radiusChipActive]}
+                        onPress={() => setNewRadius(r)}>
+                        <Text style={[styles.radiusText, newRadius === r && styles.radiusTextActive]}>
+                          {r ? `${r} km` : 'No limit'}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
                   </View>
-                  <Switch
-                    value={newNearby}
-                    onValueChange={setNewNearby}
-                    trackColor={{ false: colors.border, true: colors.accent }}
-                    thumbColor={colors.textInverse}
-                  />
-                </View>
+                  <Text style={styles.visHint}>
+                    {newRadius
+                      ? `Only people within ${newRadius} km (Location on) see it in Nearby and can join. Others join with an invite link from a member. Saves your approximate location (about 100 m).`
+                      : 'Listed in Discover for everyone. Anyone can join.'}
+                  </Text>
+                </>
               )}
 
               <View style={styles.modalActions}>
@@ -510,7 +530,18 @@ const styles = themedStyles(() => StyleSheet.create({
     paddingHorizontal: spacing.base,
     marginTop: spacing.sm,
   },
-  nearHint: { fontSize: fontSize.sm, color: colors.textSecondary },
+  nearHint: { fontSize: fontSize.sm, color: colors.textSecondary, flex: 1 },
+  radiusRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginBottom: spacing.sm },
+  radiusChip: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs + 2,
+    borderRadius: borderRadius.full,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+  },
+  radiusChipActive: { borderColor: colors.accent, backgroundColor: colors.surfaceElevated },
+  radiusText: { fontSize: fontSize.sm, color: colors.textSecondary, fontWeight: fontWeight.semiBold },
+  radiusTextActive: { color: colors.primary, fontWeight: fontWeight.bold },
   flex1: { flex: 1 },
   listContent: { paddingBottom: spacing.xxxl },
   header: {
