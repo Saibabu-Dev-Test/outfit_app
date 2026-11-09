@@ -3,7 +3,9 @@
 // Android app reads it on the sign-up screen (sideloaded APKs get no Play Install Referrer).
 // Every share path (Share, WhatsApp, Copy link, post / profile / circle shares) sends this link
 // with the sharer's code; a share waits for the code and never goes out without it.
-// Old /?ref=CODE links still prefill the web sign-up (an Android browser is sent on to /get/).
+// /get/ detects the platform: Android gets the APK (+ a small "Open in browser" link), iPhone /
+// iPad / computers get only "Open Outfit in browser" (/?ref=CODE&web=1, code prefilled at sign-up).
+// The web root sends /?ref=CODE on to /get/ only on Android, and never when web=1.
 import { Alert, Linking, Platform, Share } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ensureReferralCode } from '../services/rewardsApi';

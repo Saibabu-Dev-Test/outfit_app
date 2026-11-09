@@ -14,10 +14,12 @@
   <meta name="apple-mobile-web-app-title" content="OUTFIT" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <script>
-    // Invite links (/?ref=CODE) opened in an Android browser go to the app download page
+    // Invite links (/?ref=CODE) opened in an Android browser go to the app download page.
+    // Never on iPhone / iPad / computers, and not when /get/ sent them here on purpose (web=1).
     (function () {
       try {
-        if (/[?&]ref=[^&#]+/i.test(location.search) && /Android/i.test(navigator.userAgent || '')) {
+        if (/[?&]ref=[^&#]+/i.test(location.search) && !/[?&]web=1/.test(location.search)
+            && /Android/i.test(navigator.userAgent || '')) {
           location.replace('<%= publicPath %>get/' + location.search);
         }
       } catch (e) {}

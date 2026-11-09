@@ -32,6 +32,9 @@
     .steps h2 { margin: 0 0 8px; font-size: 15px; color: var(--p); }
     .steps ol { margin: 0; padding-left: 20px; }
     .steps li { margin-bottom: 6px; }
+    .browser { display: block; margin-top: 22px; color: var(--m); font-size: 13px; }
+    .browser a { color: var(--p2); font-weight: 700; }
+    [hidden] { display: none !important; }
   </style>
 </head>
 <body>
@@ -42,18 +45,37 @@
 
     <div class="code" id="codeBox" hidden>Your friend's referral code<b id="code"></b></div>
 
-    <a class="btn" id="dl" href="https://github.com/Saibabu-Dev-Test/outfit_app/releases/latest/download/app-arm64-v8a-release.apk">⬇ Download Android app</a>
-    <p class="note" id="note"></p>
-    <a class="small" id="dlOld" href="https://github.com/Saibabu-Dev-Test/outfit_app/releases/latest/download/app-universal-release.apk">Older phone? Download this version</a>
+    <!-- Android: the app (APK) -->
+    <div id="android" hidden>
+      <a class="btn" id="dl" href="https://github.com/Saibabu-Dev-Test/outfit_app/releases/latest/download/app-arm64-v8a-release.apk">⬇ Download Android app</a>
+      <p class="note" id="note"></p>
+      <a class="small" id="dlOld" href="https://github.com/Saibabu-Dev-Test/outfit_app/releases/latest/download/app-universal-release.apk">Older phone? Download this version</a>
 
-    <div class="steps">
-      <h2>How to install</h2>
-      <ol>
-        <li>Tap <b>Download Android app</b> and open the file when it finishes.</li>
-        <li>If asked, allow <b>install from this source</b> (Settings → Install unknown apps), then go back and tap <b>Install</b>.</li>
-        <li>If you see <b>"package appears to be invalid"</b>, delete the old download and download again in <b>Chrome</b>.</li>
-        <li>Open OUTFIT and create your account. The referral code is filled in for you.</li>
-      </ol>
+      <div class="steps">
+        <h2>How to install</h2>
+        <ol>
+          <li>Tap <b>Download Android app</b> and open the file when it finishes.</li>
+          <li>If asked, allow <b>install from this source</b> (Settings → Install unknown apps), then go back and tap <b>Install</b>.</li>
+          <li>If you see <b>"package appears to be invalid"</b>, delete the old download and download again in <b>Chrome</b>.</li>
+          <li>Open OUTFIT and create your account. The referral code is filled in for you.</li>
+        </ol>
+      </div>
+      <span class="browser">Trouble installing? <a id="webSmall" href="/?web=1">Open in browser</a></span>
+    </div>
+
+    <!-- iPhone / iPad / computer: the web app (no APK) -->
+    <div id="other" hidden>
+      <a class="btn" id="web" href="/">Open Outfit in browser</a>
+      <p class="note">Create your account there. The referral code is filled in for you.</p>
+      <div class="steps" id="iosSteps" hidden>
+        <h2>Add Outfit to your Home Screen</h2>
+        <ol>
+          <li>Open this page in <b>Safari</b>.</li>
+          <li>Tap <b>Open Outfit in browser</b>.</li>
+          <li>Tap the <b>Share</b> button (square with an arrow ↑) at the bottom.</li>
+          <li>Scroll and tap <b>Add to Home Screen</b>, then <b>Add</b>. Outfit opens like an app from your Home Screen.</li>
+        </ol>
+      </div>
     </div>
   </main>
   <script>
@@ -66,6 +88,20 @@
       } else {
         code = '';
       }
+
+      // Android gets the APK; iPhone / iPad / computers get the web app (never the APK)
+      var ua = navigator.userAgent || '';
+      var isAndroid = /Android/i.test(ua);
+      var isIOS = /iPhone|iPad|iPod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      var webUrl = '/?' + (code ? 'ref=' + encodeURIComponent(code) + '&' : '') + 'web=1';
+      document.getElementById('web').href = webUrl;
+      document.getElementById('webSmall').href = webUrl;
+      if (!isAndroid) {
+        document.getElementById('other').hidden = false;
+        if (isIOS) document.getElementById('iosSteps').hidden = false;
+        return; // no download on these devices
+      }
+      document.getElementById('android').hidden = false;
 
       // Copies OUTFITREF:CODE so the app can fill the code after install (no Play Install Referrer)
       function fallbackCopy(text) {
