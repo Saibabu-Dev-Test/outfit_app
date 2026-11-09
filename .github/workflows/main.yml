@@ -130,6 +130,9 @@ jobs:
             cp "$f" "apks/app-$abi-release.apk"
           done
           cp apks/app-universal-release.apk apks/app-release.apk
+          # Branded names for the /get/ page and in-app updates (old names kept for older installs)
+          cp apks/app-arm64-v8a-release.apk apks/Outfit.apk
+          cp apks/app-universal-release.apk apks/Outfit-universal.apk
           ls -la apks
 
       # 7. Upload generated APKs
@@ -145,10 +148,12 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
-          name: OV App Build ${{ github.run_number }}
+          name: Outfit build ${{ github.run_number }}
           prerelease: false
           make_latest: true
           files: |
+            apks/Outfit.apk
+            apks/Outfit-universal.apk
             apks/app-arm64-v8a-release.apk
             apks/app-armeabi-v7a-release.apk
             apks/app-x86_64-release.apk
