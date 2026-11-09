@@ -1,7 +1,9 @@
 // Referral share links: https://outfit-vote-9edca.web.app/get/?ref=CODE (app download page).
 // The /get/ page copies "OUTFITREF:CODE" to the clipboard before the APK download starts; the
 // Android app reads it on the sign-up screen (sideloaded APKs get no Play Install Referrer).
-// "Open in browser" there goes to /?ref=CODE, which prefills the code on the web sign-up screen.
+// Every share path (Share, WhatsApp, Copy link, post / profile / circle shares) sends this link
+// with the sharer's code; a share waits for the code and never goes out without it.
+// Old /?ref=CODE links still prefill the web sign-up (an Android browser is sent on to /get/).
 import { Alert, Linking, Platform, Share } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ensureReferralCode } from '../services/rewardsApi';
@@ -141,14 +143,38 @@ export const getMyReferralCode = (uid: string | undefined): Promise<string | nul
   return myCode.p;
 };
 
-// "<line>" + app link with my referral code (plain app link if the code can't be loaded).
-// Used by Share on posts and "Share profile".
+const notify = (title: string, message: string) => {
+  if (Platform.OS === 'web' && typeof window !== 'undefined') window.alert(`${title}\n${message}`);
+  else Alert.alert(title, message);
+};
+const NO_CODE_MESSAGE = 'Could not load your invite code. Check your internet connection and try again.';
+
+// My code, waiting for it (creates it when missing; one retry after a failure). null = no code.
+export const requireMyReferralCode = async (uid: string | undefined): Promise<string | null> => {
+  if (!uid) return null;
+  const first = await getMyReferralCode(uid);
+  if (first) return first;
+  myCode = null;
+  return getMyReferralCode(uid);
+};
+
+// Invite (share sheet) with my code; waits for the code first
+export const shareMyReferral = async (uid: string | undefined) => {
+  const code = await requireMyReferralCode(uid);
+  if (code) await shareReferral(code);
+  else notify('Invite', NO_CODE_MESSAGE);
+};
+
+// "<line>" + app download link with my referral code. Used by Share on posts, "Share profile"
+// and circle invites. Never shares a link without the code.
 export const shareWithReferral = async (uid: string | undefined, line: string) => {
-  const code = await getMyReferralCode(uid);
-  const link = code ? referralLink(code) : APP_GET_URL;
-  const message = `${line}\nDownload the app (Outfit Vote, your AI stylist & daily colour guide): ${link}${
-    code ? `\n(referral code ${code})` : ''
-  }`;
+  const code = await requireMyReferralCode(uid);
+  if (!code) {
+    notify('Share', NO_CODE_MESSAGE);
+    return;
+  }
+  const link = referralLink(code);
+  const message = `${line}\nDownload the app (Outfit Vote, your AI stylist & daily colour guide): ${link}\n(referral code ${code})`;
   await shareText(message, async () => {
     const ok = await copyText(message);
     if (Platform.OS === 'web' && typeof window !== 'undefined') window.alert(ok ? 'Link copied' : link);

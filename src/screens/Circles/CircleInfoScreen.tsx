@@ -8,7 +8,6 @@ import {
   ScrollView,
   Alert,
   ActivityIndicator,
-  Share,
   StatusBar,
   Platform,
 } from 'react-native';
@@ -21,6 +20,7 @@ import ReportModal, { ReportTarget } from '../../components/ReportModal';
 import { Circle, subscribeCircle, leaveCircle, deleteCircle } from '../../services/circlesApi';
 import { getPublicUser } from '../../services/userApi';
 import { PRIVATE_NOTICE } from './CirclesScreen';
+import { shareWithReferral } from '../../utils/referralLink';
 
 interface MemberRow {
   id: string;
@@ -93,11 +93,11 @@ export default function CircleInfoScreen({ navigation, route }: { navigation: an
 
   const shareCode = async () => {
     if (!circle) return;
-    try {
-      await Share.share({
-        message: `Join my circle "${circle.name}" on Outfit Vote. Open Circles, tap "Join with code" and enter ${circle.inviteCode}`,
-      });
-    } catch {}
+    // App download link with my referral code, plus the circle code to join after sign-up
+    await shareWithReferral(
+      uid,
+      `Join my circle "${circle.name}" on Outfit Vote. Open Circles, tap "Join with code" and enter ${circle.inviteCode}`,
+    );
   };
 
   const handleLeave = () => {

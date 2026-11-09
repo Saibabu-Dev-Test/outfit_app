@@ -16,7 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles, statusBarStyle } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
-import { shareReferral } from '../../utils/referralLink';
+import { shareMyReferral, shareReferral } from '../../utils/referralLink';
 import {
   ALL_TASKS_BONUS,
   DayState,
@@ -89,6 +89,7 @@ export default function AchievementsScreen({ navigation }: { navigation: any }) 
 
   const invite = () => {
     if (code) shareReferral(code);
+    else shareMyReferral(uid);
   };
 
   const fullDays = week?.fullDays || 0;

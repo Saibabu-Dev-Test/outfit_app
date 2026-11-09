@@ -13,6 +13,16 @@
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-title" content="OUTFIT" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <script>
+    // Invite links (/?ref=CODE) opened in an Android browser go to the app download page
+    (function () {
+      try {
+        if (/[?&]ref=[^&#]+/i.test(location.search) && /Android/i.test(navigator.userAgent || '')) {
+          location.replace('<%= publicPath %>get/' + location.search);
+        }
+      } catch (e) {}
+    })();
+  </script>
   <style>
     html, body, #root { height: 100%; margin: 0; }
     body { background: #F5F4FA; overscroll-behavior-y: none; }

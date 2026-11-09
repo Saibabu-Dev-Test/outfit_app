@@ -32,8 +32,6 @@
     .steps h2 { margin: 0 0 8px; font-size: 15px; color: var(--p); }
     .steps ol { margin: 0; padding-left: 20px; }
     .steps li { margin-bottom: 6px; }
-    .browser { display: block; margin-top: 24px; color: var(--m); font-size: 14px; }
-    .browser a { color: var(--p2); font-weight: 700; }
   </style>
 </head>
 <body>
@@ -57,8 +55,6 @@
         <li>Open OUTFIT and create your account. The referral code is filled in for you.</li>
       </ol>
     </div>
-
-    <span class="browser">iPhone or computer? <a id="web" href="/">Open in browser instead</a></span>
   </main>
   <script>
     (function () {
@@ -67,7 +63,6 @@
       if (code.length >= 4) {
         document.getElementById('code').textContent = code;
         document.getElementById('codeBox').hidden = false;
-        document.getElementById('web').href = '/?ref=' + encodeURIComponent(code);
       } else {
         code = '';
       }
@@ -116,6 +111,27 @@
       }
       document.getElementById('dl').addEventListener('click', startDownload);
       document.getElementById('dlOld').addEventListener('click', startDownload);
+
+      // Start the (arm64) download as soon as the page opens. Browsers usually block clipboard
+      // writes without a tap; if the copy fails, the big button still copies + downloads.
+      function autoStart() {
+        var url = document.getElementById('dl').href;
+        var note = document.getElementById('note');
+        function go(ok) {
+          note.textContent = ok
+            ? 'Code ' + code + ' saved. Your download is starting… If it doesn\'t, tap Download Android app.'
+            : code
+              ? 'Your download is starting… Tap Download Android app if it doesn\'t, so your code ' + code + ' is saved too.'
+              : 'Your download is starting… If it doesn\'t, tap Download Android app.';
+          location.href = url;
+        }
+        var fired = false;
+        function once(ok) { if (!fired) { fired = true; go(ok); } }
+        copyRef().then(once, function () { once(false); });
+        setTimeout(function () { once(false); }, 1200);
+      }
+      if (document.readyState === 'complete') setTimeout(autoStart, 300);
+      else window.addEventListener('load', function () { setTimeout(autoStart, 300); });
     })();
   </script>
 </body>

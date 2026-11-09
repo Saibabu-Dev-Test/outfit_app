@@ -26,7 +26,7 @@ import FeedbackModal from '../../components/FeedbackModal';
 import TimePickerModal from '../../components/TimePickerModal';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles, statusBarStyle, useTheme, ThemeMode } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
-import { copyReferralLink, referralLink, shareReferral, shareReferralOnWhatsApp } from '../../utils/referralLink';
+import { copyReferralLink, referralLink, shareMyReferral, shareReferral, shareReferralOnWhatsApp } from '../../utils/referralLink';
 import {
   countFriendsJoined,
   ensureReferralCode,
@@ -331,6 +331,7 @@ const fetchProfile = async () => {
 
   const handleShareInvite = () => {
     if (referralCode) shareReferral(referralCode);
+    else shareMyReferral(authUser?.id); // waits for (or creates) the code
   };
 
   // ✅ ONLY ONE handleOpenEditModal (removed duplicate)
@@ -575,7 +576,6 @@ const fetchProfile = async () => {
               <TouchableOpacity
                 style={[styles.inviteShare, !referralCode && styles.inviteShareOff]}
                 onPress={handleShareInvite}
-                disabled={!referralCode}
                 activeOpacity={0.8}>
                 <Text style={styles.inviteShareText}>Share</Text>
               </TouchableOpacity>
