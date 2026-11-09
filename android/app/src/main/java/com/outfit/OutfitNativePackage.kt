@@ -14,6 +14,7 @@ class OutfitNativePackage : ReactPackage {
       AppLockModule(reactContext),
       NotificationsModule(reactContext),
       AppUpdateModule(reactContext),
+      LocationModule(reactContext),
     )
 
   override fun createViewManagers(reactContext: ReactApplicationContext): List<ViewManager<in Nothing, in Nothing>> =

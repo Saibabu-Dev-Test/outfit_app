@@ -374,7 +374,13 @@ service cloud.firestore {
         && request.resource.data.inviteCode.size() == 6
         && request.resource.data.name is string
         && request.resource.data.name.size() > 0
-        && request.resource.data.name.size() <= 60;
+        && request.resource.data.name.size() <= 60
+        // Nearby: isPublic must match isPrivate; location is optional (~100 m, set by the app)
+        && request.resource.data.get('isPublic', !request.resource.data.isPrivate) == !request.resource.data.isPrivate
+        && (request.resource.data.get('geohash', null) == null
+            || (request.resource.data.geohash is string && request.resource.data.geohash.size() <= 12))
+        && (request.resource.data.get('location', null) == null
+            || (request.resource.data.location.lat is number && request.resource.data.location.lng is number));
 
       allow update: if signedIn() && (
         // Owner: anything except ownership
