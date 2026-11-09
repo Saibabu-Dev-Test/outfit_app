@@ -24,12 +24,12 @@ export const GEMINI_MODELS = [
 export const GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models';
 
 // Only set this to true when the key is restricted to "Android apps" in Google Cloud
-// (package com.outfit + the release SHA-1 below). Then the Android app sends the
+// (package com.saibabu.outfit + the release SHA-1 below). Then the Android app sends the
 // X-Android-Package / X-Android-Cert headers. Off by default: a wrong header makes Google
 // reject the request, and the web build never sends them.
 export const GEMINI_ANDROID_RESTRICTED = false;
-export const GEMINI_ANDROID_PACKAGE = 'com.outfit';
-export const GEMINI_ANDROID_CERT_SHA1 = '5E8F16062EA3CD2C4A0D547876BAA6F38CABF625';
+export const GEMINI_ANDROID_PACKAGE = 'com.saibabu.outfit';
+export const GEMINI_ANDROID_CERT_SHA1 = 'BF31F529A0BC08AD6E94EDF98B35B57FFF905173';
 
 // Messages per user per day
 export const AI_DAILY_LIMIT = 20;
