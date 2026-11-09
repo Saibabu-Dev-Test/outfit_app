@@ -1,6 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
-import { DarkTheme, DefaultTheme, NavigationContainer, NavigationState } from '@react-navigation/native';
+import {
+  createNavigationContainerRef,
+  DarkTheme,
+  DefaultTheme,
+  NavigationContainer,
+  NavigationState,
+} from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import BottomTabNavigator from './BottomTabNavigator';
 import AuthNavigator from './AuthNavigator';
@@ -21,6 +27,7 @@ import PostDetailScreen from '../screens/Feed/PostDetailScreen';
 import { colors, themedStyles, useTheme } from '../theme';
 import AppLockGate from '../components/AppLockGate';
 import ActivityWatcher from '../components/ActivityWatcher';
+import CircleInviteLink from '../components/CircleInviteLink';
 import SessionLockScreen from '../components/SessionLockScreen';
 import TamperScreen from '../components/TamperScreen';
 import { getVaultStatus, subscribeVault, VaultStatus } from '../native/sessionVault';
@@ -38,6 +45,9 @@ function useVaultStatus(): VaultStatus {
   }, []);
   return status;
 }
+
+// Used by CircleInviteLink to open a circle after joining from an invite link
+const navigationRef = createNavigationContainerRef<RootStackParamList>();
 
 // Kept across a theme switch (the tree remounts) so the user stays on the same screen
 let savedNavState: NavigationState | undefined;
@@ -79,6 +89,7 @@ function NavigationContent() {
   return (
     <React.Fragment key={isDark ? 'dark' : 'light'}>
     <NavigationContainer
+      ref={navigationRef}
       theme={navTheme}
       initialState={isAuthenticated ? savedNavState : undefined}
       onStateChange={st => {
@@ -119,6 +130,7 @@ function NavigationContent() {
     </NavigationContainer>
     <AppLockGate />
     <ActivityWatcher />
+    <CircleInviteLink navigationRef={navigationRef} />
     </React.Fragment>
   );
 }

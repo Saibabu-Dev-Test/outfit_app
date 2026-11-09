@@ -26,7 +26,8 @@ import {
   deleteCircle,
   updateCircleVisibility,
   removeCircleLocation,
-  NEARBY_KM,
+  RADIUS_OPTIONS,
+  circleInviteLink,
 } from '../../services/circlesApi';
 import { getApproxLocation } from '../../native/location';
 import { getPublicUser } from '../../services/userApi';
@@ -110,7 +111,7 @@ export default function CircleInfoScreen({ navigation, route }: { navigation: an
     const title = makePrivate ? 'Make circle private?' : 'Make circle public?';
     const body = makePrivate
       ? 'It will be hidden from Discover and Nearby. Members stay, and new people join with the invite code.'
-      : 'It will be listed in Discover and anyone can join. Turn on "Show in Nearby" to let people near you find it.';
+      : 'Anyone can join. Pick a distance limit to show it only to people near you.';
     Alert.alert(title, body, [
       { text: 'Cancel', style: 'cancel' },
       {
@@ -129,18 +130,20 @@ export default function CircleInfoScreen({ navigation, route }: { navigation: an
     ]);
   };
 
-  // Public circles: show / hide in Nearby (saves this phone's approximate location, ~100 m)
-  const changeNearby = async (on: boolean) => {
-    if (!circle || circle.isPrivate) return;
+  // Public circles: distance limit. A limit saves this phone's approximate location (~100 m) as
+  // the centre; "No limit" removes it (listed in Discover for everyone).
+  const changeRadius = async (radiusKm: number | null) => {
+    if (!circle || circle.isPrivate || busy) return;
+    if (radiusKm === circle.radiusKm && (radiusKm === null || circle.location)) return;
     setBusy(true);
     try {
-      if (on) {
+      if (radiusKm) {
         const loc = await getApproxLocation();
         if (!loc.ok) {
-          Alert.alert('Location not added', loc.message);
+          Alert.alert('Location needed', `${loc.message}\nA distance limit needs your location.`);
           return;
         }
-        await updateCircleVisibility(circle.id, false, loc.coords);
+        await updateCircleVisibility(circle.id, false, loc.coords, radiusKm);
       } else {
         await removeCircleLocation(circle.id);
       }
@@ -153,10 +156,11 @@ export default function CircleInfoScreen({ navigation, route }: { navigation: an
 
   const shareCode = async () => {
     if (!circle) return;
-    // App download link with my referral code, plus the circle code to join after sign-up
+    // Invite link (opens the app and joins, from any distance) + the code, plus the app download
+    // link with my referral code for friends who don't have the app yet
     await shareWithReferral(
       uid,
-      `Join my circle "${circle.name}" on Outfit. Open Circles, tap "Join with code" and enter ${circle.inviteCode}`,
+      `Join my circle "${circle.name}" on Outfit: ${circleInviteLink(circle.inviteCode)}\nOr open Circles, tap "Join with code" and enter ${circle.inviteCode}`,
     );
   };
 
@@ -227,7 +231,10 @@ export default function CircleInfoScreen({ navigation, route }: { navigation: an
           <View style={styles.hero}>
             <Text style={styles.heroEmoji}>{circle.emoji}</Text>
             <Text style={styles.heroName}>{circle.name}</Text>
-            <Text style={styles.heroVis}>{circle.isPrivate ? '🔒 Private circle' : '🌍 Public circle'}</Text>
+            <Text style={styles.heroVis}>
+              {circle.isPrivate ? '🔒 Private circle' : '🌍 Public circle'}
+              {!circle.isPrivate && circle.radiusKm ? ` · 📍 within ${circle.radiusKm} km` : ''}
+            </Text>
             {circle.description ? <Text style={styles.heroDesc}>{circle.description}</Text> : null}
           </View>
 
@@ -240,7 +247,10 @@ export default function CircleInfoScreen({ navigation, route }: { navigation: an
                   <Text style={styles.shareText}>Share</Text>
                 </TouchableOpacity>
               </View>
-              <Text style={styles.hint}>Friends enter this in Circles › Join with code.</Text>
+              <Text style={styles.hint}>
+                Share the invite link, or friends enter the code in Circles › Join with code.
+                {circle.radiusKm ? ` The link and code work from any distance.` : ''}
+              </Text>
               {circle.isPrivate && <Text style={styles.notice}>{PRIVATE_NOTICE}</Text>}
             </View>
           ) : null}
@@ -266,22 +276,29 @@ export default function CircleInfoScreen({ navigation, route }: { navigation: an
                 />
               </View>
               {!circle.isPrivate && (
-                <View style={styles.settingRow}>
-                  <View style={styles.flex1}>
-                    <Text style={styles.settingTitle}>📍 Show in Nearby</Text>
-                    <Text style={styles.hint}>
-                      {circle.location
-                        ? `People within ${NEARBY_KM} km of this spot can find and join it.`
-                        : `Saves your approximate location (about 100 m) so people within ${NEARBY_KM} km find it.`}
-                    </Text>
+                <View>
+                  <Text style={styles.settingTitle}>📍 Distance limit</Text>
+                  <View style={styles.radiusRow}>
+                    {[null, ...RADIUS_OPTIONS].map(r => {
+                      const on = r === null ? !circle.radiusKm : circle.radiusKm === r;
+                      return (
+                        <TouchableOpacity
+                          key={String(r)}
+                          style={[styles.radiusChip, on && styles.radiusChipActive]}
+                          disabled={busy}
+                          onPress={() => changeRadius(r)}>
+                          <Text style={[styles.radiusText, on && styles.radiusTextActive]}>
+                            {r ? `${r} km` : 'No limit'}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
                   </View>
-                  <Switch
-                    value={!!circle.location}
-                    onValueChange={changeNearby}
-                    disabled={busy}
-                    trackColor={{ false: colors.border, true: colors.accent }}
-                    thumbColor={colors.textInverse}
-                  />
+                  <Text style={styles.hint}>
+                    {circle.radiusKm
+                      ? `Only people within ${circle.radiusKm} km of where you set it (Location on) see it in Nearby and can join. Others join with the invite link or code.`
+                      : 'Listed in Discover for everyone. Anyone can join. Picking a limit saves your approximate location (about 100 m).'}
+                  </Text>
                 </View>
               )}
             </View>
@@ -333,6 +350,17 @@ export default function CircleInfoScreen({ navigation, route }: { navigation: an
 }
 
 const styles = themedStyles(() => StyleSheet.create({
+  radiusRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginVertical: spacing.sm },
+  radiusChip: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs + 2,
+    borderRadius: borderRadius.full,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+  },
+  radiusChipActive: { borderColor: colors.accent, backgroundColor: colors.surfaceElevated },
+  radiusText: { fontSize: fontSize.sm, color: colors.textSecondary, fontWeight: fontWeight.semiBold },
+  radiusTextActive: { color: colors.primary, fontWeight: fontWeight.bold },
   safeArea: { flex: 1, backgroundColor: colors.background },
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
   back: { fontSize: 34, color: colors.primary, marginRight: spacing.sm, lineHeight: 36 },

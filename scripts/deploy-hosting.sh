@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Puts the latest CI web build live on Firebase Hosting: https://outfit-vote-9edca.web.app
+# App only, no website for now: Firebase Hosting (https://outfit-vote-9edca.web.app) just downloads
+# the Android app. "/" and every other path are 302 redirects to the latest GitHub release APK
+# (same as firebase.json; `firebase deploy --only hosting` does the same thing).
 # Run in Google Cloud Shell as a project owner:
 #   curl -sL https://raw.githubusercontent.com/Saibabu-Dev-Test/outfit_app/main/scripts/deploy-hosting.sh | bash
 #
@@ -9,14 +11,13 @@
 # $SITE`, done here through the Hosting REST API so no `firebase login` is needed) and deploys the
 # same build to it too. A name already taken by another Firebase project stops with an error.
 #
-# /Outfit.apk and /Outfit-universal.apk are 302 redirects to the latest GitHub release file: the
-# APK bytes don't count against the Hosting free transfer (360 MB/day), only the tiny redirect does.
+# The APK bytes don't count against the Hosting free transfer (360 MB/day), only the tiny redirect does.
+# The only file served is hosting-public/robots.txt (no index.html, so "/" reaches the redirect).
 set -euo pipefail
 P=outfit-vote-9edca
 SITE="${SITE:-}"
 rm -rf /tmp/webdist && mkdir -p /tmp/webdist
-curl -sfL https://github.com/Saibabu-Dev-Test/outfit_app/releases/download/web-latest/web-firebase.tar.gz | tar -xz -C /tmp/webdist
-ls /tmp/webdist | head
+printf 'User-agent: *\nDisallow: /\n' > /tmp/webdist/robots.txt
 export TOKEN=$(gcloud auth print-access-token) P SITE
 python3 - <<'PY'
 import os, re, gzip, hashlib, json, urllib.request
@@ -27,8 +28,10 @@ CONFIG = {
     'redirects': [
         {'glob': '/Outfit.apk', 'statusCode': 302, 'location': REL + 'Outfit.apk'},
         {'glob': '/Outfit-universal.apk', 'statusCode': 302, 'location': REL + 'Outfit-universal.apk'},
+        # App only: the root and every other path download the app
+        {'glob': '/', 'statusCode': 302, 'location': REL + 'Outfit.apk'},
+        {'glob': '**', 'statusCode': 302, 'location': REL + 'Outfit.apk'},
     ],
-    'rewrites': [{'glob': '**', 'path': '/index.html'}],
 }
 def call(method, url, body=None, raw=None, ctype='application/json', ok=()):
     data = raw if raw is not None else (json.dumps(body).encode() if body is not None else None)

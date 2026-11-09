@@ -30,6 +30,13 @@
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
         </intent-filter>
+        <!-- Circle invite links: outfit://join/CODE (CircleInviteLink.tsx) -->
+        <intent-filter>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.DEFAULT" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="outfit" android:host="join" />
+        </intent-filter>
       </activity>
 
       <!-- Daily reminders (8 AM / 1 PM / 7 PM) + re-arm after boot, update or clock change -->

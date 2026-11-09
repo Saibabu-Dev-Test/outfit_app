@@ -36,6 +36,7 @@ import {
 } from '../../services/rewardsApi';
 import { getLockCapability, isAppLockOn, turnOffAppLock, turnOnAppLock } from '../../native/appLock';
 import { signOutKeepLock } from '../../services/authApi';
+import { auth } from '../../config/firebaseConfig';
 import { isAutoUpdateOn, isUpdateSupported, setAutoUpdate } from '../../native/appUpdate';
 
 // "+91 98765 43210" from users/{uid}.phone (10 digits), else the saved phoneNumber
@@ -516,6 +517,32 @@ const fetchProfile = async () => {
           </View>
         </View>
 
+        {/* Account: which Gmail this app is signed in with */}
+        <View style={styles.detailsCard}>
+          <Text style={styles.detailsTitle}>Account</Text>
+          <View style={styles.infoGrid}>
+            <View style={styles.infoRow}>
+              <View style={styles.infoItem}>
+                <Text style={styles.infoLabel}>✉️ Signed in with Google</Text>
+                <Text style={styles.infoValue} numberOfLines={1} selectable>
+                  {authUser?.email || auth.currentUser?.email || 'Unknown'}
+                </Text>
+              </View>
+            </View>
+            {authUser?.phoneNumber ? (
+              <>
+                <View style={styles.infoDivider} />
+                <View style={styles.infoRow}>
+                  <View style={styles.infoItem}>
+                    <Text style={styles.infoLabel}>📱 Mobile number</Text>
+                    <Text style={styles.infoValue}>{authUser.phoneNumber}</Text>
+                  </View>
+                </View>
+              </>
+            ) : null}
+          </View>
+        </View>
+
         {/* Personal Details Section */}
         <View style={styles.detailsCard}>
           <Text style={styles.detailsTitle}>Personal Information</Text>
@@ -629,13 +656,15 @@ const fetchProfile = async () => {
         {lockSupported && (
           <View style={styles.menuSection}>
             <View style={styles.menuItem}>
-              <View style={styles.menuLeft}>
+              <View style={[styles.menuLeft, styles.flexTitle]}>
                 <View style={styles.menuIconBox}>
                   <Text style={styles.menuIcon}>🔒</Text>
                 </View>
-                <View>
-                  <Text style={styles.menuLabel}>App lock (fingerprint)</Text>
-                  <Text style={styles.lockValue}>{lockOn ? 'On: asks when Outfit opens' : 'Off: Outfit opens straight in'}</Text>
+                <View style={styles.flexTitle}>
+                  <Text style={styles.menuLabel}>Unlock with fingerprint</Text>
+                  <Text style={styles.lockValue}>
+                    {lockOn ? 'On: asks for your fingerprint when Outfit opens' : 'Off: Outfit opens straight in'}
+                  </Text>
                 </View>
               </View>
               <Switch

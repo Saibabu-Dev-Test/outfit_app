@@ -1,12 +1,17 @@
 name: Web (PWA) to GitHub Pages
 
+# DISABLED for now (app only, no website): it no longer runs on push to main. The public link
+# (Firebase Hosting, firebase.json) just downloads the APK that main.yml publishes.
+# To bring the web version back: restore the push trigger below, put back the web build in
+# firebase.json / scripts/deploy-hosting.sh, and run this once from the Actions tab.
+#
 # Builds the browser version of the same app (react-native-web) and publishes it free on
 # GitHub Pages: https://saibabu-dev-test.github.io/outfit_app/
 # The Android APK build stays in main.yml.
 on:
-  push:
-    branches:
-      - main
+  # push:
+  #   branches:
+  #     - main
   workflow_dispatch:
 
 permissions:
