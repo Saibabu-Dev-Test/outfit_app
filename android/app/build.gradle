@@ -99,18 +99,8 @@ android {
         versionName "1.0.${ciBuildNumber}"
     }
 
-    // One APK per CPU type (smaller downloads) + a universal APK for any phone.
-    // Outputs: app-arm64-v8a-release.apk, app-armeabi-v7a-release.apk,
-    // app-universal-release.apk (all signed with the same key, same versionCode).
-    splits {
-        abi {
-            reset()
-            enable true
-            // Real phones only (x86_64 is for emulators)
-            include "arm64-v8a", "armeabi-v7a"
-            universalApk true
-        }
-    }
+    // One APK only: arm64-v8a (every 64-bit phone; 32-bit/x86 dropped to keep it small).
+    // Output: app-release.apk, published as Outfit.apk.
     signingConfigs {
         if (hasReleaseKey) {
             release {
