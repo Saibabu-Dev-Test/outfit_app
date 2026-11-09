@@ -130,8 +130,8 @@ export default function MeScreen({ navigation }: { navigation: any }) {
         <TouchableOpacity style={styles.barBtn} onPress={() => navigation.navigate('Achievements')}>
           <Text style={styles.barIcon}>🏆</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.barBtn} onPress={() => navigation.navigate('Settings')}>
-          <Text style={styles.barIcon}>☰</Text>
+        <TouchableOpacity style={styles.barBtn} onPress={() => navigation.navigate('Settings')} accessibilityLabel="Settings">
+          <Text style={styles.barIcon}>⚙️</Text>
         </TouchableOpacity>
       </View>
       <ScrollView
@@ -161,9 +161,6 @@ export default function MeScreen({ navigation }: { navigation: any }) {
           </TouchableOpacity>
           <TouchableOpacity style={hb.btn} onPress={() => navigation.navigate('Achievements')}>
             <Text style={hb.btnText}>Achievements</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={hb.btn} onPress={() => navigation.navigate('UserSearch')}>
-            <Text style={hb.btnText}>Find people</Text>
           </TouchableOpacity>
         </ProfileHeader>
 

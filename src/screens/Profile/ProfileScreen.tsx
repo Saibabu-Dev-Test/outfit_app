@@ -535,32 +535,20 @@ const fetchProfile = async () => {
           </View>
         </View>
 
-        {/* Community */}
-        <View style={styles.menuSection}>
-          {[
-            { id: 'feed', icon: '📰', label: 'Feed', onPress: () => navigation.navigate('MainApp', { screen: 'Feed' }) },
-            { id: 'search', icon: '🔍', label: 'Find people', onPress: () => navigation.navigate('UserSearch') },
-            {
-              id: 'me',
-              icon: profileData?.isPublic === false ? '🔒' : '👁️',
-              label: profileData?.isPublic === false ? 'My profile (private)' : 'View my public profile',
-              onPress: () => authUser?.id && navigation.navigate('UserProfile', { userId: authUser.id }),
-            },
-            ...(isAdmin
-              ? [{ id: 'admin', icon: '🛡️', label: 'Admin', onPress: () => navigation.navigate('Admin') }]
-              : []),
-          ].map(item => (
-            <TouchableOpacity key={item.id} style={styles.menuItem} activeOpacity={0.7} onPress={item.onPress}>
+        {/* Admin (Feed, Find people and my public profile are reached from the Feed tab) */}
+        {isAdmin && (
+          <View style={styles.menuSection}>
+            <TouchableOpacity style={styles.menuItem} activeOpacity={0.7} onPress={() => navigation.navigate('Admin')}>
               <View style={styles.menuLeft}>
                 <View style={styles.menuIconBox}>
-                  <Text style={styles.menuIcon}>{item.icon}</Text>
+                  <Text style={styles.menuIcon}>🛡️</Text>
                 </View>
-                <Text style={styles.menuLabel}>{item.label}</Text>
+                <Text style={styles.menuLabel}>Admin</Text>
               </View>
               <Text style={styles.menuArrow}>›</Text>
             </TouchableOpacity>
-          ))}
-        </View>
+          </View>
+        )}
 
         {/* Invite friends */}
         <View style={styles.menuSection}>
