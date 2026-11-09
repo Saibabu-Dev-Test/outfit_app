@@ -1,5 +1,6 @@
 // Build a photo poll: "Which should I buy?" / "Which should I wear?" with 2-6 photos labelled A-F.
-// Add photo: From Wardrobe / Take photo / Several photos (A-F vote) / Cancel (ActionSheet).
+// Add photo: From Wardrobe / Take photos (camera, several in a row) / Several photos (A-F vote) / Cancel.
+// Tap a photo to see it full screen.
 import React, { useEffect, useState } from 'react';
 import {
   Modal,
@@ -16,9 +17,11 @@ import {
   Platform,
 } from 'react-native';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles } from '../theme';
-import { pickImage, pickImages, POLL_PICK } from '../utils/imagePicker';
+import { pickImages, POLL_PICK } from '../utils/imagePicker';
 import ActionSheet from './ActionSheet';
 import WardrobePickerModal from './WardrobePickerModal';
+import MultiShotModal from './MultiShotModal';
+import FullScreenImageViewer from './FullScreenImageViewer';
 import {
   MAX_POLL_OPTIONS,
   MAX_POLL_TOTAL_CHARS,
@@ -45,6 +48,8 @@ export default function CreatePollModal({ visible, onClose, onSubmit, initialIma
   const [sending, setSending] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [wardrobeOpen, setWardrobeOpen] = useState(false);
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [viewIndex, setViewIndex] = useState<number | null>(null);
 
   useEffect(() => {
     if (visible && initialImages?.length) {
@@ -63,17 +68,11 @@ export default function CreatePollModal({ visible, onClose, onSubmit, initialIma
     onClose();
   };
 
-  const addPhoto = async (source: 'camera' | 'library') => {
-    try {
-      const picked = await pickImage(source, POLL_PICK);
-      if (!picked) return;
-      setOptions(prev =>
-        prev.length >= MAX_POLL_OPTIONS ? prev : [...prev, { imageData: picked.dataUri, label: '' }],
-      );
-    } catch (e: any) {
-      Alert.alert('Photo problem', e?.message || 'Could not read that photo.');
-    }
-  };
+  // Camera: several shots in a row (MultiShotModal), added after the photos already here
+  const addShots = (images: string[]) =>
+    setOptions(prev =>
+      [...prev, ...images.map(img => ({ imageData: img, label: '' }))].slice(0, MAX_POLL_OPTIONS),
+    );
 
   const addSeveral = async () => {
     try {
@@ -146,7 +145,9 @@ export default function CreatePollModal({ visible, onClose, onSubmit, initialIma
             <View style={styles.grid}>
               {options.map((o, i) => (
                 <View key={i} style={styles.slot}>
-                  <Image source={{ uri: o.imageData }} style={styles.slotImage} resizeMode="cover" />
+                  <TouchableOpacity activeOpacity={0.85} onPress={() => setViewIndex(i)}>
+                    <Image source={{ uri: o.imageData }} style={styles.slotImage} resizeMode="cover" />
+                  </TouchableOpacity>
                   <View style={styles.letter}>
                     <Text style={styles.letterText}>{POLL_LETTERS[i]}</Text>
                   </View>
@@ -202,7 +203,12 @@ export default function CreatePollModal({ visible, onClose, onSubmit, initialIma
         onClose={() => setSheetOpen(false)}
         actions={[
           { icon: '👗', label: 'From Wardrobe', hint: 'Pick clothes you already added', onPress: () => setWardrobeOpen(true) },
-          { icon: '📷', label: 'Take photo', onPress: () => addPhoto('camera') },
+          {
+            icon: '📷',
+            label: 'Take photo',
+            hint: `Shoot one after another, up to ${MAX_POLL_OPTIONS - options.length}`,
+            onPress: () => setCameraOpen(true),
+          },
           {
             icon: '🖼️',
             label: 'Several photos (A–F vote)',
@@ -219,6 +225,22 @@ export default function CreatePollModal({ visible, onClose, onSubmit, initialIma
         maxChars={POLL_PHOTO_MAX_CHARS}
         onClose={() => setWardrobeOpen(false)}
         onDone={addFromWardrobe}
+      />
+      <MultiShotModal
+        visible={cameraOpen}
+        max={MAX_POLL_OPTIONS - options.length}
+        startIndex={options.length}
+        onClose={() => setCameraOpen(false)}
+        onDone={addShots}
+      />
+      <FullScreenImageViewer
+        visible={viewIndex !== null}
+        photos={options.map((o, i) => ({
+          uri: o.imageData,
+          label: o.label ? `${POLL_LETTERS[i]} · ${o.label}` : POLL_LETTERS[i],
+        }))}
+        index={viewIndex ?? 0}
+        onClose={() => setViewIndex(null)}
       />
     </Modal>
   );

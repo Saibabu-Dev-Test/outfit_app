@@ -1,5 +1,7 @@
-// "Me" tab, Instagram-like: avatar, counts (posts, wardrobe, followers, following), bio,
-// Edit profile, and Posts / Wardrobe / Likes grids. Settings live behind the ☰ button.
+// "Me" tab, Instagram-like: avatar (tap for full screen), counts (wear votes today, wardrobe, followers,
+// following), bio, Edit profile, and Wardrobe / Today's pick / Likes tabs. Settings live behind ⚙️.
+// The old Posts tab and ＋ New post button were replaced by the wardrobe "Wear today" votes
+// (posts are still in the Feed; New post is in the Feed too).
 import React, { useCallback, useState } from 'react';
 import {
   View,
@@ -18,23 +20,27 @@ import { colors, fontSize, fontWeight, spacing, themedStyles, statusBarStyle } f
 import { useAuth } from '../../context/AuthContext';
 import ProfileHeader, { headerButtonStyles as hb } from '../../components/ProfileHeader';
 import PhotoGrid from '../../components/PhotoGrid';
+import WardrobeVoteGrid from '../../components/WardrobeVoteGrid';
+import TodaysPick from '../../components/TodaysPick';
+import useWearVotes from '../../hooks/useWearVotes';
 import { getProfileCounts, ProfileCounts } from '../../services/socialApi';
-import { getLikedItems, getUserPosts, Post } from '../../services/feedApi';
+import { getLikedItems, Post } from '../../services/feedApi';
 import { getWardrobeItems } from '../../services/wardrobeApi';
 import { getUserProfile } from '../../services/userApi';
 import { countFriendsJoined, isWeeklyStar, joinedWithLinkText } from '../../services/rewardsApi';
 import { shareMyReferral } from '../../utils/referralLink';
 
-type Tab = 'posts' | 'wardrobe' | 'likes';
+type Tab = 'wardrobe' | 'pick' | 'likes';
 
 export default function MeScreen({ navigation }: { navigation: any }) {
   const { user, updateUserData } = useAuth();
   const uid = user?.id || '';
   const [counts, setCounts] = useState<ProfileCounts | null>(null);
-  const [posts, setPosts] = useState<Post[]>([]);
+  const [privateIds, setPrivateIds] = useState<Set<string>>(new Set());
   const [wardrobe, setWardrobe] = useState<Post[]>([]);
   const [likes, setLikes] = useState<Post[] | null>(null);
-  const [tab, setTab] = useState<Tab>('posts');
+  const [tab, setTab] = useState<Tab>('wardrobe');
+  const wear = useWearVotes(uid, uid);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [isStar, setIsStar] = useState(false);
@@ -44,12 +50,8 @@ export default function MeScreen({ navigation }: { navigation: any }) {
   const load = useCallback(async () => {
     if (!uid) return;
     const errs: string[] = [];
-    const [c, p, w, prof] = await Promise.all([
+    const [c, w, prof] = await Promise.all([
       getProfileCounts(uid, true),
-      getUserPosts(uid).catch(e => {
-        errs.push(e?.message);
-        return [] as Post[];
-      }),
       getWardrobeItems(uid).catch(e => {
         errs.push(e?.message);
         return [];
@@ -57,10 +59,10 @@ export default function MeScreen({ navigation }: { navigation: any }) {
       getUserProfile(uid),
     ]);
     setCounts(c);
-    setPosts(p);
+    const withPhoto = w.filter(i => !!i.imageUrl);
+    setPrivateIds(new Set(withPhoto.filter(i => !i.isPublic).map(i => i.id)));
     setWardrobe(
-      w
-        .filter(i => !!i.imageUrl)
+      withPhoto
         .map(i => ({
           id: i.id,
           kind: 'wardrobe' as const,
@@ -83,6 +85,7 @@ export default function MeScreen({ navigation }: { navigation: any }) {
     setRefreshing(false);
     isWeeklyStar(uid).then(setIsStar);
     countFriendsJoined(uid).then(setJoined);
+    wear.refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uid]);
 
@@ -111,7 +114,6 @@ export default function MeScreen({ navigation }: { navigation: any }) {
   };
 
   const open = (p: Post) => navigation.navigate('PostDetail', { kind: p.kind, id: p.id });
-  const grid = tab === 'posts' ? posts : tab === 'wardrobe' ? wardrobe : likes || [];
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
@@ -123,8 +125,11 @@ export default function MeScreen({ navigation }: { navigation: any }) {
         <Text style={styles.barTitle} numberOfLines={1}>
           {user?.name || 'Me'}
         </Text>
-        <TouchableOpacity style={styles.barBtn} onPress={() => navigation.navigate('NewPost')}>
-          <Text style={styles.barIcon}>＋</Text>
+        <TouchableOpacity
+          style={styles.barBtn}
+          onPress={() => navigation.navigate('Wardrobe', { screen: 'AddItem' })}
+          accessibilityLabel="Add clothes to my wardrobe">
+          <Text style={styles.barIcon}>＋👗</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.barBtn} onPress={invite} accessibilityLabel="Invite friends to download the app">
           <Text style={styles.barIcon}>🎁</Text>
@@ -157,7 +162,9 @@ export default function MeScreen({ navigation }: { navigation: any }) {
           stylePrefs={user?.stylePrefs}
           counts={counts}
           isStar={isStar}
-          isPrivate={user?.isPublic === false}>
+          isPrivate={user?.isPublic === false}
+          todayVotes={wear.loading ? undefined : wear.tally.total}
+          onPressTodayVotes={() => openTab('pick')}>
           <TouchableOpacity style={hb.btn} onPress={() => navigation.navigate('Settings', { edit: true })}>
             <Text style={hb.btnText}>Edit profile</Text>
           </TouchableOpacity>
@@ -175,10 +182,10 @@ export default function MeScreen({ navigation }: { navigation: any }) {
         </TouchableOpacity>
 
         <View style={styles.tabs}>
-          {(['posts', 'wardrobe', 'likes'] as Tab[]).map(t => (
+          {(['wardrobe', 'pick', 'likes'] as Tab[]).map(t => (
             <TouchableOpacity key={t} style={[styles.tab, tab === t && styles.tabOn]} onPress={() => openTab(t)}>
               <Text style={[styles.tabText, tab === t && styles.tabTextOn]}>
-                {t === 'posts' ? '▦ Posts' : t === 'wardrobe' ? '👗 Wardrobe' : '♡ Likes'}
+                {t === 'wardrobe' ? '👗 Wardrobe' : t === 'pick' ? "⭐ Today's pick" : '♡ Likes'}
               </Text>
             </TouchableOpacity>
           ))}
@@ -186,18 +193,26 @@ export default function MeScreen({ navigation }: { navigation: any }) {
         {error ? <Text style={styles.error}>{error}</Text> : null}
         {loading || (tab === 'likes' && likes === null) ? (
           <ActivityIndicator style={styles.spinner} color={colors.primary} />
-        ) : (
-          <PhotoGrid
-            items={grid}
-            onPress={open}
-            empty={
-              tab === 'posts'
-                ? 'No posts yet. Tap ＋ to share a look.'
-                : tab === 'wardrobe'
-                ? 'No wardrobe photos yet.'
-                : 'Posts and photos you like show up here.'
-            }
+        ) : tab === 'wardrobe' ? (
+          <WardrobeVoteGrid
+            items={wardrobe}
+            ownerId={uid}
+            ownerName={user?.name}
+            isOwner
+            wear={wear}
+            privateIds={privateIds}
+            empty="No wardrobe photos yet. Tap ＋👗 to add clothes."
           />
+        ) : tab === 'pick' ? (
+          <TodaysPick
+            items={wardrobe}
+            ownerName={user?.name}
+            isOwner
+            wear={wear}
+            onOpenWardrobe={() => openTab('wardrobe')}
+          />
+        ) : (
+          <PhotoGrid items={likes || []} onPress={open} empty="Posts and photos you like show up here." />
         )}
       </ScrollView>
     </SafeAreaView>

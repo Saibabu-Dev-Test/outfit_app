@@ -1,5 +1,6 @@
 // One feed item (post or public wardrobe photo), Instagram style:
 // header, photo(s), double-tap like, 👍 / 👎 / 💬 / Follow / Share, caption. 2-6 photos = A-F vote post.
+// Single tap on a photo opens it full screen (swipe A-F, pinch-zoom, vote from there).
 import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
@@ -19,6 +20,7 @@ import { useNavigation } from '@react-navigation/native';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles } from '../theme';
 import Avatar from './Avatar';
 import ReportModal, { ReportTarget } from './ReportModal';
+import FullScreenImageViewer, { ViewerVoteBar } from './FullScreenImageViewer';
 import { useAuth } from '../context/AuthContext';
 import {
   OPTION_LABELS,
@@ -64,6 +66,8 @@ export default function PostCard({ post, width, myUid, isAdmin, onDeleted }: Pro
   const [reportTarget, setReportTarget] = useState<ReportTarget | null>(null);
   const liking = useRef(false);
   const lastTap = useRef(0);
+  const tapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [viewIndex, setViewIndex] = useState<number | null>(null);
   const heart = useRef(new Animated.Value(0)).current;
   const multi = post.kind === 'post' && post.photos.length > 1;
   const isMine = !!myUid && post.userId === myUid;
@@ -254,10 +258,22 @@ export default function PostCard({ post, width, myUid, isAdmin, onDeleted }: Pro
     shareWithReferral(myUid, line);
   };
 
-  const onImagePress = () => {
+  useEffect(
+    () => () => {
+      if (tapTimer.current) clearTimeout(tapTimer.current);
+    },
+    [],
+  );
+
+  // Double tap = like; single tap (no second tap within 300 ms) = full screen
+  const onImagePress = (index: number) => {
     const now = Date.now();
     if (now - lastTap.current < 300) {
       lastTap.current = 0;
+      if (tapTimer.current) {
+        clearTimeout(tapTimer.current);
+        tapTimer.current = null;
+      }
       heart.setValue(0);
       Animated.sequence([
         Animated.spring(heart, { toValue: 1, useNativeDriver: true, friction: 4 }),
@@ -266,6 +282,11 @@ export default function PostCard({ post, width, myUid, isAdmin, onDeleted }: Pro
       if (!liked) like(true);
     } else {
       lastTap.current = now;
+      if (tapTimer.current) clearTimeout(tapTimer.current);
+      tapTimer.current = setTimeout(() => {
+        tapTimer.current = null;
+        setViewIndex(index);
+      }, 300);
     }
   };
 
@@ -280,6 +301,22 @@ export default function PostCard({ post, width, myUid, isAdmin, onDeleted }: Pro
     } finally {
       setVoting(null);
     }
+  };
+
+  // Full-screen footer on A-F posts: vote for the photo on screen
+  const viewerFooter = (i: number) => {
+    const c = votes?.counts[i] || 0;
+    const pct = votes && votes.total ? Math.round((c / votes.total) * 100) : 0;
+    const mine = votes?.myVote === i;
+    return (
+      <ViewerVoteBar
+        label={mine ? `✓ You voted ${OPTION_LABELS[i]}` : `Vote ${OPTION_LABELS[i]}`}
+        info={`${pct}% · ${c} ${c === 1 ? 'vote' : 'votes'}`}
+        active={mine}
+        busy={voting === i}
+        onPress={myUid ? () => vote(i) : undefined}
+      />
+    );
   };
 
   const openProfile = () => {
@@ -316,7 +353,7 @@ export default function PostCard({ post, width, myUid, isAdmin, onDeleted }: Pro
     setPage(Math.round(e.nativeEvent.contentOffset.x / Math.max(1, width)));
 
   const photo = (uri: string, i: number) => (
-    <Pressable key={i} onPress={onImagePress}>
+    <Pressable key={i} onPress={() => onImagePress(i)}>
       <Image source={{ uri }} style={{ width, height: width }} resizeMode="cover" />
       {multi ? (
         <View style={styles.letter}>
@@ -490,6 +527,16 @@ export default function PostCard({ post, width, myUid, isAdmin, onDeleted }: Pro
         </Text>
       </TouchableOpacity>
       <ReportModal target={reportTarget} reporterId={myUid} onClose={() => setReportTarget(null)} />
+      <FullScreenImageViewer
+        visible={viewIndex !== null}
+        photos={(multi ? post.photos : [post.imageData]).map((uri, i) => ({
+          uri,
+          label: multi ? `${OPTION_LABELS[i]} · ${post.userName}` : post.userName,
+        }))}
+        index={viewIndex ?? 0}
+        onClose={() => setViewIndex(null)}
+        renderFooter={multi ? viewerFooter : undefined}
+      />
     </View>
   );
 }

@@ -12,7 +12,6 @@ import {
   Image,
   Alert,
   ActivityIndicator,
-  Modal,
   StatusBar,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -24,6 +23,8 @@ import PollCard from '../../components/PollCard';
 import CreatePollModal from '../../components/CreatePollModal';
 import ActionSheet from '../../components/ActionSheet';
 import WardrobePickerModal from '../../components/WardrobePickerModal';
+import MultiShotModal from '../../components/MultiShotModal';
+import FullScreenImageViewer from '../../components/FullScreenImageViewer';
 import ReactionBar from '../../components/ReactionBar';
 import ReportModal, { ReportTarget } from '../../components/ReportModal';
 import {
@@ -38,7 +39,7 @@ import {
   deleteMessage,
   joinCircle,
 } from '../../services/circlesApi';
-import { MAX_BASE64_CHARS, pickImage, pickImages } from '../../utils/imagePicker';
+import { MAX_BASE64_CHARS, pickImages } from '../../utils/imagePicker';
 import { clockTime } from '../../utils/date';
 
 export default function CircleChatScreen({ navigation, route }: { navigation: any; route: any }) {
@@ -61,6 +62,7 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
   const [joining, setJoining] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
   const [wardrobeOpen, setWardrobeOpen] = useState(false);
+  const [cameraOpen, setCameraOpen] = useState(false);
 
   const isMember = !!uid && !!circle && circle.memberIds.includes(uid);
   const isOwner = !!uid && !!circle && circle.ownerId === uid;
@@ -130,19 +132,6 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
     }
   };
 
-  const sendPhoto = async (source: 'camera' | 'library') => {
-    try {
-      const picked = await pickImage(source);
-      if (!picked) return;
-      setSending(true);
-      await sendImageMessage(circleId, me, picked.dataUri);
-    } catch (e: any) {
-      Alert.alert('Photo not sent', e?.message || 'Please try again.');
-    } finally {
-      setSending(false);
-    }
-  };
-
   // Several photos together: 1 = normal photo, 2-6 = A-F vote post
   const sendSeveral = async () => {
     try {
@@ -166,7 +155,7 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
   const openComments = (m: ChatMessage) =>
     navigation.navigate('Comments', { target: { kind: 'circle', circleId, id: m.id } });
 
-  // Wardrobe photos: 1 = normal photo, 2-6 = A-F vote (poll editor opens with them)
+  // Wardrobe photos / camera shots: 1 = normal photo, 2-6 = A-F vote (poll editor opens with them)
   const sendFromWardrobe = async (images: string[]) => {
     if (images.length === 1) {
       setSending(true);
@@ -183,7 +172,7 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
     setPollOpen(true);
   };
 
-  // Attach: From Wardrobe / Take photo / Several photos (A-F vote) / Cancel.
+  // Attach: From Wardrobe / Take photo (several shots in a row) / Several photos (A-F vote) / Cancel.
   // (Android's Alert shows only 3 buttons, so this is an ActionSheet.)
   const openAttach = () => setAttachOpen(true);
 
@@ -273,7 +262,6 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
               myUid={uid}
               canVote={isMember}
               onLongPress={() => onMessageLongPress(item)}
-              onOpenImage={setViewer}
             />
           ) : null}
           {item.text ? <Text style={[styles.text, mine && styles.textMine]}>{item.text}</Text> : null}
@@ -430,7 +418,12 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
             hint: 'One photo, or 2-6 for an A–F vote',
             onPress: () => setWardrobeOpen(true),
           },
-          { icon: '📷', label: 'Take photo', onPress: () => sendPhoto('camera') },
+          {
+            icon: '📷',
+            label: 'Take photo',
+            hint: 'Shoot one, or keep going for an A–F vote (up to 6)',
+            onPress: () => setCameraOpen(true),
+          },
           {
             icon: '🖼️',
             label: 'Several photos (A–F vote)',
@@ -447,13 +440,19 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
         onClose={() => setWardrobeOpen(false)}
         onDone={sendFromWardrobe}
       />
+      <MultiShotModal
+        visible={cameraOpen}
+        max={6}
+        onClose={() => setCameraOpen(false)}
+        onDone={sendFromWardrobe}
+      />
       <ReportModal target={reportTarget} reporterId={uid} onClose={() => setReportTarget(null)} />
 
-      <Modal visible={!!viewer} transparent animationType="fade" onRequestClose={() => setViewer(null)}>
-        <TouchableOpacity style={styles.viewer} activeOpacity={1} onPress={() => setViewer(null)}>
-          {viewer ? <Image source={{ uri: viewer }} style={styles.viewerImage} resizeMode="contain" /> : null}
-        </TouchableOpacity>
-      </Modal>
+      <FullScreenImageViewer
+        visible={!!viewer}
+        photos={viewer ? [{ uri: viewer }] : []}
+        onClose={() => setViewer(null)}
+      />
     </SafeAreaView>
   );
 }
@@ -549,6 +548,4 @@ const styles = themedStyles(() => StyleSheet.create({
   },
   sendText: { color: colors.textInverse, fontSize: 18 },
   disabled: { opacity: 0.5 },
-  viewer: { flex: 1, backgroundColor: 'rgba(0,0,0,0.92)', alignItems: 'center', justifyContent: 'center' },
-  viewerImage: { width: '100%', height: '80%' },
 }));

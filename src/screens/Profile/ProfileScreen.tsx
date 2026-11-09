@@ -24,6 +24,7 @@ import { RASHIS } from '../../utils/panchangam';
 import SelectModal from '../../components/SelectModal';
 import FeedbackModal from '../../components/FeedbackModal';
 import TimePickerModal from '../../components/TimePickerModal';
+import FullScreenImageViewer from '../../components/FullScreenImageViewer';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles, statusBarStyle, useTheme, ThemeMode } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
 import { copyReferralLink, referralLink, shareMyReferral, shareReferral, shareReferralOnWhatsApp } from '../../utils/referralLink';
@@ -115,6 +116,7 @@ export default function ProfileScreen() {
   const [editBio, setEditBio] = useState<string>('');
   const [savingProfile, setSavingProfile] = useState<boolean>(false);
   const [uploadingAvatar, setUploadingAvatar] = useState<boolean>(false);
+  const [avatarViewerOpen, setAvatarViewerOpen] = useState<boolean>(false);
 
   // Picker modals
   const [isTimePickerOpen, setIsTimePickerOpen] = useState<boolean>(false);
@@ -215,6 +217,19 @@ export default function ProfileScreen() {
     } finally {
       setUploadingAvatar(false);
     }
+  };
+
+  // Tap the profile photo: see it full screen (pinch-zoom) or change it
+  const handleAvatarPress = () => {
+    if (!profileData?.avatarUrl) {
+      handleSelectAvatarSource();
+      return;
+    }
+    Alert.alert('Profile Photo', undefined, [
+      { text: 'View photo', onPress: () => setAvatarViewerOpen(true) },
+      { text: 'Change photo', onPress: handleSelectAvatarSource },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
   };
 
   const handleSelectAvatarSource = () => {
@@ -474,7 +489,7 @@ const fetchProfile = async () => {
           <View style={styles.profileGradient}>
             <TouchableOpacity
               style={styles.avatarContainer}
-              onPress={handleSelectAvatarSource}
+              onPress={handleAvatarPress}
               disabled={uploadingAvatar}
               activeOpacity={0.8}>
               <View style={styles.avatar}>
@@ -1196,6 +1211,11 @@ const fetchProfile = async () => {
         selected={editLanguage}
         onSelect={setEditLanguage}
         onClose={() => setIsLanguageOpen(false)}
+      />
+      <FullScreenImageViewer
+        visible={avatarViewerOpen && !!profileData?.avatarUrl}
+        photos={profileData?.avatarUrl ? [{ uri: profileData.avatarUrl, label: profileData?.name || 'Profile photo' }] : []}
+        onClose={() => setAvatarViewerOpen(false)}
       />
     </SafeAreaView>
   );
