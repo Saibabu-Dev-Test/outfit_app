@@ -31,8 +31,9 @@ CONFIG = {
         {'glob': '/Outfit.apk', 'statusCode': 302, 'location': REL + 'Outfit.apk'},
         {'glob': '/Outfit-universal.apk', 'statusCode': 302, 'location': REL + 'Outfit-universal.apk'},
         # App only: the root and every other path download the app
-        {'glob': '/', 'statusCode': 302, 'location': REL + 'Outfit.apk'},
-        {'glob': '**', 'statusCode': 302, 'location': REL + 'Outfit.apk'},
+        # Every path except /sw.js (redirects beat files on Firebase Hosting, and the old PWA's
+        # service worker only goes away when /sw.js serves the kill-switch file)
+        {'regex': r'^/(?:[^s].*|s(?:[^w].*)?|sw(?:[^.].*)?|sw\.(?:[^j].*)?|sw\.j(?:[^s].*)?|sw\.js.+)?$', 'statusCode': 302, 'location': REL + 'Outfit.apk'},
     ],
 }
 def call(method, url, body=None, raw=None, ctype='application/json', ok=()):

@@ -1,7 +1,10 @@
 {
   "hosting": {
     "public": "hosting-public",
-    "ignore": ["firebase.json", "**/.*"],
+    "ignore": [
+      "firebase.json",
+      "**/.*"
+    ],
     "redirects": [
       {
         "source": "/Outfit.apk",
@@ -14,12 +17,7 @@
         "type": 302
       },
       {
-        "source": "/",
-        "destination": "https://github.com/Saibabu-Dev-Test/outfit_app/releases/latest/download/Outfit.apk",
-        "type": 302
-      },
-      {
-        "source": "**",
+        "regex": "^/(?:[^s].*|s(?:[^w].*)?|sw(?:[^.].*)?|sw\\.(?:[^j].*)?|sw\\.j(?:[^s].*)?|sw\\.js.+)?$",
         "destination": "https://github.com/Saibabu-Dev-Test/outfit_app/releases/latest/download/Outfit.apk",
         "type": 302
       }
