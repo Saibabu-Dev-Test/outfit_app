@@ -78,3 +78,4 @@ yarn-error.log
 # never commit a real key here (the repo is public).
 src/config/ai.generated.ts
 web/dist/
+.eslintcache

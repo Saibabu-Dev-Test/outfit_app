@@ -2,6 +2,7 @@
 // The latest GitHub release is build-N, and the APK's versionCode is that same N (build.gradle).
 import { Linking, NativeModules, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { APK_NAME, APK_UNIVERSAL_NAME, APP_GET_URL } from '../config/links';
 
 interface NativeUpdate {
   getInfo: () => Promise<{ versionCode: number; versionName: string; abis: string[] }>;
@@ -16,7 +17,7 @@ const Native: NativeUpdate | undefined =
 const REPO = 'Saibabu-Dev-Test/outfit_app';
 const LATEST_API = `https://api.github.com/repos/${REPO}/releases/latest`;
 const LATEST_DL = `https://github.com/${REPO}/releases/latest/download/`;
-export const GET_PAGE_URL = 'https://outfit-vote-9edca.web.app/get/';
+export const GET_PAGE_URL = APP_GET_URL;
 // Not under "outfit:" so logout's storage cleanup keeps it
 const LAST_CHECK_KEY = 'outfitupdate:lastCheck';
 const CHECK_EVERY_MS = 6 * 60 * 60 * 1000;
@@ -49,11 +50,13 @@ export const checkForUpdate = async (force = false): Promise<UpdateInfo | null> 
     const urlOf = (name: string) =>
       assets.find(a => a?.name === name)?.browser_download_url || (assets.length ? '' : `${LATEST_DL}${name}`);
     const arm64 = (info?.abis || [])[0] === 'arm64-v8a';
+    // Outfit.apk / Outfit-universal.apk first; the old names stay as a fallback (older releases)
     const apkUrl =
-      (arm64 && urlOf('app-arm64-v8a-release.apk')) ||
+      (arm64 && (urlOf(APK_NAME) || urlOf('app-arm64-v8a-release.apk'))) ||
+      urlOf(APK_UNIVERSAL_NAME) ||
       urlOf('app-universal-release.apk') ||
       urlOf('app-release.apk') ||
-      `${LATEST_DL}app-universal-release.apk`;
+      `${LATEST_DL}${APK_UNIVERSAL_NAME}`;
     return { build, current, apkUrl };
   } catch (e: any) {
     console.warn('update check failed:', e?.message);
@@ -82,7 +85,7 @@ export const openInstallSettings = async (): Promise<boolean> => {
 export const downloadAndInstall = async (u: UpdateInfo): Promise<'installing' | 'browser' | 'failed'> => {
   try {
     if (Native) {
-      const r = await Native.downloadAndInstall(u.apkUrl, `OUTFIT update (build ${u.build})`);
+      const r = await Native.downloadAndInstall(u.apkUrl, `Outfit update (build ${u.build})`);
       if (r === 'installing') return 'installing';
     }
   } catch (e: any) {

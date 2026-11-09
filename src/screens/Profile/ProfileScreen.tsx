@@ -691,7 +691,7 @@ const fetchProfile = async () => {
           )}
         </TouchableOpacity>
 
-        <Text style={styles.version}>Outfit Vote v1.0.0</Text>
+        <Text style={styles.version}>Outfit v1.0.0</Text>
       </ScrollView>
 
       <FeedbackModal

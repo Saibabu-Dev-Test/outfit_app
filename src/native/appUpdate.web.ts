@@ -1,5 +1,7 @@
 // Web build: no in-app update (the web app updates itself through Firebase Hosting)
-export const GET_PAGE_URL = 'https://outfit-vote-9edca.web.app/get/';
+import { APP_GET_URL } from '../config/links';
+
+export const GET_PAGE_URL = APP_GET_URL;
 
 export interface UpdateInfo {
   build: number;

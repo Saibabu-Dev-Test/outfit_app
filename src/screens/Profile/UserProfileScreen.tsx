@@ -128,8 +128,8 @@ export default function UserProfileScreen({ navigation, route }: { navigation: a
   const shareProfile = () => {
     if (!profile) return;
     const line = isMe
-      ? 'Follow me on Outfit Vote! Search for "' + profile.name + '" in the app.'
-      : 'Check out ' + profile.name + "'s outfits on Outfit Vote! Search for \"" + profile.name + '" in the app.';
+      ? 'Follow me on Outfit! Search for "' + profile.name + '" in the app.'
+      : 'Check out ' + profile.name + "'s outfits on Outfit! Search for \"" + profile.name + '" in the app.';
     shareWithReferral(me?.id, line);
   };
 

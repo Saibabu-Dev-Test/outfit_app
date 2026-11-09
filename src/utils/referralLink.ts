@@ -1,4 +1,4 @@
-// Referral share links: https://outfit-vote-9edca.web.app/get/?ref=CODE (app download page).
+// Referral share links: <SHARE_BASE>/get/?ref=CODE (app download page, src/config/links.ts).
 // The /get/ page copies "OUTFITREF:CODE" to the clipboard before the APK download starts; the
 // Android app reads it on the sign-up screen (sideloaded APKs get no Play Install Referrer).
 // Every share path (Share, WhatsApp, Copy link, post / profile / circle shares) sends this link
@@ -10,10 +10,9 @@ import { Alert, Linking, Platform, Share } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ensureReferralCode } from '../services/rewardsApi';
 import { readClipboardText, clearClipboardText, setClipboardText } from '../native/clipboard';
+import { APP_GET_URL, APP_WEB_URL } from '../config/links';
 
-export const APP_WEB_URL = 'https://outfit-vote-9edca.web.app/';
-// App download page (Android APK + "open in browser")
-export const APP_GET_URL = `${APP_WEB_URL}get/`;
+export { APP_GET_URL, APP_WEB_URL };
 // What the /get/ page puts on the clipboard (web/public/get/index.html)
 const CLIPBOARD_REF = /^OUTFITREF:([A-Z0-9]{4,8})$/;
 const PENDING_KEY = 'pendingReferralCode';
@@ -28,7 +27,7 @@ const clean = (s: string | null | undefined) =>
 export const referralLink = (code: string) => `${APP_GET_URL}?ref=${encodeURIComponent(code)}`;
 
 export const referralMessage = (code: string) =>
-  `Join me on Outfit Vote, your AI stylist & daily colour guide! Download the app: ${referralLink(code)}\n(my referral code ${code} is filled in for you, or enter it when you create your account)`;
+  `Join me on Outfit, vote on outfits with friends! Download Outfit: ${referralLink(code)}\n(my referral code ${code} is filled in for you, or enter it when you create your account)`;
 
 const refFromUrl = (url: string | null | undefined): string => {
   if (!url) return '';
@@ -114,7 +113,7 @@ const shareText = async (message: string, onNoShareSheet: () => Promise<void>) =
     if (Platform.OS === 'web') {
       const nav: any = typeof navigator !== 'undefined' ? navigator : null;
       if (nav?.share) {
-        await nav.share({ title: 'Outfit Vote', text: message });
+        await nav.share({ title: 'Outfit', text: message });
         return;
       }
       await onNoShareSheet();
@@ -176,7 +175,7 @@ export const shareWithReferral = async (uid: string | undefined, line: string) =
     return;
   }
   const link = referralLink(code);
-  const message = `${line}\nDownload the app (Outfit Vote, your AI stylist & daily colour guide): ${link}\n(referral code ${code})`;
+  const message = `${line}\nDownload Outfit: ${link}\n(referral code ${code})`;
   await shareText(message, async () => {
     const ok = await copyText(message);
     if (Platform.OS === 'web' && typeof window !== 'undefined') window.alert(ok ? 'Link copied' : link);

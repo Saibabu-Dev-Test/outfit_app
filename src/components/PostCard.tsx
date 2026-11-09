@@ -250,7 +250,7 @@ export default function PostCard({ post, width, myUid, isAdmin, onDeleted }: Pro
     const who = isMine ? 'my' : `${post.userName}'s`;
     const what = post.kind === 'wardrobe' ? 'wardrobe pick' : multi ? 'outfit vote (help pick one!)' : 'look';
     const cap = post.caption.trim();
-    const line = `Check out ${who} ${what} on Outfit Vote${cap ? `: "${cap.length > 80 ? `${cap.slice(0, 77)}...` : cap}"` : ''}`;
+    const line = `Check out ${who} ${what} on Outfit${cap ? `: "${cap.length > 80 ? `${cap.slice(0, 77)}...` : cap}"` : ''}`;
     shareWithReferral(myUid, line);
   };
 

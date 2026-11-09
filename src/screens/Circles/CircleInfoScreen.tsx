@@ -96,7 +96,7 @@ export default function CircleInfoScreen({ navigation, route }: { navigation: an
     // App download link with my referral code, plus the circle code to join after sign-up
     await shareWithReferral(
       uid,
-      `Join my circle "${circle.name}" on Outfit Vote. Open Circles, tap "Join with code" and enter ${circle.inviteCode}`,
+      `Join my circle "${circle.name}" on Outfit. Open Circles, tap "Join with code" and enter ${circle.inviteCode}`,
     );
   };
 
