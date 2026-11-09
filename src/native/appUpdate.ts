@@ -6,9 +6,6 @@ import { APK_NAME, APK_UNIVERSAL_NAME, APP_GET_URL } from '../config/links';
 
 interface NativeUpdate {
   getInfo: () => Promise<{ versionCode: number; versionName: string; abis: string[] }>;
-  canInstall: () => Promise<boolean>;
-  openInstallSettings: () => Promise<boolean>;
-  downloadAndInstall: (url: string, title: string) => Promise<string>;
 }
 
 const Native: NativeUpdate | undefined =
@@ -98,33 +95,13 @@ export const checkForUpdate = async (force = false): Promise<UpdateInfo | null> 
   }
 };
 
-export const canInstallApks = async (): Promise<boolean> => {
-  try {
-    return !!(await Native?.canInstall());
-  } catch {
-    return false;
-  }
-};
+// The app does not install APKs itself (no install permission), so nothing to grant.
+export const canInstallApks = async (): Promise<boolean> => true;
+export const openInstallSettings = async (): Promise<boolean> => true;
 
-export const openInstallSettings = async (): Promise<boolean> => {
-  try {
-    return !!(await Native?.openInstallSettings());
-  } catch {
-    return false;
-  }
-};
-
-// Downloads the APK and opens the installer. Falls back to the browser when the native path fails.
-// 'installing' | 'browser' | 'failed'. Never throws.
+// Opens the new APK (or the /get/ page) in the browser; the user installs it themselves.
+// 'browser' | 'failed'. Never throws.
 export const downloadAndInstall = async (u: UpdateInfo): Promise<'installing' | 'browser' | 'failed'> => {
-  try {
-    if (Native) {
-      const r = await Native.downloadAndInstall(u.apkUrl, `Outfit update (build ${u.build})`);
-      if (r === 'installing') return 'installing';
-    }
-  } catch (e: any) {
-    console.warn('in-app update failed:', e?.code, e?.message);
-  }
   for (const url of [u.apkUrl, GET_PAGE_URL]) {
     try {
       await Linking.openURL(url);

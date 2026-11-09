@@ -497,7 +497,7 @@ class AppLockModule(private val ctx: ReactApplicationContext) : ReactContextBase
      * or run `./gradlew signingReport` and copy the release variant's "SHA-256" line.
      */
     const val EXPECTED_SIGNING_SHA256 =
-      "FA:C6:17:45:DC:09:03:78:6F:B9:ED:E6:2A:96:2B:39:9F:73:48:F0:BB:6F:89:9B:83:32:66:75:91:03:3B:9C"
+      "20:8C:35:C0:3D:12:DA:97:9F:53:A6:99:6D:A4:1B:DA:A4:6F:7B:30:5B:88:B3:85:4C:55:94:68:6D:2C:32:4B"
 
     @Volatile var lockEnabled = false
     @Volatile var lockScreenShown = false
