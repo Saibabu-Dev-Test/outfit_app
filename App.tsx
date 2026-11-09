@@ -4,7 +4,6 @@ import { StatusBar } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import RootNavigator from './src/navigation/RootNavigator';
 import NotificationGate from './src/components/NotificationGate';
-import UpdatePrompt from './src/components/UpdatePrompt';
 import { captureClipboardReferral } from './src/utils/referralLink';
 import { ThemeProvider, useTheme } from './src/theme';
 
@@ -22,8 +21,6 @@ function Themed() {
       <NotificationGate>
         <RootNavigator />
       </NotificationGate>
-      {/* Android: "New update available" (no-op on web) */}
-      <UpdatePrompt />
     </>
   );
 }
