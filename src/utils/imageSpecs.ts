@@ -1,13 +1,15 @@
 // Photo sizes for Firestore (free Spark plan: photos live inside documents, no Cloud Storage).
 // Full photo: shown only on detail screens, kept in a separate media doc.
 // Thumbnail: lists, grids and the feed read only this (on the light parent doc).
-// Sizes are JPEG bytes; base64 adds a third (60 KB -> ~80K characters).
+// Sizes are JPEG bytes; base64 adds a third (80 KB -> ~107K characters).
+// Every photo is downscaled with filtering, slightly contrast-stretched and sharpened, then saved
+// at the highest JPEG quality (60..92) that fits; below 60 the long edge is lowered instead.
 export interface ImageSpec {
   maxEdge: number; // long edge in px
   maxBytes: number;
 }
 
-export const FULL_SPEC: ImageSpec = { maxEdge: 1080, maxBytes: 60 * 1024 };
+export const FULL_SPEC: ImageSpec = { maxEdge: 1080, maxBytes: 80 * 1024 };
 export const THUMB_SPEC: ImageSpec = { maxEdge: 200, maxBytes: 12 * 1024 };
 // Circle poll / chat photos (up to 6 in one message doc)
 export const POLL_SPEC: ImageSpec = { maxEdge: 720, maxBytes: 40 * 1024 };

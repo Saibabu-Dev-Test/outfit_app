@@ -13,7 +13,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles } from '../theme';
-import { getWardrobeItems, WardrobeItemResponse } from '../services/wardrobeApi';
+import { getWardrobeFullImage, getWardrobeItems, WardrobeItemResponse } from '../services/wardrobeApi';
 import { POLL_LETTERS } from '../services/circlesApi';
 
 interface Props {
@@ -74,11 +74,20 @@ export default function WardrobePickerModal({
     );
   };
 
-  const done = () => {
-    const byId = new Map(items.map(i => [i.id, i.imageUrl || '']));
-    const images = picked.map(id => byId.get(id) || '').filter(Boolean);
+  // Items keep a ~200 px thumbnail; the poll gets the full photo (1 read each), or the
+  // thumbnail when the full one can't be read or is over the size limit.
+  const done = async () => {
+    const byId = new Map(items.map(i => [i.id, i]));
+    const chosen = picked.map(id => byId.get(id)).filter((i): i is WardrobeItemResponse => !!i);
     onClose();
-    if (images.length) onDone(images);
+    const images = await Promise.all(
+      chosen.map(async i => {
+        const full = await getWardrobeFullImage(i);
+        return full && full.length <= maxChars ? full : i.imageUrl || '';
+      }),
+    );
+    const ok = images.filter(Boolean);
+    if (ok.length) onDone(ok);
   };
 
   return (

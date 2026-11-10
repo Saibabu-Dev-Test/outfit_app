@@ -15,7 +15,7 @@ export interface PickedImage {
 }
 
 export interface PickOptions {
-  spec?: ImageSpec; // default FULL_SPEC (1080 px, ~60 KB)
+  spec?: ImageSpec; // default FULL_SPEC (1080 px, <= 80 KB)
   thumb?: ImageSpec | null; // also make a thumbnail of this size
   maxChars?: number; // extra cap on the full photo's base64 length
 }
@@ -56,8 +56,8 @@ const fromAsset = async (a: Asset, o: PickOptions): Promise<PickedImage | null> 
     throw new Error('Could not read the photo. Please try another one.');
   }
   if (dataUri.length > maxChars) return null;
-  // Thumbnail from the (already small) full photo: fast and sharp enough
-  const thumbUri = o.thumb && canResize() ? await resizeImage(dataUri, o.thumb) : undefined;
+  // Thumbnail from the picked file (not the already sharpened full photo: no double sharpening)
+  const thumbUri = o.thumb && canResize() ? await resizeImage(a.uri || dataUri, o.thumb) : undefined;
   return { dataUri, thumbUri, uri: a.uri };
 };
 
