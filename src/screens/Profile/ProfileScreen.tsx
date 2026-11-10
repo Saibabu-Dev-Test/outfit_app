@@ -22,7 +22,7 @@ import { getUserProfile, saveUserProfile, uploadAvatar } from '../../services/us
 import { checkNotifications, openNotificationSettings } from '../../native/notifications';
 import { RASHIS } from '../../utils/panchangam';
 import SelectModal from '../../components/SelectModal';
-import FeedbackModal from '../../components/FeedbackModal';
+import FeedbackBoardModal from '../../components/FeedbackBoardModal';
 import ZoomableImage from '../../components/ZoomableImage';
 import TimePickerModal from '../../components/TimePickerModal';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles, statusBarStyle, useTheme, ThemeMode } from '../../theme';
@@ -699,7 +699,7 @@ const fetchProfile = async () => {
               id: 'feedback',
               icon: '💌',
               label: 'Feedback & Suggestions',
-              value: 'Suggestion, complaint or bug',
+              value: 'Board: share ideas, like, reply and quote',
               onPress: () => setFeedbackOpen(true),
             },
             { id: 'help', icon: '❓', label: 'Help & Support' },
@@ -761,7 +761,7 @@ const fetchProfile = async () => {
         <Text style={styles.version}>Outfit v1.0.0</Text>
       </ScrollView>
 
-      <FeedbackModal
+      <FeedbackBoardModal
         visible={feedbackOpen}
         uid={authUser?.id}
         name={profileData?.name || authUser?.name}

@@ -707,21 +707,88 @@ service cloud.firestore {
       allow update: if false;
     }
 
-    // ── Feedback & suggestions ──────────────────────────────────────────
-    // feedback/{autoId} {uid, name, type, text, image, appVersion, platform, createdAt, status}
-    // Anyone signed in with Google writes their own (status 'new'); only admins read them
-    // and change the status. Nobody else can read another user's feedback.
+    // ── Feedback & suggestions board ────────────────────────────────────
+    // feedback/{fid} {uid, name, type, text, image, appVersion, platform, createdAt, status,
+    //   isPublic, likeCount, replyCount, lastReplyId, quoteOf: {id, uid, name, text}, editedAt}
+    //   feedback/{fid}/likes/{uid}       one like per user, likeCount changes in the same write
+    //   feedback/{fid}/replies/{rid}     {uid, name, text, createdAt, editedAt}, replyCount likewise
+    // Signed-in users read public feedback (isPublic == true); authors read their own; admins
+    // (users.role 'admin' or listed in config/admins) read ALL and change status. Authors may only
+    // edit / delete their own feedback and replies. Feedback written before the board has no
+    // isPublic, so it stays admin + author only.
+    function listedAdmin() {
+      return signedIn()
+        && me() in get(/databases/$(db)/documents/config/admins).data.get('uids', []);
+    }
+    function feedbackAdmin() {
+      return isAdmin() || listedAdmin();
+    }
+    // Same worst-words check as comments (the app filters a longer list before sending)
+    function feedbackTextOk(t, max) {
+      return t is string && t.size() >= 1 && t.size() <= max
+        && !t.lower().matches('(([a-z]|[^a-z])*[^a-z])?(fuck[a-z]*|motherfucker[a-z]*|bitch(es)?|cunts?|nigg(er|a)s?|faggots?|madarchod|behenchod|bhenchod|chutiy[ae]|bhosdike|lanja|lanjakodaka|dengu|puku|modda|randi|gandu|lavda)([^a-z]([a-z]|[^a-z])*)?');
+    }
+    function feedbackPath(fid) {
+      return /databases/$(db)/documents/feedback/$(fid);
+    }
+    function canSeeFeedback(fid) {
+      return signedIn()
+        && (get(feedbackPath(fid)).data.get('isPublic', false) == true
+            || get(feedbackPath(fid)).data.uid == me()
+            || feedbackAdmin());
+    }
+    function quoteOk(d) {
+      return d.get('quoteOf', null) == null
+        || (d.quoteOf is map
+            && d.quoteOf.keys().hasOnly(['id', 'uid', 'name', 'text'])
+            && d.quoteOf.id is string
+            && d.quoteOf.text is string && d.quoteOf.text.size() <= 220
+            && d.quoteOf.get('name', '') is string && d.quoteOf.get('name', '').size() <= 80
+            && exists(feedbackPath(d.quoteOf.id))
+            && get(feedbackPath(d.quoteOf.id)).data.uid == d.quoteOf.get('uid', '')
+            && canSeeFeedback(d.quoteOf.id));
+    }
+
     match /feedback/{fid} {
+      function likePathF() {
+        return /databases/$(db)/documents/feedback/$(fid)/likes/$(request.auth.uid);
+      }
+      function replyPathF(rid) {
+        return /databases/$(db)/documents/feedback/$(fid)/replies/$(rid);
+      }
+      function visible() {
+        return resource.data.isPublic == true || resource.data.uid == me() || feedbackAdmin();
+      }
+      // likeCount changes by exactly 1, together with my own like doc
+      function feedbackLikeUpdate() {
+        let before = resource.data.get('likeCount', 0);
+        return onlyChanged(['likeCount'])
+          && ((request.resource.data.likeCount == before + 1 && !exists(likePathF()) && existsAfter(likePathF()))
+              || (request.resource.data.likeCount == before - 1 && before > 0
+                  && exists(likePathF()) && !existsAfter(likePathF())));
+      }
+      // replyCount changes by exactly 1, together with the reply named in lastReplyId
+      function feedbackReplyCountUpdate() {
+        let rid = request.resource.data.lastReplyId;
+        let before = resource.data.get('replyCount', 0);
+        return onlyChanged(['replyCount', 'lastReplyId'])
+          && rid is string
+          && ((request.resource.data.replyCount == before + 1 && !exists(replyPathF(rid)) && existsAfter(replyPathF(rid)))
+              || (request.resource.data.replyCount == before - 1 && before > 0
+                  && exists(replyPathF(rid)) && !existsAfter(replyPathF(rid))));
+      }
+
       allow create: if signedIn()
-        && request.resource.data.keys().hasOnly(['uid', 'name', 'type', 'text', 'image', 'appVersion', 'platform', 'createdAt', 'status'])
+        && request.resource.data.keys().hasOnly(['uid', 'name', 'type', 'text', 'image', 'appVersion', 'platform', 'createdAt', 'status', 'isPublic', 'likeCount', 'replyCount', 'quoteOf'])
         && request.resource.data.keys().hasAll(['uid', 'type', 'text', 'createdAt', 'status'])
         && request.resource.data.uid == me()
         && request.resource.data.type in ['Suggestion', 'Complaint', 'Bug', 'Other']
-        && request.resource.data.text is string
-        && request.resource.data.text.size() >= 1
-        && request.resource.data.text.size() <= 1000
+        && feedbackTextOk(request.resource.data.text, 1000)
         && request.resource.data.status == 'new'
         && request.resource.data.createdAt == request.time
+        && request.resource.data.get('isPublic', false) is bool
+        && request.resource.data.get('likeCount', 0) == 0
+        && request.resource.data.get('replyCount', 0) == 0
         && (request.resource.data.get('name', null) == null
             || (request.resource.data.name is string && request.resource.data.name.size() <= 80))
         && (request.resource.data.get('image', null) == null
@@ -730,13 +797,69 @@ service cloud.firestore {
             || (request.resource.data.appVersion is string && request.resource.data.appVersion.size() <= 20))
         && (request.resource.data.get('platform', null) == null
             || (request.resource.data.platform is string && request.resource.data.platform.size() <= 20))
-        // Same worst-words check as comments (the app filters a longer list before sending)
-        && !request.resource.data.text.lower().matches('(([a-z]|[^a-z])*[^a-z])?(fuck[a-z]*|motherfucker[a-z]*|bitch(es)?|cunts?|nigg(er|a)s?|faggots?|madarchod|behenchod|bhenchod|chutiy[ae]|bhosdike|lanja|lanjakodaka|dengu|puku|modda|randi|gandu|lavda)([^a-z]([a-z]|[^a-z])*)?');
-      allow read: if isAdmin();
-      allow update: if isAdmin()
-        && onlyChanged(['status'])
-        && request.resource.data.status in ['new', 'read', 'done'];
-      allow delete: if isAdmin();
+        && quoteOk(request.resource.data);
+      // Queries: the board asks for isPublic == true, "Mine" for uid == me, admins for everything
+      allow read: if signedIn() && visible();
+      allow update: if signedIn() && (
+        // Author: text / type / board visibility only
+        (resource.data.uid == me()
+            && onlyChanged(['text', 'type', 'isPublic', 'editedAt'])
+            && feedbackTextOk(request.resource.data.text, 1000)
+            && request.resource.data.type in ['Suggestion', 'Complaint', 'Bug', 'Other']
+            && request.resource.data.get('isPublic', false) is bool
+            && request.resource.data.editedAt == request.time)
+        // Admin: status
+        || (feedbackAdmin()
+            && onlyChanged(['status'])
+            && request.resource.data.status in ['new', 'read', 'done'])
+        // Anyone who can see it: like counter / reply counter (checked against the sub-docs)
+        || (visible() && (feedbackLikeUpdate() || feedbackReplyCountUpdate()))
+      );
+      allow delete: if signedIn() && (resource.data.uid == me() || feedbackAdmin());
+
+      // ── Likes: doc id = liker, so one like per user ──
+      match /likes/{likerId} {
+        allow read: if canSeeFeedback(fid);
+        allow create: if canSeeFeedback(fid)
+          && likerId == me()
+          && request.resource.data.keys().hasOnly(['createdAt'])
+          && getAfter(feedbackPath(fid)).data.get('likeCount', 0)
+             == get(feedbackPath(fid)).data.get('likeCount', 0) + 1;
+        allow update: if false;
+        // Unlike (with the counter), or cleanup when the feedback is deleted by its author / an admin
+        allow delete: if signedIn() && (
+          (likerId == me()
+              && (!existsAfter(feedbackPath(fid))
+                  || getAfter(feedbackPath(fid)).data.get('likeCount', 0)
+                     == get(feedbackPath(fid)).data.get('likeCount', 0) - 1))
+          || get(feedbackPath(fid)).data.uid == me()
+          || feedbackAdmin());
+      }
+
+      // ── Replies ──
+      match /replies/{rid} {
+        allow read: if canSeeFeedback(fid);
+        allow create: if canSeeFeedback(fid)
+          && request.resource.data.keys().hasOnly(['uid', 'name', 'text', 'createdAt'])
+          && request.resource.data.uid == me()
+          && request.resource.data.createdAt == request.time
+          && request.resource.data.name is string && request.resource.data.name.size() <= 80
+          && feedbackTextOk(request.resource.data.text, 500)
+          && getAfter(feedbackPath(fid)).data.get('lastReplyId', '') == rid;
+        // Author edits the text only
+        allow update: if signedIn()
+          && resource.data.uid == me()
+          && onlyChanged(['text', 'editedAt'])
+          && feedbackTextOk(request.resource.data.text, 500)
+          && request.resource.data.editedAt == request.time;
+        // Reply author (with the counter), feedback author or admin
+        allow delete: if signedIn() && (
+          (resource.data.uid == me()
+              && (!existsAfter(feedbackPath(fid))
+                  || getAfter(feedbackPath(fid)).data.get('lastReplyId', '') == rid))
+          || get(feedbackPath(fid)).data.uid == me()
+          || feedbackAdmin());
+      }
     }
   }
 }
