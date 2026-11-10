@@ -1,5 +1,8 @@
 // "Me" tab, Instagram-like: avatar, counts (posts, wardrobe, followers, following), bio,
-// Edit profile, and Posts / Wardrobe / Likes grids. Settings live behind the ☰ button.
+// Edit profile, and 🔮 Astrology / Wardrobe / Likes. Astrology (components/AstrologyPanel.tsx) is
+// computed on the phone from the saved profile (dob, time of birth, rashi, gender, language).
+// It replaced the old Posts grid (new posts can't be made any more; old posts stay in the DB and
+// still open from the Feed / Likes). Settings live behind the ⚙️ button.
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
@@ -19,22 +22,24 @@ import { useAuth } from '../../context/AuthContext';
 import ProfileHeader, { headerButtonStyles as hb } from '../../components/ProfileHeader';
 import PhotoGrid from '../../components/PhotoGrid';
 import { getProfileCounts, ProfileCounts } from '../../services/socialApi';
-import { getCachedLikedItems, getLikedItems, getUserPosts, Post, rememberPosts } from '../../services/feedApi';
-import { getWardrobeItems } from '../../services/wardrobeApi';
-import { getUserProfile } from '../../services/userApi';
+import { getCachedLikedItems, getLikedItems, Post, rememberPosts } from '../../services/feedApi';
+import { getWardrobeItems, WardrobeItemResponse } from '../../services/wardrobeApi';
+import { getUserProfile, StoredProfile } from '../../services/userApi';
+import AstrologyPanel from '../../components/AstrologyPanel';
 import { countFriendsJoined, isWeeklyStar, joinedWithLinkText } from '../../services/rewardsApi';
 import { shareMyReferral } from '../../utils/referralLink';
 
-type Tab = 'posts' | 'wardrobe' | 'likes';
+type Tab = 'astro' | 'wardrobe' | 'likes';
 
 export default function MeScreen({ navigation }: { navigation: any }) {
   const { user, updateUserData } = useAuth();
   const uid = user?.id || '';
   const [counts, setCounts] = useState<ProfileCounts | null>(null);
-  const [posts, setPosts] = useState<Post[]>([]);
   const [wardrobe, setWardrobe] = useState<Post[]>([]);
+  const [wardrobeItems, setWardrobeItems] = useState<WardrobeItemResponse[] | null>(null);
+  const [profile, setProfile] = useState<StoredProfile>({});
   const [likes, setLikes] = useState<Post[] | null>(null);
-  const [tab, setTab] = useState<Tab>('posts');
+  const [tab, setTab] = useState<Tab>('astro');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [isStar, setIsStar] = useState(false);
@@ -44,12 +49,8 @@ export default function MeScreen({ navigation }: { navigation: any }) {
   const load = useCallback(async () => {
     if (!uid) return;
     const errs: string[] = [];
-    const [c, p, w, prof] = await Promise.all([
+    const [c, w, prof] = await Promise.all([
       getProfileCounts(uid, true),
-      getUserPosts(uid).catch(e => {
-        errs.push(e?.message);
-        return [] as Post[];
-      }),
       getWardrobeItems(uid).catch(e => {
         errs.push(e?.message);
         return [];
@@ -57,7 +58,8 @@ export default function MeScreen({ navigation }: { navigation: any }) {
       getUserProfile(uid),
     ]);
     setCounts(c);
-    setPosts(p);
+    setWardrobeItems(w);
+    setProfile(prof);
     const wardrobePosts: Post[] = w
         .filter(i => !!i.imageUrl)
         .map(i => ({
@@ -129,7 +131,17 @@ export default function MeScreen({ navigation }: { navigation: any }) {
   };
 
   const open = (p: Post) => navigation.navigate('PostDetail', { kind: p.kind, id: p.id });
-  const grid = tab === 'posts' ? posts : tab === 'wardrobe' ? wardrobe : likes || [];
+  const grid = tab === 'wardrobe' ? wardrobe : likes || [];
+  const editProfile = () => navigation.navigate('Settings', { edit: true });
+  // Saved profile (fresh read) over the signed-in copy
+  const astroProfile = {
+    name: profile.name ?? user?.name,
+    dob: profile.dob ?? user?.dob,
+    timeOfBirth: profile.timeOfBirth ?? user?.timeOfBirth,
+    rashi: profile.rashi ?? user?.rashi,
+    gender: profile.gender ?? user?.gender,
+    language: profile.language ?? user?.language,
+  };
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
@@ -173,7 +185,7 @@ export default function MeScreen({ navigation }: { navigation: any }) {
           counts={counts}
           isStar={isStar}
           isPrivate={user?.isPublic === false}>
-          <TouchableOpacity style={hb.btn} onPress={() => navigation.navigate('Settings', { edit: true })}>
+          <TouchableOpacity style={hb.btn} onPress={editProfile}>
             <Text style={hb.btnText}>Edit profile</Text>
           </TouchableOpacity>
           <TouchableOpacity style={hb.btn} onPress={() => navigation.navigate('Achievements')}>
@@ -190,25 +202,25 @@ export default function MeScreen({ navigation }: { navigation: any }) {
         </TouchableOpacity>
 
         <View style={styles.tabs}>
-          {(['posts', 'wardrobe', 'likes'] as Tab[]).map(t => (
+          {(['astro', 'wardrobe', 'likes'] as Tab[]).map(t => (
             <TouchableOpacity key={t} style={[styles.tab, tab === t && styles.tabOn]} onPress={() => openTab(t)}>
               <Text style={[styles.tabText, tab === t && styles.tabTextOn]}>
-                {t === 'posts' ? '▦ Posts' : t === 'wardrobe' ? '👗 Wardrobe' : '♡ Likes'}
+                {t === 'astro' ? '🔮 Astrology' : t === 'wardrobe' ? '👗 Wardrobe' : '♡ Likes'}
               </Text>
             </TouchableOpacity>
           ))}
         </View>
         {error ? <Text style={styles.error}>{error}</Text> : null}
-        {loading || (tab === 'likes' && likes === null) ? (
+        {tab === 'astro' ? (
+          <AstrologyPanel uid={uid} profile={astroProfile} wardrobe={wardrobeItems} onEditProfile={editProfile} />
+        ) : loading || (tab === 'likes' && likes === null) ? (
           <ActivityIndicator style={styles.spinner} color={colors.primary} />
         ) : (
           <PhotoGrid
             items={grid}
             onPress={open}
             empty={
-              tab === 'posts'
-                ? 'No posts yet. Tap ＋ to share a look.'
-                : tab === 'wardrobe'
+              tab === 'wardrobe'
                 ? 'No wardrobe photos yet.'
                 : 'No likes yet. Photos you like (double-tap in the Feed) show up here.'
             }

@@ -145,6 +145,19 @@ const enhance = (canvas: any, sharpen?: number) => {
 // downscale, slight auto-contrast + mild sharpen, then the highest JPEG quality in 60..92 that
 // fits (binary search). Below quality 60 the size is lowered instead. Browsers apply EXIF
 // rotation when drawing (image-orientation: from-image).
+// WebP when this browser can encode it (Chrome / Edge / Firefox / Android WebView), else JPEG
+let webpOk: boolean | null = null;
+const outType = (canvas: any): string => {
+  if (webpOk === null) {
+    try {
+      webpOk = String(canvas.toDataURL('image/webp', 0.8)).startsWith('data:image/webp');
+    } catch {
+      webpOk = false;
+    }
+  }
+  return webpOk ? 'image/webp' : 'image/jpeg';
+};
+
 export const resizeLoaded = (img: any, spec: ImageSpec): string => {
   const w0 = img.naturalWidth || img.width;
   const h0 = img.naturalHeight || img.height;
@@ -153,12 +166,13 @@ export const resizeLoaded = (img: any, spec: ImageSpec): string => {
   for (let round = 0; round < 8; round++) {
     const canvas = fit(img, w0, h0, edge);
     enhance(canvas, spec.sharpen);
+    const type = outType(canvas);
     let lowQ = MIN_Q;
     let highQ = MAX_Q;
     let fitUri = '';
     while (lowQ <= highQ) {
       const mid = Math.floor((lowQ + highQ) / 2);
-      const uri = canvas.toDataURL('image/jpeg', mid / 100);
+      const uri = canvas.toDataURL(type, mid / 100);
       if (b64Bytes(uri) <= spec.maxBytes) {
         fitUri = uri;
         lowQ = mid + 1;
@@ -167,7 +181,7 @@ export const resizeLoaded = (img: any, spec: ImageSpec): string => {
       }
     }
     if (fitUri) return fitUri;
-    best = canvas.toDataURL('image/jpeg', MIN_Q / 100);
+    best = canvas.toDataURL(type, MIN_Q / 100);
     if (edge <= 64) break;
     edge = Math.max(64, Math.round(edge * 0.85));
   }

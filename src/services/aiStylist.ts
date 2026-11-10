@@ -33,6 +33,8 @@ export interface StylistContext {
   wardrobeCategories?: string[];
   luckyColours?: string[];
   luckyWhy?: string;
+  // Replaces the stylist instructions (Me > Astrology "More details": one call a day, cached)
+  system?: string;
 }
 
 export const REFUSAL: Record<AiLanguage, string> = {
@@ -49,7 +51,9 @@ export const defaultAiLanguage = (appLanguage?: string | null): AiLanguage => {
 };
 
 const systemPrompt = (c: StylistContext): string =>
-  [
+  c.system
+    ? c.system
+    : [
     'You are OUTFIT Stylist, a friendly personal fashion stylist inside the OUTFIT app (India).',
     'ONLY answer questions about clothing, outfits, colours, colour matching, accessories, footwear, grooming for an outfit, fabrics, and what to wear for an occasion or place.',
     `If the user asks about anything else (coding, maths, news, health, politics, homework, other apps, or anything not about clothes/style/colour), reply exactly: "${REFUSAL[c.language]}"`,

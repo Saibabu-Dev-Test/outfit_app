@@ -105,8 +105,8 @@ const MAX_THUMB_CHARS = 40000;
 const okThumb = (t?: string | null): t is string => !!t && /^data:image\//.test(t) && t.length <= MAX_THUMB_CHARS;
 const mediaRef = (id: string) => doc(db, COLL, id, 'media', 'full');
 const clearRef = (id: string) => doc(db, COLL, id, 'media', 'clear');
-// Clear feed photo: a JPEG data URI of at most ~45 KB (CLEAR_SPEC) with slack
-const MAX_CLEAR_CHARS = 120000;
+// Clear feed photo: a WebP / JPEG data URI of at most 80 KB (CLEAR_SPEC, ~109K chars) with slack
+const MAX_CLEAR_CHARS = 160000;
 const okClear = (t?: string | null): t is string => !!t && /^data:image\//.test(t) && t.length <= MAX_CLEAR_CHARS;
 
 // ── Cache of my items ──────────────────────────────────────────────────────

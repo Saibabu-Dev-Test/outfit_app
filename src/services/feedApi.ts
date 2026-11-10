@@ -61,12 +61,12 @@ export const OPTION_LABELS = ['A', 'B', 'C', 'D', 'E', 'F'];
 export const MAX_POST_PHOTOS = 6;
 // Whole post doc must stay under Firestore's 1 MiB
 export const MAX_POST_TOTAL_CHARS = 900000;
-// One thumbnail (THUMB_SPEC ~12 KB) with slack for a picker that overshoots
+// One thumbnail (THUMB_SPEC <= 16 KB = ~22K chars) with slack for a picker that overshoots
 const MAX_THUMB_CHARS = 40000;
 export const MEDIA_FULL = 'full';
 export const MEDIA_CLEAR = 'clear';
-// One clear feed photo (CLEAR_SPEC ~45 KB) with slack
-const MAX_CLEAR_CHARS = 120000;
+// One clear feed photo (CLEAR_SPEC <= 80 KB = ~109K chars) with slack
+const MAX_CLEAR_CHARS = 160000;
 
 // A photo to post: full size + thumbnail (thumb missing = older picker: stored inline)
 export interface PostPhoto {

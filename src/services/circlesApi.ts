@@ -5,8 +5,9 @@
 //   inviteCodes/{code}                    -> { circleId } so private circles can be joined by code
 // circles/{id}.isPublic (= !isPrivate). The owner can switch a circle between public and private
 // later (updateCircleVisibility). Public circles are listed in Discover; private ones are joined with
-// the invite link / code. The old "Nearby" feature is gone: new circles never get a location.
-// Legacy: older public circles may still have location / geohash / radiusKm; those stay out of
+// the invite link / code. Nearby (Circles > 📍 Nearby): a public circle created with "Show in Nearby"
+// saves its approximate location (~100 m) + geohash; getNearbyCircles lists public circles within
+// NEARBY_KM (3 km). Legacy: older public circles with a distance limit (radiusKm) stay out of
 // Discover (members share the invite code) until the owner clears the limit (removeCircleLocation).
 import {
   collection,
@@ -35,7 +36,7 @@ import { MAX_BASE64_CHARS } from '../utils/imagePicker';
 import { toDate } from '../utils/date';
 import { inlineAvatar } from './userApi';
 import { assertClean } from '../utils/profanity';
-import { encodeGeohash, haversineKm, roundCoord } from '../utils/geo';
+import { encodeGeohash, geohashNeighbours, haversineKm, roundCoord } from '../utils/geo';
 import { getApproxLocation } from '../native/location';
 
 export interface Circle {
@@ -275,6 +276,53 @@ export const getDiscoverCircles = async (): Promise<Circle[]> => {
       .sort((a, b) => b.memberIds.length - a.memberIds.length || byRecent(a, b));
   } catch (e: any) {
     return fail(e, 'Loading circles');
+  }
+};
+
+export const NEARBY_KM = 3;
+
+// Public circles within NEARBY_KM (3 km) of me, nearest first. Geohash prefix range queries over the
+// precision-5 cells covering the 3 km box (index: circles isPrivate ASC + geohash ASC), then an
+// exact great-circle distance filter. If that index isn't deployed, falls back to public circles
+// filtered on the phone. (isPrivate == false because the read rule is written on isPrivate.)
+export const getNearbyCircles = async (lat: number, lng: number): Promise<Circle[]> => {
+  const col = collection(db, CIRCLES);
+  const within = (cs: Circle[]): Circle[] => {
+    const seen = new Set<string>();
+    const out: Circle[] = [];
+    cs.forEach(c => {
+      if (seen.has(c.id) || c.isPrivate || !c.location) return;
+      seen.add(c.id);
+      const km = haversineKm(lat, lng, c.location.lat, c.location.lng);
+      if (km <= NEARBY_KM) out.push({ ...c, distanceKm: km });
+    });
+    return out.sort((a, b) => (a.distanceKm || 0) - (b.distanceKm || 0));
+  };
+  try {
+    const cells = geohashNeighbours(lat, lng, 5, NEARBY_KM);
+    const snaps = await Promise.all(
+      cells.map(h =>
+        getDocs(
+          query(
+            col,
+            where('isPrivate', '==', false),
+            where('geohash', '>=', h),
+            where('geohash', '<=', h + '~'),
+            limit(100),
+          ),
+        ),
+      ),
+    );
+    return within(snaps.flatMap(sn => sn.docs.map(d => toCircle(d.id, d.data()))));
+  } catch (e: any) {
+    // failed-precondition = composite index missing (firestore.indexes.json not deployed)
+    console.warn('Nearby geohash query failed, using fallback:', e?.code, e?.message);
+  }
+  try {
+    const snap = await getDocs(query(col, where('isPrivate', '==', false), limit(500)));
+    return within(snap.docs.map(d => toCircle(d.id, d.data())));
+  } catch (e: any) {
+    return fail(e, 'Loading nearby circles');
   }
 };
 
