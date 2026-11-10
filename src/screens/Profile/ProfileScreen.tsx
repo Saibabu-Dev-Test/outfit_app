@@ -18,7 +18,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { pickImage, AVATAR_PICK } from '../../utils/imagePicker';
-import { getUserProfile, saveUserProfile, uploadAvatar, STYLE_OPTIONS } from '../../services/userApi';
+import { getUserProfile, saveUserProfile, uploadAvatar } from '../../services/userApi';
 import { checkNotifications, openNotificationSettings } from '../../native/notifications';
 import { RASHIS } from '../../utils/panchangam';
 import SelectModal from '../../components/SelectModal';
@@ -76,10 +76,7 @@ export default function ProfileScreen() {
   const route = useRoute<any>();
   const { user: authUser, logout, updateUserData } = useAuth();
   const { mode: themeMode, isDark, setMode: setThemeMode } = useTheme();
-  const [stylePrefsOpen, setStylePrefsOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
-  const [editStylePrefs, setEditStylePrefs] = useState<string[]>([]);
-  const [savingStyles, setSavingStyles] = useState(false);
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
   const [editIsPublic, setEditIsPublic] = useState<boolean>(true);
   const [profileData, setProfileData] = useState<UserProfile | null>(authUser);
@@ -289,30 +286,6 @@ const fetchProfile = async () => {
       { text: 'Light', onPress: () => setThemeMode('light') },
       { text: 'Dark', onPress: () => setThemeMode('dark') },
     ]);
-
-  const openStylePrefs = () => {
-    setEditStylePrefs(profileData?.stylePrefs || []);
-    setStylePrefsOpen(true);
-  };
-
-  const toggleStylePref = (opt: string) =>
-    setEditStylePrefs(prev => (prev.includes(opt) ? prev.filter(x => x !== opt) : [...prev, opt]));
-
-  const saveStylePrefs = async () => {
-    const uid = authUser?.id;
-    if (!uid) return;
-    setSavingStyles(true);
-    try {
-      await saveUserProfile(uid, { stylePrefs: editStylePrefs });
-      setProfileData(prev => (prev ? { ...prev, stylePrefs: editStylePrefs } : prev));
-      updateUserData({ stylePrefs: editStylePrefs });
-      setStylePrefsOpen(false);
-    } catch (e: any) {
-      Alert.alert('Not saved', e?.message || 'Please try again.');
-    } finally {
-      setSavingStyles(false);
-    }
-  };
 
   // App lock, invite code, friends joined, ⭐ badge
   useEffect(() => {
@@ -681,15 +654,7 @@ const fetchProfile = async () => {
         {/* Menu Section */}
         <View style={styles.menuSection}>
           {[
-            {
-              id: 'style',
-              icon: '🎨',
-              label: 'Style preference',
-              value: profileData?.stylePrefs?.length ? profileData.stylePrefs.join(', ') : 'Not set',
-              onPress: openStylePrefs,
-            },
             { id: 'ach', icon: '🏆', label: 'Achievements', onPress: () => navigation.navigate('Achievements') },
-            { id: 'likes', icon: '♥', label: 'Likes', onPress: () => navigation.navigate('Likes', { tab: 'likes' }) },
             {
               id: 'notif',
               icon: '🔔',
@@ -787,46 +752,6 @@ const fetchProfile = async () => {
         name={profileData?.name || authUser?.name}
         onClose={() => setFeedbackOpen(false)}
       />
-
-      {/* Style preference (multi-select) */}
-      <Modal visible={stylePrefsOpen} transparent animationType="slide" onRequestClose={() => setStylePrefsOpen(false)}>
-        <View style={styles.modalOverlay}>
-          <TouchableOpacity style={styles.backdropPressable} activeOpacity={1} onPress={() => setStylePrefsOpen(false)} />
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Style preference</Text>
-              <TouchableOpacity onPress={() => setStylePrefsOpen(false)}>
-                <Text style={styles.modalCloseIcon}>✕</Text>
-              </TouchableOpacity>
-            </View>
-            <Text style={styles.stylePrefHint}>Pick all that suit you</Text>
-            <View style={styles.stylePrefWrap}>
-              {STYLE_OPTIONS.map(opt => {
-                const on = editStylePrefs.includes(opt);
-                return (
-                  <TouchableOpacity
-                    key={opt}
-                    style={[styles.stylePrefChip, on && styles.stylePrefChipOn]}
-                    onPress={() => toggleStylePref(opt)}
-                    activeOpacity={0.8}>
-                    <Text style={[styles.stylePrefText, on && styles.stylePrefTextOn]}>
-                      {on ? '✓ ' : ''}
-                      {opt}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-            <TouchableOpacity style={styles.stylePrefSave} onPress={saveStylePrefs} disabled={savingStyles}>
-              {savingStyles ? (
-                <ActivityIndicator color={colors.onPrimary} />
-              ) : (
-                <Text style={styles.stylePrefSaveText}>Save ({editStylePrefs.length})</Text>
-              )}
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
 
       {/* Edit Profile Modal */}
       <Modal
@@ -1205,29 +1130,6 @@ const styles = themedStyles(() => StyleSheet.create({
   backArrow: { fontSize: 34, color: colors.primary, marginRight: spacing.sm, lineHeight: 36 },
   flexTitle: { flex: 1 },
   menuValue: { fontSize: fontSize.xs, color: colors.textSecondary, marginTop: 1 },
-  stylePrefHint: { fontSize: fontSize.sm, color: colors.textSecondary, marginBottom: spacing.md },
-  stylePrefWrap: { flexDirection: 'row', flexWrap: 'wrap' },
-  stylePrefChip: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 18,
-    borderWidth: 1.5,
-    borderColor: colors.border,
-    marginRight: 8,
-    marginBottom: 8,
-    backgroundColor: colors.surface,
-  },
-  stylePrefChipOn: { backgroundColor: colors.primary, borderColor: colors.primary },
-  stylePrefText: { fontSize: fontSize.sm, fontWeight: fontWeight.semiBold, color: colors.textPrimary },
-  stylePrefTextOn: { color: colors.onPrimary },
-  stylePrefSave: {
-    marginTop: spacing.lg,
-    backgroundColor: colors.primary,
-    borderRadius: borderRadius.full,
-    paddingVertical: spacing.md,
-    alignItems: 'center',
-  },
-  stylePrefSaveText: { color: colors.onPrimary, fontWeight: fontWeight.bold, fontSize: fontSize.base },
   flexShrink: { flexShrink: 1 },
   publicRow: {
     flexDirection: 'row',
