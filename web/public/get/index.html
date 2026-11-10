@@ -5,13 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#2D1F6E" />
   <title>Outfit</title>
-  <meta name="description" content="Download Outfit – vote on outfits with friends" />
+  <meta name="description" content="Outfit for Android – vote on outfits with friends" />
   <!-- Link previews (WhatsApp, Telegram, SMS). __SHARE_BASE__ is filled in by web/webpack.config.js
        from SHARE_BASE in src/config/links.ts -->
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="Outfit" />
   <meta property="og:title" content="Outfit" />
-  <meta property="og:description" content="Download Outfit – vote on outfits with friends" />
+  <meta property="og:description" content="Outfit for Android – vote on outfits with friends" />
   <meta property="og:url" content="__SHARE_BASE__/get/" />
   <meta property="og:image" content="__SHARE_BASE__/icons/og.png" />
   <meta property="og:image:secure_url" content="__SHARE_BASE__/icons/og.png" />
@@ -21,7 +21,7 @@
   <meta property="og:image:alt" content="Outfit" />
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="Outfit" />
-  <meta name="twitter:description" content="Download Outfit – vote on outfits with friends" />
+  <meta name="twitter:description" content="Outfit for Android – vote on outfits with friends" />
   <meta name="twitter:image" content="__SHARE_BASE__/icons/og.png" />
   <link rel="icon" href="/icons/favicon-32.png" />
   <style>
@@ -48,6 +48,8 @@
     .steps h2 { margin: 0 0 8px; font-size: 15px; color: var(--p); }
     .steps ol { margin: 0; padding-left: 20px; }
     .steps li { margin-bottom: 6px; }
+    .only { margin: 0 0 18px; text-align: center; }
+    .only p { margin: 0; color: var(--m); }
     [hidden] { display: none !important; }
   </style>
 </head>
@@ -76,10 +78,14 @@
       </div>
     </div>
 
-    <!-- iPhone / iPad / computer: sent to the web app (shown only if that redirect is slow) -->
+    <!-- iPhone / iPad / computer: Outfit is an Android app only (no web version) -->
     <div id="other" hidden>
-      <a class="btn" id="web" href="/">Open Outfit</a>
-      <p class="note">Opening Outfit… Create your account there. The referral code is filled in for you.</p>
+      <div class="steps only">
+        <h2>Outfit is available on Android</h2>
+        <p>Open this link on your Android phone to download and install Outfit.</p>
+      </div>
+      <button class="btn btn-sm" id="copy" type="button">Copy link</button>
+      <p class="note" id="copied"></p>
     </div>
   </main>
   <script>
@@ -93,17 +99,23 @@
         code = '';
       }
 
-      // Site root: "/" on Firebase Hosting, "/outfit_app/" on the GitHub Pages copy
-      var base = location.pathname.replace(/get\/?(index\.html)?$/, '') || '/';
-      var webUrl = base + '?' + (code ? 'ref=' + encodeURIComponent(code) + '&' : '') + 'web=1';
-      document.getElementById('web').href = webUrl;
-
-      // iPhone / iPad / computers: straight to the web app (PWA), never the APK
+      // iPhone / iPad / computers: Outfit is Android only. No web app, no APK: just say so and
+      // offer to copy this link (with the referral code) to open on an Android phone.
       var ua = navigator.userAgent || '';
       var isAndroid = /Android/i.test(ua);
       if (!isAndroid) {
         document.getElementById('other').hidden = false;
-        location.replace(webUrl);
+        var shareUrl = location.origin + location.pathname + (code ? '?ref=' + encodeURIComponent(code) : '');
+        document.getElementById('copy').addEventListener('click', function () {
+          var done = function (ok) {
+            document.getElementById('copied').textContent = ok ? 'Link copied. Open it on your Android phone.' : shareUrl;
+          };
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(shareUrl).then(function () { done(true); }, function () { done(false); });
+          } else {
+            done(false);
+          }
+        });
         return;
       }
 

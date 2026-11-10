@@ -1,6 +1,7 @@
 // App only, no website: replaces the old PWA service worker. Browsers that visited the old site
 // still run it and show the cached website; this version clears every cache, unregisters itself
-// and reloads open tabs, so the link goes to the server's 302 (APK download) from then on.
+// and reloads open tabs, so the link goes to the server's 302 (the /get/ Android download page) from
+// then on.
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', event => {
   event.waitUntil((async () => {
@@ -11,5 +12,5 @@ self.addEventListener('activate', event => {
     tabs.forEach(tab => tab.navigate(tab.url).catch(() => {}));
   })());
 });
-// Never answer from cache: let every request go to the network (server redirects to the APK).
+// Never answer from cache: let every request go to the network (server redirects to /get/).
 self.addEventListener('fetch', () => {});

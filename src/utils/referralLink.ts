@@ -5,8 +5,8 @@
 // with the sharer's code; a share waits for the code and never goes out without it.
 // /get/ detects the platform: on Android the APK download starts as soon as the link opens (no
 // web app shown; a "Tap here if the download didn't start" button + install steps), with the code
-// copied first; iPhone / iPad / computers are sent straight to the web app (/?ref=CODE&web=1, code
-// prefilled at sign-up). The web root sends /?ref=CODE on to /get/ only on Android, never when web=1.
+// copied first. Outfit is Android only: iPhone / iPad / computers see "Outfit is available on
+// Android" (no web app). Every other Hosting path, including /?ref=CODE, redirects to /get/.
 import { Alert, Linking, Platform, Share } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ensureReferralCode } from '../services/rewardsApi';

@@ -28,14 +28,14 @@
   <meta name="apple-mobile-web-app-title" content="Outfit" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <script>
-    // Invite links (/?ref=CODE) opened in an Android browser go to the app download page.
-    // Never on iPhone / iPad / computers, and not when /get/ sent them here on purpose (web=1).
+    // Outfit is an Android app only: outside local development this page is not an app. Every
+    // visitor goes to the /get/ Android download page (query kept, so ?ref=CODE survives).
     (function () {
       try {
-        if (/[?&]ref=[^&#]+/i.test(location.search) && !/[?&]web=1/.test(location.search)
-            && /Android/i.test(navigator.userAgent || '')) {
-          location.replace('<%= publicPath %>get/' + location.search);
-        }
+        var h = location.hostname;
+        var local = h === 'localhost' || h === '127.0.0.1' || h === '[::1]' ||
+          /^(10|192\.168|172\.(1[6-9]|2\d|3[01]))\./.test(h);
+        if (!local) location.replace('<%= publicPath %>get/' + location.search);
       } catch (e) {}
     })();
   </script>

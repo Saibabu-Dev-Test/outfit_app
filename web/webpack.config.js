@@ -1,5 +1,7 @@
-// Web (PWA) build of the same src/ app with react-native-web.
-//   npm run web:build   -> web/dist (static files for GitHub Pages)
+// Browser build of the same src/ app with react-native-web, for local development and as a
+// compile check only. Outfit is Android only: this bundle is never hosted (Firebase Hosting serves
+// just /get/, see scripts/build-hosting.js), and on any non-local host it redirects to /get/.
+//   npm run web:build   -> web/dist
 // PUBLIC_PATH sets the base path (GitHub Pages project site: /outfit_app/).
 const path = require('path');
 const webpack = require('webpack');
@@ -95,7 +97,7 @@ module.exports = (env, argv) => {
         patterns: [
           { from: path.join(__dirname, 'public', 'manifest.json') },
           { from: path.join(__dirname, 'public', 'icons'), to: 'icons' },
-          // Static app download page (/get/?ref=CODE); Firebase Hosting serves it before the SPA rewrite
+          // Static app download page (/get/?ref=CODE); Hosting copies it via scripts/build-hosting.js
           {
             from: path.join(__dirname, 'public', 'get'),
             to: 'get',

@@ -1,17 +1,22 @@
-// Web (browser / PWA) entry. The Android app keeps using ../index.js.
+// Web entry. Outfit is an Android app only: the browser build runs ONLY for local development
+// (npm run web:dev on localhost / a LAN address). Served from any other host it is not a usable
+// app and sends visitors to the /get/ Android download page (query kept, so ?ref=CODE survives).
+// Firebase Hosting never deploys this bundle (scripts/build-hosting.js, firebase.json).
 /* global __webpack_public_path__ */
 import { AppRegistry } from 'react-native';
 import './polyfills';
 import App from '../App';
 
-AppRegistry.registerComponent('outfit', () => App);
-AppRegistry.runApplication('outfit', { rootTag: document.getElementById('root') });
+const host = window.location.hostname;
+const isLocalDev =
+  host === 'localhost' ||
+  host === '127.0.0.1' ||
+  host === '[::1]' ||
+  /^(10|192\.168|172\.(1[6-9]|2\d|3[01]))\./.test(host);
 
-// Offline shell (production build only)
-if ('serviceWorker' in navigator && process.env.NODE_ENV === 'production') {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register(`${__webpack_public_path__}sw.js`).catch(e => {
-      console.warn('Service worker registration failed:', e && e.message);
-    });
-  });
+if (!isLocalDev) {
+  window.location.replace(`${__webpack_public_path__}get/${window.location.search}`);
+} else {
+  AppRegistry.registerComponent('outfit', () => App);
+  AppRegistry.runApplication('outfit', { rootTag: document.getElementById('root') });
 }

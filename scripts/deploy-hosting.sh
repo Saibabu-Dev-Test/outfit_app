@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
-# App only, no website for now: Firebase Hosting (https://outfit-vote-9edca.web.app) just downloads
-# the Android app. "/" and every other path are 302 redirects to the latest GitHub release APK
-# (same as firebase.json; `firebase deploy --only hosting` does the same thing).
+# App only, no website: Firebase Hosting (https://outfit-vote-9edca.web.app) serves ONLY the
+# Android download page /get/ (share links: /get/?ref=CODE), its icons / og.png, robots.txt and the
+# old-PWA kill-switch sw.js. Every other path ("/", old web-app URLs...) is a 302 to /get/ (query
+# string kept, so old /?ref=CODE links still carry the code). /Outfit.apk and /Outfit-universal.apk
+# 302 to the latest GitHub release APK. Non-Android visitors see "Outfit is available on Android".
+# The redirects come from firebase.json (one source of truth; `firebase deploy --only hosting`
+# from a checkout does the same thing, its predeploy runs scripts/build-hosting.js).
 # Run in Google Cloud Shell as a project owner:
 #   curl -sL https://raw.githubusercontent.com/Saibabu-Dev-Test/outfit_app/main/scripts/deploy-hosting.sh | bash
 #
@@ -9,33 +13,32 @@
 #   curl -sL https://raw.githubusercontent.com/Saibabu-Dev-Test/outfit_app/main/scripts/deploy-hosting.sh | SITE=outfit-app bash
 # SITE creates that Hosting site in this project if needed (same as `firebase hosting:sites:create
 # $SITE`, done here through the Hosting REST API so no `firebase login` is needed) and deploys the
-# same build to it too. A name already taken by another Firebase project stops with an error.
+# same files to it too. A name already taken by another Firebase project stops with an error.
 #
 # The APK bytes don't count against the Hosting free transfer (360 MB/day), only the tiny redirect does.
-# Files served: hosting-public/robots.txt and sw.js (no index.html, so "/" reaches the redirect).
 set -euo pipefail
 P=outfit-vote-9edca
 SITE="${SITE:-}"
-rm -rf /tmp/webdist && mkdir -p /tmp/webdist
-printf 'User-agent: *\nDisallow: /\n' > /tmp/webdist/robots.txt
-# Kill-switch for the old PWA service worker (cached website in browsers that visited before)
-curl -sfL https://raw.githubusercontent.com/Saibabu-Dev-Test/outfit_app/main/hosting-public/sw.js -o /tmp/webdist/sw.js
+BRANCH="${BRANCH:-main}"
+# Fresh copy of the repo (no git clone needed), then assemble hosting-public/ (get/, icons/, sw.js, robots.txt)
+SRC=/tmp/outfit-src
+rm -rf "$SRC" && mkdir -p "$SRC"
+curl -sfL "https://codeload.github.com/Saibabu-Dev-Test/outfit_app/tar.gz/refs/heads/$BRANCH" | tar -xz -C "$SRC" --strip-components=1
+node "$SRC/scripts/build-hosting.js"
+export WEBROOT="$SRC/hosting-public" FIREBASE_JSON="$SRC/firebase.json"
 export TOKEN=$(gcloud auth print-access-token) P SITE
 python3 - <<'PY'
 import os, re, gzip, hashlib, json, urllib.request
-P=os.environ['P']; T=os.environ['TOKEN']; SITE=os.environ.get('SITE','').strip(); root='/tmp/webdist'
+P=os.environ['P']; T=os.environ['TOKEN']; SITE=os.environ.get('SITE','').strip(); root=os.environ['WEBROOT']
 API='https://firebasehosting.googleapis.com/v1beta1'
-REL='https://github.com/Saibabu-Dev-Test/outfit_app/releases/latest/download/'
-CONFIG = {
-    'redirects': [
-        {'glob': '/Outfit.apk', 'statusCode': 302, 'location': REL + 'Outfit.apk'},
-        {'glob': '/Outfit-universal.apk', 'statusCode': 302, 'location': REL + 'Outfit-universal.apk'},
-        # App only: the root and every other path download the app
-        # Every path except /sw.js (redirects beat files on Firebase Hosting, and the old PWA's
-        # service worker only goes away when /sw.js serves the kill-switch file)
-        {'regex': r'^/(?:[^s].*|s(?:[^w].*)?|sw(?:[^.].*)?|sw\.(?:[^j].*)?|sw\.j(?:[^s].*)?|sw\.js.+)?$', 'statusCode': 302, 'location': REL + 'Outfit.apk'},
-    ],
-}
+# firebase.json redirects -> Hosting REST API config (source/glob/regex, destination -> location)
+def api_redirect(r):
+    out = {'statusCode': int(r.get('type', 301)), 'location': r['destination']}
+    if 'regex' in r: out['regex'] = r['regex']
+    else: out['glob'] = r.get('source') or r['glob']
+    return out
+CONFIG = {'redirects': [api_redirect(r) for r in json.load(open(os.environ['FIREBASE_JSON']))['hosting']['redirects']]}
+print('Redirects:', json.dumps([(c.get('glob') or 'regex', c['location']) for c in CONFIG['redirects']]))
 def call(method, url, body=None, raw=None, ctype='application/json', ok=()):
     data = raw if raw is not None else (json.dumps(body).encode() if body is not None else None)
     req = urllib.request.Request(url, data=data, method=method, headers={

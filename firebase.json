@@ -1,6 +1,9 @@
 {
   "hosting": {
     "public": "hosting-public",
+    "predeploy": [
+      "node scripts/build-hosting.js"
+    ],
     "ignore": [
       "firebase.json",
       "**/.*"
@@ -17,8 +20,13 @@
         "type": 302
       },
       {
-        "regex": "^/(?:[^s].*|s(?:[^w].*)?|sw(?:[^.].*)?|sw\\.(?:[^j].*)?|sw\\.j(?:[^s].*)?|sw\\.js.+)?$",
-        "destination": "https://github.com/Saibabu-Dev-Test/outfit_app/releases/latest/download/Outfit.apk",
+        "source": "/og.png",
+        "destination": "/icons/og.png",
+        "type": 302
+      },
+      {
+        "regex": "^(?:|[^/].*|/(?:|[^girs].*|g(?:|[^e].*|e(?:|[^t].*|t(?:|[^/].*)))|i(?:|[^c].*|c(?:|[^o].*|o(?:|[^n].*|n(?:|[^s].*|s(?:|[^/].*)))))|r(?:|[^o].*|o(?:|[^b].*|b(?:|[^o].*|o(?:|[^t].*|t(?:|[^s].*|s(?:|[^.].*|\\.(?:|[^t].*|t(?:|[^x].*|x(?:|[^t].*|t(?:.+))))))))))|s(?:|[^w].*|w(?:|[^.].*|\\.(?:|[^j].*|j(?:|[^s].*|s(?:.+)))))))$",
+        "destination": "/get/",
         "type": 302
       }
     ]
