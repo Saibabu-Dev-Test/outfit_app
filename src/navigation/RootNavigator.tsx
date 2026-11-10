@@ -13,7 +13,6 @@ import AuthNavigator from './AuthNavigator';
 import { AuthProvider, useAuth } from '../context/AuthContext';
 import CircleChatScreen from '../screens/Circles/CircleChatScreen';
 import CircleInfoScreen from '../screens/Circles/CircleInfoScreen';
-import NewPostScreen from '../screens/Feed/NewPostScreen';
 import CommentsScreen from '../screens/Feed/CommentsScreen';
 import UserProfileScreen from '../screens/Profile/UserProfileScreen';
 import UserSearchScreen from '../screens/Profile/UserSearchScreen';
@@ -118,7 +117,6 @@ function NavigationContent() {
               <Stack.Screen name="LikedBy" component={LikedByScreen} />
               <Stack.Screen name="PostDetail" component={PostDetailScreen} />
               <Stack.Screen name="FollowList" component={FollowListScreen} />
-              <Stack.Screen name="NewPost" component={NewPostScreen} />
               <Stack.Screen name="Comments" component={CommentsScreen} />
               <Stack.Screen name="UserProfile" component={UserProfileScreen} />
               <Stack.Screen name="UserSearch" component={UserSearchScreen} />

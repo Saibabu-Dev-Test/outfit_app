@@ -14,7 +14,8 @@ export type BottomTabParamList = {
   Feed: { refreshAt?: number } | undefined;
   Stylist: undefined;
   Wardrobe: undefined;
-  Circles: undefined;
+  // tab: open a Circles tab directly (Feed's 📍 Nearby button)
+  Circles: { tab?: 'mine' | 'discover' | 'nearby' } | undefined;
   Me: undefined;
 };
 

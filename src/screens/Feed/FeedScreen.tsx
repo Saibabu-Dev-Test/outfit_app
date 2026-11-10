@@ -75,7 +75,7 @@ export default function FeedScreen({ navigation, route }: { navigation: any; rou
     }
   };
 
-  // First load, and again after a new post (NewPost passes refreshAt)
+  // First load, and again when a screen passes refreshAt
   const refreshAt = route?.params?.refreshAt;
   useEffect(() => {
     loadFirst();
@@ -105,8 +105,12 @@ export default function FeedScreen({ navigation, route }: { navigation: any; rou
         <TouchableOpacity style={styles.iconBtn} onPress={() => navigation.navigate('UserSearch')}>
           <Text style={styles.iconText}>🔍</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.newBtn} onPress={() => navigation.navigate('NewPost')}>
-          <Text style={styles.newText}>＋ Post</Text>
+        {/* No separate Post screen: wardrobe uploads show in the feed. This spot opens Nearby circles. */}
+        <TouchableOpacity
+          style={styles.newBtn}
+          onPress={() => navigation.navigate('Circles', { tab: 'nearby' })}
+          accessibilityLabel="Nearby circles">
+          <Text style={styles.newText}>📍 Nearby</Text>
         </TouchableOpacity>
       </View>
 
@@ -153,9 +157,9 @@ export default function FeedScreen({ navigation, route }: { navigation: any; rou
           ) : (
             <View style={styles.empty}>
               <Text style={styles.emptyEmoji}>📸</Text>
-              <Text style={styles.emptyText}>No posts yet. Share the first look!</Text>
-              <TouchableOpacity style={styles.emptyBtn} onPress={() => navigation.navigate('NewPost')}>
-                <Text style={styles.newText}>＋ New post</Text>
+              <Text style={styles.emptyText}>No posts yet. Add a wardrobe photo to share the first look!</Text>
+              <TouchableOpacity style={styles.emptyBtn} onPress={() => navigation.navigate('Wardrobe')}>
+                <Text style={styles.newText}>👗 Open wardrobe</Text>
               </TouchableOpacity>
             </View>
           )

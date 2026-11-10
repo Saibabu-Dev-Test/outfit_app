@@ -123,9 +123,6 @@ export default function MeScreen({ navigation }: { navigation: any }) {
         <Text style={styles.barTitle} numberOfLines={1}>
           {user?.name || 'Me'}
         </Text>
-        <TouchableOpacity style={styles.barBtn} onPress={() => navigation.navigate('NewPost')}>
-          <Text style={styles.barIcon}>＋</Text>
-        </TouchableOpacity>
         <TouchableOpacity style={styles.barBtn} onPress={invite} accessibilityLabel="Invite friends to download the app">
           <Text style={styles.barIcon}>🎁</Text>
         </TouchableOpacity>

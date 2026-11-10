@@ -2,7 +2,7 @@
 // circle. A public circle can have a distance limit (default 3 km): then only people within that
 // distance see it (in Nearby) and can join it from there; others join with a member's invite link/code.
 // No limit = listed in Discover for everyone.
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -22,7 +22,7 @@ import {
   Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles, statusBarStyle } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
 import {
@@ -104,6 +104,16 @@ export default function CirclesScreen() {
     setTab(k);
     if (k === 'nearby' && !nearbyLoaded && !nearbyLoading) loadNearby();
   };
+
+  // Opened with { tab } (Feed's 📍 Nearby button): switch to that tab, then clear the param
+  const route = useRoute<any>();
+  const wantTab: TabKey | undefined = route.params?.tab;
+  useEffect(() => {
+    if (!wantTab) return;
+    setTab(wantTab);
+    if (wantTab === 'nearby') loadNearby();
+    navigation.setParams({ tab: undefined });
+  }, [wantTab, loadNearby, navigation]);
 
   const openInMaps = (c: Circle) => {
     if (!c.location) return;

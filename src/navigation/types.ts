@@ -4,7 +4,6 @@ export type RootStackParamList = {
   MainApp: { screen?: string; params?: any } | undefined;
   CircleChat: { circleId: string };
   CircleInfo: { circleId: string };
-  NewPost: undefined;
   UserProfile: { userId: string };
   UserSearch: undefined;
   // { postId } (old) or { target: CommentTarget }
