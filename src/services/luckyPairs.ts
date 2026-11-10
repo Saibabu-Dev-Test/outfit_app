@@ -24,7 +24,7 @@ export interface LuckyPairsResult {
 }
 
 export const MIN_PAIRS = 3;
-export const MAX_PAIRS = 5;
+export const MAX_PAIRS = 3; // at most 3 pairs, best first
 
 const TOP_CATS = new Set(CATEGORY_GROUPS.find(g => g.key === 'tops')?.categories || []);
 const BOTTOM_CATS = new Set(CATEGORY_GROUPS.find(g => g.key === 'bottoms')?.categories || []);
@@ -278,14 +278,112 @@ export const pairsSubtitle = (v: VaaraColour, lang: AiLanguage): string =>
   });
 
 // ── Scoring ────────────────────────────────────────────────────────────────
-const OCCASION_WEAR: Record<string, string[]> = {
-  Work: ['Formal', 'Daily Wear'],
-  College: ['Casual', 'Daily Wear'],
-  Date: ['Casual'],
-  Party: ['Casual'],
-  'Wedding / Function': ['Formal'],
-  'Casual outing': ['Casual', 'Daily Wear'],
-  Travel: ['Casual', 'Daily Wear'],
+// ── Occasion fit ─────────────────────────────────────────────────────────
+export type OccKey =
+  | 'work' | 'interview' | 'college' | 'date' | 'party' | 'wedding' | 'festival' | 'temple'
+  | 'beach' | 'gym' | 'travel' | 'casual';
+
+// Occasion chip / detected word -> rule key
+export const occasionKey = (occ?: string | null): OccKey | null => {
+  const o = (occ || '').toLowerCase();
+  if (!o) return null;
+  if (/interview/.test(o)) return 'interview';
+  if (/work|office/.test(o)) return 'work';
+  if (/college|school|class/.test(o)) return 'college';
+  if (/date/.test(o)) return 'date';
+  if (/party/.test(o)) return 'party';
+  if (/wedding|function|marriage/.test(o)) return 'wedding';
+  if (/festival/.test(o)) return 'festival';
+  if (/temple/.test(o)) return 'temple';
+  if (/beach/.test(o)) return 'beach';
+  if (/gym|workout|sport/.test(o)) return 'gym';
+  if (/travel|trip|hill/.test(o)) return 'travel';
+  if (/casual|outing|restaurant|movie/.test(o)) return 'casual';
+  return null;
+};
+
+const WORDS = {
+  formal: /formal|blazer|suit|trouser|office|dress pant|oxford|tie\b/,
+  casualTop: /t-?shirt|tee|polo|hoodie|sweatshirt|casual|crop|top\b/,
+  denim: /jean|denim/,
+  shorts: /short|bermuda|capri|skirt/,
+  linen: /linen|cotton|shorts/,
+  ethnic: /kurta|kurti|saree|sari|lehenga|ethnic|traditional|dhoti|pancha|sherwani|salwar|churidar|anarkali|langa|half saree|pyjama|veshti/,
+  sport: /track|jogger|gym|sport|active|legging|athletic/,
+  smart: /shirt|chino|polo|dress\b|blouse|kurti/,
+  party: /party|sequin|satin|silk|blazer/,
+};
+const LIGHT = new Set<Fam>(['white', 'lightblue', 'beige', 'yellow', 'pink', 'silver', 'grey']);
+const BRIGHT_AUSPICIOUS = new Set<Fam>(['yellow', 'red', 'maroon', 'orange', 'green', 'pink']);
+
+const itemText = (i: WardrobeItemResponse) =>
+  `${i.name || ''} ${i.category || ''} ${i.subCategory || ''} ${i.subType || ''} ${i.wearType || ''} ${i.fabric || ''}`.toLowerCase();
+
+// How well one item fits the occasion (roughly -3..+4)
+export const occasionFit = (i: WardrobeItemResponse, key: OccKey | null): number => {
+  if (!key) return 0;
+  const t = itemText(i);
+  const f = famOfItem(i);
+  const has = (re: RegExp) => re.test(t);
+  let s = 0;
+  switch (key) {
+    case 'beach':
+      if (has(WORDS.shorts) || has(WORDS.linen) || has(WORDS.casualTop)) s += 2;
+      if (f && LIGHT.has(f)) s += 1;
+      if (has(WORDS.formal) || has(WORDS.ethnic)) s -= 3;
+      if (f === 'black' || f === 'navy') s -= 1;
+      break;
+    case 'college':
+      if (has(WORDS.casualTop) || has(WORDS.denim)) s += 2;
+      if (has(WORDS.formal)) s -= 1;
+      break;
+    case 'date':
+      if (has(WORDS.smart) || has(WORDS.denim)) s += 1.5;
+      if (/casual|formal/.test(t)) s += 0.5;
+      if (has(WORDS.sport) || has(WORDS.shorts)) s -= 2;
+      break;
+    case 'work':
+    case 'interview':
+      if (has(WORDS.formal) || /shirt/.test(t)) s += 2;
+      if (has(WORDS.casualTop) || has(WORDS.shorts) || has(WORDS.sport)) s -= 2;
+      if (key === 'interview' && f && ['white', 'lightblue', 'navy', 'grey', 'black', 'beige'].includes(f)) s += 1;
+      break;
+    case 'wedding':
+    case 'festival':
+    case 'temple':
+      if (has(WORDS.ethnic)) s += 3;
+      if (f && BRIGHT_AUSPICIOUS.has(f)) s += 1;
+      if (has(WORDS.shorts) || has(WORDS.sport)) s -= 3;
+      if (f === 'black') s -= 1;
+      break;
+    case 'gym':
+      if (has(WORDS.sport) || has(WORDS.shorts) || /t-?shirt|tee/.test(t)) s += 3;
+      if (has(WORDS.formal) || has(WORDS.denim) || has(WORDS.ethnic)) s -= 2;
+      break;
+    case 'party':
+      if (has(WORDS.party) || has(WORDS.smart)) s += 1;
+      if (f && ['black', 'maroon', 'navy', 'red', 'purple'].includes(f)) s += 1;
+      if (has(WORDS.sport)) s -= 2;
+      break;
+    case 'travel':
+    case 'casual':
+      if (has(WORDS.casualTop) || has(WORDS.denim) || /casual|daily/.test(t)) s += 1.5;
+      if (has(WORDS.formal)) s -= 1;
+      break;
+  }
+  return s;
+};
+
+// Occasion name in the chosen language
+export const OCC_WORD: Record<AiLanguage, Record<OccKey, string>> = {
+  English: { work: 'work', interview: 'an interview', college: 'college', date: 'a date', party: 'a party', wedding: 'a wedding / function', festival: 'the festival', temple: 'the temple', beach: 'the beach', gym: 'the gym', travel: 'travel', casual: 'a casual outing' },
+  Telugu: { work: 'ఆఫీస్', interview: 'ఇంటర్వ్యూ', college: 'కాలేజ్', date: 'డేట్', party: 'పార్టీ', wedding: 'పెళ్లి / ఫంక్షన్', festival: 'పండుగ', temple: 'గుడి', beach: 'బీచ్', gym: 'జిమ్', travel: 'ప్రయాణం', casual: 'సరదా బయటకు వెళ్లడం' },
+  Hindi: { work: 'ऑफिस', interview: 'इंटरव्यू', college: 'कॉलेज', date: 'डेट', party: 'पार्टी', wedding: 'शादी / फंक्शन', festival: 'त्योहार', temple: 'मंदिर', beach: 'बीच', gym: 'जिम', travel: 'सफ़र', casual: 'कैज़ुअल आउटिंग' },
+};
+const OCC_LINE: Record<AiLanguage, string> = {
+  English: 'Picked for {occ}.',
+  Telugu: '{occ} కోసం ఎంచుకున్నది.',
+  Hindi: '{occ} के लिए चुना गया।',
 };
 
 interface Scored {
@@ -320,15 +418,13 @@ const scorePair = (
   } else {
     score -= 1; // colour unknown
   }
-  const wear = occasion ? OCCASION_WEAR[occasion] || [] : [];
-  if (wear.length) {
-    if (wear.includes(top.wearType || '')) score += 1;
-    if (wear.includes(bottom.wearType || '')) score += 1;
-  }
+  // Occasion fit weighs about as much as the lucky colour, so the chip really changes the picks
+  const k = occasionKey(occasion);
+  if (k) score += 1.5 * (occasionFit(top, k) + occasionFit(bottom, k));
   return { top, bottom, score, tf, bf };
 };
 
-const explain = (s: Scored, lucky: Set<Fam>, v: VaaraColour, lang: AiLanguage): string => {
+const explain = (s: Scored, lucky: Set<Fam>, v: VaaraColour, lang: AiLanguage, occasion?: string | null): string => {
   const W = COLOUR_WORD[lang];
   const L = LINES[lang];
   const { near } = luckyInfo(v);
@@ -359,6 +455,8 @@ const explain = (s: Scored, lucky: Set<Fam>, v: VaaraColour, lang: AiLanguage): 
     else if (s.tf && s.bf) parts.push(fill(L.fresh, { a: cap(word(s.tf)), b: word(s.bf) }));
     parts.push(fill(L.accent, { lucky: luckyColourWords(v, lang) }));
   }
+  const ok = occasionKey(occasion);
+  if (ok) parts.unshift(fill(OCC_LINE[lang], { occ: OCC_WORD[lang][ok] }));
   return parts.join(' ');
 };
 
@@ -400,11 +498,25 @@ export const pickLuckyPairs = (
     }
   };
   take(2);
-  if (picked.length < MIN_PAIRS) take(Number.MAX_SAFE_INTEGER); // small wardrobe: allow repeats
+  if (picked.length < Math.min(MIN_PAIRS, max)) take(Number.MAX_SAFE_INTEGER); // small wardrobe: allow repeats
   return {
     vaara,
     tops: tops.length,
     bottoms: bottoms.length,
-    pairs: picked.map(s => ({ top: s.top, bottom: s.bottom, score: s.score, why: explain(s, lucky, vaara, language) })),
+    pairs: picked.map(s => ({ top: s.top, bottom: s.bottom, score: s.score, why: explain(s, lucky, vaara, language, opts.occasion) })),
   };
 };
+
+// "What goes with black jeans?": classic matches for a colour, in the chosen language (null if unknown)
+export const goesWith = (colourName: string, lang: AiLanguage): string[] | null => {
+  const f = famOfName(colourName);
+  if (!f) return null;
+  const out: Fam[] = [];
+  CLASSIC.forEach(k => {
+    const [a, b] = k.split('+') as Fam[];
+    if (a === f && b !== f) out.push(b);
+    else if (b === f && a !== f) out.push(a);
+  });
+  return out.slice(0, 6).map(x => COLOUR_WORD[lang][x]);
+};
+export const colourWord = (name: string, lang: AiLanguage): string => colourNameWord(name, lang);

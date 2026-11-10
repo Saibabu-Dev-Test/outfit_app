@@ -37,13 +37,17 @@ import {
   getAiUsedToday,
   isAiPaused,
 } from '../../services/aiStylist';
-import { LuckyPairsResult, PAIR_TEXT, pairsSubtitle, pickLuckyPairs } from '../../services/luckyPairs';
+import { LuckyPairsResult, OCC_WORD, occasionKey, PAIR_TEXT, pairsSubtitle, pickLuckyPairs } from '../../services/luckyPairs';
+import { offlineAnswer, pairsIntro, parseIntent } from '../../services/stylistIntent';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { hashString } from '../../utils/astro';
 import { containsProfanity, RESPECT_MESSAGE } from '../../utils/profanity';
 
 const PLACES = ['Indoor', 'Outdoor', 'Beach', 'Temple', 'Office', 'Restaurant', 'Hill station'];
 
 // pairs: show today's lucky wardrobe pairs under this message (offline picker)
-type Msg = { id: string; role: 'user' | 'model'; text: string; error?: boolean; pairs?: boolean };
+// pairsCount / occ: how many pairs (1..3) and for which occasion, fixed when the answer was given
+type Msg = { id: string; role: 'user' | 'model'; text: string; error?: boolean; pairs?: boolean; pairsCount?: number; occ?: string | null };
 
 // Today's lucky top + bottom pairs with their photos and a short reason
 function LuckyPairsView({ result, language }: { result: LuckyPairsResult; language: AiLanguage }) {
@@ -136,7 +140,14 @@ export default function StylistScreen() {
   // AI usable right now (key set and not resting after a credits / quota failure)
   const [aiResting, setAiResting] = useState(isAiPaused());
   const aiReady = aiOn && !aiResting;
-  const luckyPairs = pickLuckyPairs(wardrobe, language, { occasion });
+  // Place chips also hint an occasion when none is picked (Beach, Temple, Office)
+  const effOcc = (o: string | null) => o || (place && occasionKey(place) ? place : null);
+  const luckyPairs = pickLuckyPairs(wardrobe, language, { occasion: effOcc(occasion), max: 3 });
+  const pairsFor = (m: Msg) => pickLuckyPairs(wardrobe, language, { occasion: m.occ ?? null, max: m.pairsCount || 3 });
+  const occWord = (o: string | null) => {
+    const k = occasionKey(o);
+    return k ? OCC_WORD[language][k] : null;
+  };
   const scrollDown = (animated = true) =>
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated }), 80);
 
@@ -153,8 +164,48 @@ export default function StylistScreen() {
     const history: AiTurn[] = [...messages.filter(m => !m.error), mine].map(m => ({ role: m.role, text: m.text }));
     setMessages(prev => [...prev, mine]);
     setInput('');
-    setSending(true);
     scrollDown();
+
+    // 1) Offline first: wardrobe picks (count / occasion), colour, "goes with", weather questions
+    const intent = parseIntent(text);
+    const occ = effOcc(intent.occasion || occasion);
+    if (intent.occasion) setOccasion(intent.occasion);
+    if (intent.wantsPairs) {
+      const n = intent.count || 3;
+      setMessages(prev => [
+        ...prev,
+        { id: `${Date.now()}_p`, role: 'model', text: pairsIntro(language, n, occWord(occ)), pairs: true, pairsCount: n, occ },
+      ]);
+      scrollDown();
+      return;
+    }
+    const offline = offlineAnswer(intent, language, vaara);
+    if (offline) {
+      setMessages(prev => [...prev, { id: `${Date.now()}_o`, role: 'model', text: offline }]);
+      scrollDown();
+      return;
+    }
+    // 2) Other questions: free Gemini (cached per question / day / language), else the offline picks
+    const fallback = () =>
+      setMessages(prev => [
+        ...prev,
+        { id: `${Date.now()}_p`, role: 'model', text: pairsIntro(language, 3, occWord(occ)), pairs: true, pairsCount: 3, occ },
+      ]);
+    if (!aiReady || left <= 0) {
+      fallback();
+      scrollDown();
+      return;
+    }
+    const cacheKey = `outfit.stylist.ai.${uid}.${new Date().toISOString().slice(0, 10)}.${language}.${hashString(
+      `${text.toLowerCase()}|${occasion || ''}|${place || ''}`,
+    )}`;
+    const cached = await AsyncStorage.getItem(cacheKey).catch(() => null);
+    if (cached) {
+      setMessages(prev => [...prev, { id: `${Date.now()}_m`, role: 'model', text: cached }]);
+      scrollDown();
+      return;
+    }
+    setSending(true);
     try {
       const r = await askStylist(uid, history, {
         occasion,
@@ -167,15 +218,13 @@ export default function StylistScreen() {
         luckyWhy: vaara.why,
       });
       setUsed(r.usedToday);
+      AsyncStorage.setItem(cacheKey, r.text).catch(() => undefined);
       setMessages(prev => [...prev, { id: `${Date.now()}_m`, role: 'model', text: r.text }]);
     } catch (e: any) {
       // Never show the raw error: answer with today's lucky pairs from the wardrobe instead
       console.warn('Stylist AI failed, offline picks shown:', e?.detail || e?.message);
       setAiResting(isAiPaused());
-      setMessages(prev => [
-        ...prev,
-        { id: `${Date.now()}_p`, role: 'model', text: PAIR_TEXT[language].fallback, pairs: true },
-      ]);
+      fallback();
       if (uid) getAiUsedToday(uid).then(setUsed);
     } finally {
       setSending(false);
@@ -183,11 +232,16 @@ export default function StylistScreen() {
     }
   };
 
+  // Occasion chip: re-ranks the wardrobe picks for it (offline, no AI call). Tap again to clear.
   const askForOccasion = (occ: string) => {
-    setOccasion(occ);
-    if (!aiReady) return; // the lucky pairs below re-rank for the occasion
-    const where = place ? ` at a ${place.toLowerCase()} place` : '';
-    send(`What should I wear for ${occ.toLowerCase()}${where} today? Suggest clothes, colours and a style tip.`);
+    const next = occasion === occ ? null : occ;
+    setOccasion(next);
+    if (!next || messages.length === 0) return; // the first-screen picks below re-rank by themselves
+    setMessages(prev => [
+      ...prev,
+      { id: `${Date.now()}_p`, role: 'model', text: pairsIntro(language, 3, occWord(next)), pairs: true, pairsCount: 3, occ: next },
+    ]);
+    scrollDown();
   };
 
 
@@ -309,10 +363,10 @@ export default function StylistScreen() {
                   <Text
                     selectable
                     style={[styles.bubbleText, m.role === 'user' && styles.bubbleTextMe, m.error && styles.bubbleTextErr]}>
-                    {m.pairs ? PAIR_TEXT[language].fallback : m.text}
+                    {m.text}
                   </Text>
                 </View>
-                {m.pairs ? <LuckyPairsView result={luckyPairs} language={language} /> : null}
+                {m.pairs ? <LuckyPairsView result={pairsFor(m)} language={language} /> : null}
               </View>
             ))
           )}
@@ -324,23 +378,23 @@ export default function StylistScreen() {
           ) : null}
         </ScrollView>
 
-        {aiReady || (aiOn && messages.length > 0) ? (
+        {true ? (
           <View style={styles.inputBar}>
             <TextInput
               style={styles.input}
-              placeholder={left > 0 ? 'Ask about clothes, colours, style...' : 'Daily limit reached'}
+              placeholder="Ask about clothes, colours, style..."
               placeholderTextColor={colors.textMuted}
               value={input}
               onChangeText={setInput}
               onFocus={() => scrollDown()}
-              editable={left > 0 && !sending}
+              editable={!sending}
               multiline
               maxLength={500}
             />
             <TouchableOpacity
-              style={[styles.sendBtn, (!input.trim() || sending || left <= 0) && styles.disabled]}
+              style={[styles.sendBtn, (!input.trim() || sending) && styles.disabled]}
               onPress={() => send()}
-              disabled={!input.trim() || sending || left <= 0}>
+              disabled={!input.trim() || sending}>
               <Text style={styles.sendText}>➤</Text>
             </TouchableOpacity>
           </View>

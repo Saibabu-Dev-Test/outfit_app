@@ -17,7 +17,10 @@ import { localDateKey } from '../utils/date';
 
 export type AiLanguage = 'English' | 'Telugu' | 'Hindi';
 export const AI_LANGUAGES: AiLanguage[] = ['English', 'Telugu', 'Hindi'];
-export const OCCASIONS = ['College', 'Date', 'Work', 'Party', 'Wedding / Function', 'Casual outing', 'Travel'];
+export const OCCASIONS = [
+  'Work', 'Interview', 'College', 'Date', 'Party', 'Wedding / Function', 'Festival', 'Temple', 'Beach', 'Gym',
+  'Travel', 'Casual outing',
+];
 
 export interface AiTurn {
   role: 'user' | 'model';
