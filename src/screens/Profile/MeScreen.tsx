@@ -138,6 +138,7 @@ export default function MeScreen({ navigation }: { navigation: any }) {
     name: profile.name ?? user?.name,
     dob: profile.dob ?? user?.dob,
     timeOfBirth: profile.timeOfBirth ?? user?.timeOfBirth,
+    placeOfBirth: profile.placeOfBirth ?? (user as any)?.placeOfBirth,
     rashi: profile.rashi ?? user?.rashi,
     gender: profile.gender ?? user?.gender,
     language: profile.language ?? user?.language,

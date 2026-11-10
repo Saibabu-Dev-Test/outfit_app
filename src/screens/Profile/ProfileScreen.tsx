@@ -22,6 +22,7 @@ import { getUserProfile, saveUserProfile, uploadAvatar } from '../../services/us
 import { checkNotifications, openNotificationSettings } from '../../native/notifications';
 import { RASHIS } from '../../utils/panchangam';
 import SelectModal from '../../components/SelectModal';
+import CityPickerModal from '../../components/CityPickerModal';
 import FeedbackBoardModal from '../../components/FeedbackBoardModal';
 import ZoomableImage from '../../components/ZoomableImage';
 import TimePickerModal from '../../components/TimePickerModal';
@@ -54,6 +55,7 @@ interface UserProfile {
   name?: string;
   dob?: string;
   timeOfBirth?: string;
+  placeOfBirth?: string;
   rashi?: string;
   language?: string;
   gender?: string;
@@ -107,6 +109,8 @@ export default function ProfileScreen() {
   const [editName, setEditName] = useState<string>('');
   const [editDob, setEditDob] = useState<string>('');
   const [editTimeOfBirth, setEditTimeOfBirth] = useState<string>('');
+  const [editPlaceOfBirth, setEditPlaceOfBirth] = useState<string>('');
+  const [isPlaceOpen, setIsPlaceOpen] = useState<boolean>(false);
   const [editRashi, setEditRashi] = useState<string>('');
   const [editLanguage, setEditLanguage] = useState<string>('');
   const [editGender, setEditGender] = useState<string>('');
@@ -246,6 +250,7 @@ const fetchProfile = async () => {
       avatarUrl: stored.avatarUrl || authUser.avatarUrl || null,
       dob: stored.dob || '',
       timeOfBirth: stored.timeOfBirth || '',
+      placeOfBirth: stored.placeOfBirth || '',
       rashi: stored.rashi || '',
       language: stored.language || '',
       gender: stored.gender || '',
@@ -346,6 +351,7 @@ const fetchProfile = async () => {
     setEditName(profileData?.name || '');
     setEditDob(profileData?.dob || '');
     setEditTimeOfBirth(profileData?.timeOfBirth || '');
+    setEditPlaceOfBirth(profileData?.placeOfBirth || '');
     setEditRashi(profileData?.rashi || '');
     setEditLanguage(profileData?.language || '');
     setEditGender(profileData?.gender || '');
@@ -374,6 +380,7 @@ const fetchProfile = async () => {
     phone: profileData?.phone,
     dob: editDob.trim(),
     timeOfBirth: editTimeOfBirth.trim(),
+    placeOfBirth: editPlaceOfBirth.trim(),
     rashi: editRashi.trim(),
     language: editLanguage.trim(),
     gender: editGender.trim(),
@@ -390,6 +397,7 @@ const fetchProfile = async () => {
       name: updatedProfile.name,
       dob: updatedProfile.dob,
       timeOfBirth: updatedProfile.timeOfBirth,
+      placeOfBirth: updatedProfile.placeOfBirth,
       rashi: updatedProfile.rashi,
       language: updatedProfile.language,
       gender: updatedProfile.gender,
@@ -552,6 +560,12 @@ const fetchProfile = async () => {
                 <Text style={styles.infoLabel}>⏰ Time of Birth</Text>
                 <Text style={styles.infoValue}>
                   {profileData?.timeOfBirth ? profileData.timeOfBirth : 'Not specified'}
+                </Text>
+              </View>
+              <View style={styles.infoItem}>
+                <Text style={styles.infoLabel}>📍 Place of Birth</Text>
+                <Text style={styles.infoValue}>
+                  {profileData?.placeOfBirth ? profileData.placeOfBirth : 'Not specified'}
                 </Text>
               </View>
             </View>
@@ -882,6 +896,21 @@ const fetchProfile = async () => {
                 </View>
               </View>
 
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Place of Birth</Text>
+                <TouchableOpacity
+                  style={styles.modalInputTouchable}
+                  onPress={() => setIsPlaceOpen(true)}
+                  activeOpacity={0.85}>
+                  <Text
+                    numberOfLines={1}
+                    style={[editPlaceOfBirth ? styles.modalInputValueText : styles.modalInputPlaceholderText, styles.flexShrink]}>
+                    {editPlaceOfBirth || 'Select city (for your birth chart)'}
+                  </Text>
+                  <Text style={styles.inputCalendarIcon}>📍</Text>
+                </TouchableOpacity>
+              </View>
+
               <View style={styles.formRow}>
                 <View style={[styles.inputGroup, { flex: 1 }]}>
                   <Text style={styles.inputLabel}>Rashi</Text>
@@ -1120,6 +1149,12 @@ const fetchProfile = async () => {
         </View>
       </Modal>
 
+      <CityPickerModal
+        visible={isPlaceOpen}
+        selected={editPlaceOfBirth}
+        onSelect={setEditPlaceOfBirth}
+        onClose={() => setIsPlaceOpen(false)}
+      />
       <TimePickerModal
         visible={isTimePickerOpen}
         value={editTimeOfBirth}

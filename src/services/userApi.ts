@@ -22,6 +22,7 @@ export interface StoredProfile {
   phone?: string; // login key (digits), written only at sign up
   dob?: string;
   timeOfBirth?: string;
+  placeOfBirth?: string; // 'City, State' from constants/indianCities.ts
   rashi?: string;
   language?: string;
   gender?: string;
@@ -64,7 +65,7 @@ export const ageFromDob = (dob?: string | null, now: Date = new Date()): number 
 };
 
 const PROFILE_KEYS: (keyof StoredProfile)[] = [
-  'name', 'phoneNumber', 'phone', 'dob', 'timeOfBirth', 'rashi', 'language', 'gender',
+  'name', 'phoneNumber', 'phone', 'dob', 'timeOfBirth', 'placeOfBirth', 'rashi', 'language', 'gender',
   'bio', 'avatarUrl', 'isPublic', 'nameLower', 'role', 'lastLoginDate', 'streak', 'stylePrefs',
 ];
 

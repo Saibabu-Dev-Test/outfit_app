@@ -273,6 +273,7 @@ export default function HomeScreen() {
             dob: stored.dob,
             language: stored.language,
             timeOfBirth: stored.timeOfBirth,
+            placeOfBirth: stored.placeOfBirth,
             bio: stored.bio,
             stylePrefs: stored.stylePrefs,
             isPublic: stored.isPublic !== false,

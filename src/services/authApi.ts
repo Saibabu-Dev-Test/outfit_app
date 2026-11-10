@@ -582,6 +582,7 @@ export interface UserProfile {
   name?: string;
   dob?: string;
   timeOfBirth?: string;
+  placeOfBirth?: string;
   rashi?: string;
   language?: string;
   gender?: string;
@@ -648,6 +649,7 @@ export const restoreSession = async (user: User): Promise<RestoreResult> => {
       dob: data.dob,
       language: data.language,
       timeOfBirth: data.timeOfBirth,
+      placeOfBirth: data.placeOfBirth,
       bio: data.bio,
     },
   };
@@ -691,6 +693,7 @@ export interface UpdateProfilePayload {
   name?: string;
   dob?: string;
   timeOfBirth?: string;
+  placeOfBirth?: string;
   rashi?: string;
   language?: string;
   gender?: string;
