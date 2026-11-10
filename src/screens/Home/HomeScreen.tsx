@@ -23,8 +23,8 @@ import { colors, spacing, borderRadius, fontSize, fontWeight, themedStyles, stat
 import { useAuth } from '../../context/AuthContext';
 import { doc, setDoc, serverTimestamp, collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../../config/firebaseConfig';
-import { ageFromDob, getUserProfile, recordDailyLogin } from '../../services/userApi';
-import { hasUploadedToday } from '../../services/wardrobeApi';
+import { ageFromDob, getUserProfile, recordDailyLogin, saveUserProfile } from '../../services/userApi';
+import { compactMyClearCopies, hasUploadedToday } from '../../services/wardrobeApi';
 import { getTodayVaaraColour, getRashiLuckyColour, getTodayLuckyMessage } from '../../utils/panchangam';
 import { localDateKey, greetingForNow } from '../../utils/date';
 import { useDayKey } from '../../hooks/useDayKey';
@@ -121,6 +121,46 @@ let voteGateDone = false;
 export default function HomeScreen() {
   const navigation = useNavigation<any>();
   const { user, updateUserData } = useAuth();
+  // Once per user: drop the old duplicate 1080 px feed copies (free-tier space); runs in the background
+  useEffect(() => {
+    const id = user?.id ? String(user.id) : null;
+    if (!id) return;
+    const t = setTimeout(() => compactMyClearCopies(id), 8000);
+    return () => clearTimeout(t);
+  }, [user?.id]);
+  // Gender is mandatory: older accounts (signed up when it was optional) pick it once
+  const genderAsked = useRef(false);
+  useEffect(() => {
+    const id = user?.id ? String(user.id) : null;
+    if (!id || genderAsked.current) return;
+    let alive = true;
+    getUserProfile(id)
+      .then((p: any) => {
+        if (!alive || genderAsked.current || (p?.gender || '').trim()) return;
+        genderAsked.current = true;
+        const save = (g: string) =>
+          saveUserProfile(id, { gender: g } as any)
+            .then(() => updateUserData({ gender: g } as any))
+            .catch(() => {
+              genderAsked.current = false;
+            });
+        Alert.alert(
+          'Select your gender',
+          'Gender is required for outfit and astrology suggestions.',
+          [
+            { text: 'Male', onPress: () => save('Male') },
+            { text: 'Female', onPress: () => save('Female') },
+            { text: 'Other', onPress: () => save('Other') },
+          ],
+          { cancelable: false },
+        );
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
   const uid = user?.id;
   const [gateDone, setGateDone] = useState<boolean>(voteGateDone);
   const [topColours, setTopColours] = useState<ColourTally[]>(emptyTally());

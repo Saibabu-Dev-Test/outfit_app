@@ -380,3 +380,34 @@ export const analyzeClothingPhoto = async (
     clearTimeout(timer);
   }
 };
+
+// ── One-time clean-up of the old separate feed copies (build 94) ──────────────────────────
+// Items saved between the "clear feed" and "one sharp copy" passes kept TWO big photos
+// (media/full 1600 px + media/clear 1080 px). The feed now shows media/full (>= 1080 px, < 1 MB),
+// so the extra clear copy only used free-tier space. Runs once per user per device, on the
+// owner's phone (rules: only the owner may delete their media docs). Never throws.
+const COMPACT_KEY = (uid: string) => `outfit:compactClear:v1:${uid}`;
+export const compactMyClearCopies = async (uid?: string | null): Promise<number> => {
+  if (!uid) return 0;
+  try {
+    if (await AsyncStorage.getItem(COMPACT_KEY(uid))) return 0;
+    const snap = await getDocs(query(collection(db, COLL), where('userId', '==', uid), where('clear', '==', 1)));
+    let done = 0;
+    const docs = snap.docs.filter(d => (d.data() as any)?.media === 1); // keep clear copies of items without a full copy
+    for (let i = 0; i < docs.length; i += 200) {
+      const b = writeBatch(db);
+      docs.slice(i, i + 200).forEach(d => {
+        b.delete(clearRef(d.id));
+        b.update(d.ref, { clear: 0 });
+      });
+      await b.commit();
+      done += Math.min(200, docs.length - i);
+    }
+    await AsyncStorage.setItem(COMPACT_KEY(uid), String(Date.now()));
+    if (done) console.log(`compactMyClearCopies: removed ${done} duplicate feed copies`);
+    return done;
+  } catch (e: any) {
+    console.warn('compactMyClearCopies failed:', e?.code, e?.message);
+    return 0;
+  }
+};

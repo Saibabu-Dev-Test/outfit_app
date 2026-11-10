@@ -2,13 +2,18 @@
 //   circles/{id}                          circle doc
 //   circles/{id}/messages/{msgId}         chat messages (text | image | poll)
 //   circles/{id}/messages/{msgId}/votes/{uid}   one poll vote per user
-//   inviteCodes/{code}                    -> { circleId } so private circles can be joined by code
-// circles/{id}.isPublic (= !isPrivate). The owner can switch a circle between public and private
-// later (updateCircleVisibility). Public circles are listed in Discover; private ones are joined with
-// the invite link / code. Nearby (Circles > 📍 Nearby): a public circle created with "Show in Nearby"
-// saves its approximate location (~100 m) + geohash; getNearbyCircles lists public circles within
-// NEARBY_KM (3 km). Legacy: older public circles with a distance limit (radiusKm) stay out of
-// Discover (members share the invite code) until the owner clears the limit (removeCircleLocation).
+//   inviteCodes/{code}                    -> { circleId } so any circle can be joined by code
+//   circleNames/{nameId}                  -> { circleId, ownerId, createdAt } unique circle names
+// circles/{id}.isPublic (= !isPrivate). Discovery is ONLY by distance: a public circle always stores
+// its approximate location (~100 m) + geohash, and getNearbyCircles lists public circles within
+// NEARBY_KM (3 km) of the user, nearest first. There is no global Discover list. Circles further
+// away, private circles and legacy public circles without a location are joined with the invite
+// link / code (joinWithCode works for public and private circles alike).
+// The owner can edit name / description / emoji (updateCircleDetails) and switch public <-> private
+// (updateCircleVisibility: public saves the owner's current approximate location, private removes it).
+// Names are unique (case-insensitive, trimmed, spaces collapsed): circles/{id}.nameLower is the
+// normalized name, circles/{id}.nameKey the circleNames doc id, both written in the same transaction
+// as the circleNames doc (Firestore rules check the pairing).
 import {
   collection,
   doc,
@@ -20,6 +25,7 @@ import {
   deleteField,
   setDoc,
   writeBatch,
+  runTransaction,
   query,
   where,
   orderBy,
@@ -52,6 +58,8 @@ export interface Circle {
   lastMessageAt: Date | null;
   location: { lat: number; lng: number } | null;
   geohash: string | null;
+  // circleNames doc id (null for legacy circles created before unique names)
+  nameKey: string | null;
   // Distance limit in km (null = no limit: everyone can see and join it)
   radiusKm: number | null;
   distanceKm?: number; // Nearby list only
@@ -103,6 +111,7 @@ export const POLL_LETTERS = ['A', 'B', 'C', 'D', 'E', 'F'];
 
 const CIRCLES = 'circles';
 const CODES = 'inviteCodes';
+const NAMES = 'circleNames';
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0/O/1/I
 
 const toCircle = (id: string, d: any): Circle => ({
@@ -121,6 +130,7 @@ const toCircle = (id: string, d: any): Circle => ({
       ? { lat: d.location.lat, lng: d.location.lng }
       : null,
   geohash: typeof d?.geohash === 'string' ? d.geohash : null,
+  nameKey: typeof d?.nameKey === 'string' && d.nameKey ? d.nameKey : null,
   radiusKm: typeof d?.radiusKm === 'number' && d.radiusKm > 0 ? d.radiusKm : null,
 });
 
@@ -195,26 +205,120 @@ const locationFields = (loc: { lat: number; lng: number }) => ({
 export const formatKm = (km: number): string =>
   km < 1 ? `${Math.round(km * 1000)} m` : `${km.toFixed(1)} km`;
 
+// ── Unique names ───────────────────────────────────────────────────────────
+
+export const MAX_NAME_CHARS = 60;
+
+// What we save / show: trimmed, runs of whitespace collapsed to one space, max 60 chars
+export const cleanCircleName = (name: string): string =>
+  String(name || '').replace(/\s+/g, ' ').trim().slice(0, MAX_NAME_CHARS).trim();
+
+// Uniqueness key: the cleaned name in lower case ("  Office   LOOKS " -> "office looks")
+export const normalizeCircleName = (name: string): string => cleanCircleName(name).toLowerCase();
+
+// circleNames doc id for a normalized name. Firestore ids can't contain "/" and can't be "." / ".."
+// or look like __x__, so those characters are %-escaped ("%" first, so the mapping stays one-to-one).
+export const circleNameDocId = (key: string): string => {
+  let id = key.replace(/%/g, '%25').replace(/\//g, '%2F');
+  if (id === '.' || id === '..' || /^__.*__$/.test(id)) {
+    id = id.replace(/[._]/g, c => (c === '.' ? '%2E' : '%5F'));
+  }
+  return id;
+};
+
+export const nameTakenMessage = (name: string) =>
+  `A circle called "${cleanCircleName(name)}" already exists. Please choose a different name.`;
+
+// Common spellings of a name for the legacy exact-match query (Firestore 'in' takes up to 30):
+// as typed, lower, UPPER, Title Case, Sentence case
+export const nameVariants = (display: string): string[] => {
+  const lower = display.toLowerCase();
+  const title = lower.replace(/(^|\s)(\S)/g, (_m, sp, ch) => sp + ch.toUpperCase());
+  const sentence = lower.charAt(0).toUpperCase() + lower.slice(1);
+  return Array.from(new Set([display, lower, display.toUpperCase(), title, sentence])).filter(Boolean);
+};
+
+// Circles created before circleNames existed have no name doc. Best-effort check against them:
+// public circles with the same nameLower or a common spelling of the name, plus my own circles (private
+// circles of other people can't be queried under the read rules). Errors never block.
+const legacyNameTaken = async (display: string, key: string, uid: string, exceptId?: string): Promise<boolean> => {
+  const col = collection(db, CIRCLES);
+  const other = (id: string) => id !== exceptId;
+  const checks: Promise<boolean>[] = [
+    getDocs(query(col, where('isPrivate', '==', false), where('nameLower', '==', key), limit(3))).then(sn =>
+      sn.docs.some(d => other(d.id)),
+    ),
+    getDocs(
+      query(col, where('isPrivate', '==', false), where('name', 'in', nameVariants(display)), limit(3)),
+    ).then(sn => sn.docs.some(d => other(d.id))),
+    getDocs(query(col, where('memberIds', 'array-contains', uid))).then(sn =>
+      sn.docs.some(d => other(d.id) && normalizeCircleName((d.data() as any)?.name || '') === key),
+    ),
+  ];
+  const results = await Promise.all(
+    checks.map(p =>
+      p.catch((e: any) => {
+        console.warn('Circle name check failed:', e?.code, e?.message);
+        return false;
+      }),
+    ),
+  );
+  return results.some(Boolean);
+};
+
+// Is this name free? (For an inline hint before saving; create / rename check again atomically.)
+export const isCircleNameAvailable = async (name: string, uid: string, exceptCircleId?: string): Promise<boolean> => {
+  const display = cleanCircleName(name);
+  const key = display.toLowerCase();
+  if (!key) return false;
+  try {
+    const snap = await getDoc(doc(db, NAMES, circleNameDocId(key)));
+    if (snap.exists() && String((snap.data() as any)?.circleId || '') !== exceptCircleId) return false;
+  } catch (e: any) {
+    console.warn('Circle name lookup failed:', e?.code, e?.message);
+  }
+  return !(await legacyNameTaken(display, key, uid, exceptCircleId));
+};
+
+// A write was denied: was it because the name doc was taken in the meantime?
+const nameDocTakenBy = async (nameId: string, circleId: string): Promise<boolean> => {
+  try {
+    const snap = await getDoc(doc(db, NAMES, nameId));
+    return snap.exists() && String((snap.data() as any)?.circleId || '') !== circleId;
+  } catch {
+    return false;
+  }
+};
+
+// ── Create ─────────────────────────────────────────────────────────────────
+
+const LOCATION_NEEDED =
+  `Public circles show to people within 3 km, so they need your approximate location. ` +
+  `Turn on Location, or make the circle private (joined with the invite code).`;
+
 export const createCircle = async (
   input: {
     name: string;
     description: string;
     emoji: string;
     isPrivate: boolean;
-    // Optional: shown in Nearby (public circles only). Rounded to ~100 m before saving.
+    // Required for public circles (shown in Nearby). Rounded to ~100 m before saving.
     location?: { lat: number; lng: number } | null;
-    // Optional distance limit (public circles only; needs location). null = no limit.
+    // Legacy distance limit (public circles only; needs location). null = no limit.
     radiusKm?: number | null;
   },
   uid: string,
 ): Promise<Circle> => {
-  const name = input.name.trim();
+  const name = cleanCircleName(input.name);
   if (!name) throw new Error('Please give your circle a name.');
+  const nameLower = name.toLowerCase();
+  const nameKey = circleNameDocId(nameLower);
+  if (!input.isPrivate && !input.location) throw new Error(LOCATION_NEEDED);
   const radiusKm = !input.isPrivate && input.radiusKm ? input.radiusKm : null;
-  if (radiusKm && !input.location) {
-    throw new Error('A distance limit needs your location. Turn on Location, or choose "No limit".');
-  }
+  const ref = doc(collection(db, CIRCLES));
   try {
+    if (await legacyNameTaken(name, nameLower, uid)) throw new Error(nameTakenMessage(name));
+
     // Pick an unused invite code
     let code = '';
     for (let i = 0; i < 6 && !code; i++) {
@@ -224,13 +328,14 @@ export const createCircle = async (
     }
     if (!code) throw new Error('Could not create an invite code. Please try again.');
 
-    const ref = doc(collection(db, CIRCLES));
     const loc =
       !input.isPrivate && input.location
         ? { lat: roundCoord(input.location.lat), lng: roundCoord(input.location.lng) }
         : null;
     const data: any = {
-      name: name.slice(0, 60),
+      name,
+      nameLower,
+      nameKey,
       description: input.description.trim().slice(0, 300),
       emoji: input.emoji || '👗',
       isPrivate: input.isPrivate,
@@ -243,15 +348,87 @@ export const createCircle = async (
       createdAt: serverTimestamp(),
       lastMessageAt: serverTimestamp(),
     };
-    const batch = writeBatch(db);
-    batch.set(ref, data);
-    batch.set(doc(db, CODES, code), { circleId: ref.id, createdBy: uid, createdAt: serverTimestamp() });
-    await batch.commit();
+    // Circle + invite code + name doc together. The name doc is read inside the transaction, and the
+    // rules only allow creating it when it does not exist yet, so two people can't take one name.
+    const nameRef = doc(db, NAMES, nameKey);
+    await runTransaction(db, async tx => {
+      const existing = await tx.get(nameRef);
+      if (existing.exists()) throw new Error(nameTakenMessage(name));
+      tx.set(ref, data);
+      tx.set(doc(db, CODES, code), { circleId: ref.id, createdBy: uid, createdAt: serverTimestamp() });
+      tx.set(nameRef, { circleId: ref.id, ownerId: uid, createdAt: serverTimestamp() });
+    });
     const now = new Date();
     return { ...toCircle(ref.id, data), createdAt: now, lastMessageAt: now };
   } catch (e: any) {
     if (!e?.code && e instanceof Error) throw e;
+    if (e?.code === 'permission-denied' && (await nameDocTakenBy(nameKey, ref.id))) {
+      throw new Error(nameTakenMessage(name));
+    }
     return fail(e, 'Creating circle');
+  }
+};
+
+// ── Edit (owner) ───────────────────────────────────────────────────────────
+
+// Owner: change name / description / emoji. A new name must be free (circleNames doc, plus the
+// legacy check); the old name doc is deleted and the new one created in the same transaction.
+// Legacy circles get their name doc (and nameLower / nameKey) on the first save, when the name is free.
+export const updateCircleDetails = async (
+  circleId: string,
+  input: { name: string; description: string; emoji: string },
+  uid: string,
+): Promise<void> => {
+  const name = cleanCircleName(input.name);
+  if (!name) throw new Error('Please give your circle a name.');
+  const nameLower = name.toLowerCase();
+  const nameKey = circleNameDocId(nameLower);
+  const circleRef = doc(db, CIRCLES, circleId);
+  try {
+    const before = await getDoc(circleRef);
+    if (!before.exists()) throw new Error('This circle no longer exists.');
+    const cur: any = before.data();
+    if (String(cur?.ownerId || '') !== uid) throw new Error('Only the circle owner can edit it.');
+    const oldLower = typeof cur?.nameLower === 'string' ? cur.nameLower : normalizeCircleName(cur?.name || '');
+    if (nameLower !== oldLower && (await legacyNameTaken(name, nameLower, uid, circleId))) {
+      throw new Error(nameTakenMessage(name));
+    }
+
+    await runTransaction(db, async tx => {
+      // Reads first (transaction rule), then writes
+      const cs = await tx.get(circleRef);
+      if (!cs.exists()) throw new Error('This circle no longer exists.');
+      const c: any = cs.data();
+      if (String(c?.ownerId || '') !== uid) throw new Error('Only the circle owner can edit it.');
+      const curLower = typeof c?.nameLower === 'string' ? c.nameLower : normalizeCircleName(c?.name || '');
+      const oldKey = typeof c?.nameKey === 'string' && c.nameKey ? c.nameKey : circleNameDocId(curLower);
+      const newRef = doc(db, NAMES, nameKey);
+      const oldRef = doc(db, NAMES, oldKey);
+      const ns = await tx.get(newRef);
+      const os = oldKey !== nameKey ? await tx.get(oldRef) : null;
+
+      const nameChanged = name !== String(c?.name || '') || nameLower !== curLower;
+      const takenByOther = ns.exists() && String((ns.data() as any)?.circleId || '') !== circleId;
+      const update: any = {
+        description: input.description.trim().slice(0, 300),
+        emoji: input.emoji || c?.emoji || '👗',
+      };
+      if (takenByOther) {
+        if (nameChanged) throw new Error(nameTakenMessage(name));
+        // Legacy duplicate keeping its unchanged name: save the other fields only
+      } else {
+        Object.assign(update, { name, nameLower, nameKey });
+        if (!ns.exists()) tx.set(newRef, { circleId, ownerId: uid, createdAt: serverTimestamp() });
+        if (os && os.exists() && String((os.data() as any)?.circleId || '') === circleId) tx.delete(oldRef);
+      }
+      tx.update(circleRef, update);
+    });
+  } catch (e: any) {
+    if (!e?.code && e instanceof Error) throw e;
+    if (e?.code === 'permission-denied' && (await nameDocTakenBy(nameKey, circleId))) {
+      throw new Error(nameTakenMessage(name));
+    }
+    fail(e, 'Saving circle');
   }
 };
 
@@ -265,21 +442,14 @@ export const getMyCircles = async (uid: string): Promise<Circle[]> => {
   }
 };
 
-// Public circles for Discover (equality only; sorted on the device)
-export const getDiscoverCircles = async (): Promise<Circle[]> => {
-  try {
-    const snap = await getDocs(query(collection(db, CIRCLES), where('isPrivate', '==', false), limit(100)));
-    // Legacy circles with a distance limit are left out (joined with the invite code)
-    return snap.docs
-      .map(d => toCircle(d.id, d.data()))
-      .filter(c => !c.radiusKm)
-      .sort((a, b) => b.memberIds.length - a.memberIds.length || byRecent(a, b));
-  } catch (e: any) {
-    return fail(e, 'Loading circles');
-  }
-};
+// No global Discover list: circles are found by distance (getNearbyCircles) or joined by code.
 
 export const NEARBY_KM = 3;
+
+// Distance within which a public circle can be joined without its code: its legacy distance limit
+// if smaller, otherwise NEARBY_KM. (Rules: circles joinedNearby, with ~0.5 km slack for rounding.)
+export const joinRadiusKm = (c: Pick<Circle, 'radiusKm'>): number =>
+  c.radiusKm && c.radiusKm < NEARBY_KM ? c.radiusKm : NEARBY_KM;
 
 // Public circles within NEARBY_KM (3 km) of me, nearest first. Geohash prefix range queries over the
 // precision-5 cells covering the 3 km box (index: circles isPrivate ASC + geohash ASC), then an
@@ -294,7 +464,8 @@ export const getNearbyCircles = async (lat: number, lng: number): Promise<Circle
       if (seen.has(c.id) || c.isPrivate || !c.location) return;
       seen.add(c.id);
       const km = haversineKm(lat, lng, c.location.lat, c.location.lng);
-      if (km <= NEARBY_KM) out.push({ ...c, distanceKm: km });
+      // Only circles this user can actually join from here (legacy limits may be < 3 km)
+      if (km <= joinRadiusKm(c)) out.push({ ...c, distanceKm: km });
     });
     return out.sort((a, b) => (a.distanceKm || 0) - (b.distanceKm || 0));
   };
@@ -326,24 +497,24 @@ export const getNearbyCircles = async (lat: number, lng: number): Promise<Circle
   }
 };
 
-// Owner (or admin, once the rules allow it): switch public <-> private after creation.
-// Private: removes location, geohash and the distance limit (no longer in Discover or Nearby;
-// invite code still works).
-// Public: optional approximate location (rounded to ~100 m) and distance limit (radiusKm, needs the
-// location; null = no limit).
+// Owner (or admin): switch public <-> private, or refresh a public circle's location.
+// Private: removes location, geohash and the distance limit (no longer in Nearby; the invite code
+// still works). Public: needs the approximate location (rounded to ~100 m) so the circle shows to
+// people within NEARBY_KM; optional legacy distance limit (radiusKm; null = no limit).
 export const updateCircleVisibility = async (
   circleId: string,
   isPrivate: boolean,
   location?: { lat: number; lng: number } | null,
   radiusKm?: number | null,
 ): Promise<void> => {
+  if (!isPrivate && !location) throw new Error(LOCATION_NEEDED);
   const data: any = { isPrivate, isPublic: !isPrivate };
-  if (isPrivate) {
+  if (isPrivate || !location) {
     data.location = deleteField();
     data.geohash = deleteField();
     data.cosLat = deleteField();
     data.radiusKm = deleteField();
-  } else if (location) {
+  } else {
     const loc = { lat: roundCoord(location.lat), lng: roundCoord(location.lng) };
     Object.assign(data, locationFields(loc));
     data.radiusKm = radiusKm ? radiusKm : deleteField();
@@ -355,7 +526,15 @@ export const updateCircleVisibility = async (
   }
 };
 
-// Owner: clear a legacy distance limit / location (public circle then shows in Discover for everyone)
+// Owner / admin: public circle, save my current approximate location as the circle's location.
+export const setCircleLocationHere = async (circleId: string): Promise<void> => {
+  const loc = await getApproxLocation();
+  if (!loc.ok) throw new Error(`${LOCATION_NEEDED}\n${loc.message}`);
+  await updateCircleVisibility(circleId, false, loc.coords, null);
+};
+
+// Clears location / distance limit. NOTE: a public circle without a location no longer shows in
+// Nearby (code-only); prefer updateCircleVisibility / setCircleLocationHere.
 export const removeCircleLocation = async (circleId: string): Promise<void> => {
   try {
     await updateDoc(doc(db, CIRCLES, circleId), {
@@ -400,30 +579,27 @@ export const subscribeCircle = (
   }
 };
 
-export const joinPublicCircle = async (circleId: string, uid: string): Promise<void> => {
-  try {
-    await updateDoc(doc(db, CIRCLES, circleId), { memberIds: arrayUnion(uid) });
-  } catch (e: any) {
-    fail(e, 'Joining circle');
-  }
-};
-
-// Join from Discover / the circle screen. A legacy circle with a distance limit needs the user's
-// location (Location on) and the user within radiusKm; the approximate location (~100 m) goes into
-// lastJoin so the rules can check it. Far away: join with the invite code a member shares instead.
+// Join without a code (Nearby list / circle screen): public circles only, and only from within
+// joinRadiusKm (3 km, or a smaller legacy limit) of the circle. The approximate location (~100 m)
+// goes into lastJoin so the rules can check the distance. Private circles, circles further away and
+// public circles without a location are joined with the invite link / code (joinWithCode).
 export const joinCircle = async (circle: Circle, uid: string): Promise<void> => {
-  if (circle.isPrivate) throw new Error('This circle is private. Join it with an invite code.');
-  if (!circle.radiusKm || !circle.location) return joinPublicCircle(circle.id, uid);
+  const codeHint = 'Ask a member for the invite link or code.';
+  if (circle.isPrivate) throw new Error(`${circle.name} is private. Join it with an invite code.`);
+  if (!circle.location) {
+    throw new Error(`${circle.name} can only be joined with its invite code. ${codeHint}`);
+  }
+  const radius = joinRadiusKm(circle);
   const loc = await getApproxLocation();
   if (!loc.ok) {
     throw new Error(
-      `${circle.name} is only for people within ${circle.radiusKm} km. Turn on Location to join.\n${loc.message}`,
+      `Circles nearby can be joined from within ${radius} km. Turn on Location to join, or use the invite code.\n${loc.message}`,
     );
   }
   const km = haversineKm(loc.coords.lat, loc.coords.lng, circle.location.lat, circle.location.lng);
-  if (km > circle.radiusKm) {
+  if (km > radius) {
     throw new Error(
-      `${circle.name} is only for people within ${circle.radiusKm} km, and you are about ${formatKm(km)} away. Ask a member for the invite link or code.`,
+      `${circle.name} can be joined from within ${radius} km, and you are about ${formatKm(km)} away. ${codeHint}`,
     );
   }
   try {
@@ -433,7 +609,7 @@ export const joinCircle = async (circle: Circle, uid: string): Promise<void> => 
     });
   } catch (e: any) {
     if (e?.code === 'permission-denied') {
-      throw new Error(`You need to be within ${circle.radiusKm} km of ${circle.name} to join. Ask a member for the invite code.`);
+      throw new Error(`You need to be within ${radius} km of ${circle.name} to join. ${codeHint}`);
     }
     fail(e, 'Joining circle');
   }
@@ -516,6 +692,16 @@ export const deleteCircle = async (circle: Circle): Promise<void> => {
     await deleteDoc(doc(db, CIRCLES, circle.id));
   } catch (e: any) {
     fail(e, 'Deleting circle');
+  }
+  // Then free the name (only if the name doc points at this circle; legacy circles may have none)
+  try {
+    const nameId = circle.nameKey || circleNameDocId(normalizeCircleName(circle.name));
+    const ns = await getDoc(doc(db, NAMES, nameId));
+    if (ns.exists() && String((ns.data() as any)?.circleId || '') === circle.id) {
+      await deleteDoc(ns.ref);
+    }
+  } catch (e: any) {
+    console.warn('deleteCircle name:', e?.code, e?.message);
   }
 };
 

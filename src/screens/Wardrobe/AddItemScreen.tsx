@@ -13,9 +13,9 @@ import {
   ActionSheetIOS,
   ActivityIndicator,
   Modal,
-  KeyboardAvoidingView,
   Switch,
 } from 'react-native';
+import KeyboardSafeView from '../../components/KeyboardSafeView';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles, statusBarStyle } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
@@ -405,9 +405,7 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
       </View>
 
       {/* Scrollable Form Fields */}
-      <KeyboardAvoidingView
-        style={styles.scroll}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      <KeyboardSafeView style={styles.scroll}>
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
@@ -586,7 +584,7 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
           )}
         </TouchableOpacity>
       </ScrollView>
-      </KeyboardAvoidingView>
+      </KeyboardSafeView>
 
       {/* Full Screen Image Preview Modal */}
       <Modal

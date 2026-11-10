@@ -362,6 +362,11 @@ const fetchProfile = async () => {
     return;
   }
 
+  if (!editGender.trim()) {
+    Alert.alert('Gender required', 'Please select your gender. It is needed for outfit and astrology suggestions.');
+    return;
+  }
+
   const updatedProfile: UserProfile = {
     id: uid,
     name: editName.trim(),
@@ -775,7 +780,7 @@ const fetchProfile = async () => {
         transparent={true}
         onRequestClose={() => setIsEditModalVisible(false)}>
         <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          behavior="padding"
           style={styles.modalOverlay}>
           <TouchableOpacity
             style={styles.backdropPressable}
@@ -910,7 +915,7 @@ const fetchProfile = async () => {
               </View>
 
               <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Gender</Text>
+                <Text style={styles.inputLabel}>Gender *</Text>
                 <TouchableOpacity
                   style={styles.modalInputTouchable}
                   onPress={() => setIsGenderDropdownOpen(o => !o)}

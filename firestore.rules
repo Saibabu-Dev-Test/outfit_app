@@ -379,6 +379,30 @@ service cloud.firestore {
       allow delete: if signedIn() && (resource.data.createdBy == me() || isAdmin());
     }
 
+    // ── Circle names: circleNames/{nameId} -> {circleId, ownerId, createdAt} ──
+    // nameId = the circle's normalized name (lower case, trimmed, spaces collapsed; "/" etc.
+    // %-escaped), equal to circles/{circleId}.nameKey. Created in the same transaction as the
+    // circle (create / rename). A set on an existing doc is an update, which is never allowed, so
+    // a taken name can't be claimed. Anyone signed in can check one name; nobody can list them.
+    match /circleNames/{nameId} {
+      allow get: if signedIn();
+      allow list: if false;
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['circleId', 'ownerId', 'createdAt'])
+        && request.resource.data.ownerId == me()
+        && request.resource.data.circleId is string
+        && request.resource.data.createdAt == request.time
+        && existsAfter(/databases/$(db)/documents/circles/$(request.resource.data.circleId))
+        && getAfter(/databases/$(db)/documents/circles/$(request.resource.data.circleId)).data.ownerId == me()
+        && getAfter(/databases/$(db)/documents/circles/$(request.resource.data.circleId)).data.get('nameKey', '') == nameId;
+      allow update: if false;
+      // Owner, when the circle is gone or no longer uses this name (rename), or an admin
+      allow delete: if signedIn() && (isAdmin()
+        || (resource.data.ownerId == me()
+            && (!existsAfter(/databases/$(db)/documents/circles/$(resource.data.circleId))
+                || getAfter(/databases/$(db)/documents/circles/$(resource.data.circleId)).data.get('nameKey', '') != nameId)));
+    }
+
     // ── Circles ─────────────────────────────────────────────────────────
     match /circles/{cid} {
       // Optional distance limit: public circles only, needs a location, 1-50 km
@@ -393,12 +417,23 @@ service cloud.firestore {
         let j = request.resource.data.get('lastJoin', {});
         return j.get('uid', '') == me() && j.get('code', '') == resource.data.inviteCode;
       }
-      // Approximate distance (equirectangular, cosLat stored with the location) with ~0.5 km slack
-      // for the ~100 m rounding of both points. The location comes from the phone.
+      // Unique name: nameKey points at a circleNames doc that (after this write) belongs to this circle
+      function nameDocOk(d) {
+        return d.get('nameKey', null) is string
+          && d.nameKey.size() > 0
+          && d.nameKey.size() <= 500
+          && d.get('nameLower', null) is string
+          && existsAfter(/databases/$(db)/documents/circleNames/$(d.nameKey))
+          && getAfter(/databases/$(db)/documents/circleNames/$(d.nameKey)).data.circleId == cid;
+      }
+      // Join without the code: within 3 km of a public circle's location (or a smaller legacy
+      // radiusKm). Approximate distance (equirectangular, cosLat stored with the location) with
+      // ~0.5 km slack for the ~100 m rounding of both points. The location comes from the phone.
       function joinedNearby() {
         let j = request.resource.data.get('lastJoin', {});
         let c = resource.data;
-        let r = c.get('radiusKm', 0) + 0.5;
+        let lim = c.get('radiusKm', null);
+        let r = (lim is number && lim < 3 ? lim : 3) + 0.5;
         return j.get('uid', '') == me()
           && j.get('lat', null) is number && j.get('lng', null) is number
           && c.get('location', null) != null
@@ -424,11 +459,23 @@ service cloud.firestore {
             || (request.resource.data.geohash is string && request.resource.data.geohash.size() <= 12))
         && (request.resource.data.get('location', null) == null
             || (request.resource.data.location.lat is number && request.resource.data.location.lng is number))
-        && validRadius(request.resource.data);
+        && validRadius(request.resource.data)
+        // Public circles are found only by distance, so they must carry a location
+        && (request.resource.data.isPrivate == true
+            || (request.resource.data.get('location', null) != null
+                && request.resource.data.get('geohash', null) is string))
+        // Unique name (circleNames doc written in the same transaction)
+        && nameDocOk(request.resource.data);
 
       allow update: if signedIn() && (
-        // Owner: anything except ownership (incl. Public <-> Private and the Nearby location)
+        // Owner: anything except ownership (incl. name, Public <-> Private and the Nearby location).
+        // A changed name must come with its circleNames doc (same transaction).
         (resource.data.ownerId == me() && request.resource.data.ownerId == resource.data.ownerId
+            && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['name', 'nameLower', 'nameKey'])
+                || (request.resource.data.get('name', null) is string
+                    && request.resource.data.name.size() > 0
+                    && request.resource.data.name.size() <= 60
+                    && nameDocOk(request.resource.data)))
             && validRadius(request.resource.data))
         // Admin: only Public <-> Private and the Nearby location (isPublic must match isPrivate)
         || (isAdmin()
@@ -437,13 +484,11 @@ service cloud.firestore {
             && request.resource.data.get('isPublic', !request.resource.data.isPrivate) == !request.resource.data.isPrivate
             && validRadius(request.resource.data))
         // Join: add only yourself.
-        //   Invite code (any circle, any distance): lastJoin = {uid: me, code: inviteCode}
-        //   Public, no distance limit: anyone
-        //   Public with radiusKm: lastJoin = {uid: me, lat, lng} within radiusKm of the circle
+        //   Invite code (any circle, private or public, any distance): lastJoin = {uid: me, code: inviteCode}
+        //   Public: lastJoin = {uid: me, lat, lng} within 3 km (or a smaller legacy radiusKm)
         || (onlyChanged(['memberIds', 'lastJoin'])
             && request.resource.data.memberIds.toSet() == resource.data.memberIds.toSet().union([me()].toSet())
-            && ((resource.data.isPrivate == false && resource.data.get('radiusKm', null) == null)
-                || joinedWithCode()
+            && (joinedWithCode()
                 || (resource.data.isPrivate == false && joinedNearby())))
         // Leave: remove only yourself (the owner deletes instead of leaving)
         || (onlyChanged(['memberIds'])

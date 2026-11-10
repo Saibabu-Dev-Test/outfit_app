@@ -9,10 +9,10 @@ import {
   TextInput,
   Alert,
   ActivityIndicator,
-  KeyboardAvoidingView,
   Platform,
   StatusBar,
 } from 'react-native';
+import KeyboardSafeView from '../../components/KeyboardSafeView';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles, statusBarStyle } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
@@ -188,10 +188,7 @@ export default function CommentsScreen({ navigation, route }: { navigation: any;
         <Text style={styles.title}>Comments</Text>
       </View>
 
-      <KeyboardAvoidingView
-        style={styles.flex1}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={0}>
+      <KeyboardSafeView style={styles.flex1}>
         {post === null ? (
           <Text style={styles.empty}>This post was deleted.</Text>
         ) : (
@@ -249,7 +246,7 @@ export default function CommentsScreen({ navigation, route }: { navigation: any;
             </TouchableOpacity>
           </View>
         ) : null}
-      </KeyboardAvoidingView>
+      </KeyboardSafeView>
       <ReportModal target={reportTarget} reporterId={uid} onClose={() => setReportTarget(null)} />
     </SafeAreaView>
   );

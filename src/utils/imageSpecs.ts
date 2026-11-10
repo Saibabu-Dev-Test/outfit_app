@@ -17,7 +17,11 @@ export interface ImageSpec {
   sharpen?: number; // unsharp-mask amount; default 0.55 (0.35 for <= 400 px)
 }
 
-export const FULL_SPEC: ImageSpec = { maxEdge: 1600, maxBytes: 160 * 1024 };
+// Since the "one sharp copy" pass (Nov 2026, build 94): ONE 1440 px photo <= 170 KB (WebP, far under
+// 1 MB, always >= 1080 px when the original is) is both the detail photo and the feed photo; the
+// separate 1080 px clear copy is no longer made. ~190 KB per item instead of ~256 KB, and sharper
+// in the feed. Older items' clear copies are removed by compactMyClearCopies (wardrobeApi).
+export const FULL_SPEC: ImageSpec = { maxEdge: 1440, maxBytes: 170 * 1024, sharpen: 0.6 };
 export const THUMB_SPEC: ImageSpec = { maxEdge: 360, maxBytes: 16 * 1024 };
 // Feed card photo (full width): sharp and still small
 export const CLEAR_SPEC: ImageSpec = { maxEdge: 1080, maxBytes: 80 * 1024, sharpen: 0.65 };

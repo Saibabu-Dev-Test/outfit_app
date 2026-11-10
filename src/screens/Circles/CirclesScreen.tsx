@@ -1,8 +1,8 @@
-// Circles: Mine / Discover / 📍 Nearby tabs, join with an invite code, create a public or private circle.
-// Public = listed in Discover, anyone can join; private = invite link / code only.
-// Nearby: asks for approximate location when opened and lists public circles within 3 km
-// (geohash query + exact distance, circlesApi.getNearbyCircles). A public circle created with
-// "Show in Nearby" on saves its approximate location (~100 m) so it shows up there.
+// Circles: Mine / 📍 Nearby tabs, join with an invite code, create a public or private circle.
+// There is no global Discover list: Nearby asks for the approximate location and lists ONLY public
+// circles within 3 km (nearest first, with distance; circlesApi.getNearbyCircles). A public circle
+// always saves its approximate location (~100 m) on create, so it shows to people around it.
+// Circles further away and private circles are joined with the invite code / link (any distance).
 // No Feed shortcut here (the Feed tab shows posts from my circles).
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -30,7 +30,6 @@ import { useAuth } from '../../context/AuthContext';
 import {
   Circle,
   createCircle,
-  getDiscoverCircles,
   getMyCircles,
   getNearbyCircles,
   formatKm,
@@ -42,12 +41,12 @@ import {
 import { timeAgo } from '../../utils/date';
 import { getApproxLocation, LocationFailReason } from '../../native/location';
 
-const EMOJIS = ['👗', '🔥', '🤍', '💼', '🌟', '🕰️', '👟', '💍', '🎉', '🌸', '🧥', '🪔', '👜', '🕶️', '🥻', '💄'];
+export const EMOJIS = ['👗', '🔥', '🤍', '💼', '🌟', '🕰️', '👟', '💍', '🎉', '🌸', '🧥', '🪔', '👜', '🕶️', '🥻', '💄'];
 
 export const PRIVATE_NOTICE =
   'Private circles may be reviewed by moderators if reported, to keep the community safe.';
 
-type TabKey = 'mine' | 'discover' | 'nearby';
+type TabKey = 'mine' | 'nearby';
 
 export default function CirclesScreen() {
   const navigation = useNavigation<any>();
@@ -56,7 +55,6 @@ export default function CirclesScreen() {
 
   const [tab, setTab] = useState<TabKey>('mine');
   const [mine, setMine] = useState<Circle[]>([]);
-  const [discover, setDiscover] = useState<Circle[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -71,7 +69,6 @@ export default function CirclesScreen() {
   const [newDesc, setNewDesc] = useState('');
   const [newEmoji, setNewEmoji] = useState(EMOJIS[0]);
   const [newPrivate, setNewPrivate] = useState(false);
-  const [newNearby, setNewNearby] = useState(true); // public circle: save approximate location
   const [creating, setCreating] = useState(false);
 
   // Nearby: public circles within NEARBY_KM (3 km)
@@ -110,7 +107,8 @@ export default function CirclesScreen() {
   const wantTab: TabKey | undefined = route.params?.tab;
   useEffect(() => {
     if (!wantTab) return;
-    const k: TabKey = wantTab === 'discover' || wantTab === 'nearby' ? wantTab : 'mine';
+    // 'discover' (old links) opens Nearby: there is no global list any more
+    const k: TabKey = (wantTab as string) === 'discover' || wantTab === 'nearby' ? 'nearby' : 'mine';
     setTab(k);
     if (k === 'nearby') loadNearby();
     navigation.setParams({ tab: undefined });
@@ -124,18 +122,12 @@ export default function CirclesScreen() {
         return;
       }
       if (showSpinner) setLoading(true);
-      const errors: string[] = [];
       try {
         setMine(await getMyCircles(uid));
+        setError(null);
       } catch (e: any) {
-        errors.push(e?.message || 'Could not load your circles.');
+        setError(e?.message || 'Could not load your circles.');
       }
-      try {
-        setDiscover(await getDiscoverCircles());
-      } catch (e: any) {
-        errors.push(e?.message || 'Could not load circles.');
-      }
-      setError(errors.length ? errors[0] : null);
       setLoading(false);
       setRefreshing(false);
     },
@@ -191,7 +183,6 @@ export default function CirclesScreen() {
     setNewDesc('');
     setNewEmoji(EMOJIS[0]);
     setNewPrivate(false);
-    setNewNearby(true);
   };
 
   const handleCreate = async () => {
@@ -205,13 +196,23 @@ export default function CirclesScreen() {
     }
     setCreating(true);
     try {
-      // Public + "Show in Nearby": approximate location (rounded to ~100 m in createCircle). No
-      // distance limit: anyone can still join from Discover.
+      // Public circles always save the approximate location (rounded to ~100 m in createCircle) so
+      // people within 3 km find them in Nearby. No location: offer to create it private instead.
       let location: { lat: number; lng: number } | null = null;
-      if (!newPrivate && newNearby) {
+      if (!newPrivate) {
         const loc = await getApproxLocation();
-        if (loc.ok) location = loc.coords;
-        else Alert.alert('Location not added', `${loc.message}\nYour circle is created without a location, so it won't show in Nearby.`);
+        if (!loc.ok) {
+          Alert.alert(
+            'Location needed',
+            `Public circles show to people within ${NEARBY_KM} km, so they need your approximate location (about 100 m).\n${loc.message}\n\nYou can turn on Location and try again, or make it private and invite people with the code.`,
+            [
+              { text: 'OK', style: 'cancel' },
+              { text: 'Make it private', onPress: () => setNewPrivate(true) },
+            ],
+          );
+          return;
+        }
+        location = loc.coords;
       }
       const c = await createCircle(
         { name: newName, description: newDesc, emoji: newEmoji, isPrivate: newPrivate, location, radiusKm: null },
@@ -230,7 +231,7 @@ export default function CirclesScreen() {
     }
   };
 
-  const data = tab === 'mine' ? mine : tab === 'discover' ? discover : nearby;
+  const data = tab === 'mine' ? mine : nearby;
   const busy = loading || (tab === 'nearby' && (nearbyLoading || !nearbyLoaded));
 
   const renderCircle = ({ item }: { item: Circle }) => {
@@ -295,7 +296,7 @@ export default function CirclesScreen() {
       <View style={styles.codeRow}>
         <TextInput
           style={styles.codeInput}
-          placeholder="Join with code"
+          placeholder="Join with invite code"
           placeholderTextColor={colors.textMuted}
           value={code}
           // A pasted invite link / message (outfit://join/CODE) becomes just the code
@@ -315,22 +316,24 @@ export default function CirclesScreen() {
         </TouchableOpacity>
       </View>
 
+      <Text style={styles.codeHint}>Private or further than {NEARBY_KM} km? Join with the invite code or link.</Text>
+
       {/* Tabs */}
       <View style={styles.tabs}>
-        {(['mine', 'discover', 'nearby'] as TabKey[]).map(k => (
+        {(['mine', 'nearby'] as TabKey[]).map(k => (
           <TouchableOpacity
             key={k}
             style={[styles.tab, tab === k && styles.tabActive]}
             onPress={() => openTab(k)}>
             <Text style={[styles.tabText, tab === k && styles.tabTextActive]} numberOfLines={1} adjustsFontSizeToFit>
-              {k === 'mine' ? `Mine (${mine.length})` : k === 'discover' ? 'Discover' : '📍 Nearby'}
+              {k === 'mine' ? `Mine (${mine.length})` : `📍 Nearby (${NEARBY_KM} km)`}
             </Text>
           </TouchableOpacity>
         ))}
       </View>
       {tab === 'nearby' ? (
         <View style={styles.nearbyBar}>
-          <Text style={styles.nearbyHint}>Public circles within {NEARBY_KM} km of you</Text>
+          <Text style={styles.nearbyHint}>Public circles within {NEARBY_KM} km of you, nearest first</Text>
           <TouchableOpacity onPress={loadNearby} disabled={nearbyLoading}>
             <Text style={styles.nearbyLink}>{nearbyLoading ? 'Finding…' : '↻ Refresh'}</Text>
           </TouchableOpacity>
@@ -377,14 +380,13 @@ export default function CirclesScreen() {
         <Text style={styles.emptyText}>
           {nearbyError
             ? nearbyError.message
-            : `No public circles within ${NEARBY_KM} km yet. Create one with "Show in Nearby" on and people around you can join!`}
+            : `No public circles within ${NEARBY_KM} km yet. Create a public one and people around you can join! Circles further away are joined with their invite code.`}
         </Text>
         <View style={styles.emptyBtns}>
           <TouchableOpacity
             style={styles.emptyBtn}
             onPress={() => {
               setNewPrivate(false);
-              setNewNearby(true);
               setCreateOpen(true);
             }}>
             <Text style={styles.emptyBtnText}>+ Create a circle</Text>
@@ -428,11 +430,9 @@ export default function CirclesScreen() {
             nearbyEmpty()
           ) : (
             <View style={styles.empty}>
-              <Text style={styles.emptyEmoji}>{tab === 'mine' ? '◎' : '🔎'}</Text>
+              <Text style={styles.emptyEmoji}>◎</Text>
               <Text style={styles.emptyText}>
-                {tab === 'mine'
-                  ? 'You have not joined any circles yet. Create one, join with a code, or look in Discover.'
-                  : 'No public circles yet. Create the first one!'}
+                You have not joined any circles yet. Create one, join with an invite code, or look in 📍 Nearby.
               </Text>
             </View>
           )
@@ -469,7 +469,7 @@ export default function CirclesScreen() {
                 ))}
               </View>
 
-              <Text style={styles.label}>Name</Text>
+              <Text style={styles.label}>Name (must be unique)</Text>
               <TextInput
                 style={styles.input}
                 placeholder="e.g. Office Looks"
@@ -495,8 +495,8 @@ export default function CirclesScreen() {
                   <Text style={styles.visTitle}>{newPrivate ? '🔒 Private' : '🌍 Public'}</Text>
                   <Text style={styles.visHint}>
                     {newPrivate
-                      ? 'Hidden from Discover. People join with your invite code.'
-                      : 'Listed in Discover. Anyone can join.'}
+                      ? 'Not shown in Nearby. People join with your invite code or link.'
+                      : `Shown in Nearby to people within ${NEARBY_KM} km (saves your approximate location, about 100 m). Anyone further away joins with the invite code.`}
                   </Text>
                 </View>
                 <Switch
@@ -507,24 +507,6 @@ export default function CirclesScreen() {
                 />
               </View>
               {newPrivate && <Text style={styles.notice}>{PRIVATE_NOTICE}</Text>}
-              {!newPrivate && (
-                <View style={styles.visRow}>
-                  <View style={styles.flex1}>
-                    <Text style={styles.visTitle}>📍 Show in Nearby</Text>
-                    <Text style={styles.visHint}>
-                      {newNearby
-                        ? `Saves this circle's approximate location (about 100 m) so people within ${NEARBY_KM} km find it.`
-                        : 'Not shown in Nearby. Still listed in Discover.'}
-                    </Text>
-                  </View>
-                  <Switch
-                    value={newNearby}
-                    onValueChange={setNewNearby}
-                    trackColor={{ false: colors.border, true: colors.accent }}
-                    thumbColor={colors.textInverse}
-                  />
-                </View>
-              )}
               <View style={styles.modalActions}>
                 <TouchableOpacity
                   style={styles.cancelBtn}
@@ -597,6 +579,13 @@ const styles = themedStyles(() => StyleSheet.create({
   },
   codeBtnText: { color: colors.textInverse, fontWeight: fontWeight.bold },
   disabled: { opacity: 0.5 },
+  codeHint: {
+    fontSize: fontSize.xs,
+    color: colors.textSecondary,
+    paddingHorizontal: spacing.base,
+    marginTop: -spacing.sm,
+    marginBottom: spacing.md,
+  },
   tabs: {
     flexDirection: 'row',
     marginHorizontal: spacing.base,

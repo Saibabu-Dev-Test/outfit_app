@@ -10,11 +10,11 @@ import {
   StyleSheet,
   StatusBar,
   Platform,
-  KeyboardAvoidingView,
   ScrollView,
   ActivityIndicator,
   Keyboard,
 } from 'react-native';
+import KeyboardSafeView from '../../components/KeyboardSafeView';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { spacing, borderRadius, themedStyles, statusBarStyle, colors } from '../../theme';
@@ -312,6 +312,8 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
     if (isRegister && selectedCountry.code === '+91' && !/^[6-9]/.test(digits)) {
       return 'Indian mobile numbers start with 6, 7, 8 or 9';
     }
+    if (isRegister && !name.trim()) return 'Please enter your name';
+    if (isRegister && !gender) return 'Please select your gender';
     if (!password) return isForgot ? 'Please enter a new password' : 'Please enter your password';
     if (needsConfirm) {
       if (password.length < MIN_PASSWORD) {
@@ -418,9 +420,7 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
         barStyle={statusBarStyle()}
         {...(Platform.OS === 'android' ? { backgroundColor: colors.background } : {})}
       />
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.flexOne}>
+      <KeyboardSafeView>
         <ScrollView
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
@@ -512,14 +512,14 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
                       onChangeText={setName}
                     />
 
-                    <Text style={[styles.inputLabel, styles.labelSpacing]}>Gender</Text>
+                    <Text style={[styles.inputLabel, styles.labelSpacing]}>Gender *</Text>
                     <TouchableOpacity
                       style={styles.selectBox}
                       onPress={() => setShowGenderPicker(true)}
                       disabled={busy}
                       activeOpacity={0.7}>
                       <Text style={gender ? styles.selectValue : styles.selectPlaceholder}>
-                        {gender || 'Select (optional)'}
+                        {gender || 'Select gender'}
                       </Text>
                       <Text style={styles.dropdownChevron}>▾</Text>
                     </TouchableOpacity>
@@ -808,7 +808,7 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
             </Text>
           </View>
         </ScrollView>
-      </KeyboardAvoidingView>
+      </KeyboardSafeView>
     </SafeAreaView>
   );
 }

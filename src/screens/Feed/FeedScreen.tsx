@@ -1,6 +1,6 @@
-// Feed tab, Instagram style: posts + public wardrobe photos from people in my circles (and mine),
-// newest first, infinite scroll, pull to refresh. Like, comment and A-F voting live in PostCard.
-// No "Nearby": the feed exists only within circles.
+// Feed tab, Instagram style: posts + public wardrobe photos from EVERY user (default, so new users
+// see looks from day one) or only from my circles (toggle), newest first, infinite scroll,
+// pull to refresh. Like, comment and A-F voting live in PostCard.
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
@@ -19,7 +19,7 @@ import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles, stat
 import { useAuth } from '../../context/AuthContext';
 import useIsAdmin from '../../hooks/useIsAdmin';
 import PostCard from '../../components/PostCard';
-import { FeedLoader, Post } from '../../services/feedApi';
+import { FeedLoader, FeedScope, Post } from '../../services/feedApi';
 import { subscribeUnreadActivity } from '../../services/activityWatcher';
 
 export default function FeedScreen({ navigation, route }: { navigation: any; route: any }) {
@@ -38,12 +38,13 @@ export default function FeedScreen({ navigation, route }: { navigation: any; rou
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mateCount, setMateCount] = useState(0);
-  const loader = useRef<FeedLoader>(new FeedLoader(uid));
+  const [scope, setScope] = useState<FeedScope>('everyone');
+  const loader = useRef<FeedLoader>(new FeedLoader(uid, 'everyone'));
   const busy = useRef(false);
 
   const loadFirst = useCallback(async () => {
     busy.current = true;
-    loader.current = new FeedLoader(uid);
+    loader.current = new FeedLoader(uid, scope);
     try {
       const list = await loader.current.next();
       setPosts(list);
@@ -57,7 +58,7 @@ export default function FeedScreen({ navigation, route }: { navigation: any; rou
       setLoading(false);
       setRefreshing(false);
     }
-  }, [uid]);
+  }, [uid, scope]);
 
   const loadMore = async () => {
     if (busy.current || loading || refreshing || !hasMore) return;
@@ -98,7 +99,23 @@ export default function FeedScreen({ navigation, route }: { navigation: any; rou
         ) : null}
         <View style={styles.titleBox}>
           <Text style={styles.title}>Feed</Text>
-          <Text style={styles.subtitle}>From your circles</Text>
+          <View style={styles.scopeRow}>
+            {(['everyone', 'circles'] as FeedScope[]).map(sc => (
+              <TouchableOpacity
+                key={sc}
+                style={[styles.scopeBtn, scope === sc && styles.scopeOn]}
+                onPress={() => {
+                  if (sc === scope) return;
+                  setLoading(true);
+                  setPosts([]);
+                  setScope(sc);
+                }}>
+                <Text style={[styles.scopeText, scope === sc && styles.scopeTextOn]}>
+                  {sc === 'everyone' ? '🌐 Everyone' : '◎ My circles'}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
         </View>
         <TouchableOpacity style={styles.iconBtn} onPress={() => navigation.navigate('Likes')}>
           <Text style={styles.iconText}>♡</Text>
@@ -157,11 +174,13 @@ export default function FeedScreen({ navigation, route }: { navigation: any; rou
             <View style={styles.empty}>
               <Text style={styles.emptyEmoji}>📸</Text>
               <Text style={styles.emptyText}>
-                {mateCount === 0
+                {scope === 'everyone'
+                  ? 'No public looks yet. Add a public wardrobe photo to share the first one!'
+                  : mateCount === 0
                   ? 'Your feed shows looks from your circles. Join or create a circle to see them here.'
                   : 'No looks from your circles yet. Add a public wardrobe photo to share the first one!'}
               </Text>
-              {mateCount === 0 ? (
+              {scope === 'circles' && mateCount === 0 ? (
                 <TouchableOpacity style={styles.emptyBtn} onPress={() => navigation.navigate('Circles')}>
                   <Text style={styles.newText}>◎ Open circles</Text>
                 </TouchableOpacity>
@@ -192,6 +211,18 @@ const styles = themedStyles(() => StyleSheet.create({
   titleBox: { flex: 1 },
   title: { fontSize: fontSize.xl, fontWeight: fontWeight.extraBold, color: colors.textPrimary },
   subtitle: { fontSize: fontSize.xs, color: colors.textMuted },
+  scopeRow: { flexDirection: 'row', marginTop: 4 },
+  scopeBtn: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 3,
+    borderRadius: borderRadius.full,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginRight: spacing.xs,
+  },
+  scopeOn: { backgroundColor: colors.primary, borderColor: colors.primary },
+  scopeText: { fontSize: fontSize.xs, color: colors.textSecondary, fontWeight: fontWeight.bold },
+  scopeTextOn: { color: colors.onPrimary },
   iconBtn: { paddingHorizontal: spacing.sm },
   badge: {
     position: 'absolute',

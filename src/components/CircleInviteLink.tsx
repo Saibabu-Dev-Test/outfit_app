@@ -1,7 +1,8 @@
 // Circle invite links: outfit://join/CODE (Share in Circle info). Opening one asks to join the
-// circle with its code and opens the chat. The code works from any distance (a circle with a
-// distance limit can still be joined this way). Before sign-in the code waits until the user is
-// signed in. Android opens these links through the intent filter in AndroidManifest.xml.
+// circle with its code and opens the chat. The code is the only way into private circles and into
+// public circles further than 3 km (Nearby lists only circles within 3 km), and works from any
+// distance. Before sign-in the code waits until the user is signed in. Android opens these links
+// through the intent filter in AndroidManifest.xml.
 import { useEffect, useRef } from 'react';
 import { Alert, Linking } from 'react-native';
 import { NavigationContainerRefWithCurrent } from '@react-navigation/native';

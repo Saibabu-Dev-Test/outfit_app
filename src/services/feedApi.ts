@@ -794,8 +794,13 @@ const fillSource = async (s: Source): Promise<void> => {
   if (s.done || s.fallback) return;
   const base = collection(db, s.name === 'posts' ? POSTS : 'wardrobe');
   const at = (d: any) => toDate(d?.createdAt)?.getTime() || 0;
-  const filters: any[] =
-    s.name === 'wardrobe'
+  // Global feed (no uids): every user's public wardrobe photos + all posts, newest first.
+  // Index used: wardrobe isPublic ASC + createdAt DESC (firestore.indexes.json); posts: createdAt only.
+  const filters: any[] = !s.uids.length
+    ? s.name === 'wardrobe'
+      ? [where('isPublic', '==', true)]
+      : []
+    : s.name === 'wardrobe'
       ? [where('isPublic', '==', true), where('userId', 'in', s.uids)]
       : [where('userId', 'in', s.uids)];
   try {
@@ -838,14 +843,18 @@ const circleMates = async (meUid?: string): Promise<string[]> => {
   return Array.from(ids);
 };
 
+export type FeedScope = 'everyone' | 'circles';
+
 export class FeedLoader {
   private sources: Source[] | null = null;
   private meUid?: string;
   // How many circle mates (me excluded) the feed covers; set after the first page
   circleMateCount = 0;
 
-  constructor(meUid?: string) {
+  private scope: FeedScope;
+  constructor(meUid?: string, scope: FeedScope = 'everyone') {
     this.meUid = meUid;
+    this.scope = scope;
   }
 
   get hasMore(): boolean {
@@ -854,6 +863,12 @@ export class FeedLoader {
 
   private async init(): Promise<Source[]> {
     if (this.sources) return this.sources;
+    if (this.scope === 'everyone') {
+      // Everyone's public looks (new users see a full feed from day one)
+      this.circleMateCount = 0;
+      this.sources = [newSource('posts', []), newSource('wardrobe', [])];
+      return this.sources;
+    }
     const uids = await circleMates(this.meUid);
     this.circleMateCount = Math.max(0, uids.length - 1);
     const chunks: string[][] = [];

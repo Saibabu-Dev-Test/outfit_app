@@ -7,13 +7,13 @@ import {
   TouchableOpacity,
   FlatList,
   TextInput,
-  KeyboardAvoidingView,
   Platform,
   Image,
   Alert,
   ActivityIndicator,
   StatusBar,
 } from 'react-native';
+import KeyboardSafeView from '../../components/KeyboardSafeView';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles, statusBarStyle } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
@@ -393,12 +393,9 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
         {...(Platform.OS === 'android' ? { backgroundColor: colors.surface } : {})}
       />
       {header}
-      <KeyboardAvoidingView
-        style={styles.flex1}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={0}>
+      <KeyboardSafeView style={styles.flex1}>
         {body}
-      </KeyboardAvoidingView>
+      </KeyboardSafeView>
 
       <CreatePollModal
         visible={pollOpen}

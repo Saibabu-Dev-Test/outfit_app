@@ -12,12 +12,12 @@ import {
   TouchableOpacity,
   TextInput,
   StatusBar,
-  KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
   Image,
   StyleSheet,
 } from 'react-native';
+import KeyboardSafeView from '../../components/KeyboardSafeView';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles, statusBarStyle } from '../../theme';
@@ -279,10 +279,7 @@ export default function StylistScreen() {
         barStyle={statusBarStyle()}
         {...(Platform.OS === 'android' ? { backgroundColor: colors.background } : {})}
       />
-      <KeyboardAvoidingView
-        style={styles.flex1}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={0}>
+      <KeyboardSafeView style={styles.flex1}>
         {/* Compact header: title + language pills */}
         <View style={styles.header}>
           <View style={styles.flex1}>
@@ -399,7 +396,7 @@ export default function StylistScreen() {
             </TouchableOpacity>
           </View>
         ) : null}
-      </KeyboardAvoidingView>
+      </KeyboardSafeView>
     </SafeAreaView>
   );
 }

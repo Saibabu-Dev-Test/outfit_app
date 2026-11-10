@@ -8,6 +8,7 @@ import {
 import { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, fontSize, fontWeight, spacing, themedStyles } from '../../theme';
+import useKeyboardVisible from '../../hooks/useKeyboardVisible';
 
 type TabItem = {
   name: string;
@@ -27,6 +28,9 @@ const TABS: TabItem[] = [
 
 export default function CustomTabBar({ state, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
+  // Keyboard open: hide the tab bar so the message / comment box sits right on the keyboard
+  const keyboardOpen = useKeyboardVisible();
+  if (keyboardOpen) return null;
 
   return (
     <View style={[styles.container, { paddingBottom: insets.bottom || spacing.sm }]}>

@@ -24,7 +24,8 @@ export interface PickOptions {
 }
 
 // Posts and wardrobe items: full photo (1600 px) + 360 px thumbnail + 1080 px clear feed photo
-export const PHOTO_PICK: PickOptions = { spec: FULL_SPEC, thumb: THUMB_SPEC, clear: CLEAR_SPEC };
+export const PHOTO_PICK: PickOptions = { spec: FULL_SPEC, thumb: THUMB_SPEC, clear: null };
+void CLEAR_SPEC; // kept for older code paths
 // Avatars are shown small; the tiny copy goes on posts / comments / likes
 export const AVATAR_PICK: PickOptions = { spec: AVATAR_SPEC, thumb: AVATAR_THUMB_SPEC };
 // A poll message / chat photo set holds up to 6 photos in one Firestore doc (1 MiB limit)

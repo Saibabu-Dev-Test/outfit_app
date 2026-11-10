@@ -19,7 +19,8 @@ export interface PickOptions {
   maxChars?: number;
 }
 
-export const PHOTO_PICK: PickOptions = { spec: FULL_SPEC, thumb: THUMB_SPEC, clear: CLEAR_SPEC };
+export const PHOTO_PICK: PickOptions = { spec: FULL_SPEC, thumb: THUMB_SPEC, clear: null };
+void CLEAR_SPEC; // kept for older code paths
 export const AVATAR_PICK: PickOptions = { spec: AVATAR_SPEC, thumb: AVATAR_THUMB_SPEC };
 export const POLL_PICK: PickOptions = { spec: POLL_SPEC, thumb: null };
 
