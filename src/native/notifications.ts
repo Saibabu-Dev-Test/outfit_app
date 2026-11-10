@@ -1,5 +1,7 @@
 // Notification permission (Android 13+) + the app's notification toggle. Android only.
 import { Linking, NativeModules, PermissionsAndroid, Platform } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { localDateKey } from '../utils/date';
 
 const Native:
   | {
@@ -9,6 +11,9 @@ const Native:
       cancelDaily?: () => Promise<boolean>;
       postNotification?: (title: string, body: string) => Promise<boolean>;
       setUserFirstName?: (name: string) => Promise<boolean>;
+      scheduleVoteReminder?: () => Promise<boolean>;
+      markColourVoted?: (day: string) => Promise<boolean>;
+      cancelVoteReminder?: () => Promise<boolean>;
     }
   | undefined = NativeModules.OutfitNotifications;
 
@@ -92,5 +97,46 @@ export const setNotificationName = async (displayName?: string | null): Promise<
     await Native?.setUserFirstName?.(firstNameOf(displayName));
   } catch (e: any) {
     console.warn('setNotificationName failed:', e?.message);
+  }
+};
+
+// ── Colour-vote reminder (OutfitNotifier.kt) ──────────────────────────────
+// From 1:00 AM local time the phone reminds every hour until today's colour is voted; after the
+// vote it stays quiet until 1:00 AM the next day. The vote day is also kept in AsyncStorage so a
+// fresh launch (or a reinstall of the alarm after an update) knows today is already done.
+const VOTED_KEY = (uid: string) => `outfit:colourVoted:${uid}`;
+
+// Call after the user's vote for today is saved (or found on the server). Never throws.
+export const markColourVoted = async (uid?: string | null, day: string = localDateKey()): Promise<void> => {
+  if (uid) await AsyncStorage.setItem(VOTED_KEY(uid), day).catch(() => undefined);
+  if (Platform.OS !== 'android') return;
+  try {
+    await Native?.markColourVoted?.(day);
+  } catch (e: any) {
+    console.warn('markColourVoted failed:', e?.message);
+  }
+};
+
+// Signed in: arm the hourly reminder (idempotent), and tell the phone if today's vote is already in.
+// Never throws.
+export const syncVoteReminder = async (uid: string): Promise<void> => {
+  if (Platform.OS !== 'android') return;
+  try {
+    const today = localDateKey();
+    const voted = await AsyncStorage.getItem(VOTED_KEY(uid)).catch(() => null);
+    await Native?.scheduleVoteReminder?.();
+    if (voted === today) await Native?.markColourVoted?.(today);
+  } catch (e: any) {
+    console.warn('syncVoteReminder failed:', e?.message);
+  }
+};
+
+// Signed out: no reminders. Never throws.
+export const cancelVoteReminder = async (): Promise<void> => {
+  if (Platform.OS !== 'android') return;
+  try {
+    await Native?.cancelVoteReminder?.();
+  } catch (e: any) {
+    console.warn('cancelVoteReminder failed:', e?.message);
   }
 };

@@ -4,7 +4,11 @@
 // Each item: like (one per user), replies (paged 10), quote (a new feedback that shows a snippet of
 // the original), and for my own items edit / delete. Admins can also change the status and delete.
 // Lists page 10 at a time.
-import React, { useCallback, useEffect, useState } from 'react';
+// Layout: the header sits below the status bar and the bottom composer above the phone's
+// navigation buttons (safe-area insets; the modal is edge-to-edge), and the composer moves up
+// with the keyboard. Replies are typed in that bottom composer (tap 💬 Reply on a card).
+// Load problems (e.g. rules not deployed yet) show a friendly empty state, never a red error.
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -21,6 +25,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import {
   borderRadius,
   colors,
@@ -195,9 +200,14 @@ function FeedbackCard({
   onDeleted,
   onUpdated,
   onOpenImage,
+  onReply,
+  incoming,
 }: {
   item: Feedback;
   me: Me;
+  onReply: (f: Feedback) => void;
+  // A reply just sent from the bottom composer for this card (n changes on every send)
+  incoming: { reply: FeedbackReply; n: number } | null;
   onQuote: (f: Feedback) => void;
   onEdit: (f: Feedback) => void;
   onDeleted: (f: Feedback) => void;
@@ -212,8 +222,6 @@ function FeedbackCard({
   const [replyCursor, setReplyCursor] = useState<FeedbackCursor>(null);
   const [moreReplies, setMoreReplies] = useState(false);
   const [loadingReplies, setLoadingReplies] = useState(false);
-  const [draft, setDraft] = useState('');
-  const [sending, setSending] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
@@ -265,26 +273,16 @@ function FeedbackCard({
     if (next && !replies.length && item.replyCount > 0) loadReplies(false);
   };
 
-  const sendReply = async () => {
-    const t = draft.trim();
-    if (!t || sending || !me.uid) return;
-    if (containsProfanity(t)) {
-      Alert.alert('Not sent', 'Please keep your reply respectful 🙏');
-      return;
-    }
-    setSending(true);
-    try {
-      const r = await addReply(item.id, { uid: me.uid, name: me.name }, t);
-      setDraft('');
-      // Shown at the end only when every older reply is already loaded
-      if (!moreReplies) setReplies(prev => [...prev, r]);
-      onUpdated({ ...item, replyCount: item.replyCount + 1 });
-    } catch (e: any) {
-      Alert.alert('Reply not sent', e?.message || 'Please try again.');
-    } finally {
-      setSending(false);
-    }
-  };
+  // Reply sent from the bottom composer: show it here (at the end only when every older reply
+  // is already loaded) and open the replies
+  const seenIncoming = useRef(0);
+  useEffect(() => {
+    if (!incoming || incoming.n === seenIncoming.current) return;
+    seenIncoming.current = incoming.n;
+    setOpen(true);
+    if (!moreReplies) setReplies(prev => (prev.some(x => x.id === incoming.reply.id) ? prev : [...prev, incoming.reply]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [incoming]);
 
   const remove = () =>
     Alert.alert('Delete feedback?', 'Its likes and replies are removed too.', [
@@ -414,6 +412,9 @@ function FeedbackCard({
             💬 {item.replyCount} {open ? '▴' : ''}
           </Text>
         </TouchableOpacity>
+        <TouchableOpacity style={styles.action} onPress={() => onReply(item)}>
+          <Text style={styles.actionText}>↩ Reply</Text>
+        </TouchableOpacity>
         {item.isPublic ? (
           <TouchableOpacity style={styles.action} onPress={() => onQuote(item)}>
             <Text style={styles.actionText}>❝ Quote</Text>
@@ -455,32 +456,9 @@ function FeedbackCard({
               </Text>
             </TouchableOpacity>
           ) : null}
-          <View style={styles.replyBar}>
-            <TextInput
-              style={styles.replyBox}
-              value={draft}
-              onChangeText={setDraft}
-              placeholder="Write a reply…"
-              placeholderTextColor={colors.textMuted}
-              multiline
-              maxLength={FEEDBACK_REPLY_MAX}
-              editable={!sending}
-            />
-            <TouchableOpacity
-              style={[
-                styles.replySend,
-                (!draft.trim() || sending) && styles.disabled,
-              ]}
-              onPress={sendReply}
-              disabled={!draft.trim() || sending}
-            >
-              {sending ? (
-                <ActivityIndicator size="small" color={colors.onPrimary} />
-              ) : (
-                <Text style={styles.replySendText}>➤</Text>
-              )}
-            </TouchableOpacity>
-          </View>
+          <TouchableOpacity onPress={() => onReply(item)} style={styles.replyCta}>
+            <Text style={[styles.link, styles.linkStrong]}>💬 Write a reply</Text>
+          </TouchableOpacity>
         </View>
       ) : null}
 
@@ -514,6 +492,12 @@ export default function FeedbackBoardModal({
     editing?: Feedback | null;
   } | null>(null);
   const [shot, setShot] = useState<string | null>(null);
+  // Bottom composer: replying to this feedback (null = "share an idea" button)
+  const [replyTo, setReplyTo] = useState<Feedback | null>(null);
+  const [draft, setDraft] = useState('');
+  const [sending, setSending] = useState(false);
+  const [incoming, setIncoming] = useState<{ feedbackId: string; reply: FeedbackReply; n: number } | null>(null);
+  const inputRef = useRef<any>(null);
 
   const me: Me = {
     uid: uid || '',
@@ -585,18 +569,53 @@ export default function FeedbackBoardModal({
   const update = (f: Feedback) =>
     setItems(prev => prev.map(x => (x.id === f.id ? f : x)));
 
+  const startReply = (f: Feedback) => {
+    setReplyTo(f);
+    setTimeout(() => inputRef.current?.focus(), 50);
+  };
+
+  const sendReply = async () => {
+    const t = draft.trim();
+    const target = replyTo;
+    if (!t || sending || !uid || !target) return;
+    if (containsProfanity(t)) {
+      Alert.alert('Not sent', 'Please keep your reply respectful 🙏');
+      return;
+    }
+    setSending(true);
+    try {
+      const r = await addReply(target.id, { uid: me.uid, name: me.name }, t);
+      setDraft('');
+      setIncoming(prev => ({ feedbackId: target.id, reply: r, n: (prev?.n || 0) + 1 }));
+      setItems(prev =>
+        prev.map(x => (x.id === target.id ? { ...x, replyCount: x.replyCount + 1 } : x)),
+      );
+      setReplyTo(null);
+    } catch (e: any) {
+      Alert.alert('Reply not sent', e?.message || 'Please try again.');
+    } finally {
+      setSending(false);
+    }
+  };
+
   return (
-    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
+    <Modal
+      visible={visible}
+      animationType="slide"
+      onRequestClose={onClose}
+      statusBarTranslucent
+      navigationBarTranslucent
+    >
+      <SafeAreaProvider>
       <StatusBar
         barStyle={statusBarStyle()}
         {...(Platform.OS === 'android'
-          ? { backgroundColor: colors.surface }
+          ? { backgroundColor: 'transparent', translucent: true }
           : {})}
       />
-      <KeyboardAvoidingView
-        style={styles.root}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
+      {/* Edge-to-edge window: adjustResize does not shrink it, so pad for the keyboard on both platforms */}
+      <KeyboardAvoidingView style={styles.root} behavior="padding">
+      <SafeAreaView style={styles.root} edges={['top', 'bottom', 'left', 'right']}>
         <View style={styles.header}>
           <TouchableOpacity
             onPress={onClose}
@@ -628,7 +647,6 @@ export default function FeedbackBoardModal({
             </TouchableOpacity>
           ))}
         </View>
-        {error ? <Text style={styles.error}>{error}</Text> : null}
         <FlatList
           data={items}
           keyExtractor={f => f.id}
@@ -648,28 +666,99 @@ export default function FeedbackBoardModal({
               onDeleted={f => setItems(prev => prev.filter(x => x.id !== f.id))}
               onUpdated={update}
               onOpenImage={setShot}
+              onReply={startReply}
+              incoming={incoming && incoming.feedbackId === item.id ? incoming : null}
             />
           )}
           ListEmptyComponent={
             loading ? undefined : (
-              <Text style={styles.empty}>
-                {scope === 'mine'
-                  ? "You haven't sent feedback yet. Tap ＋ New."
-                  : 'No feedback yet. Be the first to share an idea!'}
-              </Text>
+              <View style={styles.emptyBox}>
+                <Text style={styles.emptyEmoji}>💡</Text>
+                <Text style={styles.emptyTitle}>
+                  {scope === 'mine' ? "You haven't shared anything yet" : 'No feedback here yet'}
+                </Text>
+                <Text style={styles.empty}>
+                  {scope === 'mine'
+                    ? 'Tell us what you like, what is broken, or what we should add. Tap ＋ New.'
+                    : 'Be the first to share an idea! Tap ＋ New to post a suggestion.'}
+                </Text>
+                {error ? (
+                  <TouchableOpacity onPress={refresh} style={styles.moreBtn}>
+                    <Text style={[styles.link, styles.linkStrong]}>↻ Refresh</Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
             )
           }
           ListFooterComponent={
             loading ? (
               <ActivityIndicator color={colors.primary} style={styles.spin} />
-            ) : hasMore ? (
+            ) : hasMore && !error ? (
               <TouchableOpacity onPress={loadMore} style={styles.moreBtn}>
                 <Text style={[styles.link, styles.linkStrong]}>Load more</Text>
               </TouchableOpacity>
             ) : undefined
           }
         />
+
+        {/* Bottom composer: above the navigation buttons, moves up with the keyboard */}
+        {replyTo ? (
+          <View style={styles.composer}>
+            <View style={styles.composerHead}>
+              <Text style={styles.composerTo} numberOfLines={1}>
+                ↩ Replying to {replyTo.name || 'Outfit user'}
+              </Text>
+              <TouchableOpacity
+                onPress={() => {
+                  setReplyTo(null);
+                  setDraft('');
+                }}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <Text style={styles.composerClose}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.replyBar}>
+              <TextInput
+                ref={inputRef}
+                style={styles.replyBox}
+                value={draft}
+                onChangeText={setDraft}
+                placeholder="Write a reply…"
+                placeholderTextColor={colors.textMuted}
+                multiline
+                maxLength={FEEDBACK_REPLY_MAX}
+                editable={!sending}
+                textAlignVertical="top"
+              />
+              <TouchableOpacity
+                style={[styles.replySend, (!draft.trim() || sending) && styles.disabled]}
+                onPress={sendReply}
+                disabled={!draft.trim() || sending}
+              >
+                {sending ? (
+                  <ActivityIndicator size="small" color={colors.onPrimary} />
+                ) : (
+                  <Text style={styles.replySendText}>➤</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : (
+          <TouchableOpacity
+            style={styles.composer}
+            activeOpacity={0.8}
+            onPress={() => setComposer({})}
+            disabled={!uid}
+          >
+            <View style={[styles.replyBox, styles.fakeInput]}>
+              <Text style={styles.fakeInputText}>💡 Share an idea or suggestion…</Text>
+            </View>
+          </TouchableOpacity>
+        )}
+      </SafeAreaView>
       </KeyboardAvoidingView>
+      </SafeAreaProvider>
 
       <FeedbackModal
         visible={!!composer}
@@ -717,7 +806,9 @@ const styles = themedStyles(() =>
       backgroundColor: colors.primary,
       borderRadius: borderRadius.full,
       paddingHorizontal: spacing.md,
-      paddingVertical: 6,
+      paddingVertical: 8,
+      minHeight: 36,
+      justifyContent: 'center',
     },
     newText: {
       color: colors.onPrimary,
@@ -755,8 +846,10 @@ const styles = themedStyles(() =>
     empty: {
       textAlign: 'center',
       color: colors.textMuted,
-      padding: spacing.xxl,
+      paddingHorizontal: spacing.xl,
+      paddingTop: spacing.sm,
       fontSize: fontSize.sm,
+      lineHeight: 20,
     },
     spin: { marginVertical: spacing.lg },
     smallSpin: { marginVertical: spacing.sm },
@@ -896,33 +989,65 @@ const styles = themedStyles(() =>
     },
     linkStrong: { color: colors.primary, fontWeight: fontWeight.bold },
     linkDanger: { color: colors.error },
+    replyCta: { marginTop: spacing.sm },
+    composer: {
+      backgroundColor: colors.surface,
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
+      paddingHorizontal: spacing.md,
+      paddingTop: spacing.sm,
+      paddingBottom: spacing.sm,
+    },
+    composerHead: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: spacing.xs,
+    },
+    composerTo: {
+      flex: 1,
+      fontSize: fontSize.xs,
+      fontWeight: fontWeight.bold,
+      color: colors.textSecondary,
+    },
+    composerClose: { fontSize: 16, color: colors.textMuted },
+    fakeInput: { justifyContent: 'center' },
+    fakeInputText: { fontSize: fontSize.base, color: colors.textMuted },
+    emptyBox: { alignItems: 'center', paddingTop: spacing.xxl },
+    emptyEmoji: { fontSize: 44 },
+    emptyTitle: {
+      fontSize: fontSize.md,
+      fontWeight: fontWeight.bold,
+      color: colors.textPrimary,
+      marginTop: spacing.sm,
+      textAlign: 'center',
+    },
     replyBar: {
       flexDirection: 'row',
       alignItems: 'flex-end',
-      marginTop: spacing.xs,
       gap: spacing.sm,
     },
     replyBox: {
       flex: 1,
-      minHeight: 38,
-      maxHeight: 110,
+      minHeight: 48,
+      maxHeight: 140,
       backgroundColor: colors.inputBg,
-      borderRadius: 19,
-      paddingHorizontal: spacing.md,
-      paddingTop: 9,
-      paddingBottom: 9,
-      fontSize: fontSize.sm,
+      borderRadius: 22,
+      paddingHorizontal: spacing.base,
+      paddingTop: 12,
+      paddingBottom: 12,
+      fontSize: fontSize.base,
+      lineHeight: 21,
       color: colors.textPrimary,
     },
     replySend: {
-      width: 38,
-      height: 38,
-      borderRadius: 19,
+      width: 48,
+      height: 48,
+      borderRadius: 24,
       backgroundColor: colors.primary,
       alignItems: 'center',
       justifyContent: 'center',
     },
-    replySendText: { color: colors.onPrimary, fontSize: 16 },
+    replySendText: { color: colors.onPrimary, fontSize: 18 },
     disabled: { opacity: 0.5 },
   }),
 );

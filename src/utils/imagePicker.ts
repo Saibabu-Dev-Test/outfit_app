@@ -1,9 +1,10 @@
 // Pick a photo as a small JPEG data URI (stored in Firestore; no Firebase Storage on the Spark plan).
 // The picker hands over a file; ImageResizeModule.kt shrinks it to the requested size with a
-// quality loop, and also makes a thumbnail when asked (lists / feed read only the thumbnail).
+// quality loop, and also makes a thumbnail (lists) and a clear 720 px copy (feed cards) when asked.
+// The picker hands over the original file (no pre-shrink), so every size is made from the original.
 import { launchCamera, launchImageLibrary, Asset, ImagePickerResponse, CameraOptions } from 'react-native-image-picker';
 import { canResize, resizeImage } from './imageResize';
-import { AVATAR_SPEC, AVATAR_THUMB_SPEC, FULL_SPEC, ImageSpec, POLL_SPEC, THUMB_SPEC } from './imageSpecs';
+import { AVATAR_SPEC, AVATAR_THUMB_SPEC, CLEAR_SPEC, FULL_SPEC, ImageSpec, POLL_SPEC, THUMB_SPEC } from './imageSpecs';
 
 // Firestore doc limit is 1 MiB; old (pre-split) photos were up to this size
 export const MAX_BASE64_CHARS = 700000;
@@ -11,17 +12,19 @@ export const MAX_BASE64_CHARS = 700000;
 export interface PickedImage {
   dataUri: string; // full photo (spec size)
   thumbUri?: string; // thumbnail, when PickOptions.thumb is set
+  clearUri?: string; // ~720 px feed photo, when PickOptions.clear is set
   uri?: string;
 }
 
 export interface PickOptions {
   spec?: ImageSpec; // default FULL_SPEC (1080 px, <= 80 KB)
   thumb?: ImageSpec | null; // also make a thumbnail of this size
+  clear?: ImageSpec | null; // also make a clear feed-size copy (CLEAR_SPEC)
   maxChars?: number; // extra cap on the full photo's base64 length
 }
 
-// Posts and wardrobe items: full photo + ~200 px thumbnail
-export const PHOTO_PICK: PickOptions = { spec: FULL_SPEC, thumb: THUMB_SPEC };
+// Posts and wardrobe items: full photo + ~200 px thumbnail + ~720 px clear feed photo
+export const PHOTO_PICK: PickOptions = { spec: FULL_SPEC, thumb: THUMB_SPEC, clear: CLEAR_SPEC };
 // Avatars are shown small; the tiny copy goes on posts / comments / likes
 export const AVATAR_PICK: PickOptions = { spec: AVATAR_SPEC, thumb: AVATAR_THUMB_SPEC };
 // A poll message / chat photo set holds up to 6 photos in one Firestore doc (1 MiB limit)
@@ -29,19 +32,15 @@ export const POLL_PICK: PickOptions = { spec: POLL_SPEC, thumb: null };
 
 const specOf = (o: PickOptions) => o.spec || FULL_SPEC;
 
-// The picker only pre-shrinks (keeps decoding fast); the native module does the real sizing.
-// Without the module (should not happen: it ships in the same APK) the picker's own base64 is used.
+// No pre-shrink: the picker hands over the original photo and the native module does all sizing
+// from it (it subsamples while decoding, so memory stays low). Without the module (should not
+// happen: it ships in the same APK) the picker's own small base64 is used.
 const pickerOptions = (o: PickOptions): CameraOptions => {
   const native = canResize();
   const edge = specOf(o).maxEdge;
-  return {
-    mediaType: 'photo',
-    maxWidth: native ? Math.max(1600, edge) : edge,
-    maxHeight: native ? Math.max(1600, edge) : edge,
-    quality: native ? 0.9 : 0.5,
-    includeBase64: !native,
-    saveToPhotos: false,
-  };
+  return native
+    ? { mediaType: 'photo', quality: 1, includeBase64: false, saveToPhotos: false }
+    : { mediaType: 'photo', maxWidth: edge, maxHeight: edge, quality: 0.5, includeBase64: true, saveToPhotos: false };
 };
 
 const fromAsset = async (a: Asset, o: PickOptions): Promise<PickedImage | null> => {
@@ -58,7 +57,16 @@ const fromAsset = async (a: Asset, o: PickOptions): Promise<PickedImage | null> 
   if (dataUri.length > maxChars) return null;
   // Thumbnail from the picked file (not the already sharpened full photo: no double sharpening)
   const thumbUri = o.thumb && canResize() ? await resizeImage(a.uri || dataUri, o.thumb) : undefined;
-  return { dataUri, thumbUri, uri: a.uri };
+  // Clear feed photo, also from the original. Optional: a failure just leaves the thumbnail.
+  let clearUri: string | undefined;
+  if (o.clear && canResize()) {
+    try {
+      clearUri = await resizeImage(a.uri || dataUri, o.clear);
+    } catch {
+      clearUri = undefined;
+    }
+  }
+  return { dataUri, thumbUri, clearUri, uri: a.uri };
 };
 
 const TOO_BIG = 'This photo is too large to save. Please pick a smaller photo or crop it.';

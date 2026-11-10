@@ -44,3 +44,8 @@ export const postNotification = async (title: string, body: string): Promise<boo
 export const firstNameOf = (displayName?: string | null): string =>
   String(displayName || '').trim().split(/\s+/)[0] || '';
 export const setNotificationName = async (_displayName?: string | null): Promise<void> => {};
+
+// Colour-vote reminder: Android only (AlarmManager)
+export const markColourVoted = async (_uid?: string | null, _day?: string): Promise<void> => {};
+export const syncVoteReminder = async (_uid: string): Promise<void> => {};
+export const cancelVoteReminder = async (): Promise<void> => {};

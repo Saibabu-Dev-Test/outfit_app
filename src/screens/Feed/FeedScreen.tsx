@@ -1,5 +1,6 @@
-// Feed tab, Instagram style: public posts + public wardrobe photos from public profiles,
+// Feed tab, Instagram style: posts + public wardrobe photos from people in my circles (and mine),
 // newest first, infinite scroll, pull to refresh. Like, comment and A-F voting live in PostCard.
+// No "Nearby": the feed exists only within circles.
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
@@ -36,6 +37,7 @@ export default function FeedScreen({ navigation, route }: { navigation: any; rou
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [mateCount, setMateCount] = useState(0);
   const loader = useRef<FeedLoader>(new FeedLoader(uid));
   const busy = useRef(false);
 
@@ -46,6 +48,7 @@ export default function FeedScreen({ navigation, route }: { navigation: any; rou
       const list = await loader.current.next();
       setPosts(list);
       setHasMore(loader.current.hasMore);
+      setMateCount(loader.current.circleMateCount);
       setError(null);
     } catch (e: any) {
       setError(e?.message || 'Could not load the feed.');
@@ -93,7 +96,10 @@ export default function FeedScreen({ navigation, route }: { navigation: any; rou
             <Text style={styles.back}>‹</Text>
           </TouchableOpacity>
         ) : null}
-        <Text style={styles.title}>Feed</Text>
+        <View style={styles.titleBox}>
+          <Text style={styles.title}>Feed</Text>
+          <Text style={styles.subtitle}>From your circles</Text>
+        </View>
         <TouchableOpacity style={styles.iconBtn} onPress={() => navigation.navigate('Likes')}>
           <Text style={styles.iconText}>♡</Text>
           {unreadActivity > 0 ? (
@@ -104,13 +110,6 @@ export default function FeedScreen({ navigation, route }: { navigation: any; rou
         </TouchableOpacity>
         <TouchableOpacity style={styles.iconBtn} onPress={() => navigation.navigate('UserSearch')}>
           <Text style={styles.iconText}>🔍</Text>
-        </TouchableOpacity>
-        {/* No separate Post screen: wardrobe uploads show in the feed. This spot opens Nearby circles. */}
-        <TouchableOpacity
-          style={styles.newBtn}
-          onPress={() => navigation.navigate('Circles', { tab: 'nearby' })}
-          accessibilityLabel="Nearby circles">
-          <Text style={styles.newText}>📍 Nearby</Text>
         </TouchableOpacity>
       </View>
 
@@ -157,10 +156,20 @@ export default function FeedScreen({ navigation, route }: { navigation: any; rou
           ) : (
             <View style={styles.empty}>
               <Text style={styles.emptyEmoji}>📸</Text>
-              <Text style={styles.emptyText}>No posts yet. Add a wardrobe photo to share the first look!</Text>
-              <TouchableOpacity style={styles.emptyBtn} onPress={() => navigation.navigate('Wardrobe')}>
-                <Text style={styles.newText}>👗 Open wardrobe</Text>
-              </TouchableOpacity>
+              <Text style={styles.emptyText}>
+                {mateCount === 0
+                  ? 'Your feed shows looks from your circles. Join or create a circle to see them here.'
+                  : 'No looks from your circles yet. Add a public wardrobe photo to share the first one!'}
+              </Text>
+              {mateCount === 0 ? (
+                <TouchableOpacity style={styles.emptyBtn} onPress={() => navigation.navigate('Circles')}>
+                  <Text style={styles.newText}>◎ Open circles</Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity style={styles.emptyBtn} onPress={() => navigation.navigate('Wardrobe')}>
+                  <Text style={styles.newText}>👗 Open wardrobe</Text>
+                </TouchableOpacity>
+              )}
             </View>
           )
         }
@@ -180,7 +189,9 @@ const styles = themedStyles(() => StyleSheet.create({
     borderBottomColor: colors.border,
   },
   back: { fontSize: 34, color: colors.primary, marginRight: spacing.sm, lineHeight: 36 },
-  title: { flex: 1, fontSize: fontSize.xl, fontWeight: fontWeight.extraBold, color: colors.textPrimary },
+  titleBox: { flex: 1 },
+  title: { fontSize: fontSize.xl, fontWeight: fontWeight.extraBold, color: colors.textPrimary },
+  subtitle: { fontSize: fontSize.xs, color: colors.textMuted },
   iconBtn: { paddingHorizontal: spacing.sm },
   badge: {
     position: 'absolute',
@@ -196,20 +207,13 @@ const styles = themedStyles(() => StyleSheet.create({
   },
   badgeText: { color: '#FFFFFF', fontSize: 10, fontWeight: '800' },
   iconText: { fontSize: 22, color: colors.textPrimary },
-  newBtn: {
-    backgroundColor: colors.primary,
-    borderRadius: borderRadius.full,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    marginLeft: spacing.xs,
-  },
   newText: { color: colors.onPrimary, fontWeight: fontWeight.bold, fontSize: fontSize.sm },
   error: { color: colors.error, textAlign: 'center', padding: spacing.md },
   footer: { marginVertical: spacing.xl },
   end: { textAlign: 'center', color: colors.textMuted, marginVertical: spacing.xl },
   empty: { alignItems: 'center', padding: spacing.xxxl },
   emptyEmoji: { fontSize: 48, marginBottom: spacing.sm },
-  emptyText: { color: colors.textSecondary, marginBottom: spacing.md },
+  emptyText: { color: colors.textSecondary, marginBottom: spacing.md, textAlign: 'center' },
   emptyBtn: {
     backgroundColor: colors.primary,
     borderRadius: borderRadius.full,

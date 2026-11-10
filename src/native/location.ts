@@ -1,4 +1,4 @@
-// Approximate location for "Nearby circles" (Android: LocationModule.kt, coarse permission)
+// Approximate location (legacy distance-limited circles only) (Android: LocationModule.kt, coarse permission)
 import { NativeModules, PermissionsAndroid, Platform } from 'react-native';
 
 export interface LatLng {

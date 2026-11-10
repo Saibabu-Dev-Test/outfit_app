@@ -243,6 +243,19 @@ export const getFeedbackPage = async (
       hasMore: docs.length === FEEDBACK_PAGE_SIZE,
     };
   } catch (e: any) {
+    // Index not deployed yet: first page without the sort, sorted here (no paging)
+    if (e?.code === 'failed-precondition' && !cursor) {
+      try {
+        const eq = cons.filter((c: any) => c?.type === 'where');
+        const snap = await getDocs(query(collection(db, 'feedback'), ...eq, limit(50)));
+        const items = snap.docs
+          .map(d => toFeedback(d.id, d.data()))
+          .sort((a, b) => (b.createdAt?.getTime() || 0) - (a.createdAt?.getTime() || 0));
+        return { items, cursor: null, hasMore: false };
+      } catch (e2: any) {
+        console.warn('feedback fallback failed:', e2?.code, e2?.message);
+      }
+    }
     return failWith(e, 'Loading feedback');
   }
 };

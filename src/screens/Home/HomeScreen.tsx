@@ -28,6 +28,7 @@ import { hasUploadedToday } from '../../services/wardrobeApi';
 import { getTodayVaaraColour, getRashiLuckyColour, getTodayLuckyMessage } from '../../utils/panchangam';
 import { localDateKey, greetingForNow } from '../../utils/date';
 import { useDayKey } from '../../hooks/useDayKey';
+import { markColourVoted } from '../../native/notifications';
 import { firestoreErrorMessage, SERVER_SETUP_MESSAGE } from '../../utils/firebaseErrors';
 import Avatar from '../../components/Avatar';
 import {
@@ -204,8 +205,11 @@ export default function HomeScreen() {
       }
       votesRef.current = map;
       showVotes(map);
-      // Voted earlier (or on another device): tick the daily task
-      if (uid && map.has(uid)) recordTask(uid, 'voted').then(() => refreshPoints());
+      // Voted earlier (or on another device): tick the daily task and stop today's vote reminders
+      if (uid && map.has(uid)) {
+        recordTask(uid, 'voted').then(() => refreshPoints());
+        markColourVoted(uid, today);
+      }
     } catch (error: any) {
       console.warn('Error fetching votes:', error?.code, error?.message);
     } finally {
@@ -338,6 +342,8 @@ export default function HomeScreen() {
     flashTimer.current = setTimeout(() => setFlashName(null), 1500);
     setVoting(null);
     recordTask(uid, 'voted').then(() => refreshPoints());
+    // No more hourly vote reminders until 1 AM tomorrow (written locally + native alarm)
+    markColourVoted(uid, today);
     fetchVotes();
     // First screen: show the rest of Home after a moment
     if (!gateDone) {
@@ -595,7 +601,7 @@ export default function HomeScreen() {
           <Text style={styles.feedEmoji}>📸</Text>
           <View style={styles.flex1}>
             <Text style={styles.feedTitle}>Style Feed</Text>
-            <Text style={styles.feedSub}>See today's looks from the community and vote A / B / C</Text>
+            <Text style={styles.feedSub}>See today's looks from your circles and vote A / B / C</Text>
           </View>
           <Text style={styles.feedArrow}>›</Text>
         </TouchableOpacity>

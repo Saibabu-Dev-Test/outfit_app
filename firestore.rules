@@ -351,9 +351,11 @@ service cloud.firestore {
       // ── Full-size photo: wardrobe/{id}/media/full {imageData, userId, updatedAt} ──
       // The item itself keeps only a ~200 px thumbnail (media: 1). Written by the owner in the
       // same batch as the item; read only by the detail / edit screen.
+      // ── Clear feed photo: wardrobe/{id}/media/clear {imageData (~720 px, ~45 KB), userId,
+      //    updatedAt} (+ clear: 1 on the item), shown full width on feed cards ──
       match /media/{mid} {
         allow read: if signedIn() && itemVisible();
-        allow create, update: if signedIn() && mid == 'full'
+        allow create, update: if signedIn() && mid in ['full', 'clear']
           && getAfter(/databases/$(db)/documents/wardrobe/$(itemId)).data.userId == me()
           && request.resource.data.keys().hasOnly(['imageData', 'userId', 'updatedAt'])
           && request.resource.data.userId == me()
@@ -609,9 +611,11 @@ service cloud.firestore {
       // ── Full-size photos: posts/{postId}/media/full {photos: [A, B...], userId, createdAt} ──
       // The post keeps ~200 px thumbnails (media: 1); written by the author in the same batch
       // as the post, read only on the detail screen.
+      // ── Clear feed photos: posts/{postId}/media/clear {photos: [~720 px A, B...], userId,
+      //    createdAt} (+ clear: 1 on the post), shown full width on feed cards ──
       match /media/{mid} {
         allow read: if signedIn();
-        allow create: if signedIn() && mid == 'full'
+        allow create: if signedIn() && mid in ['full', 'clear']
           && getAfter(postPath()).data.userId == me()
           && request.resource.data.keys().hasOnly(['photos', 'userId', 'createdAt'])
           && request.resource.data.userId == me()

@@ -1,6 +1,9 @@
 // "Style" tab: AI stylist chat (Gemini free tier). Pick an occasion, a place and a language;
 // the AI suggests clothes, colours and styles. Clothing topics only, max messages per day.
-// Without an API key it shows "coming soon" plus picks from the user's own wardrobe.
+// Free offline picker (services/luckyPairs.ts): 3-5 top + bottom pairs from the user's own wardrobe
+// for today's lucky colour, with photos and a short positive reason in EN / Telugu / Hindi. It is the
+// default without an API key (or while the AI is out of credits / quota) and the answer whenever
+// an AI call fails, so raw API errors are never shown.
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
@@ -12,6 +15,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  Image,
   StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -31,43 +35,69 @@ import {
   askStylist,
   defaultAiLanguage,
   getAiUsedToday,
+  isAiPaused,
 } from '../../services/aiStylist';
+import { LuckyPairsResult, PAIR_TEXT, pairsSubtitle, pickLuckyPairs } from '../../services/luckyPairs';
 import { containsProfanity, RESPECT_MESSAGE } from '../../utils/profanity';
 
-const TOP_CATS = ['Shirts', 'T-Shirts', 'Kurtas', 'Tops', 'Kurtis', 'Jackets', 'Ethnic'];
-const BOTTOM_CATS = ['Jeans', 'Trousers', 'Pants', 'Shorts', 'Leggings', 'Skirts'];
-const ONE_PIECE_CATS = ['Sarees', 'Dresses', 'Lehengas'];
-const SHOE_CATS = ['Footwear', 'Shoes'];
-const OCCASION_PREFS: Record<string, string[]> = {
-  Work: ['Formal', 'Daily Wear'],
-  College: ['Casual', 'Daily Wear'],
-  Date: ['Casual', 'Party'],
-  Party: ['Party', 'Casual', 'Ethnic'],
-  'Wedding / Function': ['Ethnic', 'Formal'],
-  'Casual outing': ['Casual', 'Daily Wear'],
-  Travel: ['Casual', 'Daily Wear'],
-};
 const PLACES = ['Indoor', 'Outdoor', 'Beach', 'Temple', 'Office', 'Restaurant', 'Hill station'];
 
-// Offline pick from the user's own wardrobe (used when the AI key isn't set)
-const suggestFromWardrobe = (items: WardrobeItemResponse[], occasion: string): string | null => {
-  if (!items.length) return null;
-  const prefs = OCCASION_PREFS[occasion] || [];
-  const score = (i: WardrobeItemResponse) =>
-    (prefs.includes(i.wearType || '') ? 2 : 0) + (prefs.includes(i.fabric || '') ? 1 : 0);
-  const best = (cats: string[]) =>
-    items.filter(i => cats.includes(i.category)).sort((a, b) => score(b) - score(a))[0];
-  const onePiece = best(ONE_PIECE_CATS);
-  const top = best(TOP_CATS);
-  const bottom = best(BOTTOM_CATS);
-  const shoes = best(SHOE_CATS);
-  const pieces = onePiece && (!top || !bottom || score(onePiece) > score(top)) ? [onePiece, shoes] : [top, bottom, shoes];
-  const chosen = pieces.filter(Boolean) as WardrobeItemResponse[];
-  if (!chosen.length) return null;
-  return chosen.map(i => `${categoryIcon(i.category)} ${i.color && !i.color.startsWith('#') ? `${i.color} ` : ''}${i.name}`).join('\n');
-};
+// pairs: show today's lucky wardrobe pairs under this message (offline picker)
+type Msg = { id: string; role: 'user' | 'model'; text: string; error?: boolean; pairs?: boolean };
 
-type Msg = { id: string; role: 'user' | 'model'; text: string; error?: boolean };
+// Today's lucky top + bottom pairs with their photos and a short reason
+function LuckyPairsView({ result, language }: { result: LuckyPairsResult; language: AiLanguage }) {
+  const T = PAIR_TEXT[language];
+  const photo = (uri: string | null, label: string) =>
+    uri ? (
+      <Image source={{ uri }} style={styles.pairPhoto} resizeMode="cover" />
+    ) : (
+      <View style={[styles.pairPhoto, styles.pairPhotoEmpty]}>
+        <Text style={styles.pairPhotoLabel}>{label}</Text>
+      </View>
+    );
+  const name = (i: WardrobeItemResponse) =>
+    `${categoryIcon(i.category)} ${i.color && !i.color.startsWith('#') ? `${i.color} ` : ''}${i.name}`;
+  return (
+    <View style={styles.pairsBox}>
+      <Text style={styles.pairsTitle}>{T.title}</Text>
+      <View style={styles.pairsSubRow}>
+        {result.vaara.colours.map(c => (
+          <View key={c.name} style={[styles.luckyDot, { backgroundColor: c.hex }]} />
+        ))}
+        <Text style={styles.pairsSub}>{pairsSubtitle(result.vaara, language)}</Text>
+      </View>
+      {result.pairs.length === 0 ? (
+        <Text style={styles.offlineText}>{T.needItems}</Text>
+      ) : (
+        result.pairs.map((p, idx) => (
+          <View key={`${p.top.id}_${p.bottom.id}`} style={styles.pairCard}>
+            <View style={styles.pairPhotos}>
+              <View style={styles.pairCol}>
+                {photo(p.top.imageUrl, T.top)}
+                <Text style={styles.pairName} numberOfLines={2}>
+                  {name(p.top)}
+                </Text>
+              </View>
+              <Text style={styles.pairPlus}>+</Text>
+              <View style={styles.pairCol}>
+                {photo(p.bottom.imageUrl, T.bottom)}
+                <Text style={styles.pairName} numberOfLines={2}>
+                  {name(p.bottom)}
+                </Text>
+              </View>
+            </View>
+            <Text style={styles.pairWhy}>
+              {idx === 0 ? '⭐ ' : '✨ '}
+              {p.why}
+            </Text>
+          </View>
+        ))
+      )}
+      {result.pairs.length > 0 && result.pairs.length < 3 ? <Text style={styles.pairsHint}>{T.fewItems}</Text> : null}
+    </View>
+  );
+}
 
 export default function StylistScreen() {
   const { user } = useAuth();
@@ -103,6 +133,10 @@ export default function StylistScreen() {
   );
 
   const left = Math.max(0, AI_DAILY_LIMIT - used);
+  // AI usable right now (key set and not resting after a credits / quota failure)
+  const [aiResting, setAiResting] = useState(isAiPaused());
+  const aiReady = aiOn && !aiResting;
+  const luckyPairs = pickLuckyPairs(wardrobe, language, { occasion });
   const scrollDown = (animated = true) =>
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated }), 80);
 
@@ -135,9 +169,12 @@ export default function StylistScreen() {
       setUsed(r.usedToday);
       setMessages(prev => [...prev, { id: `${Date.now()}_m`, role: 'model', text: r.text }]);
     } catch (e: any) {
+      // Never show the raw error: answer with today's lucky pairs from the wardrobe instead
+      console.warn('Stylist AI failed, offline picks shown:', e?.detail || e?.message);
+      setAiResting(isAiPaused());
       setMessages(prev => [
         ...prev,
-        { id: `${Date.now()}_e`, role: 'model', text: e?.message || 'Please try again.', error: true },
+        { id: `${Date.now()}_p`, role: 'model', text: PAIR_TEXT[language].fallback, pairs: true },
       ]);
       if (uid) getAiUsedToday(uid).then(setUsed);
     } finally {
@@ -148,12 +185,11 @@ export default function StylistScreen() {
 
   const askForOccasion = (occ: string) => {
     setOccasion(occ);
-    if (!aiOn) return;
+    if (!aiReady) return; // the lucky pairs below re-rank for the occasion
     const where = place ? ` at a ${place.toLowerCase()} place` : '';
     send(`What should I wear for ${occ.toLowerCase()}${where} today? Suggest clothes, colours and a style tip.`);
   };
 
-  const offlinePick = occasion ? suggestFromWardrobe(wardrobe, occasion) : null;
 
   // Small pill chips in a one-line horizontal row (flexGrow 0 so the row never stretches tall)
   const chips = (list: string[], value: string | null, onPick: (v: string) => void, labels?: Record<string, string>) => (
@@ -198,7 +234,7 @@ export default function StylistScreen() {
           <View style={styles.flex1}>
             <Text style={styles.title}>AI Stylist ✦</Text>
             <Text style={styles.sub} numberOfLines={1}>
-              {aiOn ? `${left}/${AI_DAILY_LIMIT} messages left today` : 'Your personal style guide'}
+              {aiReady ? `${left}/${AI_DAILY_LIMIT} messages left today` : 'Your personal style guide'}
             </Text>
           </View>
           <View style={styles.langRow}>
@@ -247,46 +283,36 @@ export default function StylistScreen() {
             </Text>
           </View>
 
-          {!aiOn ? (
-            <View style={styles.soon}>
-              <Text style={styles.soonEmoji}>✨</Text>
-              <Text style={styles.soonTitle}>AI stylist is coming soon</Text>
-              <Text style={styles.soonText}>
-                Soon you can chat with your AI stylist in English, Telugu or Hindi. Meanwhile, pick an occasion for a
-                look from your own wardrobe.
-              </Text>
-              {occasion ? (
-                <View style={styles.offline}>
-                  <Text style={styles.offlineTitle}>{occasion} look from your wardrobe</Text>
-                  <Text style={styles.offlineText}>
-                    {offlinePick ||
-                      'Add a few items (top, bottom, footwear) to your wardrobe and I will put outfits together from them.'}
+          {messages.length === 0 ? (
+            <>
+              {aiReady ? (
+                <View style={styles.soon}>
+                  <Text style={styles.soonEmoji}>👗</Text>
+                  <Text style={styles.soonTitle}>Ask me what to wear</Text>
+                  <Text style={styles.soonText}>
+                    Pick an occasion above, or type e.g. "Navy shirt, which pants and shoes go with it?"
                   </Text>
                 </View>
               ) : null}
-            </View>
-          ) : messages.length === 0 ? (
-            <View style={styles.soon}>
-              <Text style={styles.soonEmoji}>👗</Text>
-              <Text style={styles.soonTitle}>Ask me what to wear</Text>
-              <Text style={styles.soonText}>
-                Pick an occasion above, or type e.g. "Navy shirt, which pants and shoes go with it?"
-              </Text>
-            </View>
+              {/* Free offline picks: the default without AI, and a ready answer with it */}
+              <LuckyPairsView result={luckyPairs} language={language} />
+            </>
           ) : (
             messages.map(m => (
-              <View
-                key={m.id}
-                style={[
-                  styles.bubble,
-                  m.role === 'user' ? styles.bubbleMe : styles.bubbleAi,
-                  m.error && styles.bubbleErr,
-                ]}>
-                <Text
-                  selectable
-                  style={[styles.bubbleText, m.role === 'user' && styles.bubbleTextMe, m.error && styles.bubbleTextErr]}>
-                  {m.text}
-                </Text>
+              <View key={m.id}>
+                <View
+                  style={[
+                    styles.bubble,
+                    m.role === 'user' ? styles.bubbleMe : styles.bubbleAi,
+                    m.error && styles.bubbleErr,
+                  ]}>
+                  <Text
+                    selectable
+                    style={[styles.bubbleText, m.role === 'user' && styles.bubbleTextMe, m.error && styles.bubbleTextErr]}>
+                    {m.pairs ? PAIR_TEXT[language].fallback : m.text}
+                  </Text>
+                </View>
+                {m.pairs ? <LuckyPairsView result={luckyPairs} language={language} /> : null}
               </View>
             ))
           )}
@@ -298,7 +324,7 @@ export default function StylistScreen() {
           ) : null}
         </ScrollView>
 
-        {aiOn ? (
+        {aiReady || (aiOn && messages.length > 0) ? (
           <View style={styles.inputBar}>
             <TextInput
               style={styles.input}
@@ -411,6 +437,33 @@ const styles = themedStyles(() => StyleSheet.create({
   },
   offlineTitle: { fontSize: fontSize.base, fontWeight: fontWeight.bold, color: colors.textPrimary, marginBottom: 6 },
   offlineText: { fontSize: fontSize.base, color: colors.textSecondary, lineHeight: 22 },
+  pairsBox: {
+    alignSelf: 'stretch',
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+  },
+  pairsTitle: { fontSize: fontSize.base, fontWeight: fontWeight.extraBold, color: colors.textPrimary },
+  pairsSubRow: { flexDirection: 'row', alignItems: 'center', marginTop: 4, marginBottom: spacing.sm, flexWrap: 'wrap' },
+  pairsSub: { fontSize: fontSize.xs, color: colors.textSecondary, marginLeft: 2, flexShrink: 1 },
+  pairsHint: { fontSize: fontSize.xs, color: colors.textMuted, marginTop: spacing.xs, textAlign: 'center' },
+  pairCard: {
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    paddingTop: spacing.sm,
+    marginTop: spacing.sm,
+  },
+  pairPhotos: { flexDirection: 'row', alignItems: 'flex-start' },
+  pairCol: { flex: 1, alignItems: 'center' },
+  pairPhoto: { width: '100%', aspectRatio: 1, borderRadius: borderRadius.md, backgroundColor: colors.inputBg },
+  pairPhotoEmpty: { alignItems: 'center', justifyContent: 'center' },
+  pairPhotoLabel: { fontSize: fontSize.sm, color: colors.textMuted, fontWeight: fontWeight.semiBold },
+  pairPlus: { fontSize: 22, fontWeight: fontWeight.bold, color: colors.textMuted, marginHorizontal: 6, marginTop: 40 },
+  pairName: { fontSize: fontSize.xs, color: colors.textPrimary, fontWeight: fontWeight.semiBold, marginTop: 4, textAlign: 'center' },
+  pairWhy: { fontSize: fontSize.sm, color: colors.textSecondary, lineHeight: 20, marginTop: spacing.sm },
   bubble: {
     maxWidth: '85%',
     borderRadius: 18,

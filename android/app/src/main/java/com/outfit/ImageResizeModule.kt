@@ -30,6 +30,7 @@ import kotlin.math.roundToInt
  * step) to maxEdge -> flatten on white -> slight auto-contrast -> mild unsharp mask -> binary
  * search of the JPEG quality (60..92) for the best quality that fits maxBytes. When even quality
  * 60 is too big the long edge is lowered (x0.85) instead of dropping the quality further.
+ * resizeSharp(uri, maxEdge, maxBytes, sharpen) does the same with a chosen sharpen amount.
  * Resolves {base64, width, height, bytes, quality}. Runs off the UI thread.
  * Keep in sync with src/utils/imageResize.web.ts.
  */
@@ -108,7 +109,7 @@ class ImageResizeModule(private val ctx: ReactApplicationContext) : ReactContext
    * Sharpen: out = px + amount * (px - blur3x3(px)), skipped where the difference is below a small
    * threshold so flat areas / noise are not amplified (that would also bloat the JPEG).
    */
-  private fun enhance(bmp: Bitmap) {
+  private fun enhance(bmp: Bitmap, sharpen: Float = -1f) {
     val w = bmp.width
     val h = bmp.height
     val n = w * h
@@ -152,7 +153,7 @@ class ImageResizeModule(private val ctx: ReactApplicationContext) : ReactContext
 
     // ── unsharp mask (separable 3x3 box blur) ──
     val small = max(w, h) <= 320
-    val amount = if (small) 0.35f else 0.55f
+    val amount = if (sharpen >= 0f) sharpen else if (small) 0.35f else 0.55f
     val threshold = 3
     val br = blur3(rr, w, h)
     val bg = blur3(gg, w, h)
@@ -201,6 +202,14 @@ class ImageResizeModule(private val ctx: ReactApplicationContext) : ReactContext
 
   @ReactMethod
   fun resize(uri: String, maxEdge: Int, maxBytes: Int, promise: Promise) {
+    resizeSharp(uri, maxEdge, maxBytes, -1.0, promise)
+  }
+
+  // Same as resize with an explicit unsharp-mask amount (< 0 = default). The clear feed photo
+  // (720 px, ~45 KB) uses a stronger amount so it stays crisp at full screen width.
+  @ReactMethod
+  fun resizeSharp(uri: String, maxEdge: Int, maxBytes: Int, sharpen: Double, promise: Promise) {
+    val amount = sharpen.toFloat().coerceAtMost(1.5f)
     Thread {
       try {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -226,7 +235,7 @@ class ImageResizeModule(private val ctx: ReactApplicationContext) : ReactContext
         var bq = 0
         for (round in 0 until 8) {
           val bmp = fit(upright, edge)
-          enhance(bmp)
+          enhance(bmp, amount)
           // Highest quality in [MIN_Q, MAX_Q] that fits maxBytes
           var fitBytes: ByteArray? = null
           var fitQ = 0

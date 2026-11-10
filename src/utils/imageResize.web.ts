@@ -87,7 +87,7 @@ const blur3 = (src: Uint8ClampedArray | Int16Array, w: number, h: number): Int16
 
 // Slight auto-contrast (0.5% / 99.5% luminance points, black point <= 24, white point >= 228,
 // blended 50%) + mild unsharp mask with a small threshold. Same as ImageResizeModule.kt.
-const enhance = (canvas: any) => {
+const enhance = (canvas: any, sharpen?: number) => {
   const w = canvas.width;
   const h = canvas.height;
   const n = w * h;
@@ -127,7 +127,7 @@ const enhance = (canvas: any) => {
     ch[1][i] = lut[d[o + 1]];
     ch[2][i] = lut[d[o + 2]];
   }
-  const amount = Math.max(w, h) <= 320 ? 0.35 : 0.55;
+  const amount = sharpen != null && sharpen >= 0 ? sharpen : Math.max(w, h) <= 320 ? 0.35 : 0.55;
   const threshold = 3;
   for (let c = 0; c < 3; c++) {
     const src = ch[c];
@@ -152,7 +152,7 @@ export const resizeLoaded = (img: any, spec: ImageSpec): string => {
   let best = '';
   for (let round = 0; round < 8; round++) {
     const canvas = fit(img, w0, h0, edge);
-    enhance(canvas);
+    enhance(canvas, spec.sharpen);
     let lowQ = MIN_Q;
     let highQ = MAX_Q;
     let fitUri = '';

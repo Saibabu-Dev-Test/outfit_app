@@ -4,6 +4,8 @@ import { ImageSpec } from './imageSpecs';
 
 interface NativeResize {
   resize: (uri: string, maxEdge: number, maxBytes: number) => Promise<{ base64: string; bytes: number }>;
+  // Newer APKs: same with an explicit sharpen amount (< 0 = default)
+  resizeSharp?: (uri: string, maxEdge: number, maxBytes: number, sharpen: number) => Promise<{ base64: string; bytes: number }>;
 }
 const Native: NativeResize | undefined = NativeModules.OutfitImageResize;
 
@@ -14,7 +16,10 @@ export const canResize = (): boolean => !!Native?.resize;
 export const resizeImage = async (uri: string, spec: ImageSpec): Promise<string> => {
   if (!Native?.resize) throw new Error('Photo tools need the latest app. Please update Outfit.');
   try {
-    const r = await Native.resize(uri, spec.maxEdge, spec.maxBytes);
+    const r =
+      spec.sharpen != null && Native.resizeSharp
+        ? await Native.resizeSharp(uri, spec.maxEdge, spec.maxBytes, spec.sharpen)
+        : await Native.resize(uri, spec.maxEdge, spec.maxBytes);
     return `data:image/jpeg;base64,${r.base64}`;
   } catch (e: any) {
     console.warn('resize failed:', e?.code, e?.message);

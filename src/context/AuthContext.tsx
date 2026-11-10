@@ -2,7 +2,7 @@ import React, { createContext, useContext, useEffect, useRef, useState } from 'r
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '../config/firebaseConfig';
 import { logoutUser, restoreSession, UserProfile } from '../services/authApi';
-import { setNotificationName } from '../native/notifications';
+import { cancelVoteReminder, setNotificationName, syncVoteReminder } from '../native/notifications';
 
 interface AuthContextType {
   isAuthenticated: boolean;
@@ -68,6 +68,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     setNotificationName(displayName);
   }, [displayName]);
+
+  // Hourly colour-vote reminder (from 1 AM until today's vote) while signed in; off after sign-out
+  const signedInUid = isAuthenticated ? user?.id || '' : '';
+  useEffect(() => {
+    if (signedInUid) syncVoteReminder(signedInUid);
+    else if (!initializing) cancelVoteReminder();
+  }, [signedInUid, initializing]);
 
   const login = (userData?: UserProfile) => {
     if (userData) {

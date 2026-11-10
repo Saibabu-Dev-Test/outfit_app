@@ -3,6 +3,10 @@
 // Light doc + media doc (since the free-tier pass): posts/{id} keeps ~200 px thumbnails in
 // imageData / morePhotos (+ media: 1), and posts/{id}/media/full {photos: [full A, B...]} holds the
 // ~1080 px photos, read only on the detail screen. Older posts have full photos inline (no media).
+// Clear feed photos (since the clear-feed pass): {posts|wardrobe}/{id}/media/clear holds ~720 px,
+// ~45 KB copies (+ clear: 1 on the parent). Feed cards show these full width (the 200 px thumbnail
+// stretched to the screen looked blurry); older items fall back to the full photo, then the thumbnail.
+// The feed itself only shows people who share a circle with me (and my own items).
 import {
   collection,
   doc,
@@ -23,6 +27,7 @@ import {
   QueryDocumentSnapshot,
   DocumentData,
 } from 'firebase/firestore';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { db } from '../config/firebaseConfig';
 import { firestoreErrorMessage } from '../utils/firebaseErrors';
 import { recordTask } from './rewardsApi';
@@ -31,6 +36,7 @@ import { toDate } from '../utils/date';
 import { inlineAvatar } from './userApi';
 import { assertClean } from '../utils/profanity';
 import { getUserLite, getUsersLite } from './userCache';
+import { getMyCircles } from './circlesApi';
 
 export type FeedKind = 'post' | 'wardrobe';
 
@@ -43,6 +49,7 @@ export interface Post {
   imageData: string; // first photo (A): thumbnail on new posts, full photo on older ones
   photos: string[]; // all photos A..F (1 for a normal post), same sizes as imageData
   hasMedia: boolean; // full-size photos are in {posts|wardrobe}/{id}/media/full
+  hasClear?: boolean; // ~720 px feed photos are in {posts|wardrobe}/{id}/media/clear
   caption: string;
   likeCount: number;
   commentCount: number;
@@ -57,11 +64,15 @@ export const MAX_POST_TOTAL_CHARS = 900000;
 // One thumbnail (THUMB_SPEC ~12 KB) with slack for a picker that overshoots
 const MAX_THUMB_CHARS = 40000;
 export const MEDIA_FULL = 'full';
+export const MEDIA_CLEAR = 'clear';
+// One clear feed photo (CLEAR_SPEC ~45 KB) with slack
+const MAX_CLEAR_CHARS = 120000;
 
 // A photo to post: full size + thumbnail (thumb missing = older picker: stored inline)
 export interface PostPhoto {
   full: string;
   thumb?: string;
+  clear?: string; // ~720 px feed copy (optional)
 }
 
 export type FeedCursor = QueryDocumentSnapshot<DocumentData> | null;
@@ -80,6 +91,7 @@ const toPost = (id: string, d: any): Post => ({
     .filter((x: any) => typeof x === 'string' && x)
     .slice(0, MAX_POST_PHOTOS),
   hasMedia: d?.media === 1,
+  hasClear: d?.clear === 1,
   caption: d?.caption || '',
   likeCount: typeof d?.likeCount === 'number' ? Math.max(0, d.likeCount) : 0,
   // Older posts have no commentCount: treat as 0
@@ -170,12 +182,22 @@ export const createPost = async (
     const b = writeBatch(db);
     if (split) {
       data.media = 1;
+      // Clear feed copies only when every photo has one
+      const clear = list.every(x => !!x.clear && /^data:image\//.test(x.clear) && x.clear.length <= MAX_CLEAR_CHARS);
+      if (clear) data.clear = 1;
       b.set(ref, data);
       b.set(doc(db, POSTS, ref.id, 'media', MEDIA_FULL), {
         photos: list.map(x => x.full),
         userId: me.uid,
         createdAt: serverTimestamp(),
       });
+      if (clear) {
+        b.set(doc(db, POSTS, ref.id, 'media', MEDIA_CLEAR), {
+          photos: list.map(x => x.clear as string),
+          userId: me.uid,
+          createdAt: serverTimestamp(),
+        });
+      }
     } else {
       b.set(ref, data);
     }
@@ -192,6 +214,7 @@ export const deletePost = async (postId: string): Promise<void> => {
   try {
     const b = writeBatch(db);
     b.delete(doc(db, POSTS, postId, 'media', MEDIA_FULL));
+    b.delete(doc(db, POSTS, postId, 'media', MEDIA_CLEAR));
     b.delete(doc(db, POSTS, postId));
     await b.commit();
     forgetFullPhotos('post', postId);
@@ -203,7 +226,10 @@ export const deletePost = async (postId: string): Promise<void> => {
 // ── Full-size photos (detail screen only) ───────────────────────────────
 const fullCache = new Map<string, string[]>();
 const FULL_CACHE_MAX = 30;
-const forgetFullPhotos = (kind: FeedKind, id: string) => fullCache.delete(`${kind}_${id}`);
+const forgetFullPhotos = (kind: FeedKind, id: string) => {
+  fullCache.delete(`${kind}_${id}`);
+  clearCache.delete(`${kind}_${id}`);
+};
 
 // Full photos of a post / wardrobe photo (1 read, cached for the session). Older items without a
 // media doc already hold them inline. Never throws: falls back to the thumbnails.
@@ -225,6 +251,34 @@ export const getFullPhotos = async (post: Post): Promise<string[]> => {
   } catch (e: any) {
     console.warn('full photo load failed:', e?.code, e?.message);
     return post.photos;
+  }
+};
+
+// ── Clear feed photos (feed cards, full width) ──────────────────────────
+const clearCache = new Map<string, string[]>();
+const CLEAR_CACHE_MAX = 40;
+
+// ~720 px photos for a feed card (1 read, cached for the session). Older items without a clear
+// copy use the full photos (media/full, or inline on the oldest items); the thumbnails are the
+// last resort. Never throws.
+export const getClearPhotos = async (post: Post): Promise<string[]> => {
+  const key = `${post.kind}_${post.id}`;
+  const hit = clearCache.get(key);
+  if (hit) return hit;
+  if (!post.hasClear) return getFullPhotos(post);
+  try {
+    const s = await getDoc(doc(db, post.kind === 'post' ? POSTS : 'wardrobe', post.id, 'media', MEDIA_CLEAR));
+    const d: any = s.exists() ? s.data() : null;
+    const arr: string[] = (post.kind === 'post' ? (Array.isArray(d?.photos) ? d.photos : []) : [d?.imageData])
+      .filter((x: any) => typeof x === 'string' && x);
+    if (!arr.length) return getFullPhotos(post);
+    const out = post.photos.map((thumb, i) => arr[i] || thumb);
+    if (clearCache.size >= CLEAR_CACHE_MAX) clearCache.delete(clearCache.keys().next().value as string);
+    clearCache.set(key, out);
+    return out;
+  } catch (e: any) {
+    console.warn('clear photo load failed:', e?.code, e?.message);
+    return getFullPhotos(post);
   }
 };
 
@@ -485,6 +539,7 @@ export const wardrobeToPost = (id: string, d: any, owner?: { name?: string; avat
     imageData: img,
     photos: img ? [img] : [],
     hasMedia: d?.media === 1,
+    hasClear: d?.clear === 1,
     caption: label ? `👗 ${label}${d?.category && d?.name !== d?.category ? ` · ${d.category}` : ''}` : '',
     likeCount: 0,
     commentCount: 0,
@@ -630,7 +685,44 @@ export const getWardrobeAsPost = async (itemId: string): Promise<Post | null> =>
 };
 
 // ── Liked items list ────────────────────────────────────────────────────
-export const getLikedItems = async (uid: string, max = 60): Promise<Post[]> => {
+// users/{uid}/liked ordered by createdAt (single-field index, automatic: no composite index).
+// The last result is cached (memory + AsyncStorage) so Me › Likes shows at once; the screen then
+// refreshes in the background. A slow / offline network never leaves it spinning: after
+// LIKES_TIMEOUT_MS the cached (or empty) list is returned.
+const LIKES_CACHE_KEY = (uid: string) => `outfit:likes:${uid}`;
+const LIKES_CACHE_MAX = 30;
+const LIKES_TIMEOUT_MS = 8000;
+const likesMem = new Map<string, Post[]>();
+
+const reviveLiked = (x: any): Post => ({ ...x, createdAt: x?.createdAt ? new Date(x.createdAt) : null });
+
+// Cached likes: memory first, then AsyncStorage. null = never loaded on this phone. Never throws.
+export const getCachedLikedItems = async (uid: string): Promise<Post[] | null> => {
+  const hit = likesMem.get(uid);
+  if (hit) return hit;
+  try {
+    const raw = await AsyncStorage.getItem(LIKES_CACHE_KEY(uid));
+    const arr = raw ? JSON.parse(raw) : null;
+    if (!Array.isArray(arr)) return null;
+    const list = arr.map(reviveLiked).filter((p: Post) => !!p?.id && !!p?.imageData);
+    likesMem.set(uid, list);
+    rememberPosts(list);
+    return list;
+  } catch {
+    return null;
+  }
+};
+
+const saveLikedCache = (uid: string, list: Post[]) => {
+  likesMem.set(uid, list);
+  AsyncStorage.setItem(LIKES_CACHE_KEY(uid), JSON.stringify(list.slice(0, LIKES_CACHE_MAX))).catch(() => undefined);
+};
+
+const withTimeout = <T,>(p: Promise<T>, ms: number): Promise<T | typeof TIMED_OUT> =>
+  Promise.race([p, new Promise<typeof TIMED_OUT>(resolve => setTimeout(() => resolve(TIMED_OUT), ms))]);
+const TIMED_OUT = Symbol('timeout');
+
+const loadLikedItems = async (uid: string, max: number): Promise<Post[]> => {
   let refs: { kind: FeedKind; refId: string }[] = [];
   try {
     const snap = await getDocs(
@@ -643,33 +735,70 @@ export const getLikedItems = async (uid: string, max = 60): Promise<Post[]> => {
   } catch (e: any) {
     return fail(e, 'Loading likes');
   }
+  if (!refs.length) return [];
+  // Items I've already seen this session need no read
   const items = await Promise.all(
-    refs.map(r => (r.kind === 'post' ? getPost(r.refId).catch(() => null) : getWardrobeAsPost(r.refId))),
+    refs.map(r => {
+      const known = cachedPost(r.kind, r.refId);
+      if (known) return Promise.resolve(known);
+      return r.kind === 'post' ? getPost(r.refId).catch(() => null) : getWardrobeAsPost(r.refId);
+    }),
   );
-  const out = items.filter((x): x is Post => !!x && !!x.imageData);
-  rememberPosts(out);
-  return out;
+  return items.filter((x): x is Post => !!x && !!x.imageData);
 };
 
-// ── Mixed feed: public posts + public wardrobe photos, newest first, only from public profiles ──
+// Fresh list (also updates the cache). Resolves within LIKES_TIMEOUT_MS with the cached list
+// (or []) when the network is slow. Throws a readable Error only when nothing is cached.
+export const getLikedItems = async (uid: string, max = 60): Promise<Post[]> => {
+  const cached = await getCachedLikedItems(uid);
+  try {
+    const r = await withTimeout(loadLikedItems(uid, max), LIKES_TIMEOUT_MS);
+    if (r === TIMED_OUT) return cached || [];
+    rememberPosts(r);
+    saveLikedCache(uid, r);
+    return r;
+  } catch (e: any) {
+    if (cached) return cached;
+    throw e;
+  }
+};
+
+// ── Circle feed: posts + public wardrobe photos from people who share a circle with me ──
+// (and my own), newest first. Queries use userId in [<= 30 circle mates] per chunk, so they read
+// only circle items (indexes: posts userId ASC + createdAt DESC; wardrobe isPublic ASC + userId ASC
+// + createdAt DESC). Until those indexes are deployed each chunk falls back to one unsorted read
+// (limit 100) sorted on the phone.
 type SourceName = 'posts' | 'wardrobe';
 interface Source {
   name: SourceName;
+  uids: string[]; // userId in [...] (max 30)
   cursor: FeedCursor;
   buffer: { id: string; data: any; at: number }[];
   done: boolean;
   fallback: boolean; // no composite index yet: one bigger unsorted read, sorted here
 }
 
-const newSource = (name: SourceName): Source => ({ name, cursor: null, buffer: [], done: false, fallback: false });
+const IN_MAX = 30; // Firestore 'in' limit
+const MAX_CHUNKS = 10; // up to 300 circle mates in the feed
+
+const newSource = (name: SourceName, uids: string[]): Source => ({
+  name,
+  uids,
+  cursor: null,
+  buffer: [],
+  done: false,
+  fallback: false,
+});
 
 const fillSource = async (s: Source): Promise<void> => {
-  if (s.done) return;
+  if (s.done || s.fallback) return;
   const base = collection(db, s.name === 'posts' ? POSTS : 'wardrobe');
   const at = (d: any) => toDate(d?.createdAt)?.getTime() || 0;
-  if (s.fallback) return;
+  const filters: any[] =
+    s.name === 'wardrobe'
+      ? [where('isPublic', '==', true), where('userId', 'in', s.uids)]
+      : [where('userId', 'in', s.uids)];
   try {
-    const filters: any[] = s.name === 'wardrobe' ? [where('isPublic', '==', true)] : [];
     const q = s.cursor
       ? query(base, ...filters, orderBy('createdAt', 'desc'), startAfter(s.cursor), limit(FEED_PAGE_SIZE))
       : query(base, ...filters, orderBy('createdAt', 'desc'), limit(FEED_PAGE_SIZE));
@@ -681,49 +810,67 @@ const fillSource = async (s: Source): Promise<void> => {
     if (snap.docs.length) s.cursor = snap.docs[snap.docs.length - 1];
     if (snap.docs.length < FEED_PAGE_SIZE) s.done = true;
   } catch (e: any) {
-    if (s.name === 'wardrobe' && e?.code === 'failed-precondition') {
-      // Index wardrobe (isPublic ASC, createdAt DESC) not created yet
-      console.warn('wardrobe feed index missing, using fallback:', e?.message);
-      s.fallback = true;
-      s.done = true;
-      try {
-        const snap = await getDocs(query(base, where('isPublic', '==', true), limit(100)));
-        snap.docs.forEach(d => s.buffer.push({ id: d.id, data: d.data(), at: at(d.data()) }));
-        s.buffer.sort((a, b) => b.at - a.at);
-      } catch (e2: any) {
-        console.warn('wardrobe feed fallback failed:', e2?.code, e2?.message);
-      }
-      return;
+    // failed-precondition = composite index not deployed yet: one unsorted read, sorted here
+    console.warn(`${s.name} circle feed query failed, using fallback:`, e?.code, e?.message);
+    s.fallback = true;
+    s.done = true;
+    try {
+      const snap = await getDocs(query(base, ...filters, limit(100)));
+      snap.docs.forEach(d => s.buffer.push({ id: d.id, data: d.data(), at: at(d.data()) }));
+      s.buffer.sort((a, b) => b.at - a.at);
+    } catch (e2: any) {
+      console.warn(`${s.name} circle feed fallback failed:`, e2?.code, e2?.message);
+      if (s.name === 'posts') throw e2;
     }
-    if (s.name === 'wardrobe') {
-      console.warn('wardrobe feed failed:', e?.code, e?.message);
-      s.done = true;
-      return;
-    }
-    throw e;
   }
 };
 
+// People who share a circle with me (+ me). Never throws (no circles = only my own items).
+const circleMates = async (meUid?: string): Promise<string[]> => {
+  if (!meUid) return [];
+  const ids = new Set<string>([meUid]);
+  try {
+    const circles = await getMyCircles(meUid);
+    circles.forEach(c => c.memberIds.forEach(id => id && ids.add(id)));
+  } catch (e: any) {
+    console.warn('circle feed: circles failed:', e?.code, e?.message);
+  }
+  return Array.from(ids);
+};
+
 export class FeedLoader {
-  private sources: Source[] = [newSource('posts'), newSource('wardrobe')];
+  private sources: Source[] | null = null;
   private meUid?: string;
+  // How many circle mates (me excluded) the feed covers; set after the first page
+  circleMateCount = 0;
 
   constructor(meUid?: string) {
     this.meUid = meUid;
   }
 
   get hasMore(): boolean {
-    return this.sources.some(s => !s.done || s.buffer.length > 0);
+    return !this.sources || this.sources.some(s => !s.done || s.buffer.length > 0);
   }
 
-  // Next page (newest first across both sources)
+  private async init(): Promise<Source[]> {
+    if (this.sources) return this.sources;
+    const uids = await circleMates(this.meUid);
+    this.circleMateCount = Math.max(0, uids.length - 1);
+    const chunks: string[][] = [];
+    for (let i = 0; i < uids.length && chunks.length < MAX_CHUNKS; i += IN_MAX) chunks.push(uids.slice(i, i + IN_MAX));
+    this.sources = chunks.flatMap(c => [newSource('posts', c), newSource('wardrobe', c)]);
+    return this.sources;
+  }
+
+  // Next page (newest first across all sources)
   async next(n = FEED_PAGE_SIZE): Promise<Post[]> {
+    const sources = await this.init();
     const picked: { src: SourceName; id: string; data: any; at: number }[] = [];
     try {
       while (picked.length < n) {
         // Every source that might hold a newer item needs a non-empty buffer
-        await Promise.all(this.sources.filter(s => !s.buffer.length && !s.done).map(fillSource));
-        const live = this.sources.filter(s => s.buffer.length);
+        await Promise.all(sources.filter(s => !s.buffer.length && !s.done).map(fillSource));
+        const live = sources.filter(s => s.buffer.length);
         if (!live.length) break;
         live.sort((a, b) => b.buffer[0].at - a.buffer[0].at);
         const s = live[0];
@@ -733,14 +880,11 @@ export class FeedLoader {
     } catch (e: any) {
       if (!picked.length) return fail(e, 'Loading feed');
     }
-    // Only public profiles (and my own items)
     const owners = await getUsersLite(picked.map(p => String(p.data?.userId || '')));
     const out: Post[] = [];
     picked.forEach(p => {
       const uid = String(p.data?.userId || '');
       const owner = owners.get(uid);
-      const mine = !!this.meUid && uid === this.meUid;
-      if (!mine && (!owner || !owner.isPublic)) return;
       if (p.src === 'posts') {
         const post = toPost(p.id, p.data);
         if (owner) {

@@ -1,6 +1,6 @@
 // "Me" tab, Instagram-like: avatar, counts (posts, wardrobe, followers, following), bio,
 // Edit profile, and Posts / Wardrobe / Likes grids. Settings live behind the ☰ button.
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -19,7 +19,7 @@ import { useAuth } from '../../context/AuthContext';
 import ProfileHeader, { headerButtonStyles as hb } from '../../components/ProfileHeader';
 import PhotoGrid from '../../components/PhotoGrid';
 import { getProfileCounts, ProfileCounts } from '../../services/socialApi';
-import { getLikedItems, getUserPosts, Post, rememberPosts } from '../../services/feedApi';
+import { getCachedLikedItems, getLikedItems, getUserPosts, Post, rememberPosts } from '../../services/feedApi';
 import { getWardrobeItems } from '../../services/wardrobeApi';
 import { getUserProfile } from '../../services/userApi';
 import { countFriendsJoined, isWeeklyStar, joinedWithLinkText } from '../../services/rewardsApi';
@@ -87,24 +87,41 @@ export default function MeScreen({ navigation }: { navigation: any }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uid]);
 
+  // Likes: the cached list shows at once, then a fresh one replaces it (getLikedItems never
+  // hangs: slow network = cached / empty list). Re-checked every time the tab is shown or the
+  // screen comes back into focus while on it (no more endless spinner).
+  const likesReq = useRef(0);
+  const loadLikes = useCallback(async () => {
+    if (!uid) {
+      setLikes([]);
+      return;
+    }
+    const req = ++likesReq.current;
+    const cached = await getCachedLikedItems(uid);
+    if (req !== likesReq.current) return;
+    setLikes(prev => prev ?? cached ?? null);
+    try {
+      const fresh = await getLikedItems(uid);
+      if (req === likesReq.current) setLikes(fresh);
+    } catch {
+      // Nothing cached and the read failed: friendly empty state, no red error
+      if (req === likesReq.current) setLikes(prev => prev ?? []);
+    }
+  }, [uid]);
+
+  const tabRef = useRef<Tab>(tab);
+  tabRef.current = tab;
   useFocusEffect(
     useCallback(() => {
       load();
-      setLikes(null);
-    }, [load]),
+      if (tabRef.current === 'likes') loadLikes();
+    }, [load, loadLikes]),
   );
+  useEffect(() => {
+    if (tab === 'likes') loadLikes();
+  }, [tab, loadLikes]);
 
-  const openTab = async (t: Tab) => {
-    setTab(t);
-    if (t === 'likes' && likes === null && uid) {
-      try {
-        setLikes(await getLikedItems(uid));
-      } catch (e: any) {
-        setError(e?.message || 'Could not load likes');
-        setLikes([]);
-      }
-    }
-  };
+  const openTab = (t: Tab) => setTab(t);
 
   // Invite friends to download the app (link with my referral code)
   const invite = async () => {
@@ -140,8 +157,8 @@ export default function MeScreen({ navigation }: { navigation: any }) {
             refreshing={refreshing}
             onRefresh={() => {
               setRefreshing(true);
-              setLikes(null);
               load();
+              if (tab === 'likes') loadLikes();
             }}
             tintColor={colors.primary}
             colors={[colors.primary]}
@@ -193,7 +210,7 @@ export default function MeScreen({ navigation }: { navigation: any }) {
                 ? 'No posts yet. Tap ＋ to share a look.'
                 : tab === 'wardrobe'
                 ? 'No wardrobe photos yet.'
-                : 'Posts and photos you like show up here.'
+                : 'No likes yet. Photos you like (double-tap in the Feed) show up here.'
             }
           />
         )}

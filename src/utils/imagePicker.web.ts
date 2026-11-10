@@ -1,23 +1,25 @@
 // Web build: photos come from <input type="file"> and are shrunk with a canvas to the same sizes
 // as the Android picker (imageSpecs.ts): full photo + optional thumbnail, JPEG data URIs.
 import { loadImage, resizeLoaded } from './imageResize.web';
-import { AVATAR_SPEC, AVATAR_THUMB_SPEC, FULL_SPEC, ImageSpec, POLL_SPEC, THUMB_SPEC } from './imageSpecs';
+import { AVATAR_SPEC, AVATAR_THUMB_SPEC, CLEAR_SPEC, FULL_SPEC, ImageSpec, POLL_SPEC, THUMB_SPEC } from './imageSpecs';
 
 export const MAX_BASE64_CHARS = 700000;
 
 export interface PickedImage {
   dataUri: string;
   thumbUri?: string;
+  clearUri?: string;
   uri?: string;
 }
 
 export interface PickOptions {
   spec?: ImageSpec;
   thumb?: ImageSpec | null;
+  clear?: ImageSpec | null;
   maxChars?: number;
 }
 
-export const PHOTO_PICK: PickOptions = { spec: FULL_SPEC, thumb: THUMB_SPEC };
+export const PHOTO_PICK: PickOptions = { spec: FULL_SPEC, thumb: THUMB_SPEC, clear: CLEAR_SPEC };
 export const AVATAR_PICK: PickOptions = { spec: AVATAR_SPEC, thumb: AVATAR_THUMB_SPEC };
 export const POLL_PICK: PickOptions = { spec: POLL_SPEC, thumb: null };
 
@@ -64,7 +66,8 @@ const processFile = async (file: any, o: PickOptions): Promise<PickedImage | nul
   const maxChars = Math.min(o.maxChars ?? MAX_BASE64_CHARS, MAX_BASE64_CHARS);
   if (!dataUri || dataUri.length > maxChars) return null;
   const thumbUri = o.thumb ? resizeLoaded(img, o.thumb) : undefined;
-  return { dataUri, thumbUri };
+  const clearUri = o.clear ? resizeLoaded(img, o.clear) || undefined : undefined;
+  return { dataUri, thumbUri, clearUri };
 };
 
 // Resolves null when cancelled; rejects with a readable Error

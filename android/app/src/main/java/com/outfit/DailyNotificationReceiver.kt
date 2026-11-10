@@ -4,8 +4,9 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 
-// Fires the daily reminder and re-arms it for tomorrow. Also re-arms all reminders after a
-// reboot, an app update, or a clock / time-zone change.
+// Fires the daily reminder and re-arms it for tomorrow, and the hourly colour-vote reminder
+// (OutfitNotifier.onVoteAlarm re-arms the next one). Also re-arms all reminders after a reboot,
+// an app update, or a clock / time-zone change.
 class DailyNotificationReceiver : BroadcastReceiver() {
   override fun onReceive(context: Context, intent: Intent) {
     val ctx = context.applicationContext
@@ -17,12 +18,14 @@ class DailyNotificationReceiver : BroadcastReceiver() {
         OutfitNotifier.post(ctx, OutfitNotifier.CHANNEL_DAILY, 7100 + slot, OutfitNotifier.titleFor(ctx, slot), s.body)
         OutfitNotifier.scheduleSlot(ctx, slot)
       }
+      OutfitNotifier.ACTION_VOTE -> OutfitNotifier.onVoteAlarm(ctx)
       Intent.ACTION_BOOT_COMPLETED,
       Intent.ACTION_MY_PACKAGE_REPLACED,
       Intent.ACTION_TIME_CHANGED,
       Intent.ACTION_TIMEZONE_CHANGED,
       "android.intent.action.QUICKBOOT_POWERON" -> {
         if (OutfitNotifier.isDailyOn(ctx)) OutfitNotifier.scheduleDaily(ctx)
+        if (OutfitNotifier.isVoteReminderOn(ctx)) OutfitNotifier.scheduleVoteReminder(ctx)
       }
     }
   }

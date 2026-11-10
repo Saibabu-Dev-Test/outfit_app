@@ -2,6 +2,8 @@
 // New items keep a ~200 px thumbnail in imageData (+ media: 1) and the ~1080 px photo in
 // wardrobe/{id}/media/full {imageData, userId, updatedAt}, read only when editing / on the detail
 // screen. Older items have the full photo in imageData.
+// Since the clear-feed pass: also wardrobe/{id}/media/clear {imageData (~720 px, ~45 KB), userId,
+// updatedAt} (+ clear: 1 on the item), which the feed card shows full width.
 // My items are cached (memory + AsyncStorage) and refreshed with a delta query
 // (updatedAt > last sync), so opening Wardrobe / Me / Stylist again costs ~1 read instead of N.
 import {
@@ -40,6 +42,7 @@ export interface WardrobeItemPayload {
   isPublic?: boolean; // for a later public feed; default false
   imageUri?: string | null; // base64 data URI (or an existing http/data URL): full photo
   imageThumb?: string | null; // ~200 px thumbnail of imageUri (new picker); enables the media doc
+  imageClear?: string | null; // ~720 px clear copy for the feed (media/clear); optional
 }
 
 export interface WardrobeItemResponse {
@@ -57,6 +60,7 @@ export interface WardrobeItemResponse {
   notes?: string | null;
   imageUrl: string | null; // imageData: thumbnail on new items (full photo: getWardrobeFullImage)
   hasMedia: boolean; // full photo in wardrobe/{id}/media/full
+  hasClear?: boolean; // ~720 px feed photo in wardrobe/{id}/media/clear
   isPublic: boolean;
   createdAt: string;
   updatedAt: string;
@@ -80,6 +84,7 @@ const toItem = (id: string, d: any): WardrobeItemResponse => ({
   notes: d?.notes ?? null,
   imageUrl: d?.imageData ?? d?.imageUrl ?? null,
   hasMedia: d?.media === 1,
+  hasClear: d?.clear === 1,
   isPublic: d?.isPublic === true,
   createdAt: toDate(d?.createdAt)?.toISOString() || '',
   updatedAt: toDate(d?.updatedAt)?.toISOString() || '',
@@ -99,6 +104,10 @@ const checkImage = (uri?: string | null): string | null => {
 const MAX_THUMB_CHARS = 40000;
 const okThumb = (t?: string | null): t is string => !!t && /^data:image\//.test(t) && t.length <= MAX_THUMB_CHARS;
 const mediaRef = (id: string) => doc(db, COLL, id, 'media', 'full');
+const clearRef = (id: string) => doc(db, COLL, id, 'media', 'clear');
+// Clear feed photo: a JPEG data URI of at most ~45 KB (CLEAR_SPEC) with slack
+const MAX_CLEAR_CHARS = 120000;
+const okClear = (t?: string | null): t is string => !!t && /^data:image\//.test(t) && t.length <= MAX_CLEAR_CHARS;
 
 // ── Cache of my items ──────────────────────────────────────────────────────
 // Stored per user: items (light docs), lastSync (ms of the newest updatedAt seen), at (last check)
@@ -163,11 +172,14 @@ export const addWardrobeItem = async (
     updatedAt: serverTimestamp(),
   };
   if (split) data.media = 1;
+  const clear = split && okClear(payload.imageClear) ? payload.imageClear : null;
+  if (clear) data.clear = 1;
   try {
     const ref = doc(collection(db, COLL));
     const b = writeBatch(db);
     b.set(ref, data);
     if (split) b.set(mediaRef(ref.id), { imageData: full, userId: uid, updatedAt: serverTimestamp() });
+    if (clear) b.set(clearRef(ref.id), { imageData: clear, userId: uid, updatedAt: serverTimestamp() });
     await b.commit();
     recordTask(uid, 'uploaded'); // daily task (never throws)
     const now = new Date().toISOString();
@@ -281,22 +293,27 @@ export const updateWardrobeItem = async (
   });
   if (payload.isPublic !== undefined) changes.isPublic = payload.isPublic;
   let full: string | null = null;
+  let clear: string | null = null;
   if (payload.imageUri) {
     full = checkImage(payload.imageUri);
     if (full && okThumb(payload.imageThumb)) {
       changes.imageData = payload.imageThumb;
       changes.media = 1;
+      clear = okClear(payload.imageClear) ? payload.imageClear : null;
     } else {
       changes.imageData = full;
       changes.media = 0;
       full = null;
     }
+    // New photo: the old clear copy no longer matches
+    changes.clear = clear ? 1 : 0;
   }
   try {
     const r = doc(db, COLL, id);
     const b = writeBatch(db);
     b.update(r, changes);
     if (full) b.set(mediaRef(id), { imageData: full, userId: String(payload.userId ?? ''), updatedAt: serverTimestamp() });
+    if (clear) b.set(clearRef(id), { imageData: clear, userId: String(payload.userId ?? ''), updatedAt: serverTimestamp() });
     await b.commit();
     const snap = await getDoc(r);
     const item = toItem(id, snap.data());
@@ -314,6 +331,7 @@ export const deleteWardrobeItem = async (itemId: string | number): Promise<void>
   try {
     const b = writeBatch(db);
     b.delete(mediaRef(id));
+    b.delete(clearRef(id));
     b.delete(doc(db, COLL, id));
     await b.commit();
     if (mem) patchCache(mem.uid, items => items.filter(i => i.id !== id));

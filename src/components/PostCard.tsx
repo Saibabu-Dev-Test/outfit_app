@@ -27,6 +27,7 @@ import {
   castPostVote,
   deletePost,
   getDislikeState,
+  getClearPhotos,
   getFullPhotos,
   getLikedPostIds,
   getPostVotes,
@@ -49,8 +50,8 @@ interface Props {
   onDeleted?: (post: Post) => void;
   // Single tap on a photo (after the double-tap-to-like window) opens it full screen
   onOpenPhoto?: (photos: string[], index: number) => void;
-  // Detail screen: loads the full-size photos (lists and the feed show the thumbnails only;
-  // a single tap on the photo in a list opens the detail screen)
+  // Detail screen: loads the full-size photos. Lists / the feed show the clear ~720 px copies
+  // (older items: full photo, then thumbnail); a single tap on the photo opens the detail screen.
   detail?: boolean;
 }
 
@@ -83,12 +84,14 @@ export default function PostCard({ post, width, myUid, isAdmin, onDeleted, onOpe
   const isMine = !!myUid && post.userId === myUid;
   const canFollow = !!myUid && !!post.userId && !isMine;
 
-  // Full-size photos on the detail screen only (1 read; older posts already hold them)
+  // Detail screen: full-size photos (1 read; older posts already hold them).
+  // Feed card: the clear ~720 px photos (thumbnail shows first, then swaps to the sharp copy).
   useEffect(() => {
     setShownPhotos(post.photos);
-    if (!detail || !post.hasMedia) return;
+    if (!detail && !post.hasClear && !post.hasMedia) return; // oldest items: photos are already full size
+    if (detail && !post.hasMedia) return;
     let alive = true;
-    getFullPhotos(post).then(p => alive && setShownPhotos(p));
+    (detail ? getFullPhotos(post) : getClearPhotos(post)).then(p => alive && setShownPhotos(p));
     return () => {
       alive = false;
     };

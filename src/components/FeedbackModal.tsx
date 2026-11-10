@@ -7,7 +7,6 @@ import {
   Image,
   KeyboardAvoidingView,
   Modal,
-  Platform,
   Switch,
   ScrollView,
   StyleSheet,
@@ -16,6 +15,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { borderRadius, colors, fontSize, fontWeight, spacing, themedStyles } from '../theme';
 import { pickImage, POLL_PICK } from '../utils/imagePicker';
 import { containsProfanity } from '../utils/profanity';
@@ -112,10 +112,20 @@ export default function FeedbackModal({ visible, uid, name, onClose, quote, edit
   };
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <KeyboardAvoidingView style={styles.overlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <Modal
+      visible={visible}
+      transparent
+      animationType="slide"
+      onRequestClose={onClose}
+      statusBarTranslucent
+      navigationBarTranslucent>
+      <SafeAreaProvider>
+      {/* Edge-to-edge window: pad for the keyboard on both platforms (adjustResize does not apply) */}
+      <KeyboardAvoidingView style={styles.overlay} behavior="padding">
         <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={onClose} />
-        <View style={styles.sheet}>
+        {/* Sheet stays below the status bar and above the phone's navigation buttons */}
+        <SafeAreaView edges={['top']} style={styles.topGap} pointerEvents="box-none" />
+        <SafeAreaView style={styles.sheet} edges={['bottom', 'left', 'right']}>
           <View style={styles.headRow}>
             <Text style={styles.title}>
               {editing ? 'Edit feedback' : quote ? 'Quote feedback' : 'Feedback & Suggestions'}
@@ -222,8 +232,9 @@ export default function FeedbackModal({ visible, uid, name, onClose, quote, edit
               </TouchableOpacity>
             </ScrollView>
           )}
-        </View>
+        </SafeAreaView>
       </KeyboardAvoidingView>
+      </SafeAreaProvider>
     </Modal>
   );
 }
@@ -236,8 +247,9 @@ const styles = themedStyles(() =>
       borderTopLeftRadius: 22,
       borderTopRightRadius: 22,
       maxHeight: '92%',
-      paddingBottom: spacing.lg,
+      paddingBottom: spacing.sm,
     },
+    topGap: { flexShrink: 0 },
     headRow: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -272,13 +284,13 @@ const styles = themedStyles(() =>
     typeText: { fontSize: fontSize.sm, fontWeight: fontWeight.semiBold, color: colors.textPrimary },
     typeTextOn: { color: colors.onPrimary },
     input: {
-      minHeight: 120,
-      maxHeight: 220,
+      minHeight: 140,
+      maxHeight: 260,
       backgroundColor: colors.inputBg,
       borderRadius: borderRadius.lg,
-      padding: spacing.md,
-      fontSize: fontSize.base,
-      lineHeight: 21,
+      padding: spacing.base,
+      fontSize: fontSize.md,
+      lineHeight: 23,
       color: colors.textPrimary,
     },
     counter: { alignSelf: 'flex-end', fontSize: fontSize.xs, color: colors.textMuted, marginTop: 4 },
