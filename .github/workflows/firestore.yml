@@ -1,0 +1,29 @@
+name: Deploy Firestore rules & indexes
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - firestore.rules
+      - firestore.indexes.json
+      - .github/workflows/firestore.yml
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Check secret
+        env:
+          SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          if [ -z "$SA" ]; then echo "::error::Add repo secret FIREBASE_SERVICE_ACCOUNT (service account JSON key)"; exit 1; fi
+          echo "$SA" > "$RUNNER_TEMP/sa.json"
+      - name: Deploy
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/sa.json
+        run: npx -y firebase-tools@13 deploy --only firestore:rules,firestore:indexes --project outfit-vote-9edca --non-interactive --force
