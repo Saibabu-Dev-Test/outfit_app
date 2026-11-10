@@ -46,9 +46,11 @@ interface Props {
   myUid?: string;
   isAdmin?: boolean;
   onDeleted?: (post: Post) => void;
+  // Single tap on a photo (after the double-tap-to-like window) opens it full screen
+  onOpenPhoto?: (photos: string[], index: number) => void;
 }
 
-export default function PostCard({ post, width, myUid, isAdmin, onDeleted }: Props) {
+export default function PostCard({ post, width, myUid, isAdmin, onDeleted, onOpenPhoto }: Props) {
   const navigation = useNavigation<any>();
   const { user: me } = useAuth();
   const [liked, setLiked] = useState(false);
@@ -64,6 +66,13 @@ export default function PostCard({ post, width, myUid, isAdmin, onDeleted }: Pro
   const [reportTarget, setReportTarget] = useState<ReportTarget | null>(null);
   const liking = useRef(false);
   const lastTap = useRef(0);
+  const openTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (openTimer.current) clearTimeout(openTimer.current);
+    },
+    [],
+  );
   const heart = useRef(new Animated.Value(0)).current;
   const multi = post.kind === 'post' && post.photos.length > 1;
   const isMine = !!myUid && post.userId === myUid;
@@ -254,10 +263,12 @@ export default function PostCard({ post, width, myUid, isAdmin, onDeleted }: Pro
     shareWithReferral(myUid, line);
   };
 
-  const onImagePress = () => {
+  const onImagePress = (index: number = 0) => {
     const now = Date.now();
     if (now - lastTap.current < 300) {
       lastTap.current = 0;
+      if (openTimer.current) clearTimeout(openTimer.current);
+      openTimer.current = null;
       heart.setValue(0);
       Animated.sequence([
         Animated.spring(heart, { toValue: 1, useNativeDriver: true, friction: 4 }),
@@ -266,6 +277,16 @@ export default function PostCard({ post, width, myUid, isAdmin, onDeleted }: Pro
       if (!liked) like(true);
     } else {
       lastTap.current = now;
+      if (onOpenPhoto) {
+        if (openTimer.current) clearTimeout(openTimer.current);
+        openTimer.current = setTimeout(() => {
+          openTimer.current = null;
+          if (lastTap.current === now) {
+            lastTap.current = 0;
+            onOpenPhoto(post.photos.length ? post.photos : [post.imageData], index);
+          }
+        }, 310);
+      }
     }
   };
 
@@ -316,7 +337,7 @@ export default function PostCard({ post, width, myUid, isAdmin, onDeleted }: Pro
     setPage(Math.round(e.nativeEvent.contentOffset.x / Math.max(1, width)));
 
   const photo = (uri: string, i: number) => (
-    <Pressable key={i} onPress={onImagePress}>
+    <Pressable key={i} onPress={() => onImagePress(i)}>
       <Image source={{ uri }} style={{ width, height: width }} resizeMode="cover" />
       {multi ? (
         <View style={styles.letter}>

@@ -1,9 +1,10 @@
 // Instagram-like profile header: avatar, counts (tap followers/following to open lists), name, bio, style chips
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles } from '../theme';
 import Avatar from './Avatar';
+import ZoomableImage from './ZoomableImage';
 import { ProfileCounts } from '../services/socialApi';
 
 interface Props {
@@ -20,6 +21,7 @@ interface Props {
 
 export default function ProfileHeader({ userId, name, avatarUrl, bio, stylePrefs, counts, isStar, isPrivate, children }: Props) {
   const navigation = useNavigation<any>();
+  const [photoOpen, setPhotoOpen] = useState(false);
   const stat = (label: string, value: number | undefined, onPress?: () => void) => (
     <TouchableOpacity style={styles.stat} onPress={onPress} disabled={!onPress} activeOpacity={0.7}>
       <Text style={styles.statValue}>{value === undefined ? '–' : value.toLocaleString()}</Text>
@@ -32,7 +34,13 @@ export default function ProfileHeader({ userId, name, avatarUrl, bio, stylePrefs
   return (
     <View style={styles.wrap}>
       <View style={styles.top}>
-        <Avatar uri={avatarUrl} name={name} size={84} />
+        <TouchableOpacity
+          disabled={!avatarUrl}
+          activeOpacity={0.8}
+          onPress={() => setPhotoOpen(true)}
+          accessibilityLabel="View profile photo">
+          <Avatar uri={avatarUrl} name={name} size={84} />
+        </TouchableOpacity>
         <View style={styles.stats}>
           {stat('Posts', counts?.posts)}
           {stat('Wardrobe', counts?.wardrobe)}
@@ -56,6 +64,9 @@ export default function ProfileHeader({ userId, name, avatarUrl, bio, stylePrefs
         </View>
       ) : null}
       {children ? <View style={styles.buttons}>{children}</View> : null}
+      {avatarUrl ? (
+        <ZoomableImage visible={photoOpen} images={[avatarUrl]} onClose={() => setPhotoOpen(false)} />
+      ) : null}
     </View>
   );
 }

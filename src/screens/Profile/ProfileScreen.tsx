@@ -23,6 +23,7 @@ import { checkNotifications, openNotificationSettings } from '../../native/notif
 import { RASHIS } from '../../utils/panchangam';
 import SelectModal from '../../components/SelectModal';
 import FeedbackModal from '../../components/FeedbackModal';
+import ZoomableImage from '../../components/ZoomableImage';
 import TimePickerModal from '../../components/TimePickerModal';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles, statusBarStyle, useTheme, ThemeMode } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
@@ -112,6 +113,7 @@ export default function ProfileScreen() {
   const [editBio, setEditBio] = useState<string>('');
   const [savingProfile, setSavingProfile] = useState<boolean>(false);
   const [uploadingAvatar, setUploadingAvatar] = useState<boolean>(false);
+  const [avatarViewerOpen, setAvatarViewerOpen] = useState(false);
 
   // Picker modals
   const [isTimePickerOpen, setIsTimePickerOpen] = useState<boolean>(false);
@@ -445,9 +447,11 @@ const fetchProfile = async () => {
         {/* Main Profile Card */}
         <View style={styles.profileCard}>
           <View style={styles.profileGradient}>
+            {/* Tap the photo to view it full screen (zoom); the 📷 badge changes it */}
             <TouchableOpacity
               style={styles.avatarContainer}
-              onPress={handleSelectAvatarSource}
+              onPress={profileData?.avatarUrl ? () => setAvatarViewerOpen(true) : handleSelectAvatarSource}
+              onLongPress={handleSelectAvatarSource}
               disabled={uploadingAvatar}
               activeOpacity={0.8}>
               <View style={styles.avatar}>
@@ -466,10 +470,21 @@ const fetchProfile = async () => {
                   </View>
                 )}
               </View>
-              <View style={styles.cameraBadge}>
+              <TouchableOpacity
+                style={styles.cameraBadge}
+                onPress={handleSelectAvatarSource}
+                disabled={uploadingAvatar}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
                 <Text style={styles.cameraIconText}>📷</Text>
-              </View>
+              </TouchableOpacity>
             </TouchableOpacity>
+            {profileData?.avatarUrl ? (
+              <ZoomableImage
+                visible={avatarViewerOpen}
+                images={[profileData.avatarUrl]}
+                onClose={() => setAvatarViewerOpen(false)}
+              />
+            ) : null}
 
 
             {loading && !profileData ? (

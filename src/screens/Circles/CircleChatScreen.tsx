@@ -12,7 +12,6 @@ import {
   Image,
   Alert,
   ActivityIndicator,
-  Modal,
   StatusBar,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -26,6 +25,7 @@ import ActionSheet from '../../components/ActionSheet';
 import WardrobePickerModal from '../../components/WardrobePickerModal';
 import ReactionBar from '../../components/ReactionBar';
 import ReportModal, { ReportTarget } from '../../components/ReportModal';
+import ZoomableImage from '../../components/ZoomableImage';
 import {
   Circle,
   ChatMessage,
@@ -56,7 +56,7 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
   const [sending, setSending] = useState(false);
   const [pollOpen, setPollOpen] = useState(false);
   const [pollImages, setPollImages] = useState<string[] | undefined>(undefined);
-  const [viewer, setViewer] = useState<string | null>(null);
+  const [viewer, setViewer] = useState<{ images: string[]; index: number; labels?: string[] } | null>(null);
   const [reportTarget, setReportTarget] = useState<ReportTarget | null>(null);
   const [joining, setJoining] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
@@ -252,7 +252,9 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
           activeOpacity={0.9}
           onLongPress={() => onMessageLongPress(item)}
           delayLongPress={350}
-          onPress={() => (item.type === 'image' && item.imageData ? setViewer(item.imageData) : undefined)}
+          onPress={() =>
+            item.type === 'image' && item.imageData ? setViewer({ images: [item.imageData], index: 0 }) : undefined
+          }
           style={[
             styles.bubble,
             mine ? styles.bubbleMine : styles.bubbleOther,
@@ -273,7 +275,7 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
               myUid={uid}
               canVote={isMember}
               onLongPress={() => onMessageLongPress(item)}
-              onOpenImage={setViewer}
+              onOpenImages={(images, at, labels) => setViewer({ images, index: at, labels })}
             />
           ) : null}
           {item.text ? <Text style={[styles.text, mine && styles.textMine]}>{item.text}</Text> : null}
@@ -449,11 +451,13 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
       />
       <ReportModal target={reportTarget} reporterId={uid} onClose={() => setReportTarget(null)} />
 
-      <Modal visible={!!viewer} transparent animationType="fade" onRequestClose={() => setViewer(null)}>
-        <TouchableOpacity style={styles.viewer} activeOpacity={1} onPress={() => setViewer(null)}>
-          {viewer ? <Image source={{ uri: viewer }} style={styles.viewerImage} resizeMode="contain" /> : null}
-        </TouchableOpacity>
-      </Modal>
+      <ZoomableImage
+        visible={!!viewer}
+        images={viewer?.images || []}
+        initialIndex={viewer?.index || 0}
+        labels={viewer?.labels}
+        onClose={() => setViewer(null)}
+      />
     </SafeAreaView>
   );
 }
@@ -549,6 +553,4 @@ const styles = themedStyles(() => StyleSheet.create({
   },
   sendText: { color: colors.textInverse, fontSize: 18 },
   disabled: { opacity: 0.5 },
-  viewer: { flex: 1, backgroundColor: 'rgba(0,0,0,0.92)', alignItems: 'center', justifyContent: 'center' },
-  viewerImage: { width: '100%', height: '80%' },
 }));
