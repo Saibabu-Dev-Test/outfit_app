@@ -70,6 +70,18 @@ class NotificationsModule(private val ctx: ReactApplicationContext) : ReactConte
     }
   }
 
+  // First name for the 8 AM "Good morning, {name}! ☀️" title, read by DailyNotificationReceiver.
+  // Empty clears it (sign-out), which falls back to "Good morning! ☀️".
+  @ReactMethod
+  fun setUserFirstName(name: String, promise: Promise) {
+    try {
+      OutfitNotifier.setFirstName(ctx, name)
+      promise.resolve(true)
+    } catch (e: Exception) {
+      promise.resolve(false)
+    }
+  }
+
   // Activity notification (likes, comments, follows, feedback) on the "activity" channel.
   // Resolves false when notifications are off.
   @ReactMethod

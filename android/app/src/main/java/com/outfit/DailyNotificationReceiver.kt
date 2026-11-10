@@ -14,7 +14,7 @@ class DailyNotificationReceiver : BroadcastReceiver() {
         val slot = intent.getIntExtra(OutfitNotifier.EXTRA_SLOT, -1)
         val s = OutfitNotifier.SLOTS.getOrNull(slot) ?: return
         if (!OutfitNotifier.isDailyOn(ctx)) return
-        OutfitNotifier.post(ctx, OutfitNotifier.CHANNEL_DAILY, 7100 + slot, s.title, s.body)
+        OutfitNotifier.post(ctx, OutfitNotifier.CHANNEL_DAILY, 7100 + slot, OutfitNotifier.titleFor(ctx, slot), s.body)
         OutfitNotifier.scheduleSlot(ctx, slot)
       }
       Intent.ACTION_BOOT_COMPLETED,

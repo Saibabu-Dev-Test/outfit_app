@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useRef, useState } from 'r
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '../config/firebaseConfig';
 import { logoutUser, restoreSession, UserProfile } from '../services/authApi';
+import { setNotificationName } from '../native/notifications';
 
 interface AuthContextType {
   isAuthenticated: boolean;
@@ -60,6 +61,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
     return unsub;
   }, []);
+
+  // Keep the 8 AM notification's name in sync: login, session restore, profile name edits, and
+  // cleared on sign-out ("Good morning! ☀️")
+  const displayName = user?.name || '';
+  useEffect(() => {
+    setNotificationName(displayName);
+  }, [displayName]);
 
   const login = (userData?: UserProfile) => {
     if (userData) {

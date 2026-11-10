@@ -25,6 +25,8 @@ object OutfitNotifier {
   const val EXTRA_SLOT = "slot"
   private const val PREFS = "outfit_notifications"
   private const val KEY_DAILY_ON = "daily_on"
+  // First name of the signed-in user (saved by the app at login / profile update) for the 8 AM title
+  private const val KEY_FIRST_NAME = "first_name"
 
   data class Slot(val hour: Int, val minute: Int, val title: String, val body: String)
 
@@ -91,6 +93,23 @@ object OutfitNotifier {
   }
 
   // ── Daily reminders ──
+
+  fun setFirstName(ctx: Context, name: String?) {
+    val clean = name?.trim().orEmpty()
+    val e = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+    if (clean.isEmpty()) e.remove(KEY_FIRST_NAME) else e.putString(KEY_FIRST_NAME, clean)
+    e.apply()
+  }
+
+  // "Good morning, Priya! ☀️" when the name is known, else "Good morning! ☀️"
+  fun morningTitle(ctx: Context): String {
+    val name = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_FIRST_NAME, null)?.trim()
+    return if (name.isNullOrEmpty()) "Good morning! ☀️" else "Good morning, $name! ☀️"
+  }
+
+  // Slot 0 (8 AM) is personalised; 1 PM and 7 PM keep their fixed titles
+  fun titleFor(ctx: Context, slot: Int): String =
+    if (slot == 0) morningTitle(ctx) else SLOTS[slot].title
 
   fun isDailyOn(ctx: Context): Boolean =
     ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_DAILY_ON, false)

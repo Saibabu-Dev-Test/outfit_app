@@ -8,6 +8,7 @@ const Native:
       scheduleDaily?: () => Promise<boolean>;
       cancelDaily?: () => Promise<boolean>;
       postNotification?: (title: string, body: string) => Promise<boolean>;
+      setUserFirstName?: (name: string) => Promise<boolean>;
     }
   | undefined = NativeModules.OutfitNotifications;
 
@@ -74,5 +75,22 @@ export const postNotification = async (title: string, body: string): Promise<boo
     return !!(await Native?.postNotification?.(title, body));
   } catch {
     return false;
+  }
+};
+
+// First word of the display name ("Priya Sharma" -> "Priya"); '' when there is none
+export const firstNameOf = (displayName?: string | null): string => {
+  const first = String(displayName || '').trim().split(/\s+/)[0] || '';
+  return first.includes('@') ? '' : first.slice(0, 30);
+};
+
+// Saves the user's first name in the app's SharedPreferences so the native 8 AM alarm can say
+// "Good morning, {name}! ☀️" even when the app is closed. Pass null/'' on sign-out. Never throws.
+export const setNotificationName = async (displayName?: string | null): Promise<void> => {
+  if (Platform.OS !== 'android') return;
+  try {
+    await Native?.setUserFirstName?.(firstNameOf(displayName));
+  } catch (e: any) {
+    console.warn('setNotificationName failed:', e?.message);
   }
 };
