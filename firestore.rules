@@ -426,6 +426,10 @@ service cloud.firestore {
           && existsAfter(/databases/$(db)/documents/circleNames/$(d.nameKey))
           && getAfter(/databases/$(db)/documents/circleNames/$(d.nameKey)).data.circleId == cid;
       }
+      // Old APKs: no name-uniqueness fields at all (nameKey / nameLower absent)
+      function legacyCreate(d) {
+        return !d.keys().hasAny(['nameKey', 'nameLower']);
+      }
       // Join without the code: within 3 km of a public circle's location (or a smaller legacy
       // radiusKm). Approximate distance (equirectangular, cosLat stored with the location) with
       // ~0.5 km slack for the ~100 m rounding of both points. The location comes from the phone.
@@ -460,12 +464,16 @@ service cloud.firestore {
         && (request.resource.data.get('location', null) == null
             || (request.resource.data.location.lat is number && request.resource.data.location.lng is number))
         && validRadius(request.resource.data)
-        // Public circles are found only by distance, so they must carry a location
-        && (request.resource.data.isPrivate == true
-            || (request.resource.data.get('location', null) != null
-                && request.resource.data.get('geohash', null) is string))
-        // Unique name (circleNames doc written in the same transaction)
-        && nameDocOk(request.resource.data);
+        && (
+          // Current builds (build 94+): unique name (circleNames doc written in the same
+          // transaction), and public circles carry a location (they are found only by distance)
+          (nameDocOk(request.resource.data)
+            && (request.resource.data.isPrivate == true
+                || (request.resource.data.get('location', null) != null
+                    && request.resource.data.get('geohash', null) is string)))
+          // Older builds (build 93 and earlier) send no nameKey / nameLower and may create a
+          // public circle without a location: still allowed so old APKs can create circles
+          || legacyCreate(request.resource.data));
 
       allow update: if signedIn() && (
         // Owner: anything except ownership (incl. name, Public <-> Private and the Nearby location).

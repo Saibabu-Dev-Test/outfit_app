@@ -1,13 +1,24 @@
 name: Deploy Firestore rules & indexes
 
+# Runs when the rules / indexes change on main (the same push that builds the new APK), or by hand
+# from the Actions tab (workflow_dispatch).
+# Auth: keyless Workload Identity Federation (GitHub OIDC -> github-deployer service account).
+# Fallback: the optional FIREBASE_SERVICE_ACCOUNT secret (JSON key) when WIF is not available.
+# With neither, the deploy is skipped with a warning instead of failing the push.
 on:
   push:
     branches: [main]
     paths:
       - firestore.rules
       - firestore.indexes.json
+      - firebase.json
+      - .firebaserc
       - .github/workflows/firestore.yml
   workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
 
 jobs:
   deploy:
@@ -17,13 +28,48 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Check secret
+
+      # Project id: .firebaserc default, else android/app/google-services.json
+      - name: Firebase project
+        id: cfg
+        run: |
+          PROJECT=$(node -e "try{console.log(require('./.firebaserc').projects.default||'')}catch(e){console.log('')}")
+          if [ -z "$PROJECT" ]; then
+            PROJECT=$(node -e "console.log(require('./android/app/google-services.json').project_info.project_id)")
+          fi
+          echo "project=$PROJECT" >> "$GITHUB_OUTPUT"
+          echo "Firebase project: $PROJECT"
+
+      - name: Google auth (Workload Identity Federation)
+        id: wif
+        continue-on-error: true
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/791853722614/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+          service_account: github-deployer@outfit-vote-9edca.iam.gserviceaccount.com
+          create_credentials_file: true
+
+      # Optional fallback: JSON key secret, used only when WIF did not work
+      - name: Google auth (FIREBASE_SERVICE_ACCOUNT fallback)
+        id: sa
+        if: steps.wif.outcome != 'success'
         env:
           SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
         run: |
-          if [ -z "$SA" ]; then echo "::error::Add repo secret FIREBASE_SERVICE_ACCOUNT (service account JSON key)"; exit 1; fi
-          echo "$SA" > "$RUNNER_TEMP/sa.json"
-      - name: Deploy
-        env:
-          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/sa.json
-        run: npx -y firebase-tools@13 deploy --only firestore:rules,firestore:indexes --project outfit-vote-9edca --non-interactive --force
+          if [ -z "$SA" ]; then
+            echo "::warning::Workload Identity auth failed and FIREBASE_SERVICE_ACCOUNT is not set: rules and indexes were NOT deployed."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          umask 077
+          printf '%s' "$SA" > "$RUNNER_TEMP/sa.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/sa.json" >> "$GITHUB_ENV"
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy rules & indexes
+        if: steps.wif.outcome == 'success' || steps.sa.outputs.ready == 'true'
+        run: npx -y firebase-tools@13 deploy --only firestore:rules,firestore:indexes --project "${{ steps.cfg.outputs.project }}" --non-interactive --force
+
+      - name: Remove key file
+        if: always()
+        run: rm -f "$RUNNER_TEMP/sa.json"
