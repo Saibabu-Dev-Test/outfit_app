@@ -460,9 +460,18 @@ service cloud.firestore {
         allow create: if isMember(cid)
           && request.resource.data.userId == me()
           && request.resource.data.type in ['text', 'image', 'poll']
+          // Photo polls (A-F picker, or up to 4 camera shots in a row): 2-6 options of
+          // {imageData, label}, kind 'buy' | 'wear'. Members vote in .../votes/{uid}.
           && (request.resource.data.type != 'poll'
-              || (request.resource.data.poll.options.size() >= 2
-                  && request.resource.data.poll.options.size() <= 6));
+              || (request.resource.data.poll is map
+                  && request.resource.data.poll.options is list
+                  && request.resource.data.poll.options.size() >= 2
+                  && request.resource.data.poll.options.size() <= 6
+                  && request.resource.data.poll.get('kind', 'buy') in ['buy', 'wear']
+                  && request.resource.data.poll.get('question', '') is string
+                  && request.resource.data.poll.get('question', '').size() <= 100
+                  && request.resource.data.poll.options[0].imageData is string
+                  && request.resource.data.poll.options[1].imageData is string));
         allow update: if false;
         allow delete: if signedIn()
           && (resource.data.userId == me() || isCircleOwner(cid) || isAdmin());

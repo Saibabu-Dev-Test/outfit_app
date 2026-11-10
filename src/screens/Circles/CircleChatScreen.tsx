@@ -26,6 +26,7 @@ import WardrobePickerModal from '../../components/WardrobePickerModal';
 import ReactionBar from '../../components/ReactionBar';
 import ReportModal, { ReportTarget } from '../../components/ReportModal';
 import ZoomableImage from '../../components/ZoomableImage';
+import CameraPollModal, { CAMERA_POLL_MAX } from '../../components/CameraPollModal';
 import {
   Circle,
   ChatMessage,
@@ -38,7 +39,7 @@ import {
   deleteMessage,
   joinCircle,
 } from '../../services/circlesApi';
-import { MAX_BASE64_CHARS, pickImage, pickImages } from '../../utils/imagePicker';
+import { MAX_BASE64_CHARS, pickImages } from '../../utils/imagePicker';
 import { clockTime } from '../../utils/date';
 
 export default function CircleChatScreen({ navigation, route }: { navigation: any; route: any }) {
@@ -61,6 +62,7 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
   const [joining, setJoining] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
   const [wardrobeOpen, setWardrobeOpen] = useState(false);
+  const [cameraOpen, setCameraOpen] = useState(false);
 
   const isMember = !!uid && !!circle && circle.memberIds.includes(uid);
   const isOwner = !!uid && !!circle && circle.ownerId === uid;
@@ -125,19 +127,6 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
     } catch (e: any) {
       setText(t);
       Alert.alert('Not sent', e?.message || 'Please try again.');
-    } finally {
-      setSending(false);
-    }
-  };
-
-  const sendPhoto = async (source: 'camera' | 'library') => {
-    try {
-      const picked = await pickImage(source);
-      if (!picked) return;
-      setSending(true);
-      await sendImageMessage(circleId, me, picked.dataUri);
-    } catch (e: any) {
-      Alert.alert('Photo not sent', e?.message || 'Please try again.');
     } finally {
       setSending(false);
     }
@@ -432,7 +421,12 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
             hint: 'One photo, or 2-6 for an A–F vote',
             onPress: () => setWardrobeOpen(true),
           },
-          { icon: '📷', label: 'Take photo', onPress: () => sendPhoto('camera') },
+          {
+            icon: '📷',
+            label: 'Take photo',
+            hint: `One photo, or up to ${CAMERA_POLL_MAX} in a row for a photo poll`,
+            onPress: () => setCameraOpen(true),
+          },
           {
             icon: '🖼️',
             label: 'Several photos (A–F vote)',
@@ -440,6 +434,12 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
             onPress: sendSeveral,
           },
         ]}
+      />
+      <CameraPollModal
+        visible={cameraOpen}
+        onClose={() => setCameraOpen(false)}
+        onSendPhoto={img => sendImageMessage(circleId, me, img)}
+        onSendPoll={(kind, options) => sendPollMessage(circleId, me, kind, options)}
       />
       <WardrobePickerModal
         visible={wardrobeOpen}
