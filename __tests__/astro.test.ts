@@ -69,8 +69,9 @@ describe('astro (offline panchang)', () => {
   it('finds festivals today and coming up', () => {
     expect(festivalsAround(at(2026, 11, 24)).today[0].festival.id).toBe('karthika');
     const soon = festivalsAround(at(2026, 11, 20));
-    expect(soon.upcoming[0].festival.id).toBe('karthika');
-    expect(soon.upcoming[0].inDays).toBe(4);
+    const k = soon.upcoming.find(h => h.festival.id === 'karthika')!;
+    expect(k.inDays).toBe(4);
+    expect(soon.upcoming[0].festival.id).toBe('karthikasomavaram'); // Monday 23 Nov
     expect(festivalsAround(at(2027, 10, 29)).today[0].festival.id).toBe('deepavali');
   });
 });
