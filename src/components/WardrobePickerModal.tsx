@@ -14,6 +14,8 @@ import {
 } from 'react-native';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles } from '../theme';
 import { getWardrobeFullImage, getWardrobeItems, WardrobeItemResponse } from '../services/wardrobeApi';
+import { canResize, resizeImage } from '../utils/imageResize';
+import { POLL_SPEC, specChars } from '../utils/imageSpecs';
 import { POLL_LETTERS } from '../services/circlesApi';
 
 interface Props {
@@ -74,8 +76,9 @@ export default function WardrobePickerModal({
     );
   };
 
-  // Items keep a ~200 px thumbnail; the poll gets the full photo (1 read each), or the
-  // thumbnail when the full one can't be read or is over the size limit.
+  // Items keep a small thumbnail; the poll gets the full photo (1 read each). Full photos are up to
+  // 1600 px / 160 KB now, so for a 2-6 photo poll (one Firestore doc, 1 MiB) or a smaller limit they
+  // are re-made at the poll size (1080 px, <= 80 KB) on the phone. The thumbnail is the last resort.
   const done = async () => {
     const byId = new Map(items.map(i => [i.id, i]));
     const chosen = picked.map(id => byId.get(id)).filter((i): i is WardrobeItemResponse => !!i);
@@ -83,7 +86,15 @@ export default function WardrobePickerModal({
     const images = await Promise.all(
       chosen.map(async i => {
         const full = await getWardrobeFullImage(i);
-        return full && full.length <= maxChars ? full : i.imageUrl || '';
+        const limit = chosen.length > 1 ? Math.min(maxChars, specChars(POLL_SPEC)) : maxChars;
+        if (full && full.length <= limit) return full;
+        if (full && canResize()) {
+          try {
+            const small = await resizeImage(full, POLL_SPEC);
+            if (small.length <= limit) return small;
+          } catch {}
+        }
+        return i.imageUrl || '';
       }),
     );
     const ok = images.filter(Boolean);

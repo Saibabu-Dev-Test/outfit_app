@@ -1,6 +1,6 @@
-// Pick a photo as a small JPEG data URI (stored in Firestore; no Firebase Storage on the Spark plan).
-// The picker hands over a file; ImageResizeModule.kt shrinks it to the requested size with a
-// quality loop, and also makes a thumbnail (lists) and a clear 720 px copy (feed cards) when asked.
+// Pick a photo as a small WebP (JPEG fallback) data URI (stored in Firestore; no Firebase Storage on
+// the Spark plan). The picker hands over a file; ImageResizeModule.kt shrinks it to the requested size
+// with a quality loop, and also makes a thumbnail (lists) and a clear 1080 px copy (feed cards) when asked.
 // The picker hands over the original file (no pre-shrink), so every size is made from the original.
 import { launchCamera, launchImageLibrary, Asset, ImagePickerResponse, CameraOptions } from 'react-native-image-picker';
 import { canResize, resizeImage } from './imageResize';
@@ -12,18 +12,18 @@ export const MAX_BASE64_CHARS = 700000;
 export interface PickedImage {
   dataUri: string; // full photo (spec size)
   thumbUri?: string; // thumbnail, when PickOptions.thumb is set
-  clearUri?: string; // ~720 px feed photo, when PickOptions.clear is set
+  clearUri?: string; // ~1080 px feed photo, when PickOptions.clear is set
   uri?: string;
 }
 
 export interface PickOptions {
-  spec?: ImageSpec; // default FULL_SPEC (1080 px, <= 80 KB)
+  spec?: ImageSpec; // default FULL_SPEC (1600 px, <= 160 KB)
   thumb?: ImageSpec | null; // also make a thumbnail of this size
   clear?: ImageSpec | null; // also make a clear feed-size copy (CLEAR_SPEC)
   maxChars?: number; // extra cap on the full photo's base64 length
 }
 
-// Posts and wardrobe items: full photo + ~200 px thumbnail + ~720 px clear feed photo
+// Posts and wardrobe items: full photo (1600 px) + 360 px thumbnail + 1080 px clear feed photo
 export const PHOTO_PICK: PickOptions = { spec: FULL_SPEC, thumb: THUMB_SPEC, clear: CLEAR_SPEC };
 // Avatars are shown small; the tiny copy goes on posts / comments / likes
 export const AVATAR_PICK: PickOptions = { spec: AVATAR_SPEC, thumb: AVATAR_THUMB_SPEC };

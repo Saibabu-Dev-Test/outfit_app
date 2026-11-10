@@ -1,7 +1,10 @@
-// Circles: My Circles / Discover tabs, join with an invite code, create a public or private circle.
-// Public = listed in Discover, anyone can join; private = invite link / code only. No location or
-// "Nearby" features, and no Feed shortcut here (the Feed tab shows posts from my circles).
-import React, { useCallback, useEffect, useState } from 'react';
+// Circles: Mine / Discover / 📍 Nearby tabs, join with an invite code, create a public or private circle.
+// Public = listed in Discover, anyone can join; private = invite link / code only.
+// Nearby: asks for approximate location when opened and lists public circles within 3 km
+// (geohash query + exact distance, circlesApi.getNearbyCircles). A public circle created with
+// "Show in Nearby" on saves its approximate location (~100 m) so it shows up there.
+// No Feed shortcut here (the Feed tab shows posts from my circles).
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -18,6 +21,7 @@ import {
   KeyboardAvoidingView,
   ScrollView,
   Switch,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
@@ -28,18 +32,22 @@ import {
   createCircle,
   getDiscoverCircles,
   getMyCircles,
+  getNearbyCircles,
+  formatKm,
+  NEARBY_KM,
   joinCircle,
   joinWithCode,
   codeFromInvite,
 } from '../../services/circlesApi';
 import { timeAgo } from '../../utils/date';
+import { getApproxLocation, LocationFailReason } from '../../native/location';
 
 const EMOJIS = ['👗', '🔥', '🤍', '💼', '🌟', '🕰️', '👟', '💍', '🎉', '🌸', '🧥', '🪔', '👜', '🕶️', '🥻', '💄'];
 
 export const PRIVATE_NOTICE =
   'Private circles may be reviewed by moderators if reported, to keep the community safe.';
 
-type TabKey = 'mine' | 'discover';
+type TabKey = 'mine' | 'discover' | 'nearby';
 
 export default function CirclesScreen() {
   const navigation = useNavigation<any>();
@@ -63,18 +71,50 @@ export default function CirclesScreen() {
   const [newDesc, setNewDesc] = useState('');
   const [newEmoji, setNewEmoji] = useState(EMOJIS[0]);
   const [newPrivate, setNewPrivate] = useState(false);
+  const [newNearby, setNewNearby] = useState(true); // public circle: save approximate location
   const [creating, setCreating] = useState(false);
 
-  const openTab = (k: TabKey) => setTab(k);
+  // Nearby: public circles within NEARBY_KM (3 km)
+  const [nearby, setNearby] = useState<Circle[]>([]);
+  const [nearbyLoaded, setNearbyLoaded] = useState(false);
+  const [nearbyLoading, setNearbyLoading] = useState(false);
+  const [nearbyError, setNearbyError] = useState<{ message: string; reason: LocationFailReason | 'load' } | null>(null);
+
+  const loadNearby = useCallback(async () => {
+    setNearbyLoading(true);
+    setNearbyError(null);
+    const loc = await getApproxLocation();
+    if (!loc.ok) {
+      setNearby([]);
+      setNearbyError({ message: loc.message, reason: loc.reason });
+      setNearbyLoading(false);
+      setNearbyLoaded(true);
+      return;
+    }
+    try {
+      setNearby(await getNearbyCircles(loc.coords.lat, loc.coords.lng));
+    } catch (e: any) {
+      setNearbyError({ message: e?.message || 'Could not load nearby circles.', reason: 'load' });
+    }
+    setNearbyLoading(false);
+    setNearbyLoaded(true);
+  }, []);
+
+  const openTab = (k: TabKey) => {
+    setTab(k);
+    if (k === 'nearby' && !nearbyLoaded && !nearbyLoading) loadNearby();
+  };
 
   // Opened with { tab }: switch to that tab, then clear the param
   const route = useRoute<any>();
   const wantTab: TabKey | undefined = route.params?.tab;
   useEffect(() => {
     if (!wantTab) return;
-    setTab(wantTab === 'discover' ? 'discover' : 'mine');
+    const k: TabKey = wantTab === 'discover' || wantTab === 'nearby' ? wantTab : 'mine';
+    setTab(k);
+    if (k === 'nearby') loadNearby();
     navigation.setParams({ tab: undefined });
-  }, [wantTab, navigation]);
+  }, [wantTab, navigation, loadNearby]);
 
   const load = useCallback(
     async (showSpinner = true) => {
@@ -102,11 +142,16 @@ export default function CirclesScreen() {
     [uid],
   );
 
-  // Back on this screen: reload
+  // Back on this screen: reload; Nearby re-checks when it is the open tab (a circle may have gone
+  // private), otherwise it reloads the next time it is opened
+  const tabRef = useRef<TabKey>(tab);
+  tabRef.current = tab;
   useFocusEffect(
     useCallback(() => {
       load(false);
-    }, [load]),
+      if (tabRef.current === 'nearby') loadNearby();
+      else setNearbyLoaded(false);
+    }, [load, loadNearby]),
   );
 
   const openCircle = (c: Circle) => navigation.navigate('CircleChat', { circleId: c.id });
@@ -116,6 +161,7 @@ export default function CirclesScreen() {
     setJoiningId(c.id);
     try {
       await joinCircle(c, uid);
+      setNearby(prev => prev.map(x => (x.id === c.id ? { ...x, memberIds: [...x.memberIds, uid] } : x)));
       await load(false);
       openCircle(c);
     } catch (e: any) {
@@ -145,6 +191,7 @@ export default function CirclesScreen() {
     setNewDesc('');
     setNewEmoji(EMOJIS[0]);
     setNewPrivate(false);
+    setNewNearby(true);
   };
 
   const handleCreate = async () => {
@@ -158,10 +205,19 @@ export default function CirclesScreen() {
     }
     setCreating(true);
     try {
+      // Public + "Show in Nearby": approximate location (rounded to ~100 m in createCircle). No
+      // distance limit: anyone can still join from Discover.
+      let location: { lat: number; lng: number } | null = null;
+      if (!newPrivate && newNearby) {
+        const loc = await getApproxLocation();
+        if (loc.ok) location = loc.coords;
+        else Alert.alert('Location not added', `${loc.message}\nYour circle is created without a location, so it won't show in Nearby.`);
+      }
       const c = await createCircle(
-        { name: newName, description: newDesc, emoji: newEmoji, isPrivate: newPrivate, location: null, radiusKm: null },
+        { name: newName, description: newDesc, emoji: newEmoji, isPrivate: newPrivate, location, radiusKm: null },
         uid,
       );
+      if (location) setNearbyLoaded(false); // show it next time Nearby opens
       setCreateOpen(false);
       resetForm();
       setTab('mine');
@@ -174,7 +230,8 @@ export default function CirclesScreen() {
     }
   };
 
-  const data = tab === 'mine' ? mine : discover;
+  const data = tab === 'mine' ? mine : tab === 'discover' ? discover : nearby;
+  const busy = loading || (tab === 'nearby' && (nearbyLoading || !nearbyLoaded));
 
   const renderCircle = ({ item }: { item: Circle }) => {
     const isMember = !!uid && item.memberIds.includes(uid);
@@ -200,6 +257,7 @@ export default function CirclesScreen() {
             </Text>
           ) : null}
           <Text style={styles.cardMeta}>
+            {tab === 'nearby' && item.distanceKm != null ? `📍 ${formatKm(item.distanceKm)} away · ` : ''}
             {count} {count === 1 ? 'member' : 'members'}
             {item.lastMessageAt ? ` · active ${timeAgo(item.lastMessageAt)}` : ''}
           </Text>
@@ -259,20 +317,82 @@ export default function CirclesScreen() {
 
       {/* Tabs */}
       <View style={styles.tabs}>
-        {(['mine', 'discover'] as TabKey[]).map(k => (
+        {(['mine', 'discover', 'nearby'] as TabKey[]).map(k => (
           <TouchableOpacity
             key={k}
             style={[styles.tab, tab === k && styles.tabActive]}
             onPress={() => openTab(k)}>
             <Text style={[styles.tabText, tab === k && styles.tabTextActive]} numberOfLines={1} adjustsFontSizeToFit>
-              {k === 'mine' ? `Mine (${mine.length})` : 'Discover'}
+              {k === 'mine' ? `Mine (${mine.length})` : k === 'discover' ? 'Discover' : '📍 Nearby'}
             </Text>
           </TouchableOpacity>
         ))}
       </View>
-      {error ? <Text style={styles.error}>{error}</Text> : null}
+      {tab === 'nearby' ? (
+        <View style={styles.nearbyBar}>
+          <Text style={styles.nearbyHint}>Public circles within {NEARBY_KM} km of you</Text>
+          <TouchableOpacity onPress={loadNearby} disabled={nearbyLoading}>
+            <Text style={styles.nearbyLink}>{nearbyLoading ? 'Finding…' : '↻ Refresh'}</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
+      {error && tab !== 'nearby' ? <Text style={styles.error}>{error}</Text> : null}
     </View>
   );
+
+  // Empty Nearby: location refused / off, load error, or no circles within 3 km
+  const nearbyEmpty = () => {
+    if (nearbyError && nearbyError.reason !== 'load') {
+      const settings = nearbyError.reason === 'blocked' || nearbyError.reason === 'denied';
+      return (
+        <View style={styles.empty}>
+          <Text style={styles.emptyEmoji}>📍</Text>
+          <Text style={styles.emptyText}>
+            Nearby needs your approximate location (about 100 m) to find public circles within {NEARBY_KM} km.
+            {'\n'}
+            {nearbyError.message}
+          </Text>
+          <View style={styles.emptyBtns}>
+            <TouchableOpacity style={styles.emptyBtn} onPress={loadNearby}>
+              <Text style={styles.emptyBtnText}>Try again</Text>
+            </TouchableOpacity>
+            {settings || nearbyError.reason === 'off' ? (
+              <TouchableOpacity
+                style={[styles.emptyBtn, styles.emptyBtnAlt]}
+                onPress={() =>
+                  nearbyError.reason === 'off' && Platform.OS === 'android'
+                    ? Linking.sendIntent('android.settings.LOCATION_SOURCE_SETTINGS').catch(() => Linking.openSettings())
+                    : Linking.openSettings()
+                }>
+                <Text style={[styles.emptyBtnText, styles.emptyBtnAltText]}>Open settings</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        </View>
+      );
+    }
+    return (
+      <View style={styles.empty}>
+        <Text style={styles.emptyEmoji}>📍</Text>
+        <Text style={styles.emptyText}>
+          {nearbyError
+            ? nearbyError.message
+            : `No public circles within ${NEARBY_KM} km yet. Create one with "Show in Nearby" on and people around you can join!`}
+        </Text>
+        <View style={styles.emptyBtns}>
+          <TouchableOpacity
+            style={styles.emptyBtn}
+            onPress={() => {
+              setNewPrivate(false);
+              setNewNearby(true);
+              setCreateOpen(true);
+            }}>
+            <Text style={styles.emptyBtnText}>+ Create a circle</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  };
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
@@ -281,7 +401,7 @@ export default function CirclesScreen() {
         {...(Platform.OS === 'android' ? { backgroundColor: colors.background } : {})}
       />
       <FlatList
-        data={loading ? [] : data}
+        data={busy ? [] : data}
         keyExtractor={c => c.id}
         renderItem={renderCircle}
         ListHeaderComponent={header}
@@ -293,13 +413,19 @@ export default function CirclesScreen() {
             onRefresh={() => {
               setRefreshing(true);
               load(false);
+              if (tab === 'nearby') loadNearby();
             }}
             tintColor={colors.primary}
           />
         }
         ListEmptyComponent={
-          loading ? (
-            <ActivityIndicator style={styles.spinner} color={colors.primary} />
+          busy ? (
+            <View>
+              <ActivityIndicator style={styles.spinner} color={colors.primary} />
+              {tab === 'nearby' ? <Text style={styles.emptyText}>Finding circles near you…</Text> : null}
+            </View>
+          ) : tab === 'nearby' ? (
+            nearbyEmpty()
           ) : (
             <View style={styles.empty}>
               <Text style={styles.emptyEmoji}>{tab === 'mine' ? '◎' : '🔎'}</Text>
@@ -381,6 +507,24 @@ export default function CirclesScreen() {
                 />
               </View>
               {newPrivate && <Text style={styles.notice}>{PRIVATE_NOTICE}</Text>}
+              {!newPrivate && (
+                <View style={styles.visRow}>
+                  <View style={styles.flex1}>
+                    <Text style={styles.visTitle}>📍 Show in Nearby</Text>
+                    <Text style={styles.visHint}>
+                      {newNearby
+                        ? `Saves this circle's approximate location (about 100 m) so people within ${NEARBY_KM} km find it.`
+                        : 'Not shown in Nearby. Still listed in Discover.'}
+                    </Text>
+                  </View>
+                  <Switch
+                    value={newNearby}
+                    onValueChange={setNewNearby}
+                    trackColor={{ false: colors.border, true: colors.accent }}
+                    thumbColor={colors.textInverse}
+                  />
+                </View>
+              )}
               <View style={styles.modalActions}>
                 <TouchableOpacity
                   style={styles.cancelBtn}
@@ -508,7 +652,26 @@ const styles = themedStyles(() => StyleSheet.create({
     marginLeft: spacing.sm,
   },
   joinBtnText: { color: colors.textInverse, fontWeight: fontWeight.bold, fontSize: fontSize.sm },
-  spinner: { marginTop: spacing.xxl },
+  spinner: { marginTop: spacing.xxl, marginBottom: spacing.sm },
+  nearbyBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.base,
+    marginBottom: spacing.sm,
+  },
+  nearbyHint: { fontSize: fontSize.xs, color: colors.textSecondary, flex: 1 },
+  nearbyLink: { fontSize: fontSize.sm, color: colors.primary, fontWeight: fontWeight.bold },
+  emptyBtns: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
+  emptyBtn: {
+    backgroundColor: colors.primary,
+    borderRadius: borderRadius.full,
+    paddingHorizontal: spacing.base,
+    paddingVertical: spacing.sm,
+  },
+  emptyBtnText: { color: colors.textInverse, fontWeight: fontWeight.bold, fontSize: fontSize.sm },
+  emptyBtnAlt: { backgroundColor: colors.surface, borderWidth: 1.5, borderColor: colors.primary },
+  emptyBtnAltText: { color: colors.primary },
   empty: { alignItems: 'center', padding: spacing.xxl },
   emptyEmoji: { fontSize: 40, color: colors.textMuted, marginBottom: spacing.sm },
   emptyText: { fontSize: fontSize.sm, color: colors.textSecondary, textAlign: 'center', lineHeight: 20 },

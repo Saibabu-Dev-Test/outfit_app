@@ -8,6 +8,7 @@ import android.graphics.Matrix
 import android.graphics.Paint
 import android.media.ExifInterface
 import android.net.Uri
+import android.os.Build
 import android.util.Base64
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
@@ -24,14 +25,18 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 
 /**
- * Shrinks a photo to a small, clean JPEG for Firestore (no Cloud Storage on the free Spark plan).
+ * Shrinks a photo to a small, clean image for Firestore (no Cloud Storage on the free Spark plan).
  * resize(uri, maxEdge, maxBytes): uri is a content:// / file:// path from the image picker or a
  * data: URI. Steps: EXIF rotation -> filtered multi-step downscale (halving, then one bilinear
- * step) to maxEdge -> flatten on white -> slight auto-contrast -> mild unsharp mask -> binary
- * search of the JPEG quality (60..92) for the best quality that fits maxBytes. When even quality
- * 60 is too big the long edge is lowered (x0.85) instead of dropping the quality further.
+ * step) to maxEdge (never upscales) -> flatten on white -> slight auto-contrast -> mild unsharp
+ * mask -> binary search of the quality (60..92) for the best quality that fits maxBytes. When even
+ * quality 60 is too big the long edge is lowered (x0.85) instead of dropping the quality further.
+ * Encoding is lossy WebP (Android's built-in encoder: WEBP_LOSSY on API 30+, WEBP below), which is
+ * about 25-35% smaller than JPEG at the same look, so the same bytes buy a sharper photo. If the
+ * WebP encoder fails on a device, JPEG is used.
  * resizeSharp(uri, maxEdge, maxBytes, sharpen) does the same with a chosen sharpen amount.
- * Resolves {base64, width, height, bytes, quality}. Runs off the UI thread.
+ * Resolves {base64, mime, width, height, bytes, quality}. Runs off the UI thread. If a big photo
+ * runs out of memory it is retried once at 3/4 of the size.
  * Keep in sync with src/utils/imageResize.web.ts.
  */
 class ImageResizeModule(private val ctx: ReactApplicationContext) : ReactContextBaseJavaModule(ctx) {
@@ -151,19 +156,18 @@ class ImageResizeModule(private val ctx: ReactApplicationContext) : ReactContext
       bb[i] = lut[c and 0xFF]
     }
 
-    // ── unsharp mask (separable 3x3 box blur) ──
-    val small = max(w, h) <= 320
+    // ── unsharp mask (separable 3x3 box blur), one channel at a time with shared buffers so a
+    //    1600 px photo needs ~6 int arrays, not 10 ──
+    val small = max(w, h) <= 400
     val amount = if (sharpen >= 0f) sharpen else if (small) 0.35f else 0.55f
     val threshold = 3
-    val br = blur3(rr, w, h)
-    val bg = blur3(gg, w, h)
-    val bbl = blur3(bb, w, h)
-    for (i in 0 until n) {
-      px[i] = (0xFF shl 24) or
-        (sharp(rr[i], br[i], amount, threshold) shl 16) or
-        (sharp(gg[i], bg[i], amount, threshold) shl 8) or
-        sharp(bb[i], bbl[i], amount, threshold)
+    val tmp = IntArray(n)
+    val blurred = IntArray(n)
+    for (ch in arrayOf(rr, gg, bb)) {
+      blur3(ch, w, h, tmp, blurred)
+      for (i in 0 until n) ch[i] = sharp(ch[i], blurred[i], amount, threshold)
     }
+    for (i in 0 until n) px[i] = (0xFF shl 24) or (rr[i] shl 16) or (gg[i] shl 8) or bb[i]
     bmp.setPixels(px, 0, w, 0, 0, w, h)
   }
 
@@ -173,9 +177,8 @@ class ImageResizeModule(private val ctx: ReactApplicationContext) : ReactContext
     return (v + amount * d).roundToInt().coerceIn(0, 255)
   }
 
-  // 3x3 box blur, edges clamped
-  private fun blur3(src: IntArray, w: Int, h: Int): IntArray {
-    val tmp = IntArray(src.size)
+  // 3x3 box blur into out (tmp = scratch of the same size), edges clamped
+  private fun blur3(src: IntArray, w: Int, h: Int, tmp: IntArray, out: IntArray) {
     for (y in 0 until h) {
       val row = y * w
       for (x in 0 until w) {
@@ -184,21 +187,35 @@ class ImageResizeModule(private val ctx: ReactApplicationContext) : ReactContext
         tmp[row + x] = l + src[row + x] + r
       }
     }
-    val out = IntArray(src.size)
     for (y in 0 until h) {
       val up = max(0, y - 1) * w
       val dn = min(h - 1, y + 1) * w
       val row = y * w
       for (x in 0 until w) out[row + x] = (tmp[up + x] + tmp[row + x] + tmp[dn + x] + 4) / 9
     }
-    return out
   }
 
-  private fun jpeg(bmp: Bitmap, q: Int): ByteArray {
+  @Suppress("DEPRECATION")
+  private val webpFormat: Bitmap.CompressFormat =
+    if (Build.VERSION.SDK_INT >= 30) Bitmap.CompressFormat.WEBP_LOSSY else Bitmap.CompressFormat.WEBP
+
+  // Encoded bytes; useWebp is switched off for good if this device's WebP encoder fails
+  private var useWebp = true
+  private fun encode(bmp: Bitmap, q: Int): ByteArray {
+    if (useWebp) {
+      try {
+        val bos = ByteArrayOutputStream()
+        if (bmp.compress(webpFormat, q, bos) && bos.size() > 0) return bos.toByteArray()
+      } catch (e: Throwable) {
+        // fall through to JPEG
+      }
+      useWebp = false
+    }
     val bos = ByteArrayOutputStream()
     bmp.compress(Bitmap.CompressFormat.JPEG, q, bos)
     return bos.toByteArray()
   }
+  private fun mime(): String = if (useWebp) "image/webp" else "image/jpeg"
 
   @ReactMethod
   fun resize(uri: String, maxEdge: Int, maxBytes: Int, promise: Promise) {
@@ -212,74 +229,95 @@ class ImageResizeModule(private val ctx: ReactApplicationContext) : ReactContext
     val amount = sharpen.toFloat().coerceAtMost(1.5f)
     Thread {
       try {
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        open(uri).use { BitmapFactory.decodeStream(it, null, bounds) }
-        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) throw IllegalArgumentException("Not an image")
-        // Power-of-two subsampling while the decoded long edge stays >= 2x maxEdge (saves memory,
-        // leaves the filtered downscale enough pixels to work with)
-        var sample = 1
-        val long = max(bounds.outWidth, bounds.outHeight)
-        while (long / (sample * 2) >= maxEdge * 2) sample *= 2
-        val opts = BitmapFactory.Options().apply {
-          inSampleSize = sample
-          inPreferredConfig = Bitmap.Config.ARGB_8888
+        val map = try {
+          work(uri, maxEdge, maxBytes, amount)
+        } catch (oom: OutOfMemoryError) {
+          // Very large photo on a small phone: once more at 3/4 of the size
+          System.gc()
+          work(uri, max(64, maxEdge * 3 / 4), maxBytes, amount)
         }
-        val decoded = open(uri).use { BitmapFactory.decodeStream(it, null, opts) }
-          ?: throw IllegalArgumentException("Could not decode the photo")
-        val upright = rotate(decoded, orientation(uri))
-
-        var edge = maxEdge
-        var best: ByteArray? = null
-        var bw = 0
-        var bh = 0
-        var bq = 0
-        for (round in 0 until 8) {
-          val bmp = fit(upright, edge)
-          enhance(bmp, amount)
-          // Highest quality in [MIN_Q, MAX_Q] that fits maxBytes
-          var fitBytes: ByteArray? = null
-          var fitQ = 0
-          var lowQ = MIN_Q
-          var highQ = MAX_Q
-          while (lowQ <= highQ) {
-            val mid = (lowQ + highQ) / 2
-            val b = jpeg(bmp, mid)
-            if (b.size <= maxBytes) {
-              fitBytes = b
-              fitQ = mid
-              lowQ = mid + 1
-            } else {
-              highQ = mid - 1
-            }
-          }
-          bw = bmp.width
-          bh = bmp.height
-          if (fitBytes != null) {
-            best = fitBytes
-            bq = fitQ
-            bmp.recycle()
-            break
-          }
-          // Too big even at MIN_Q: keep it as a last resort, then try a smaller size
-          best = jpeg(bmp, MIN_Q)
-          bq = MIN_Q
-          bmp.recycle()
-          if (edge <= 64) break
-          edge = max(64, (edge * 0.85f).roundToInt())
-        }
-        upright.recycle()
-        val out = best ?: throw IllegalStateException("No output")
-        val map = Arguments.createMap()
-        map.putString("base64", Base64.encodeToString(out, Base64.NO_WRAP))
-        map.putInt("width", bw)
-        map.putInt("height", bh)
-        map.putInt("bytes", out.size)
-        map.putInt("quality", bq)
         promise.resolve(map)
       } catch (e: Throwable) {
         promise.reject("RESIZE_FAILED", e.message ?: "Could not read the photo", e)
       }
     }.start()
+  }
+
+  private fun work(uri: String, maxEdge: Int, maxBytes: Int, amount: Float): com.facebook.react.bridge.WritableMap {
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    open(uri).use { BitmapFactory.decodeStream(it, null, bounds) }
+    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) throw IllegalArgumentException("Not an image")
+    // Power-of-two subsampling while the decoded long edge stays >= 2x maxEdge (saves memory,
+    // leaves the filtered downscale enough pixels to work with)
+    var sample = 1
+    val long = max(bounds.outWidth, bounds.outHeight)
+    while (long / (sample * 2) >= maxEdge * 2) sample *= 2
+    val opts = BitmapFactory.Options().apply {
+      inSampleSize = sample
+      inPreferredConfig = Bitmap.Config.ARGB_8888
+    }
+    val decoded = open(uri).use { BitmapFactory.decodeStream(it, null, opts) }
+      ?: throw IllegalArgumentException("Could not decode the photo")
+    val upright = rotate(decoded, orientation(uri))
+    // One filtered downscale to maxEdge (never larger than the original), then the big decode is
+    // freed; smaller retries start from this copy.
+    val base = fit(upright, maxEdge)
+    if (base != upright) upright.recycle()
+
+    var edge = max(base.width, base.height)
+    var best: ByteArray? = null
+    var bestMime = mime()
+    var bw = 0
+    var bh = 0
+    var bq = 0
+    for (round in 0 until 8) {
+      val bmp = if (round == 0) base.copy(Bitmap.Config.ARGB_8888, true) else fit(base, edge)
+      enhance(bmp, amount)
+      // Highest quality in [MIN_Q, MAX_Q] that fits maxBytes
+      var fitBytes: ByteArray? = null
+      var fitMime = mime()
+      var fitQ = 0
+      var lowQ = MIN_Q
+      var highQ = MAX_Q
+      while (lowQ <= highQ) {
+        val mid = (lowQ + highQ) / 2
+        val b = encode(bmp, mid)
+        if (b.size <= maxBytes) {
+          fitBytes = b
+          fitMime = mime()
+          fitQ = mid
+          lowQ = mid + 1
+        } else {
+          highQ = mid - 1
+        }
+      }
+      bw = bmp.width
+      bh = bmp.height
+      if (fitBytes != null) {
+        best = fitBytes
+        bestMime = fitMime
+        bq = fitQ
+        bmp.recycle()
+        break
+      }
+      // Too big even at MIN_Q: keep it as a last resort, then try a smaller size
+      best = encode(bmp, MIN_Q)
+      bestMime = mime()
+      bq = MIN_Q
+      bmp.recycle()
+      if (edge <= 64) break
+      edge = max(64, (edge * 0.85f).roundToInt())
+    }
+    base.recycle()
+    val out = best ?: throw IllegalStateException("No output")
+    val map = Arguments.createMap()
+    map.putString("base64", Base64.encodeToString(out, Base64.NO_WRAP))
+    map.putString("mime", bestMime)
+    map.putInt("width", bw)
+    map.putInt("height", bh)
+    map.putInt("bytes", out.size)
+    map.putInt("quality", bq)
+    return map
   }
 
   companion object {
