@@ -8,7 +8,7 @@ import { useAuth } from '../../context/AuthContext';
 import useIsAdmin from '../../hooks/useIsAdmin';
 import PostCard from '../../components/PostCard';
 import ZoomableImage from '../../components/ZoomableImage';
-import { getPost, getWardrobeAsPost, Post } from '../../services/feedApi';
+import { cachedPost, getPost, getWardrobeAsPost, Post } from '../../services/feedApi';
 
 export default function PostDetailScreen({ navigation, route }: { navigation: any; route: any }) {
   const kind: 'post' | 'wardrobe' = route?.params?.kind === 'wardrobe' ? 'wardrobe' : 'post';
@@ -16,10 +16,12 @@ export default function PostDetailScreen({ navigation, route }: { navigation: an
   const { user } = useAuth();
   const { isAdmin } = useIsAdmin(user?.id);
   const { width } = useWindowDimensions();
-  const [post, setPost] = useState<Post | null | undefined>(undefined);
+  // Opened from a list: the light doc is already in memory (no read)
+  const [post, setPost] = useState<Post | null | undefined>(() => cachedPost(kind, id) || undefined);
   const [viewer, setViewer] = useState<{ photos: string[]; index: number } | null>(null);
 
   useEffect(() => {
+    if (cachedPost(kind, id)) return;
     let alive = true;
     const p = kind === 'post' ? getPost(id).catch(() => null) : getWardrobeAsPost(id);
     p.then(x => alive && setPost(x));
@@ -51,6 +53,7 @@ export default function PostDetailScreen({ navigation, route }: { navigation: an
             width={width}
             myUid={user?.id}
             isAdmin={isAdmin}
+            detail
             onDeleted={() => navigation.goBack()}
             onOpenPhoto={(photos, index) => setViewer({ photos, index })}
           />

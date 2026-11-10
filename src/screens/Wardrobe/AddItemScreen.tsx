@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -23,6 +23,7 @@ import {
   addWardrobeItem as apiAddWardrobeItem,
   updateWardrobeItem as apiUpdateWardrobeItem,
   analyzeClothingPhoto,
+  getWardrobeFullImage,
 } from '../../services/wardrobeApi';
 import { pickImage } from '../../utils/imagePicker';
 import {
@@ -88,7 +89,19 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
 
   // imageUri holds a base64 data URI (new photo) or the saved imageData
   const [imageUri, setImageUri]               = useState<string | null>(itemToEdit?.imageUrl || null);
+  const [imageThumb, setImageThumb]           = useState<string | null>(null);
   const [imageChanged, setImageChanged]       = useState(false);
+  // Editing: the list holds the thumbnail; show the full photo (1 read) once it loads
+  useEffect(() => {
+    if (!itemToEdit?.hasMedia) return;
+    let alive = true;
+    getWardrobeFullImage(itemToEdit).then(full => {
+      if (alive && full) setImageUri(prev => (prev === itemToEdit.imageUrl ? full : prev));
+    });
+    return () => {
+      alive = false;
+    };
+  }, [itemToEdit]);
   // New items from a public profile default to the public feed
   const [isPublic, setIsPublic]               = useState<boolean>(
     itemToEdit ? itemToEdit.isPublic === true : user?.isPublic !== false,
@@ -203,6 +216,7 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
       const picked = await pickImage(source);
       if (!picked) return;
       setImageUri(picked.dataUri);
+      setImageThumb(picked.thumbUri || null);
       setImageChanged(true);
       if (picked.uri) triggerAIAnalysis(picked.uri);
     } catch (e: any) {
@@ -273,6 +287,7 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
         isPublic,
         // Only send the image when it is new (avoids rewriting the same data)
         imageUri: isEditing ? (imageChanged ? imageUri : undefined) : imageUri,
+        imageThumb: imageChanged || !isEditing ? imageThumb : undefined,
       };
 
       const savedItem = isEditing && itemToEdit?.id

@@ -1,12 +1,13 @@
 // Public feed: posts/{id} with likes at posts/{id}/likes/{uid}, dislikes at posts/{id}/dislikes/{uid}
-// and comments at posts/{id}/comments/{cid}. Photo is a base64 data URI (no Storage).
+// and comments at posts/{id}/comments/{cid}. Photos are base64 data URIs (no Storage on Spark).
+// Light doc + media doc (since the free-tier pass): posts/{id} keeps ~200 px thumbnails in
+// imageData / morePhotos (+ media: 1), and posts/{id}/media/full {photos: [full A, B...]} holds the
+// ~1080 px photos, read only on the detail screen. Older posts have full photos inline (no media).
 import {
   collection,
   doc,
   getDoc,
   getDocs,
-  addDoc,
-  deleteDoc,
   query,
   where,
   orderBy,
@@ -39,8 +40,9 @@ export interface Post {
   userId: string;
   userName: string;
   userAvatar: string | null;
-  imageData: string; // first photo (A)
-  photos: string[]; // all photos A..F (1 for a normal post)
+  imageData: string; // first photo (A): thumbnail on new posts, full photo on older ones
+  photos: string[]; // all photos A..F (1 for a normal post), same sizes as imageData
+  hasMedia: boolean; // full-size photos are in {posts|wardrobe}/{id}/media/full
   caption: string;
   likeCount: number;
   commentCount: number;
@@ -52,6 +54,15 @@ export const OPTION_LABELS = ['A', 'B', 'C', 'D', 'E', 'F'];
 export const MAX_POST_PHOTOS = 6;
 // Whole post doc must stay under Firestore's 1 MiB
 export const MAX_POST_TOTAL_CHARS = 900000;
+// One thumbnail (THUMB_SPEC ~12 KB) with slack for a picker that overshoots
+const MAX_THUMB_CHARS = 40000;
+export const MEDIA_FULL = 'full';
+
+// A photo to post: full size + thumbnail (thumb missing = older picker: stored inline)
+export interface PostPhoto {
+  full: string;
+  thumb?: string;
+}
 
 export type FeedCursor = QueryDocumentSnapshot<DocumentData> | null;
 
@@ -68,6 +79,7 @@ const toPost = (id: string, d: any): Post => ({
   photos: [d?.imageData || '', ...(Array.isArray(d?.morePhotos) ? d.morePhotos : [])]
     .filter((x: any) => typeof x === 'string' && x)
     .slice(0, MAX_POST_PHOTOS),
+  hasMedia: d?.media === 1,
   caption: d?.caption || '',
   likeCount: typeof d?.likeCount === 'number' ? Math.max(0, d.likeCount) : 0,
   // Older posts have no commentCount: treat as 0
@@ -105,62 +117,124 @@ export const getFeedPage = async (
 export const getUserPosts = async (userId: string): Promise<Post[]> => {
   try {
     const snap = await getDocs(query(collection(db, POSTS), where('userId', '==', userId), limit(120)));
-    return snap.docs
+    const list = snap.docs
       .map(d => toPost(d.id, d.data()))
       .sort((a, b) => (b.createdAt?.getTime() || 0) - (a.createdAt?.getTime() || 0));
+    rememberPosts(list);
+    return list;
   } catch (e: any) {
     return fail(e, 'Loading posts');
   }
 };
 
 // One photo = normal post. 2-6 photos = A/B/C... vote post (photos B.. go in morePhotos).
+// New layout: thumbnails on the post, full photos in posts/{id}/media/full, one batch.
 export const createPost = async (
   me: { uid: string; name?: string | null; avatar?: string | null },
-  images: string | string[],
+  images: string | (string | PostPhoto)[],
   caption: string,
 ): Promise<void> => {
-  const list = (Array.isArray(images) ? images : [images]).filter(Boolean);
+  const list: PostPhoto[] = (Array.isArray(images) ? images : [images])
+    .filter(Boolean)
+    .map(x => (typeof x === 'string' ? { full: x } : x));
   if (!list.length) throw new Error('Pick a photo first.');
   if (list.length > MAX_POST_PHOTOS) throw new Error(`Up to ${MAX_POST_PHOTOS} photos per post.`);
   list.forEach(img => {
-    if (!/^data:image\//.test(img)) throw new Error('Photo could not be read. Please pick it again.');
-    if (img.length > MAX_BASE64_CHARS + 100) {
+    if (!/^data:image\//.test(img.full)) throw new Error('Photo could not be read. Please pick it again.');
+    if (img.full.length > MAX_BASE64_CHARS + 100) {
       throw new Error('This photo is too large to post. Please pick a smaller photo.');
     }
   });
-  const total = list.reduce((n, x) => n + x.length, 0);
+  const total = list.reduce((n, x) => n + x.full.length, 0);
   if (total > MAX_POST_TOTAL_CHARS) {
     throw new Error('These photos are too large together. Remove one or pick smaller photos.');
   }
   assertClean(caption, 'Please keep captions respectful 🙏');
+  // Split only when every photo has a small thumbnail
+  const split = list.every(x => !!x.thumb && /^data:image\//.test(x.thumb) && x.thumb.length <= MAX_THUMB_CHARS);
+  const shown = split ? list.map(x => x.thumb as string) : list.map(x => x.full);
   try {
     const data: any = {
       userId: me.uid,
       userName: (me.name || '').trim() || 'Outfit user',
       userAvatar: inlineAvatar(me.avatar),
-      imageData: list[0],
+      imageData: shown[0],
       caption: caption.trim().slice(0, 500),
       likeCount: 0,
       commentCount: 0,
       isPublic: true,
       createdAt: serverTimestamp(),
     };
-    if (list.length > 1) data.morePhotos = list.slice(1);
-    await addDoc(collection(db, POSTS), data);
+    if (shown.length > 1) data.morePhotos = shown.slice(1);
+    const ref = doc(collection(db, POSTS));
+    const b = writeBatch(db);
+    if (split) {
+      data.media = 1;
+      b.set(ref, data);
+      b.set(doc(db, POSTS, ref.id, 'media', MEDIA_FULL), {
+        photos: list.map(x => x.full),
+        userId: me.uid,
+        createdAt: serverTimestamp(),
+      });
+    } else {
+      b.set(ref, data);
+    }
+    await b.commit();
     recordTask(me.uid, 'uploaded'); // daily task (never throws)
   } catch (e: any) {
     fail(e, 'Posting');
   }
 };
 
-// Author or admin. Like docs under it are left behind (harmless; no Cloud Functions on Spark).
+// Author or admin; the media doc goes in the same batch. Like docs under it are left behind
+// (harmless; no Cloud Functions on Spark).
 export const deletePost = async (postId: string): Promise<void> => {
   try {
-    await deleteDoc(doc(db, POSTS, postId));
+    const b = writeBatch(db);
+    b.delete(doc(db, POSTS, postId, 'media', MEDIA_FULL));
+    b.delete(doc(db, POSTS, postId));
+    await b.commit();
+    forgetFullPhotos('post', postId);
   } catch (e: any) {
     fail(e, 'Deleting post');
   }
 };
+
+// ── Full-size photos (detail screen only) ───────────────────────────────
+const fullCache = new Map<string, string[]>();
+const FULL_CACHE_MAX = 30;
+const forgetFullPhotos = (kind: FeedKind, id: string) => fullCache.delete(`${kind}_${id}`);
+
+// Full photos of a post / wardrobe photo (1 read, cached for the session). Older items without a
+// media doc already hold them inline. Never throws: falls back to the thumbnails.
+export const getFullPhotos = async (post: Post): Promise<string[]> => {
+  if (!post.hasMedia) return post.photos;
+  const key = `${post.kind}_${post.id}`;
+  const hit = fullCache.get(key);
+  if (hit) return hit;
+  try {
+    const s = await getDoc(doc(db, post.kind === 'post' ? POSTS : 'wardrobe', post.id, 'media', MEDIA_FULL));
+    const d: any = s.exists() ? s.data() : null;
+    const arr: string[] = (post.kind === 'post' ? (Array.isArray(d?.photos) ? d.photos : []) : [d?.imageData])
+      .filter((x: any) => typeof x === 'string' && x);
+    if (!arr.length) return post.photos;
+    const out = post.photos.map((thumb, i) => arr[i] || thumb);
+    if (fullCache.size >= FULL_CACHE_MAX) fullCache.delete(fullCache.keys().next().value as string);
+    fullCache.set(key, out);
+    return out;
+  } catch (e: any) {
+    console.warn('full photo load failed:', e?.code, e?.message);
+    return post.photos;
+  }
+};
+
+// Posts already loaded in a list, so the detail screen opens without another read
+const postCache = new Map<string, Post>();
+export const rememberPosts = (list: Post[]) => {
+  list.forEach(p => postCache.set(`${p.kind}_${p.id}`, p));
+  while (postCache.size > 200) postCache.delete(postCache.keys().next().value as string);
+};
+export const cachedPost = (kind: FeedKind, id: string): Post | null => postCache.get(`${kind}_${id}`) || null;
 
 // ── "Likes" list: users/{uid}/liked/{p_|w_}{id} {kind, refId, createdAt} ──
 export const likedKey = (kind: FeedKind, id: string) => `${kind === 'post' ? 'p' : 'w'}_${id}`;
@@ -410,6 +484,7 @@ export const wardrobeToPost = (id: string, d: any, owner?: { name?: string; avat
     userAvatar: owner?.avatarUrl || null,
     imageData: img,
     photos: img ? [img] : [],
+    hasMedia: d?.media === 1,
     caption: label ? `👗 ${label}${d?.category && d?.name !== d?.category ? ` · ${d.category}` : ''}` : '',
     likeCount: 0,
     commentCount: 0,
@@ -571,7 +646,9 @@ export const getLikedItems = async (uid: string, max = 60): Promise<Post[]> => {
   const items = await Promise.all(
     refs.map(r => (r.kind === 'post' ? getPost(r.refId).catch(() => null) : getWardrobeAsPost(r.refId))),
   );
-  return items.filter((x): x is Post => !!x && !!x.imageData);
+  const out = items.filter((x): x is Post => !!x && !!x.imageData);
+  rememberPosts(out);
+  return out;
 };
 
 // ── Mixed feed: public posts + public wardrobe photos, newest first, only from public profiles ──
@@ -676,6 +753,7 @@ export class FeedLoader {
         if (w.imageData) out.push(w);
       }
     });
+    rememberPosts(out);
     return out;
   }
 }
@@ -687,10 +765,12 @@ export const getUserPublicWardrobePosts = async (userId: string): Promise<Post[]
       query(collection(db, 'wardrobe'), where('userId', '==', userId), where('isPublic', '==', true)),
     );
     const owner = await getUserLite(userId);
-    return snap.docs
+    const list = snap.docs
       .map(d => wardrobeToPost(d.id, d.data(), owner))
       .filter(p => !!p.imageData)
       .sort((a, b) => (b.createdAt?.getTime() || 0) - (a.createdAt?.getTime() || 0));
+    rememberPosts(list);
+    return list;
   } catch (e: any) {
     return fail(e, 'Loading wardrobe');
   }

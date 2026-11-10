@@ -41,10 +41,10 @@ export default function WardrobeCategoryScreen({ navigation, route }: { navigati
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (force = false) => {
     if (!user?.id) return;
     try {
-      const all = await getWardrobeItems(user.id);
+      const all = await getWardrobeItems(user.id, { force });
       setItems(all.filter(i => inCategory(i.category, category)));
       setError(null);
     } catch (e: any) {
@@ -138,7 +138,7 @@ export default function WardrobeCategoryScreen({ navigation, route }: { navigati
             refreshing={refreshing}
             onRefresh={() => {
               setRefreshing(true);
-              load();
+              load(true);
             }}
             tintColor={colors.primary}
             colors={[colors.primary]}

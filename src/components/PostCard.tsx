@@ -27,6 +27,7 @@ import {
   castPostVote,
   deletePost,
   getDislikeState,
+  getFullPhotos,
   getLikedPostIds,
   getPostVotes,
   getWardrobeStats,
@@ -48,9 +49,12 @@ interface Props {
   onDeleted?: (post: Post) => void;
   // Single tap on a photo (after the double-tap-to-like window) opens it full screen
   onOpenPhoto?: (photos: string[], index: number) => void;
+  // Detail screen: loads the full-size photos (lists and the feed show the thumbnails only;
+  // a single tap on the photo in a list opens the detail screen)
+  detail?: boolean;
 }
 
-export default function PostCard({ post, width, myUid, isAdmin, onDeleted, onOpenPhoto }: Props) {
+export default function PostCard({ post, width, myUid, isAdmin, onDeleted, onOpenPhoto, detail }: Props) {
   const navigation = useNavigation<any>();
   const { user: me } = useAuth();
   const [liked, setLiked] = useState(false);
@@ -73,10 +77,22 @@ export default function PostCard({ post, width, myUid, isAdmin, onDeleted, onOpe
     },
     [],
   );
+  const [shownPhotos, setShownPhotos] = useState<string[]>(post.photos);
   const heart = useRef(new Animated.Value(0)).current;
   const multi = post.kind === 'post' && post.photos.length > 1;
   const isMine = !!myUid && post.userId === myUid;
   const canFollow = !!myUid && !!post.userId && !isMine;
+
+  // Full-size photos on the detail screen only (1 read; older posts already hold them)
+  useEffect(() => {
+    setShownPhotos(post.photos);
+    if (!detail || !post.hasMedia) return;
+    let alive = true;
+    getFullPhotos(post).then(p => alive && setShownPhotos(p));
+    return () => {
+      alive = false;
+    };
+  }, [detail, post]);
 
   // My like + counts
   useEffect(() => {
@@ -283,9 +299,16 @@ export default function PostCard({ post, width, myUid, isAdmin, onDeleted, onOpe
           openTimer.current = null;
           if (lastTap.current === now) {
             lastTap.current = 0;
-            onOpenPhoto(post.photos.length ? post.photos : [post.imageData], index);
+            onOpenPhoto(shownPhotos.length ? shownPhotos : [post.imageData], index);
           }
         }, 310);
+      } else if (!detail) {
+        // Single tap in a list: open the full-size photo (after the double-tap window)
+        if (openTimer.current) clearTimeout(openTimer.current);
+        openTimer.current = setTimeout(() => {
+          openTimer.current = null;
+          navigation.navigate('PostDetail', { kind: post.kind, id: post.id });
+        }, 300);
       }
     }
   };
@@ -375,10 +398,10 @@ export default function PostCard({ post, width, myUid, isAdmin, onDeleted, onOpe
             showsHorizontalScrollIndicator={false}
             onMomentumScrollEnd={onScrollEnd}
             nestedScrollEnabled>
-            {post.photos.map(photo)}
+            {shownPhotos.map(photo)}
           </ScrollView>
         ) : (
-          photo(post.imageData, 0)
+          photo(shownPhotos[0] || post.imageData, 0)
         )}
         <Animated.Text
           pointerEvents="none"

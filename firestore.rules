@@ -347,6 +347,22 @@ service cloud.firestore {
         allow delete: if signedIn()
           && (resource.data.userId == me() || itemData().userId == me() || isAdmin());
       }
+
+      // ── Full-size photo: wardrobe/{id}/media/full {imageData, userId, updatedAt} ──
+      // The item itself keeps only a ~200 px thumbnail (media: 1). Written by the owner in the
+      // same batch as the item; read only by the detail / edit screen.
+      match /media/{mid} {
+        allow read: if signedIn() && itemVisible();
+        allow create, update: if signedIn() && mid == 'full'
+          && getAfter(/databases/$(db)/documents/wardrobe/$(itemId)).data.userId == me()
+          && request.resource.data.keys().hasOnly(['imageData', 'userId', 'updatedAt'])
+          && request.resource.data.userId == me()
+          && request.resource.data.imageData is string
+          && request.resource.data.imageData.size() <= 300000;
+        // In the same batch as the item delete (get() = before the batch), or a leftover of mine
+        allow delete: if signedIn()
+          && (itemData().userId == me() || isAdmin() || resource.data.userId == me());
+      }
     }
 
     // ── Invite codes: inviteCodes/{code} -> {circleId, createdBy} ──────────
@@ -579,6 +595,24 @@ service cloud.firestore {
           && photoCount() >= 2
           && request.resource.data.option in ['A', 'B', 'C', 'D', 'E', 'F'][0:photoCount()];
         allow delete: if signedIn() && (voterId == me() || get(postPath()).data.userId == me() || isAdmin());
+      }
+
+      // ── Full-size photos: posts/{postId}/media/full {photos: [A, B...], userId, createdAt} ──
+      // The post keeps ~200 px thumbnails (media: 1); written by the author in the same batch
+      // as the post, read only on the detail screen.
+      match /media/{mid} {
+        allow read: if signedIn();
+        allow create: if signedIn() && mid == 'full'
+          && getAfter(postPath()).data.userId == me()
+          && request.resource.data.keys().hasOnly(['photos', 'userId', 'createdAt'])
+          && request.resource.data.userId == me()
+          && request.resource.data.photos is list
+          && request.resource.data.photos.size() >= 1
+          && request.resource.data.photos.size() <= 6;
+        allow update: if false;
+        // With the post delete (get() = before the batch), or a leftover of mine
+        allow delete: if signedIn()
+          && (get(postPath()).data.userId == me() || isAdmin() || resource.data.userId == me());
       }
 
       // ── Comments: posts/{postId}/comments/{cid} {userId, userName, userAvatar, text, createdAt} ──

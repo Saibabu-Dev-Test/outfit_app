@@ -19,7 +19,7 @@ import { useAuth } from '../../context/AuthContext';
 import ProfileHeader, { headerButtonStyles as hb } from '../../components/ProfileHeader';
 import PhotoGrid from '../../components/PhotoGrid';
 import { getProfileCounts, ProfileCounts } from '../../services/socialApi';
-import { getLikedItems, getUserPosts, Post } from '../../services/feedApi';
+import { getLikedItems, getUserPosts, Post, rememberPosts } from '../../services/feedApi';
 import { getWardrobeItems } from '../../services/wardrobeApi';
 import { getUserProfile } from '../../services/userApi';
 import { countFriendsJoined, isWeeklyStar, joinedWithLinkText } from '../../services/rewardsApi';
@@ -58,8 +58,7 @@ export default function MeScreen({ navigation }: { navigation: any }) {
     ]);
     setCounts(c);
     setPosts(p);
-    setWardrobe(
-      w
+    const wardrobePosts: Post[] = w
         .filter(i => !!i.imageUrl)
         .map(i => ({
           id: i.id,
@@ -69,12 +68,14 @@ export default function MeScreen({ navigation }: { navigation: any }) {
           userAvatar: user?.avatarUrl || null,
           imageData: i.imageUrl || '',
           photos: [i.imageUrl || ''],
+          hasMedia: i.hasMedia,
           caption: i.name,
           likeCount: 0,
           commentCount: 0,
           createdAt: i.createdAt ? new Date(i.createdAt) : null,
-        })),
-    );
+        }));
+    rememberPosts(wardrobePosts);
+    setWardrobe(wardrobePosts);
     if (Object.keys(prof).length) {
       updateUserData({ bio: prof.bio, stylePrefs: prof.stylePrefs, isPublic: prof.isPublic !== false });
     }
