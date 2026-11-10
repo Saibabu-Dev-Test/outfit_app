@@ -49,7 +49,7 @@ export const fetchAstroDetails = async (uid: string, profile: AstroProfile, r: D
     .filter(Boolean)
     .join('\n');
   const { text } = await askStylist(uid, [{ role: 'user', text: `Today's facts:\n${facts}\n\nGive me more details for today.` }], {
-    language: r.lang,
+    language: r.lang === 'Telugu' || r.lang === 'Hindi' ? r.lang : 'English',
     system: SYSTEM(r.lang),
   });
   const out = text.trim();

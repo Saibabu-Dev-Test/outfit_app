@@ -2,10 +2,14 @@
 // the day / coming soon (services/festivals.ts), and an optional one-a-day AI "More details".
 // Everything shows instantly from the phone; nothing here needs the network except "More details".
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, TouchableOpacity, Image, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, Image, ActivityIndicator, StyleSheet, Switch } from 'react-native';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles } from '../theme';
 import { useDayKey } from '../hooks/useDayKey';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AstroLang, AstroProfile, astroLanguage, dailyReading } from '../services/astrologyDaily';
+import { LABELS } from '../i18n/astroLabels';
+import { colourName, LANG_META } from '../i18n/astroNames';
+import { proseFor } from '../i18n/astroProse';
 import { festivalsAround, festivalText, FestivalHit } from '../services/festivals';
 import { astroAiAvailable, fetchAstroDetails, getCachedAstroDetails } from '../services/astrologyAi';
 import type { WardrobeItemResponse } from '../services/wardrobeApi';
@@ -17,56 +21,7 @@ interface Props {
   onEditProfile: () => void;
 }
 
-const L: Record<AstroLang, Record<string, string>> = {
-  English: {
-    panchang: "Today's panchang",
-    jathakam: 'As per your jathakam today',
-    mood: 'How to be today',
-    do: 'Good to do',
-    avoid: 'Better to avoid',
-    lucky: 'Lucky time',
-    calm: 'Pause time',
-    dress: 'What to wear today',
-    fromWardrobe: 'From your wardrobe',
-    festivalToday: 'Festival today',
-    upcoming: 'Coming up',
-    inDays: 'in {n} days',
-    tomorrow: 'tomorrow',
-    next: 'Next festival: {name} · {date} ({n} days)',
-    celebrate: 'How to celebrate',
-    wear: 'What to wear',
-    needDob: 'Add your date of birth (and time of birth, if you know it) so I can read your moon sign and star. Today\'s panchang and lucky colours are below.',
-    edit: 'Edit profile',
-    more: '✨ More details',
-    moreLoading: 'Reading the stars…',
-    moreFail: 'More details are not available right now. Your reading above is complete for today.',
-    disclaimer: 'Traditional guidance for a positive day (Lahiri, Hyderabad sunrise). Your choices shape your day!',
-  },
-  Telugu: {
-    panchang: 'నేటి పంచాంగం',
-    jathakam: 'మీ జాతకం ప్రకారం ఈ రోజు',
-    mood: 'ఈ రోజు ఎలా ఉండాలి',
-    do: 'చేయదగినవి',
-    avoid: 'దూరంగా ఉంచదగినవి',
-    lucky: 'శుభ సమయం',
-    calm: 'విరామ సమయం',
-    dress: 'ఈ రోజు ఏ దుస్తులు',
-    fromWardrobe: 'మీ వార్డ్‌రోబ్ నుండి',
-    festivalToday: 'ఈ రోజు పండుగ',
-    upcoming: 'త్వరలో',
-    inDays: '{n} రోజుల్లో',
-    tomorrow: 'రేపు',
-    next: 'తదుపరి పండుగ: {name} · {date} ({n} రోజులు)',
-    celebrate: 'ఎలా జరుపుకోవాలి',
-    wear: 'ఏ దుస్తులు ధరించాలి',
-    needDob: 'మీ రాశి, నక్షత్రం తెలుసుకోవడానికి పుట్టిన తేదీ (తెలిస్తే పుట్టిన సమయం కూడా) చేర్చండి. నేటి పంచాంగం, అదృష్ట రంగులు కింద ఉన్నాయి.',
-    edit: 'Edit profile',
-    more: '✨ మరిన్ని వివరాలు',
-    moreLoading: 'గ్రహాలను చదువుతున్నాం…',
-    moreFail: 'మరిన్ని వివరాలు ఇప్పుడు అందుబాటులో లేవు. పైన ఉన్న ఫలితం ఈ రోజుకి పూర్తి.',
-    disclaimer: 'సానుకూలమైన రోజు కోసం సంప్రదాయ సూచనలు (లాహిరి, హైదరాబాద్ సూర్యోదయం). మీ నిర్ణయాలే మీ రోజును తీర్చిదిద్దుతాయి!',
-  },
-};
+const SHOW_EN_KEY = 'outfit.astro.showEnglish';
 const fill = (t: string, v: Record<string, string | number>) => t.replace(/\{(\w+)\}/g, (_, k) => String(v[k] ?? ''));
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const shortDate = (k: string) => {
@@ -76,15 +31,41 @@ const shortDate = (k: string) => {
 
 export default function AstrologyPanel({ uid, profile, wardrobe, onEditProfile }: Props) {
   const dayKey = useDayKey();
-  const [lang, setLang] = useState<AstroLang>(astroLanguage(profile.language));
-  useEffect(() => setLang(astroLanguage(profile.language)), [profile.language]);
-  const t = L[lang];
+  const appLang = astroLanguage(profile.language);
+  const [lang, setLang] = useState<AstroLang>(appLang);
+  useEffect(() => setLang(appLang), [appLang]);
+  const t = { ...LABELS[lang], ...proseFor(lang).t } as Record<string, string>;
+  const rtl = LANG_META[lang].rtl;
+  // "Show English too": English text under the chosen language (default on for non-English)
+  const [showEn, setShowEn] = useState(true);
+  useEffect(() => {
+    AsyncStorage.getItem(SHOW_EN_KEY)
+      .then(v => setShowEn(v !== '0'))
+      .catch(() => undefined);
+  }, []);
+  const toggleEn = (v: boolean) => {
+    setShowEn(v);
+    AsyncStorage.setItem(SHOW_EN_KEY, v ? '1' : '0').catch(() => undefined);
+  };
+  const bi = lang !== 'English' && showEn;
 
   // Pure and instant: recomputed only when the day, language or profile changes
   const reading = useMemo(
     () => dailyReading(profile, { uid, lang, wardrobe }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [uid, lang, dayKey, profile.dob, profile.timeOfBirth, profile.rashi, profile.gender, profile.name, wardrobe],
+    [uid, lang, dayKey, profile.dob, profile.timeOfBirth, profile.placeOfBirth, profile.rashi, profile.gender, profile.name, wardrobe],
+  );
+  const en = useMemo(
+    () => (bi ? dailyReading(profile, { uid, lang: 'English', wardrobe }) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [bi, uid, dayKey, profile.dob, profile.timeOfBirth, profile.placeOfBirth, profile.rashi, profile.gender, profile.name, wardrobe],
+  );
+  // Text in the chosen language, with the English line under it when "Show English too" is on
+  const Bi = ({ text, enText, style }: { text: string; enText?: string | null; style?: any }) => (
+    <View>
+      <Text style={[style, rtl && styles.rtl]}>{text}</Text>
+      {bi && enText && enText !== text ? <Text style={styles.enLine}>{enText}</Text> : null}
+    </View>
   );
   const fest = useMemo(() => festivalsAround(new Date(), 7), [dayKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -113,12 +94,15 @@ export default function AstrologyPanel({ uid, profile, wardrobe, onEditProfile }
     }
   };
 
-  const swatches = (cs: { name: string; hex: string }[]) => (
+  const swatches = (cs: { name: string; hex: string; en?: string }[]) => (
     <View style={styles.swatches}>
       {cs.map(c => (
         <View key={c.name + c.hex} style={styles.swatch}>
           <View style={[styles.dot, { backgroundColor: c.hex }]} />
-          <Text style={styles.swatchText}>{c.name}</Text>
+          <Text style={styles.swatchText}>
+            {c.name}
+            {bi && c.en && c.en !== c.name ? ` (${c.en})` : ''}
+          </Text>
         </View>
       ))}
     </View>
@@ -126,20 +110,19 @@ export default function AstrologyPanel({ uid, profile, wardrobe, onEditProfile }
 
   const festivalCard = (h: FestivalHit) => {
     const f = festivalText(h.festival, lang);
+    const fe = festivalText(h.festival, 'English');
     return (
       <View key={h.festival.id + h.date} style={[styles.card, styles.festCard]}>
         <Text style={styles.festTag}>
           {h.inDays === 0 ? t.festivalToday : `${t.upcoming} · ${h.inDays === 1 ? t.tomorrow : fill(t.inDays, { n: h.inDays })}`}
         </Text>
-        <Text style={styles.festName}>
-          {h.festival.emoji} {f.name} · {shortDate(h.date)}
-        </Text>
-        <Text style={styles.body}>{f.about}</Text>
+        <Bi style={styles.festName} text={`${h.festival.emoji} ${f.name} · ${shortDate(h.date)}`} enText={`${fe.name} · ${shortDate(h.date)}`} />
+        <Bi style={styles.body} text={f.about} enText={fe.about} />
         <Text style={styles.sub}>{t.celebrate}</Text>
-        <Text style={styles.body}>{f.celebrate}</Text>
+        <Bi style={styles.body} text={f.celebrate} enText={fe.celebrate} />
         <Text style={styles.sub}>{t.wear}</Text>
-        <Text style={styles.body}>{f.wear}</Text>
-        {swatches(h.festival.colours)}
+        <Bi style={styles.body} text={f.wear} enText={fe.wear} />
+        {swatches(h.festival.colours.map(c => ({ name: colourName(c.name, lang), en: c.name, hex: c.hex })))}
       </View>
     );
   };
@@ -153,19 +136,25 @@ export default function AstrologyPanel({ uid, profile, wardrobe, onEditProfile }
           {reading.greeting}
         </Text>
         <View style={styles.langRow}>
-          {(['English', 'Telugu'] as AstroLang[]).map(l => (
+          {(appLang === 'English' ? (['English'] as AstroLang[]) : (['English', appLang] as AstroLang[])).map(l => (
             <TouchableOpacity key={l} style={[styles.langBtn, lang === l && styles.langOn]} onPress={() => setLang(l)}>
-              <Text style={[styles.langText, lang === l && styles.langTextOn]}>{l === 'English' ? 'EN' : 'తె'}</Text>
+              <Text style={[styles.langText, lang === l && styles.langTextOn]}>{LANG_META[l].short}</Text>
             </TouchableOpacity>
           ))}
         </View>
       </View>
+      {lang !== 'English' ? (
+        <View style={styles.enRow}>
+          <Text style={styles.enLabel}>{t.showEnglish}{t.showEnglish !== LABELS.English.showEnglish ? ` · ${LABELS.English.showEnglish}` : ''}</Text>
+          <Switch value={showEn} onValueChange={toggleEn} />
+        </View>
+      ) : null}
 
       {shownFest.map(festivalCard)}
 
       {reading.needsDob ? (
         <View style={[styles.card, styles.askCard]}>
-          <Text style={styles.body}>{t.needDob}</Text>
+          <Bi style={styles.body} text={t.needDob} enText={proseFor('English').t.needDob} />
           <TouchableOpacity style={styles.askBtn} onPress={onEditProfile}>
             <Text style={styles.askBtnText}>{t.edit}</Text>
           </TouchableOpacity>
@@ -174,46 +163,67 @@ export default function AstrologyPanel({ uid, profile, wardrobe, onEditProfile }
 
       <View style={styles.card}>
         <Text style={styles.title}>🗓️ {t.panchang}</Text>
-        {reading.panchang.map(p => (
+        {reading.panchang.map((p, i) => (
           <View key={p.label} style={styles.row}>
             <Text style={styles.rowLabel}>{p.label}</Text>
-            <Text style={styles.rowValue}>{p.value}</Text>
+            <Text style={styles.rowValue}>
+              {p.value}
+              {bi && en && en.panchang[i] && en.panchang[i].value !== p.value ? `\n${en.panchang[i].value}` : ''}
+            </Text>
           </View>
         ))}
       </View>
 
+      {reading.chartRows.length ? (
+        <View style={styles.card}>
+          <Text style={styles.title}>🪐 {t.chart}</Text>
+          {reading.chartRows.map((r, i) => (
+            <View key={r.label} style={styles.row}>
+              <Text style={styles.rowLabel}>
+                {r.label}
+                {bi && en?.chartRows[i] ? `\n${en.chartRows[i].label}` : ''}
+              </Text>
+              <Text style={styles.rowValue}>
+                {r.value}
+                {bi && en?.chartRows[i] && en.chartRows[i].value !== r.value ? `\n${en.chartRows[i].value}` : ''}
+              </Text>
+            </View>
+          ))}
+        </View>
+      ) : null}
+
       <View style={styles.card}>
         <Text style={styles.title}>🔮 {t.jathakam}</Text>
-        {reading.rashiLine ? <Text style={styles.rashi}>{reading.rashiLine}</Text> : null}
+        {reading.rashiLine ? <Bi style={styles.rashi} text={reading.rashiLine} enText={en?.rashiLine} /> : null}
         <Text style={styles.stars}>{'★'.repeat(reading.stars)}{'☆'.repeat(5 - reading.stars)}</Text>
-        <Text style={styles.body}>{reading.overview}</Text>
+        <Bi style={styles.body} text={reading.overview} enText={en?.overview} />
         <Text style={styles.sub}>😊 {t.mood}</Text>
-        <Text style={styles.body}>{reading.mood}</Text>
+        <Bi style={styles.body} text={reading.mood} enText={en?.mood} />
         <Text style={styles.sub}>✅ {t.do}</Text>
-        {reading.doList.map(d => (
-          <Text key={d} style={styles.bullet}>• {d}</Text>
+        {reading.doList.map((d, i) => (
+          <Bi key={d} style={styles.bullet} text={`• ${d}`} enText={en ? `  ${en.doList[i] || ''}` : null} />
         ))}
         <Text style={styles.sub}>🙅 {t.avoid}</Text>
-        {reading.avoidList.map(d => (
-          <Text key={d} style={styles.bullet}>• {d}</Text>
+        {reading.avoidList.map((d, i) => (
+          <Bi key={d} style={styles.bullet} text={`• ${d}`} enText={en ? `  ${en.avoidList[i] || ''}` : null} />
         ))}
         <Text style={styles.sub}>⏰ {t.lucky}</Text>
-        <Text style={styles.body}>{reading.luckyTime}</Text>
+        <Bi style={styles.body} text={reading.luckyTime} enText={en?.luckyTime} />
         <Text style={styles.sub}>🧘 {t.calm}</Text>
-        <Text style={styles.body}>{reading.calmTime}</Text>
+        <Bi style={styles.body} text={reading.calmTime} enText={en?.calmTime} />
         {reading.note ? (
           <TouchableOpacity onPress={onEditProfile}>
-            <Text style={styles.note}>{reading.note}</Text>
+            <Bi style={styles.note} text={reading.note} enText={en?.note} />
           </TouchableOpacity>
         ) : null}
       </View>
 
       <View style={styles.card}>
         <Text style={styles.title}>👗 {t.dress}</Text>
-        <Text style={styles.dressTitle}>{reading.dress.title}</Text>
-        {swatches(reading.dress.colours)}
-        <Text style={styles.body}>{reading.dress.why}</Text>
-        <Text style={[styles.body, styles.idea]}>{reading.dress.idea}</Text>
+        <Bi style={styles.dressTitle} text={reading.dress.title} enText={en?.dress.title} />
+        {swatches(reading.dress.colours.map((c, i) => ({ ...c, en: en?.dress.colours[i]?.name })))}
+        <Bi style={styles.body} text={reading.dress.why} enText={en?.dress.why} />
+        <Bi style={[styles.body, styles.idea]} text={reading.dress.idea} enText={en?.dress.idea} />
         {reading.dress.pair ? (
           <View style={styles.pair}>
             <Text style={styles.sub}>{t.fromWardrobe}</Text>
@@ -233,8 +243,8 @@ export default function AstrologyPanel({ uid, profile, wardrobe, onEditProfile }
       </View>
 
       <View style={[styles.card, styles.crushCard]}>
-        <Text style={styles.title}>{reading.crush.title}</Text>
-        <Text style={styles.body}>{reading.crush.text}</Text>
+        <Bi style={styles.title} text={reading.crush.title} enText={en?.crush.title} />
+        <Bi style={styles.body} text={reading.crush.text} enText={en?.crush.text} />
       </View>
 
       {!fest.today.length && !fest.upcoming.length && fest.next ? (
@@ -246,7 +256,7 @@ export default function AstrologyPanel({ uid, profile, wardrobe, onEditProfile }
 
       {more ? (
         <View style={styles.card}>
-          <Text style={styles.title}>✨ {lang === 'Telugu' ? 'మరిన్ని వివరాలు' : 'More details'}</Text>
+          <Text style={styles.title}>{t.more}</Text>
           <Text style={styles.body}>{more}</Text>
         </View>
       ) : astroAiAvailable() && uid ? (
@@ -263,7 +273,7 @@ export default function AstrologyPanel({ uid, profile, wardrobe, onEditProfile }
       ) : null}
       {moreErr ? <Text style={styles.note}>{t.moreFail}</Text> : null}
 
-      <Text style={styles.disclaimer}>{t.disclaimer}</Text>
+      <Bi style={styles.disclaimer} text={t.disclaimer} enText={proseFor('English').t.disclaimer} />
     </View>
   );
 }
@@ -272,6 +282,10 @@ const styles = themedStyles(() => StyleSheet.create({
   wrap: { paddingHorizontal: spacing.base, paddingTop: spacing.md, paddingBottom: spacing.xxl },
   topRow: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.sm },
   greeting: { flex: 1, fontSize: fontSize.lg, fontWeight: fontWeight.extraBold, color: colors.textPrimary },
+  rtl: { writingDirection: 'rtl', textAlign: 'right' },
+  enLine: { fontSize: fontSize.sm, color: colors.textSecondary, marginTop: 2 },
+  enRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.sm },
+  enLabel: { fontSize: fontSize.sm, color: colors.textSecondary, flexShrink: 1 },
   langRow: { flexDirection: 'row', backgroundColor: colors.divider, borderRadius: borderRadius.full, padding: 2 },
   langBtn: { paddingHorizontal: spacing.md, paddingVertical: 4, borderRadius: borderRadius.full },
   langOn: { backgroundColor: colors.surface },

@@ -195,9 +195,10 @@ export const festivalsAround = (d: Date = new Date(), withinDays = 7): { today: 
   };
 };
 
+const tx = (r: Record<string, string>, lang: AstroLang) => r[lang] || r.English;
 export const festivalText = (f: Festival, lang: AstroLang) => ({
-  name: f.name[lang],
-  about: f.about[lang],
-  celebrate: f.celebrate[lang],
-  wear: f.wear[lang],
+  name: tx(f.name, lang),
+  about: tx(f.about, lang),
+  celebrate: tx(f.celebrate, lang),
+  wear: tx(f.wear, lang),
 });
