@@ -107,21 +107,35 @@ jobs:
           chmod +x gradlew
           ./gradlew signingReport | grep "SHA1" | head -n 1
 
-      # 5.8. Your own release key (outfit-release.p12, unlocked by the OUTFIT_KEYSTORE_PASSWORD secret)
+      # 5.8. Release signing key from secrets (nothing secret in the repo).
+      # Preferred: RELEASE_KEYSTORE_BASE64 (+ RELEASE_KEYSTORE_PASSWORD, RELEASE_KEY_ALIAS,
+      # RELEASE_KEY_PASSWORD), decoded to a temp file outside the repo.
+      # Legacy fallback until those exist: android/app/outfit-release.p12 + OUTFIT_KEYSTORE_PASSWORD.
       - name: Release signing key
         env:
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
           OUTFIT_KEYSTORE_PASSWORD: ${{ secrets.OUTFIT_KEYSTORE_PASSWORD }}
         run: |
-          if [ -z "$OUTFIT_KEYSTORE_PASSWORD" ]; then
-            echo "::error::Add the OUTFIT_KEYSTORE_PASSWORD secret. Without it the APK would be signed with the public debug key and Play Protect blocks it."
+          if [ -n "$RELEASE_KEYSTORE_BASE64" ] && [ -n "$RELEASE_KEYSTORE_PASSWORD" ]; then
+            umask 077
+            printf '%s' "$RELEASE_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.p12"
+            echo "RELEASE_KEYSTORE_FILE=$RUNNER_TEMP/release.p12" >> "$GITHUB_ENV"
+            echo "Release key: from RELEASE_KEYSTORE_BASE64 secret"
+          elif [ -n "$OUTFIT_KEYSTORE_PASSWORD" ] && [ -f android/app/outfit-release.p12 ]; then
+            echo "::warning::Using the legacy committed outfit-release.p12. Add the RELEASE_KEYSTORE_* secrets and delete the .p12 from the repo."
+          else
+            echo "::error::No release key: add RELEASE_KEYSTORE_BASE64 + RELEASE_KEYSTORE_PASSWORD (+ RELEASE_KEY_ALIAS, RELEASE_KEY_PASSWORD). Without it the APK would be signed with the public debug key and Play Protect blocks it."
             exit 1
           fi
-          echo "Release key: set"
 
       # 6. Build Android release APK
       - name: Build APK
         working-directory: android
         env:
+          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
           OUTFIT_KEYSTORE_PASSWORD: ${{ secrets.OUTFIT_KEYSTORE_PASSWORD }}
         # Retries: dependency downloads sometimes hit 504s; finished downloads stay cached between tries
         run: |
@@ -131,6 +145,10 @@ jobs:
             sleep 60
           done
           exit 1
+
+      - name: Remove decoded key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release.p12"
       # 6.5. One APK only (arm64-v8a) -> Outfit.apk
       - name: Collect APK
         run: |
