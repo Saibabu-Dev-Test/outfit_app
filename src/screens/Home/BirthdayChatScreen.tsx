@@ -3,8 +3,8 @@
 //     "@Name " and the tagged person gets a notification (services/birthdayApi.ts sendWish).
 //   mode 'circle': today's "Happy birthday to all" circle: chat + photos, only for people whose
 //     opted-in birthday is today; it is gone tomorrow (rules only allow that day).
-// Message box: same keyboard handling as circle chat (glued to the keyboard, above the nav bar).
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+// Message box: same keyboard handling as circle chat (KeyboardSafeView: sits right on the keyboard, above the nav bar).
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -18,8 +18,8 @@ import {
   ActivityIndicator,
   StatusBar,
 } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { KeyboardChatScrollView, KeyboardStickyView } from '../../components/keyboard';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import KeyboardSafeView from '../../components/KeyboardSafeView';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles, statusBarStyle } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
 import useIsAdmin from '../../hooks/useIsAdmin';
@@ -63,11 +63,6 @@ type Row = {
 
 export default function BirthdayChatScreen({ navigation, route }: { navigation: any; route: any }) {
   const mode: 'wishes' | 'circle' = route?.params?.mode === 'circle' ? 'circle' : 'wishes';
-  const bottomInset = useSafeAreaInsets().bottom;
-  const renderChatScroll = useCallback(
-    (props: any) => <KeyboardChatScrollView {...props} inverted offset={bottomInset} keyboardLiftBehavior="always" />,
-    [bottomInset],
-  );
   const { user } = useAuth();
   const uid = user?.id ? String(user.id) : '';
   const { isAdmin } = useIsAdmin(uid);
@@ -321,7 +316,6 @@ export default function BirthdayChatScreen({ navigation, route }: { navigation: 
         <FlatList
           data={rows}
           inverted
-          renderScrollComponent={renderChatScroll}
           keyExtractor={r => r.id}
           renderItem={renderRow}
           contentContainerStyle={styles.listContent}
@@ -333,7 +327,7 @@ export default function BirthdayChatScreen({ navigation, route }: { navigation: 
           }
         />
         {canWrite ? (
-          <KeyboardStickyView offset={{ closed: 0, opened: bottomInset }}>
+          <View>
             {replyTo ? (
               <View style={styles.replyBar}>
                 <Text style={styles.replyText} numberOfLines={1}>
@@ -371,7 +365,7 @@ export default function BirthdayChatScreen({ navigation, route }: { navigation: 
                 {sending ? <ActivityIndicator size="small" color={colors.textInverse} /> : <Text style={styles.sendText}>➤</Text>}
               </TouchableOpacity>
             </View>
-          </KeyboardStickyView>
+          </View>
         ) : mode === 'wishes' ? (
           <Text style={styles.closedNote}>Wishes open 7 days before the birthday.</Text>
         ) : null}
@@ -383,7 +377,7 @@ export default function BirthdayChatScreen({ navigation, route }: { navigation: 
     <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
       <StatusBar barStyle={statusBarStyle()} {...(Platform.OS === 'android' ? { backgroundColor: colors.surface } : {})} />
       {header}
-      <View style={styles.flex1}>{body}</View>
+      <KeyboardSafeView style={styles.flex1}>{body}</KeyboardSafeView>
       <ZoomableImage visible={!!viewer} images={viewer ? [viewer] : []} onClose={() => setViewer(null)} />
     </SafeAreaView>
   );

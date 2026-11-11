@@ -22,7 +22,7 @@ import {
   Switch,
   Linking,
 } from 'react-native';
-import { KeyboardAvoidingView } from '../../components/keyboard';
+import KeyboardSafeView from '../../components/KeyboardSafeView';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { useDayKey } from '../../hooks/useDayKey';
@@ -473,8 +473,8 @@ export default function CirclesScreen() {
         animationType="slide"
         transparent
         onRequestClose={() => setCreateOpen(false)}>
-        {/* Sheet bottom rides on the keyboard, frame by frame (react-native-keyboard-controller) */}
-        <KeyboardAvoidingView behavior="padding" style={styles.modalOverlay}>
+        {/* Sheet bottom sits right on the keyboard (KeyboardSafeView) */}
+        <KeyboardSafeView style={styles.modalOverlay}>
           <TouchableOpacity
             style={styles.flex1}
             activeOpacity={1}
@@ -554,7 +554,7 @@ export default function CirclesScreen() {
               </View>
             </ScrollView>
           </View>
-        </KeyboardAvoidingView>
+        </KeyboardSafeView>
       </Modal>
     </SafeAreaView>
   );

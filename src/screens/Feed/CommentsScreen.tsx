@@ -1,5 +1,5 @@
 // Comments on a feed post, a public wardrobe photo or a circle photo post: live list, add (bad-word filtered), long-press to report or delete
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -12,8 +12,8 @@ import {
   Platform,
   StatusBar,
 } from 'react-native';
-import { KeyboardChatScrollView, KeyboardStickyView } from '../../components/keyboard';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import KeyboardSafeView, { useKeyboardShown } from '../../components/KeyboardSafeView';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles, statusBarStyle } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
 import useIsAdmin from '../../hooks/useIsAdmin';
@@ -31,13 +31,6 @@ import { timeAgo } from '../../utils/date';
 import { logActivity } from '../../services/activityApi';
 
 export default function CommentsScreen({ navigation, route }: { navigation: any; route: any }) {
-  // Comment box sits above the nav bar while the keyboard is closed and slides up glued to the
-  // keyboard, frame by frame; the list lifts with it so the latest comments stay in view.
-  const bottomInset = useSafeAreaInsets().bottom;
-  const renderChatScroll = useCallback(
-    (props: any) => <KeyboardChatScrollView {...props} offset={bottomInset} keyboardLiftBehavior="always" />,
-    [bottomInset],
-  );
   // Old callers pass { postId }; new ones pass { target }
   const target: CommentTarget | null =
     route?.params?.target || (route?.params?.postId ? { kind: 'post', id: route.params.postId } : null);
@@ -56,6 +49,8 @@ export default function CommentsScreen({ navigation, route }: { navigation: any;
   const [sending, setSending] = useState(false);
   const [reportTarget, setReportTarget] = useState<ReportTarget | null>(null);
   const listRef = useRef<FlatList<Comment>>(null);
+  // Keyboard opened: the list got shorter, keep the latest comments in view
+  useKeyboardShown(() => setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 50));
 
   useEffect(() => {
     if (!target) return;
@@ -195,14 +190,14 @@ export default function CommentsScreen({ navigation, route }: { navigation: any;
         <Text style={styles.title}>Comments</Text>
       </View>
 
-      <View style={styles.flex1}>
+      {/* Comment box sits right on the keyboard (above the nav bar while it is closed) */}
+      <KeyboardSafeView style={styles.flex1}>
         {post === null ? (
           <Text style={styles.empty}>This post was deleted.</Text>
         ) : (
           <FlatList
             ref={listRef}
             data={comments}
-            renderScrollComponent={renderChatScroll}
             keyExtractor={c => c.id}
             renderItem={renderItem}
             contentContainerStyle={styles.list}
@@ -234,7 +229,6 @@ export default function CommentsScreen({ navigation, route }: { navigation: any;
         )}
 
         {post !== null ? (
-          <KeyboardStickyView offset={{ closed: 0, opened: bottomInset }}>
           <View style={styles.inputBar}>
             <TextInput
               style={styles.input}
@@ -254,9 +248,8 @@ export default function CommentsScreen({ navigation, route }: { navigation: any;
               )}
             </TouchableOpacity>
           </View>
-          </KeyboardStickyView>
         ) : null}
-      </View>
+      </KeyboardSafeView>
       <ReportModal target={reportTarget} reporterId={uid} onClose={() => setReportTarget(null)} />
     </SafeAreaView>
   );

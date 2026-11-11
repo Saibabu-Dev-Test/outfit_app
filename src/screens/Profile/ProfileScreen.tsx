@@ -14,7 +14,7 @@ import {
   TextInput,
   Image,
 } from 'react-native';
-import { KeyboardAvoidingView } from '../../components/keyboard';
+import KeyboardSafeView from '../../components/KeyboardSafeView';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { pickImage, AVATAR_PICK } from '../../utils/imagePicker';
@@ -981,8 +981,8 @@ const fetchProfile = async () => {
         animationType="slide"
         transparent={true}
         onRequestClose={() => setIsEditModalVisible(false)}>
-        {/* Sheet bottom rides on the keyboard, frame by frame (react-native-keyboard-controller) */}
-        <KeyboardAvoidingView behavior="padding" style={styles.modalOverlay}>
+        {/* Sheet bottom sits right on the keyboard (KeyboardSafeView) */}
+        <KeyboardSafeView style={styles.modalOverlay}>
           <TouchableOpacity
             style={styles.backdropPressable}
             activeOpacity={1}
@@ -1231,7 +1231,7 @@ const fetchProfile = async () => {
               </TouchableOpacity>
             </View>
           </View>
-        </KeyboardAvoidingView>
+        </KeyboardSafeView>
       </Modal>
 
       {/* Calendar Picker Modal */}

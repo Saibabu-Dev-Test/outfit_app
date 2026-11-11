@@ -24,7 +24,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { KeyboardAvoidingView } from './keyboard';
+import KeyboardSafeView from './KeyboardSafeView';
 import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   borderRadius,
@@ -614,9 +614,9 @@ export default function FeedbackBoardModal({
           ? { backgroundColor: 'transparent', translucent: true }
           : {})}
       />
-      {/* Reply box rides on the keyboard, frame by frame (react-native-keyboard-controller). The
-          SafeAreaView inside already pads for the nav bar, so the keyboard padding leaves that out. */}
-      <KeyboardAvoidingView style={styles.root} behavior="padding" keyboardVerticalOffset={-bottomInset}>
+      {/* Reply box sits right on the keyboard (KeyboardSafeView). The SafeAreaView inside already
+          pads for the nav bar, so the keyboard padding leaves that out. */}
+      <KeyboardSafeView style={styles.root} extraOffset={-bottomInset}>
       <SafeAreaView style={styles.root} edges={['top', 'bottom', 'left', 'right']}>
         <View style={styles.header}>
           <TouchableOpacity
@@ -759,7 +759,7 @@ export default function FeedbackBoardModal({
           </TouchableOpacity>
         )}
       </SafeAreaView>
-      </KeyboardAvoidingView>
+      </KeyboardSafeView>
       </SafeAreaProvider>
 
       <FeedbackModal

@@ -17,8 +17,7 @@ import {
   Image,
   StyleSheet,
 } from 'react-native';
-import { KeyboardChatScrollView, KeyboardStickyView } from '../../components/keyboard';
-import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
+import KeyboardSafeView, { useKeyboardShown } from '../../components/KeyboardSafeView';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles, statusBarStyle } from '../../theme';
@@ -124,7 +123,6 @@ function LuckyPairsView({ result, language }: { result: LuckyPairsResult; langua
 
 export default function StylistScreen() {
   const { user } = useAuth();
-  const tabBarHeight = useBottomTabBarHeight();
   const uid = user?.id;
   const aiOn = isAiConfigured();
   useDayKey(); // re-render at midnight so the day's colour updates
@@ -184,6 +182,8 @@ export default function StylistScreen() {
   };
   const scrollDown = (animated = true) =>
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated }), 80);
+  // Keyboard opened: the chat got shorter, keep the newest message in view
+  useKeyboardShown(() => scrollDown(false));
 
   // Birth details for offline astrology answers: from the signed-in user, else one profile read
   const astroRef = useRef<AstroProfile | null>(null);
@@ -363,7 +363,9 @@ export default function StylistScreen() {
         barStyle={statusBarStyle()}
         {...(Platform.OS === 'android' ? { backgroundColor: colors.background } : {})}
       />
-      <View style={styles.flex1}>
+      {/* Whole screen above the keyboard: the message box sits right on it (the keyboard covers the
+          tab bar), the chat shrinks and scrolls to the newest message. */}
+      <KeyboardSafeView style={styles.flex1}>
         {/* Compact header: title + language pills */}
         <View style={styles.header}>
           <View style={styles.flex1}>
@@ -403,12 +405,8 @@ export default function StylistScreen() {
         ) : null}
 
         {/* Chat history takes the rest of the screen */}
-        {/* Chat list + message box move together with the keyboard, frame by frame. offset = tab bar
-            (the space under the box while the keyboard is closed; the keyboard covers the tab bar). */}
-        <KeyboardChatScrollView
+        <ScrollView
           ref={scrollRef}
-          offset={tabBarHeight}
-          keyboardLiftBehavior="always"
           style={styles.chatScroll}
           contentContainerStyle={styles.chat}
           keyboardShouldPersistTaps="handled"
@@ -461,30 +459,28 @@ export default function StylistScreen() {
               <Text style={styles.typingText}>Stylist is typing…</Text>
             </View>
           ) : null}
-        </KeyboardChatScrollView>
+        </ScrollView>
 
-        <KeyboardStickyView offset={{ closed: 0, opened: tabBarHeight }}>
-          <View style={styles.inputBar}>
-            <TextInput
-              style={styles.input}
-              placeholder="Ask about clothes, colours, style..."
-              placeholderTextColor={colors.textMuted}
-              value={input}
-              onChangeText={setInput}
-              onFocus={() => scrollDown()}
-              editable={!sending}
-              multiline
-              maxLength={500}
-            />
-            <TouchableOpacity
-              style={[styles.sendBtn, (!input.trim() || sending) && styles.disabled]}
-              onPress={() => send()}
-              disabled={!input.trim() || sending}>
-              <Text style={styles.sendText}>➤</Text>
-            </TouchableOpacity>
-          </View>
-        </KeyboardStickyView>
-      </View>
+        <View style={styles.inputBar}>
+          <TextInput
+            style={styles.input}
+            placeholder="Ask about clothes, colours, style..."
+            placeholderTextColor={colors.textMuted}
+            value={input}
+            onChangeText={setInput}
+            onFocus={() => scrollDown()}
+            editable={!sending}
+            multiline
+            maxLength={500}
+          />
+          <TouchableOpacity
+            style={[styles.sendBtn, (!input.trim() || sending) && styles.disabled]}
+            onPress={() => send()}
+            disabled={!input.trim() || sending}>
+            <Text style={styles.sendText}>➤</Text>
+          </TouchableOpacity>
+        </View>
+      </KeyboardSafeView>
     </SafeAreaView>
   );
 }
