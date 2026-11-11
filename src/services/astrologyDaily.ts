@@ -170,6 +170,29 @@ const chartFor = (profile: AstroProfile): { chart: BirthChart | null; jathakam: 
   };
 };
 
+// Birth-chart rows (labels and names in `lang`): rashi, nakshatra + pada, Lagna (with a birth
+// time), Mahadasha / Antardasha (current), birth tithi, gana, yoni, nadi, numerology, place.
+// Used by the Astrology tab and the Profile's auto-filled birth chart.
+export const birthChartRows = (j: Jathakam, lang: AstroLang): { key: string; label: string; value: string }[] => {
+  const L = LABELS[lang];
+  const rows: { key: string; label: string; value: string }[] = [];
+  const add = (key: string, label: string, value: string) => rows.push({ key, label, value });
+  add('rashi', L.janmaRashi, `${RASHI_NAMES[lang][j.rashi]} · ${degText(j.moon)}`);
+  add('nakshatra', L.nakshatra, `${NAKSHATRA_NAMES[lang][j.nakshatra]} · ${L.pada} ${j.pada + 1}`);
+  if (j.lagnaRashi !== null && j.lagna !== null) add('lagna', L.lagna, `${RASHI_NAMES[lang][j.lagnaRashi]} · ${degText(j.lagna)}`);
+  if (j.mahadasha) add('mahadasha', L.mahadasha, `${planetName(j.mahadasha.lord, lang)} · ${fill(L.until, { date: ymd(j.mahadasha.end) })}`);
+  if (j.antardasha) add('antardasha', L.antardasha, `${planetName(j.antardasha.lord, lang)} · ${fill(L.until, { date: ymd(j.antardasha.end) })}`);
+  add('tithi', L.birthTithi, tithiName(j.tithi, lang));
+  add('gana', L.gana, GANA_NAMES[lang][j.gana]);
+  add('yoni', L.yoni, YONI_NAMES[lang][j.yoni]);
+  add('nadi', L.nadi, NADI_NAMES[lang][j.nadi]);
+  add('lifePath', L.lifePath, String(j.lifePath));
+  add('birthNumber', L.birthNumber, String(j.birthNumber));
+  if (j.nameNumber) add('nameNumber', L.nameNumber, String(j.nameNumber));
+  add('place', L.place, j.place.name);
+  return rows;
+};
+
 export const dailyReading = (
   profile: AstroProfile,
   opts: { uid?: string | null; date?: Date; lang?: AstroLang; wardrobe?: WardrobeItemResponse[] | null } = {},
@@ -304,20 +327,7 @@ export const dailyReading = (
   // Birth-chart card (labels and names in the chosen language)
   const chartRows: { label: string; value: string }[] = [];
   if (jathakam) {
-    const j = jathakam;
-    chartRows.push({ label: L.janmaRashi, value: `${rashiName(j.rashi)} · ${degText(j.moon)}` });
-    chartRows.push({ label: L.nakshatra, value: `${nakName(j.nakshatra)} · ${L.pada} ${j.pada + 1}` });
-    if (j.lagnaRashi !== null && j.lagna !== null) chartRows.push({ label: L.lagna, value: `${rashiName(j.lagnaRashi)} · ${degText(j.lagna)}` });
-    if (j.mahadasha) chartRows.push({ label: L.mahadasha, value: `${planetName(j.mahadasha.lord, lang)} · ${fill(L.until, { date: ymd(j.mahadasha.end) })}` });
-    if (j.antardasha) chartRows.push({ label: L.antardasha, value: `${planetName(j.antardasha.lord, lang)} · ${fill(L.until, { date: ymd(j.antardasha.end) })}` });
-    chartRows.push({ label: L.birthTithi, value: tithiName(j.tithi, lang) });
-    chartRows.push({ label: L.gana, value: GANA_NAMES[lang][j.gana] });
-    chartRows.push({ label: L.yoni, value: YONI_NAMES[lang][j.yoni] });
-    chartRows.push({ label: L.nadi, value: NADI_NAMES[lang][j.nadi] });
-    chartRows.push({ label: L.lifePath, value: String(j.lifePath) });
-    chartRows.push({ label: L.birthNumber, value: String(j.birthNumber) });
-    if (j.nameNumber) chartRows.push({ label: L.nameNumber, value: String(j.nameNumber) });
-    chartRows.push({ label: L.place, value: j.place.name });
+    chartRows.push(...birthChartRows(jathakam, lang));
   } else if (fromName && chart && chart.nakshatra !== null) {
     chartRows.push({ label: L.nameStar, value: `${nakName(chart.nakshatra)} · ${L.pada} ${(chart.pada || 0) + 1}` });
     chartRows.push({ label: L.janmaRashi, value: rashiName(chart.rashi) });

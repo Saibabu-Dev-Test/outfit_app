@@ -24,7 +24,8 @@ import PhotoGrid from '../../components/PhotoGrid';
 import { getProfileCounts, ProfileCounts } from '../../services/socialApi';
 import { getCachedLikedItems, getLikedItems, Post, rememberPosts } from '../../services/feedApi';
 import { getWardrobeItems, WardrobeItemResponse } from '../../services/wardrobeApi';
-import { getUserProfile, StoredProfile } from '../../services/userApi';
+import { getUserProfile, saveUserProfile, StoredProfile } from '../../services/userApi';
+import { astroChartStale, birthProfileUpdate } from '../../services/birthProfile';
 import AstrologyPanel from '../../components/AstrologyPanel';
 import { countFriendsJoined, isWeeklyStar, joinedWithLinkText } from '../../services/rewardsApi';
 import { shareMyReferral } from '../../utils/referralLink';
@@ -62,6 +63,12 @@ export default function MeScreen({ navigation }: { navigation: any }) {
     ]);
     setCounts(c);
     setWardrobeItems(w);
+    // Birth chart auto-fill (rashi, nakshatra, dasha...) when it is missing or the details changed
+    if (astroChartStale(prof, prof.astroChart)) {
+      const upd = birthProfileUpdate(prof, { prevConfirmedKey: prof.birthConfirmedKey });
+      Object.assign(prof, upd);
+      saveUserProfile(uid, upd).catch(e => console.warn('Birth chart save failed:', e?.message));
+    }
     setProfile(prof);
     const wardrobePosts: Post[] = w
         .filter(i => !!i.imageUrl)

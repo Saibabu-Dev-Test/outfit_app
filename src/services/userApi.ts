@@ -15,6 +15,7 @@ import { db } from '../config/firebaseConfig';
 import { firestoreErrorMessage } from '../utils/firebaseErrors';
 import { localDateKey, yesterdayKey } from '../utils/date';
 import { MAX_BASE64_CHARS } from '../utils/imagePicker';
+import type { StoredAstroChart } from './birthProfile';
 
 export interface StoredProfile {
   name?: string;
@@ -27,6 +28,9 @@ export interface StoredProfile {
   language?: string;
   gender?: string;
   maritalStatus?: string; // 'Single' | 'Married' | 'Prefer not to say' (astrology relationship wording)
+  astroChart?: StoredAstroChart | null; // auto-filled birth chart (services/birthProfile.ts)
+  birthConfirmed?: boolean; // user ticked "Confirm birth details"
+  birthConfirmedKey?: string | null; // birthKey() of the details that were confirmed
   bio?: string;
   avatarUrl?: string | null;
   isPublic?: boolean; // public profile; default true
@@ -66,7 +70,7 @@ export const ageFromDob = (dob?: string | null, now: Date = new Date()): number 
 };
 
 const PROFILE_KEYS: (keyof StoredProfile)[] = [
-  'name', 'phoneNumber', 'phone', 'dob', 'timeOfBirth', 'placeOfBirth', 'rashi', 'language', 'gender', 'maritalStatus',
+  'name', 'phoneNumber', 'phone', 'dob', 'timeOfBirth', 'placeOfBirth', 'rashi', 'language', 'gender', 'maritalStatus', 'astroChart', 'birthConfirmed', 'birthConfirmedKey',
   'bio', 'avatarUrl', 'isPublic', 'nameLower', 'role', 'lastLoginDate', 'streak', 'stylePrefs',
 ];
 

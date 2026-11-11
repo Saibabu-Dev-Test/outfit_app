@@ -20,7 +20,15 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { pickImage, AVATAR_PICK } from '../../utils/imagePicker';
 import { getUserProfile, saveUserProfile, uploadAvatar } from '../../services/userApi';
 import { checkNotifications, openNotificationSettings } from '../../native/notifications';
-import { RASHIS } from '../../utils/panchangam';
+import {
+  astroChartStale,
+  birthDetailsComplete,
+  birthKey,
+  birthProfileUpdate,
+  jathakamFor,
+  StoredAstroChart,
+} from '../../services/birthProfile';
+import { astroLanguage, birthChartRows } from '../../services/astrologyDaily';
 import SelectModal from '../../components/SelectModal';
 import CityPickerModal from '../../components/CityPickerModal';
 import FeedbackBoardModal from '../../components/FeedbackBoardModal';
@@ -60,6 +68,9 @@ interface UserProfile {
   language?: string;
   gender?: string;
   maritalStatus?: string;
+  astroChart?: StoredAstroChart | null; // auto: computed from the birth details (services/birthProfile)
+  birthConfirmed?: boolean;
+  birthConfirmedKey?: string | null;
   bio?: string;
   avatarUrl?: string | null;
   isPublic?: boolean;
@@ -126,7 +137,7 @@ export default function ProfileScreen() {
 
   // Picker modals
   const [isTimePickerOpen, setIsTimePickerOpen] = useState<boolean>(false);
-  const [isRashiOpen, setIsRashiOpen] = useState<boolean>(false);
+  const [confirmingBirth, setConfirmingBirth] = useState(false);
   const [isLanguageOpen, setIsLanguageOpen] = useState<boolean>(false);
 
   // Gender dropdown state
@@ -260,11 +271,20 @@ const fetchProfile = async () => {
       language: stored.language || '',
       gender: stored.gender || '',
       maritalStatus: stored.maritalStatus || '',
+      astroChart: stored.astroChart || null,
+      birthConfirmed: stored.birthConfirmed === true,
+      birthConfirmedKey: stored.birthConfirmedKey || null,
       bio: stored.bio || '',
       isPublic: stored.isPublic !== false,
       stylePrefs: Array.isArray(stored.stylePrefs) ? stored.stylePrefs : [],
     };
     setIsAdmin(stored.role === 'admin');
+    // Birth chart saved for other details (or before this screen computed it): recompute and save
+    if (astroChartStale(merged, merged.astroChart)) {
+      const upd = birthProfileUpdate(merged, { prevConfirmedKey: merged.birthConfirmedKey });
+      Object.assign(merged, upd);
+      saveUserProfile(authUser.id, upd).catch(e => console.warn('Birth chart save failed:', e?.message));
+    }
     setProfileData(merged);
     updateUserData(merged as any);
   } catch (err: any) {
@@ -398,10 +418,16 @@ const fetchProfile = async () => {
     stylePrefs: profileData?.stylePrefs || [],
   };
 
+  // Rashi, nakshatra, Lagna, dasha... are worked out from the birth details (no manual entry).
+  // Changing the details clears the "confirmed" tick until the user confirms them again.
+  const birth = birthProfileUpdate(updatedProfile, { prevConfirmedKey: profileData?.birthConfirmedKey });
+  Object.assign(updatedProfile, birth);
+
   try {
     setSavingProfile(true);
     // Merge into Firestore users/{uid} (avatar is saved separately)
     await saveUserProfile(uid, {
+      ...birth,
       name: updatedProfile.name,
       dob: updatedProfile.dob,
       timeOfBirth: updatedProfile.timeOfBirth,
@@ -424,6 +450,36 @@ const fetchProfile = async () => {
     setSavingProfile(false);
   }
 };
+
+  // "Confirm birth details": the user checks name / date / time / place and ticks them
+  const handleConfirmBirth = async () => {
+    const uid = profileData?.id || authUser?.id;
+    if (!uid || !profileData || confirmingBirth) return;
+    if (!birthDetailsComplete(profileData)) {
+      Alert.alert('Add your birth details', 'Please add your name, date of birth and place of birth (time of birth is optional), then confirm.');
+      handleOpenEditModal();
+      return;
+    }
+    const upd = birthProfileUpdate(profileData, { confirm: true });
+    try {
+      setConfirmingBirth(true);
+      await saveUserProfile(uid, upd);
+      const next = { ...profileData, ...upd };
+      setProfileData(next);
+      updateUserData(next as any);
+    } catch (e: any) {
+      Alert.alert('Could not confirm', e?.message || 'Please try again.');
+    } finally {
+      setConfirmingBirth(false);
+    }
+  };
+
+  // Birth chart rows in the reading language (English under them), computed live on the phone
+  const chartLang = astroLanguage(profileData?.language);
+  const jathakam = profileData?.dob ? jathakamFor(profileData) : null;
+  const chartRows = jathakam ? birthChartRows(jathakam, chartLang) : [];
+  const chartRowsEn = jathakam && chartLang !== 'English' ? birthChartRows(jathakam, 'English') : null;
+  const birthOk = !!profileData?.birthConfirmed && profileData?.birthConfirmedKey === birthKey(profileData || {});
 
   const handleSignOut = async () => {
     try {
@@ -553,22 +609,31 @@ const fetchProfile = async () => {
           </View>
         </View>
 
-        {/* Personal Details Section */}
+        {/* Birth details: shown and confirmable; the chart below is worked out from them */}
         <View style={styles.detailsCard}>
-          <Text style={styles.detailsTitle}>Personal Information</Text>
+          <Text style={styles.detailsTitle}>Birth details</Text>
 
           <View style={styles.infoGrid}>
             <View style={styles.infoRow}>
+              <View style={styles.infoItem}>
+                <Text style={styles.infoLabel}>🙂 Name</Text>
+                <Text style={styles.infoValue}>{profileData?.name ? profileData.name : 'Not specified'}</Text>
+              </View>
               <View style={styles.infoItem}>
                 <Text style={styles.infoLabel}>🎂 Date of Birth</Text>
                 <Text style={styles.infoValue}>
                   {profileData?.dob ? profileData.dob : 'Not specified'}
                 </Text>
               </View>
+            </View>
+
+            <View style={styles.infoDivider} />
+
+            <View style={styles.infoRow}>
               <View style={styles.infoItem}>
                 <Text style={styles.infoLabel}>⏰ Time of Birth</Text>
                 <Text style={styles.infoValue}>
-                  {profileData?.timeOfBirth ? profileData.timeOfBirth : 'Not specified'}
+                  {profileData?.timeOfBirth ? profileData.timeOfBirth : 'Not known (optional)'}
                 </Text>
               </View>
               <View style={styles.infoItem}>
@@ -578,16 +643,66 @@ const fetchProfile = async () => {
                 </Text>
               </View>
             </View>
+          </View>
 
-            <View style={styles.infoDivider} />
+          {birthOk ? (
+            <View style={styles.confirmedRow}>
+              <Text style={styles.confirmedTick}>✓</Text>
+              <Text style={styles.confirmedText}>Birth details confirmed</Text>
+              <TouchableOpacity onPress={handleOpenEditModal} activeOpacity={0.8}>
+                <Text style={styles.confirmEdit}>Edit</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <TouchableOpacity
+              style={[styles.confirmBtn, confirmingBirth && styles.confirmBtnBusy]}
+              onPress={handleConfirmBirth}
+              disabled={confirmingBirth}
+              activeOpacity={0.85}>
+              {confirmingBirth ? (
+                <ActivityIndicator size="small" color={colors.textInverse} />
+              ) : (
+                <Text style={styles.confirmBtnText}>Confirm birth details</Text>
+              )}
+            </TouchableOpacity>
+          )}
+        </View>
 
+        {/* Birth chart: auto-filled from the birth details (offline engine), no manual entry */}
+        <View style={styles.detailsCard}>
+          <Text style={styles.detailsTitle}>🪐 Birth chart (auto)</Text>
+          {chartRows.length ? (
+            <View style={styles.infoGrid}>
+              {chartRows.map((row, i) => (
+                <View key={row.key} style={styles.chartRow}>
+                  <Text style={styles.chartLabel}>
+                    {row.label}
+                    {chartRowsEn && chartRowsEn[i] && chartRowsEn[i].label !== row.label ? `\n${chartRowsEn[i].label}` : ''}
+                  </Text>
+                  <Text style={styles.chartValue}>
+                    {row.value}
+                    {chartRowsEn && chartRowsEn[i] && chartRowsEn[i].value !== row.value ? `\n${chartRowsEn[i].value}` : ''}
+                  </Text>
+                </View>
+              ))}
+              {!jathakam?.timeKnown ? (
+                <Text style={styles.chartHint}>Add your time of birth for your Lagna and an exact nakshatra pada.</Text>
+              ) : null}
+            </View>
+          ) : (
+            <Text style={styles.chartHint}>
+              Add your date of birth (and time and place, if you know them): your rashi, nakshatra, tithi, Lagna, gana,
+              yoni, nadi, Mahadasha and numbers fill in automatically.
+            </Text>
+          )}
+        </View>
+
+        {/* Personal Details Section */}
+        <View style={styles.detailsCard}>
+          <Text style={styles.detailsTitle}>Personal Information</Text>
+
+          <View style={styles.infoGrid}>
             <View style={styles.infoRow}>
-              <View style={styles.infoItem}>
-                <Text style={styles.infoLabel}>✨ Rashi</Text>
-                <Text style={styles.infoValue}>
-                  {profileData?.rashi ? profileData.rashi : 'Not specified'}
-                </Text>
-              </View>
               <View style={styles.infoItem}>
                 <Text style={styles.infoLabel}>🗣️ Language</Text>
                 <Text style={styles.infoValue}>
@@ -926,23 +1041,12 @@ const fetchProfile = async () => {
                 </TouchableOpacity>
               </View>
 
-              <View style={styles.formRow}>
-                <View style={[styles.inputGroup, { flex: 1 }]}>
-                  <Text style={styles.inputLabel}>Rashi</Text>
-                  <TouchableOpacity
-                    style={styles.modalInputTouchable}
-                    onPress={() => setIsRashiOpen(true)}
-                    activeOpacity={0.85}>
-                    <Text
-                      numberOfLines={1}
-                      style={[editRashi ? styles.modalInputValueText : styles.modalInputPlaceholderText, styles.flexShrink]}>
-                      {editRashi || 'Select Rashi'}
-                    </Text>
-                    <Text style={styles.dropdownArrowIcon}>▼</Text>
-                  </TouchableOpacity>
-                </View>
+              <Text style={styles.autoNote}>
+                Rashi, nakshatra, Lagna and the rest of your birth chart are worked out from these details automatically.
+              </Text>
 
-                <View style={[styles.inputGroup, { flex: 1 }]}>
+              <View style={styles.formRow}>
+                <View style={[styles.inputGroup, styles.flexOne]}>
                   <Text style={styles.inputLabel}>Language</Text>
                   <TouchableOpacity
                     style={styles.modalInputTouchable}
@@ -1195,14 +1299,6 @@ const fetchProfile = async () => {
         onClose={() => setIsTimePickerOpen(false)}
       />
       <SelectModal
-        visible={isRashiOpen}
-        title="Select Rashi"
-        options={RASHIS}
-        selected={editRashi}
-        onSelect={setEditRashi}
-        onClose={() => setIsRashiOpen(false)}
-      />
-      <SelectModal
         visible={isLanguageOpen}
         title="Select Language"
         options={LANGUAGES}
@@ -1220,6 +1316,36 @@ const styles = themedStyles(() => StyleSheet.create({
   menuValue: { fontSize: fontSize.xs, color: colors.textSecondary, marginTop: 1 },
   flexShrink: { flexShrink: 1 },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap' },
+  flexOne: { flex: 1 },
+  autoNote: { fontSize: fontSize.xs, color: colors.textMuted, marginBottom: spacing.sm, lineHeight: 16 },
+  confirmedRow: { flexDirection: 'row', alignItems: 'center', marginTop: spacing.md },
+  confirmedTick: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: colors.success,
+    color: '#FFFFFF',
+    textAlign: 'center',
+    lineHeight: 22,
+    fontWeight: fontWeight.extraBold,
+    marginRight: spacing.sm,
+    overflow: 'hidden',
+  },
+  confirmedText: { flex: 1, fontSize: fontSize.sm, fontWeight: fontWeight.bold, color: colors.textPrimary },
+  confirmEdit: { fontSize: fontSize.sm, color: colors.primary, fontWeight: fontWeight.bold },
+  confirmBtn: {
+    marginTop: spacing.md,
+    backgroundColor: colors.primary,
+    borderRadius: borderRadius.full,
+    paddingVertical: spacing.sm,
+    alignItems: 'center',
+  },
+  confirmBtnBusy: { opacity: 0.7 },
+  confirmBtnText: { color: colors.textInverse, fontWeight: fontWeight.bold, fontSize: fontSize.sm },
+  chartRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4 },
+  chartLabel: { fontSize: fontSize.xs, color: colors.textSecondary, fontWeight: fontWeight.bold, marginRight: spacing.sm },
+  chartValue: { fontSize: fontSize.sm, color: colors.textPrimary, fontWeight: fontWeight.semiBold, flexShrink: 1, textAlign: 'right' },
+  chartHint: { fontSize: fontSize.xs, color: colors.textMuted, fontStyle: 'italic', marginTop: spacing.sm, lineHeight: 16 },
   chip: {
     paddingHorizontal: spacing.md,
     paddingVertical: 6,
