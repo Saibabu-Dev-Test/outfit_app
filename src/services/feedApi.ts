@@ -374,6 +374,9 @@ export interface Comment {
   userAvatar: string | null;
   text: string;
   createdAt: Date | null;
+  // One level of replies (Instagram style): a reply points at a top-level comment
+  parentId: string | null;
+  replyCount: number; // top-level comments only
 }
 
 export const MAX_COMMENT_CHARS = 300;
@@ -388,15 +391,19 @@ export const onCommentCountChange = (fn: CountListener): (() => void) => {
     countListeners.delete(fn);
   };
 };
-const emitCount = (postId: string, delta: number) => countListeners.forEach(fn => fn(postId, delta));
+export const emitCommentCount = (postId: string, delta: number) =>
+  countListeners.forEach(fn => fn(postId, delta));
+const emitCount = emitCommentCount;
 
-const toComment = (id: string, d: any): Comment => ({
+export const toComment = (id: string, d: any): Comment => ({
   id,
   userId: String(d?.userId || ''),
   userName: d?.userName || 'Outfit user',
   userAvatar: d?.userAvatar || null,
   text: d?.text || '',
   createdAt: toDate(d?.createdAt),
+  parentId: typeof d?.parentId === 'string' && d.parentId ? d.parentId : null,
+  replyCount: typeof d?.replyCount === 'number' ? Math.max(0, d.replyCount) : 0,
 });
 
 export const getPost = async (postId: string): Promise<Post | null> => {
@@ -424,48 +431,69 @@ export const subscribeComments = (
   );
 
 // Comment + commentCount (+1) in one transaction. lastCommentId lets the rules check the new comment.
+// A reply (parentId) also bumps the parent's replyCount (+ lastReplyId for the rules). Returns the
+// new comment (createdAt = now until the server time is read back).
 export const addComment = async (
   postId: string,
   me: { uid: string; name?: string | null; avatar?: string | null },
   text: string,
-): Promise<void> => {
+  parentId?: string | null,
+): Promise<Comment | null> => {
   const t = text.trim();
-  if (!t) return;
+  if (!t) return null;
   if (t.length > MAX_COMMENT_CHARS) throw new Error(`Comments can be up to ${MAX_COMMENT_CHARS} characters.`);
   assertClean(t);
   const postRef = doc(db, POSTS, postId);
   const commentRef = doc(collection(db, POSTS, postId, 'comments'));
+  const parentRef = parentId ? doc(db, POSTS, postId, 'comments', parentId) : null;
+  const data: any = {
+    userId: me.uid,
+    userName: (me.name || '').trim() || 'Outfit user',
+    userAvatar: inlineAvatar(me.avatar),
+    text: t,
+  };
+  if (parentId) data.parentId = parentId;
   try {
     await runTransaction(db, async tx => {
       const post = await tx.get(postRef);
       if (!post.exists()) throw new Error('This post was deleted.');
+      const parent = parentRef ? await tx.get(parentRef) : null;
+      if (parent && !parent.exists()) throw new Error('That comment was deleted.');
       const current = Math.max(0, Number((post.data() as any)?.commentCount) || 0);
-      tx.set(commentRef, {
-        userId: me.uid,
-        userName: (me.name || '').trim() || 'Outfit user',
-        userAvatar: inlineAvatar(me.avatar),
-        text: t,
-        createdAt: serverTimestamp(),
-      });
+      tx.set(commentRef, { ...data, createdAt: serverTimestamp() });
       tx.update(postRef, { commentCount: current + 1, lastCommentId: commentRef.id });
+      if (parentRef && parent) {
+        const replies = Math.max(0, Number((parent.data() as any)?.replyCount) || 0);
+        tx.update(parentRef, { replyCount: replies + 1, lastReplyId: commentRef.id });
+      }
     });
     emitCount(postId, 1);
+    return toComment(commentRef.id, { ...data, createdAt: new Date() });
   } catch (e: any) {
     if (!e?.code && e instanceof Error) throw e;
-    fail(e, 'Commenting');
+    return fail(e, 'Commenting');
   }
 };
 
-// Comment author, post owner or admin. Count goes down by 1 in the same transaction.
+// Comment author, post owner, admin (or the parent comment's author for a reply). Count goes down
+// by 1 in the same transaction (a reply also takes 1 off its parent's replyCount). Deleting a
+// top-level comment first deletes its replies one by one, so every count stays exact.
 export const deleteComment = async (postId: string, commentId: string): Promise<void> => {
   const postRef = doc(db, POSTS, postId);
   const commentRef = doc(db, POSTS, postId, 'comments', commentId);
   try {
+    const replies = await getDocs(
+      query(collection(db, POSTS, postId, 'comments'), where('parentId', '==', commentId), limit(200)),
+    );
+    for (const r of replies.docs) await deleteComment(postId, r.id);
     let counted = false;
     await runTransaction(db, async tx => {
       const post = await tx.get(postRef);
       const comment = await tx.get(commentRef);
       if (!comment.exists()) return;
+      const parentId = (comment.data() as any)?.parentId;
+      const parentRef = typeof parentId === 'string' && parentId ? doc(db, POSTS, postId, 'comments', parentId) : null;
+      const parent = parentRef ? await tx.get(parentRef) : null;
       tx.delete(commentRef);
       const current = post.exists() ? Math.max(0, Number((post.data() as any)?.commentCount) || 0) : 0;
       // Skip the count if the post is gone or the count is already 0
@@ -473,6 +501,8 @@ export const deleteComment = async (postId: string, commentId: string): Promise<
         tx.update(postRef, { commentCount: current - 1, lastCommentId: commentId });
         counted = true;
       }
+      const rc = parent?.exists() ? Math.max(0, Number((parent.data() as any)?.replyCount) || 0) : 0;
+      if (parentRef && rc > 0) tx.update(parentRef, { replyCount: rc - 1, lastReplyId: commentId });
     });
     if (counted) emitCount(postId, -1);
   } catch (e: any) {

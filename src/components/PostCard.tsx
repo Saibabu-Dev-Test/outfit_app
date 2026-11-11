@@ -41,6 +41,7 @@ import { follow, isFollowingCached, onFollowChange, unfollow } from '../services
 import { shareWithReferral } from '../utils/referralLink';
 import { logActivity } from '../services/activityApi';
 import { timeAgo } from '../utils/date';
+import InlineComments, { InlineCommentsHandle } from './InlineComments';
 
 interface Props {
   post: Post;
@@ -53,9 +54,21 @@ interface Props {
   // Detail screen: loads the full-size photos. Lists / the feed show the clear ~720 px copies
   // (older items: full photo, then thumbnail); a single tap on the photo opens the detail screen.
   detail?: boolean;
+  // Feed: comments live on the card (latest 2, expand in place, replies, comment box) instead of
+  // opening the Comments screen
+  inlineComments?: boolean;
 }
 
-export default function PostCard({ post, width, myUid, isAdmin, onDeleted, onOpenPhoto, detail }: Props) {
+export default function PostCard({
+  post,
+  width,
+  myUid,
+  isAdmin,
+  onDeleted,
+  onOpenPhoto,
+  detail,
+  inlineComments,
+}: Props) {
   const navigation = useNavigation<any>();
   const { user: me } = useAuth();
   const [liked, setLiked] = useState(false);
@@ -332,8 +345,11 @@ export default function PostCard({ post, width, myUid, isAdmin, onDeleted, onOpe
   const openProfile = () => {
     if (post.userId) navigation.navigate('UserProfile', { userId: post.userId });
   };
+  const commentsRef = useRef<InlineCommentsHandle>(null);
   const openComments = () =>
-    navigation.navigate('Comments', { target: { kind: post.kind, id: post.id } });
+    inlineComments
+      ? commentsRef.current?.focus()
+      : navigation.navigate('Comments', { target: { kind: post.kind, id: post.id } });
 
   const menu = () => {
     const buttons: any[] = [];
@@ -529,13 +545,24 @@ export default function PostCard({ post, width, myUid, isAdmin, onDeleted, onOpe
           {post.caption}
         </Text>
       ) : null}
-      <TouchableOpacity onPress={openComments}>
-        <Text style={styles.viewComments}>
-          {commentCount > 0
-            ? `View all ${commentCount} ${commentCount === 1 ? 'comment' : 'comments'}`
-            : 'Add a comment...'}
-        </Text>
-      </TouchableOpacity>
+      {inlineComments ? (
+        <InlineComments
+          ref={commentsRef}
+          post={post}
+          commentCount={commentCount}
+          myUid={myUid}
+          isAdmin={isAdmin}
+          onReport={commentId => setReportTarget({ postId: post.id, commentId })}
+        />
+      ) : (
+        <TouchableOpacity onPress={openComments}>
+          <Text style={styles.viewComments}>
+            {commentCount > 0
+              ? `View all ${commentCount} ${commentCount === 1 ? 'comment' : 'comments'}`
+              : 'Add a comment...'}
+          </Text>
+        </TouchableOpacity>
+      )}
       <ReportModal target={reportTarget} reporterId={myUid} onClose={() => setReportTarget(null)} />
     </View>
   );

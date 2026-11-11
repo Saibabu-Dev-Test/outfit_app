@@ -1,5 +1,7 @@
-// Comments on a feed post, a public wardrobe photo or a circle photo post: live list, add (bad-word filtered), long-press to report or delete
-import React, { useEffect, useRef, useState } from 'react';
+// Comments on a feed post, a public wardrobe photo or a circle photo post: live list, add (bad-word filtered), long-press to report or delete.
+// The feed shows comments inline on each card now; this screen stays for deep links / notifications.
+// Replies (posts + wardrobe photos) are listed indented under their parent.
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -29,6 +31,7 @@ import {
 import { containsProfanity, RESPECT_MESSAGE } from '../../utils/profanity';
 import { timeAgo } from '../../utils/date';
 import { logActivity } from '../../services/activityApi';
+import { replyParentId, threadComments } from '../../utils/commentThreads';
 
 export default function CommentsScreen({ navigation, route }: { navigation: any; route: any }) {
   // Old callers pass { postId }; new ones pass { target }
@@ -48,6 +51,13 @@ export default function CommentsScreen({ navigation, route }: { navigation: any;
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [reportTarget, setReportTarget] = useState<ReportTarget | null>(null);
+  const [replyTo, setReplyTo] = useState<{ parentId: string; name: string } | null>(null);
+  const canReply = target?.kind === 'post' || target?.kind === 'wardrobe';
+  // Parents oldest first, each followed by its replies (orphaned replies at the end)
+  const threaded = useMemo(() => {
+    const { top, replies, orphans } = threadComments(comments);
+    return [...top.flatMap(c => [c, ...(replies[c.id] || [])]), ...orphans];
+  }, [comments]);
   const listRef = useRef<FlatList<Comment>>(null);
   // Keyboard opened: the list got shorter, keep the latest comments in view
   useKeyboardShown(() => setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 50));
@@ -83,12 +93,12 @@ export default function CommentsScreen({ navigation, route }: { navigation: any;
 
   // Admin opening a reported comment: scroll to it
   useEffect(() => {
-    if (!highlightId || !comments.length) return;
-    const i = comments.findIndex(c => c.id === highlightId);
+    if (!highlightId || !threaded.length) return;
+    const i = threaded.findIndex(c => c.id === highlightId);
     if (i >= 0) {
       setTimeout(() => listRef.current?.scrollToIndex({ index: i, animated: true, viewPosition: 0.3 }), 300);
     }
-  }, [highlightId, comments]);
+  }, [highlightId, threaded]);
 
   const send = async () => {
     const t = text.trim();
@@ -104,7 +114,8 @@ export default function CommentsScreen({ navigation, route }: { navigation: any;
     setSending(true);
     try {
       if (!target) return;
-      await addTargetComment(target, { uid, name: user?.name, avatar: user?.avatarUrl }, t);
+      await addTargetComment(target, { uid, name: user?.name, avatar: user?.avatarUrl }, t, replyTo?.parentId);
+      setReplyTo(null);
       // "<me> commented on your photo" in the owner's Activity (best-effort; owner looked up if not loaded)
       if (target.kind === 'post' || target.kind === 'wardrobe') {
         logActivity(
@@ -124,10 +135,21 @@ export default function CommentsScreen({ navigation, route }: { navigation: any;
     }
   };
 
-  const canDelete = (c: Comment) => !!uid && (c.userId === uid || post?.userId === uid || isAdmin);
+  const canDelete = (c: Comment) =>
+    !!uid &&
+    (c.userId === uid ||
+      post?.userId === uid ||
+      isAdmin ||
+      (!!c.parentId && comments.some(p => p.id === c.parentId && p.userId === uid)));
+
+  const startReply = (c: Comment) => {
+    setReplyTo({ parentId: replyParentId(c), name: c.userName });
+    setText(v => (v.trim() ? v : `@${c.userName.replace(/\s+/g, '')} `));
+  };
 
   const onLongPress = (c: Comment) => {
     const buttons: any[] = [];
+    if (canReply) buttons.push({ text: 'Reply', onPress: () => startReply(c) });
     // Reports cover feed post comments (the admin screen opens them by post)
     if (c.userId !== uid && postId) {
       buttons.push({ text: 'Report', onPress: () => setReportTarget({ postId, commentId: c.id }) });
@@ -159,7 +181,7 @@ export default function CommentsScreen({ navigation, route }: { navigation: any;
       activeOpacity={0.7}
       onLongPress={() => onLongPress(item)}
       delayLongPress={350}
-      style={[styles.row, item.id === highlightId && styles.rowHighlight]}>
+      style={[styles.row, !!item.parentId && styles.replyRow, item.id === highlightId && styles.rowHighlight]}>
       <TouchableOpacity onPress={() => openProfile(item.userId)}>
         <Avatar uri={item.userAvatar} name={item.userName} size={32} />
       </TouchableOpacity>
@@ -170,7 +192,14 @@ export default function CommentsScreen({ navigation, route }: { navigation: any;
           </Text>
           {item.text}
         </Text>
-        <Text style={styles.time}>{timeAgo(item.createdAt)}</Text>
+        <Text style={styles.time}>
+          {timeAgo(item.createdAt)}
+          {canReply ? (
+            <Text style={styles.replyAction} onPress={() => startReply(item)}>
+              {'   '}Reply
+            </Text>
+          ) : null}
+        </Text>
       </View>
     </TouchableOpacity>
   );
@@ -197,7 +226,7 @@ export default function CommentsScreen({ navigation, route }: { navigation: any;
         ) : (
           <FlatList
             ref={listRef}
-            data={comments}
+            data={threaded}
             keyExtractor={c => c.id}
             renderItem={renderItem}
             contentContainerStyle={styles.list}
@@ -228,6 +257,16 @@ export default function CommentsScreen({ navigation, route }: { navigation: any;
           />
         )}
 
+        {post !== null && replyTo ? (
+          <View style={styles.replyBanner}>
+            <Text style={styles.replyBannerText} numberOfLines={1}>
+              Replying to @{replyTo.name}
+            </Text>
+            <TouchableOpacity onPress={() => setReplyTo(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Text style={styles.replyBannerX}>✕</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
         {post !== null ? (
           <View style={styles.inputBar}>
             <TextInput
@@ -270,6 +309,19 @@ const styles = themedStyles(() => StyleSheet.create({
   title: { flex: 1, fontSize: fontSize.xl, fontWeight: fontWeight.extraBold, color: colors.textPrimary },
   list: { paddingVertical: spacing.sm, flexGrow: 1 },
   row: { flexDirection: 'row', paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
+  replyRow: { paddingLeft: spacing.md + 40 },
+  replyAction: { fontWeight: fontWeight.bold },
+  replyBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.md,
+    paddingVertical: 6,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    backgroundColor: colors.background,
+  },
+  replyBannerText: { flex: 1, fontSize: fontSize.xs, color: colors.textSecondary },
+  replyBannerX: { fontSize: fontSize.sm, color: colors.textSecondary, paddingHorizontal: 4 },
   rowHighlight: { backgroundColor: colors.divider },
   captionRow: { borderBottomWidth: 1, borderBottomColor: colors.border, marginBottom: spacing.xs },
   body: { flex: 1, marginLeft: spacing.sm },

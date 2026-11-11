@@ -1,6 +1,8 @@
 // Feed tab, Instagram style: posts + public wardrobe photos from EVERY user (default, so new users
 // see looks from day one) or only from my circles (toggle), newest first, infinite scroll,
-// pull to refresh. Like, comment and A-F voting live in PostCard.
+// pull to refresh. Like, comment and A-F voting live in PostCard. Comments are inline on each card
+// (no separate page); the list sits in a KeyboardSafeView (like CircleChatScreen) and scrolls the
+// focused comment box so it stays just above the keyboard.
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
@@ -19,6 +21,8 @@ import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles, stat
 import { useAuth } from '../../context/AuthContext';
 import useIsAdmin from '../../hooks/useIsAdmin';
 import PostCard from '../../components/PostCard';
+import KeyboardSafeView, { useKeyboardShown } from '../../components/KeyboardSafeView';
+import { CommentInputFocusContext, FocusBox } from '../../components/InlineComments';
 import { FeedLoader, FeedScope, Post } from '../../services/feedApi';
 import { subscribeUnreadActivity } from '../../services/activityWatcher';
 
@@ -41,6 +45,34 @@ export default function FeedScreen({ navigation, route }: { navigation: any; rou
   const [scope, setScope] = useState<FeedScope>('everyone');
   const loader = useRef<FeedLoader>(new FeedLoader(uid, 'everyone'));
   const busy = useRef(false);
+
+  // Keep the focused card's comment box visible above the keyboard: the KeyboardSafeView shrinks the
+  // list when the keyboard opens, then we scroll by however much the box sits outside the list.
+  const listRef = useRef<FlatList<Post>>(null);
+  const listBox = useRef<FocusBox>(null);
+  const scrollY = useRef(0);
+  const focusedBox = useRef<FocusBox | null>(null);
+  const revealFocused = useCallback(() => {
+    const box = focusedBox.current;
+    if (!box || !listBox.current) return;
+    listBox.current.measureInWindow((_lx, ly, _lw, lh) => {
+      box.measureInWindow((_x, y, _w, h) => {
+        const below = y + h + spacing.sm - (ly + lh);
+        const above = ly - y;
+        const delta = below > 0 ? below : above > 0 ? -above : 0;
+        if (delta) listRef.current?.scrollToOffset({ offset: Math.max(0, scrollY.current + delta), animated: true });
+      });
+    });
+  }, []);
+  const onCommentFocus = useCallback(
+    (box: FocusBox | null) => {
+      focusedBox.current = box;
+      setTimeout(revealFocused, 80); // keyboard already open (moving between cards)
+    },
+    [revealFocused],
+  );
+  // Keyboard opened: wait for the KeyboardSafeView padding, then scroll
+  useKeyboardShown(() => setTimeout(revealFocused, 150));
 
   const loadFirst = useCallback(async () => {
     busy.current = true;
@@ -130,8 +162,17 @@ export default function FeedScreen({ navigation, route }: { navigation: any; rou
         </TouchableOpacity>
       </View>
 
+      <CommentInputFocusContext.Provider value={onCommentFocus}>
+        <KeyboardSafeView style={styles.flex1}>
+          <View ref={listBox} style={styles.flex1} collapsable={false}>
       <FlatList
+        ref={listRef}
         data={posts}
+        keyboardShouldPersistTaps="handled"
+        onScroll={e => {
+          scrollY.current = e.nativeEvent.contentOffset.y;
+        }}
+        scrollEventThrottle={32}
         keyExtractor={p => `${p.kind}_${p.id}`}
         renderItem={({ item }) => (
           <PostCard
@@ -139,6 +180,7 @@ export default function FeedScreen({ navigation, route }: { navigation: any; rou
             width={width}
             myUid={uid}
             isAdmin={isAdmin}
+            inlineComments
             onDeleted={p => setPosts(prev => prev.filter(x => !(x.id === p.id && x.kind === p.kind)))}
           />
         )}
@@ -193,12 +235,16 @@ export default function FeedScreen({ navigation, route }: { navigation: any; rou
           )
         }
       />
+          </View>
+        </KeyboardSafeView>
+      </CommentInputFocusContext.Provider>
     </SafeAreaView>
   );
 }
 
 const styles = themedStyles(() => StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.surface },
+  flex1: { flex: 1 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
