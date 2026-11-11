@@ -17,10 +17,7 @@ import { localDateKey } from '../utils/date';
 
 export type AiLanguage = 'English' | 'Telugu' | 'Hindi';
 export const AI_LANGUAGES: AiLanguage[] = ['English', 'Telugu', 'Hindi'];
-export const OCCASIONS = [
-  'Work', 'Interview', 'College', 'Date', 'Party', 'Wedding / Function', 'Festival', 'Temple', 'Beach', 'Gym',
-  'Travel', 'Casual outing',
-];
+export { OCCASIONS } from './stylistChips';
 
 export interface AiTurn {
   role: 'user' | 'model';

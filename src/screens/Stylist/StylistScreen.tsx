@@ -39,15 +39,30 @@ import {
 } from '../../services/aiStylist';
 import { LuckyPairsResult, OCC_WORD, occasionKey, PAIR_TEXT, pairsSubtitle, pickLuckyPairs } from '../../services/luckyPairs';
 import { offlineAnswer, pairsIntro, parseIntent } from '../../services/stylistIntent';
+import { PLACES } from '../../services/stylistChips';
+import { PlaceAdvice, placeAdvice } from '../../services/stylistPlaces';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { hashString } from '../../utils/astro';
 import { containsProfanity, RESPECT_MESSAGE } from '../../utils/profanity';
 
-const PLACES = ['Indoor', 'Outdoor', 'Beach', 'Temple', 'Office', 'Restaurant', 'Hill station'];
-
 // pairs: show today's lucky wardrobe pairs under this message (offline picker)
 // pairsCount / occ: how many pairs (1..3) and for which occasion, fixed when the answer was given
 type Msg = { id: string; role: 'user' | 'model'; text: string; error?: boolean; pairs?: boolean; pairsCount?: number; occ?: string | null };
+
+// What suits this place / occasion: the best outfit for it, what the wardrobe has or lacks (and the
+// closest item owned now), a practical tip and today's lucky colour (services/stylistPlaces.ts)
+function PlaceAdviceView({ advice }: { advice: PlaceAdvice }) {
+  return (
+    <View style={styles.adviceBox}>
+      {advice.lines.map((l, i) => (
+        <Text key={i} style={i === 0 ? styles.adviceBest : styles.adviceLine}>
+          {i === 0 ? '💡 ' : advice.add && l === advice.add ? '➕ ' : '• '}
+          {l}
+        </Text>
+      ))}
+    </View>
+  );
+}
 
 // Today's lucky top + bottom pairs with their photos and a short reason
 function LuckyPairsView({ result, language }: { result: LuckyPairsResult; language: AiLanguage }) {
@@ -113,6 +128,8 @@ export default function StylistScreen() {
   const [language, setLanguage] = useState<AiLanguage>(defaultAiLanguage(user?.language));
   const [occasion, setOccasion] = useState<string | null>(null);
   const [place, setPlace] = useState<string | null>(null);
+  // Last tapped Occasion / Place chip: it drives the picks and the advice card
+  const [focus, setFocus] = useState<string | null>(null);
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
@@ -140,10 +157,22 @@ export default function StylistScreen() {
   // AI usable right now (key set and not resting after a credits / quota failure)
   const [aiResting, setAiResting] = useState(isAiPaused());
   const aiReady = aiOn && !aiResting;
-  // Place chips also hint an occasion when none is picked (Beach, Temple, Office)
-  const effOcc = (o: string | null) => o || (place && occasionKey(place) ? place : null);
-  const luckyPairs = pickLuckyPairs(wardrobe, language, { occasion: effOcc(occasion), max: 3 });
+  // The last tapped chip leads; else the occasion, else the place (every chip maps to a rule key)
+  const effOcc = (o: string | null) =>
+    o || (focus && occasionKey(focus) ? focus : null) || occasion || (place && occasionKey(place) ? place : null);
+  const firstOcc = effOcc(null);
+  const luckyPairs = pickLuckyPairs(wardrobe, language, { occasion: firstOcc, max: 3 });
   const pairsFor = (m: Msg) => pickLuckyPairs(wardrobe, language, { occasion: m.occ ?? null, max: m.pairsCount || 3 });
+  // Advice card + wardrobe pairs for one answer (the empty-pairs hint is skipped under advice)
+  const pairsAnswer = (occ: string | null, result: LuckyPairsResult) => {
+    const a = placeAdvice(wardrobe, language, occ);
+    return (
+      <>
+        {a ? <PlaceAdviceView advice={a} /> : null}
+        {a && result.pairs.length === 0 ? null : <LuckyPairsView result={result} language={language} />}
+      </>
+    );
+  };
   const occWord = (o: string | null) => {
     const k = occasionKey(o);
     return k ? OCC_WORD[language][k] : null;
@@ -169,7 +198,10 @@ export default function StylistScreen() {
     // 1) Offline first: wardrobe picks (count / occasion), colour, "goes with", weather questions
     const intent = parseIntent(text);
     const occ = effOcc(intent.occasion || occasion);
-    if (intent.occasion) setOccasion(intent.occasion);
+    if (intent.occasion) {
+      setOccasion(intent.occasion);
+      setFocus(intent.occasion);
+    }
     if (intent.wantsPairs) {
       const n = intent.count || 3;
       setMessages(prev => [
@@ -232,16 +264,26 @@ export default function StylistScreen() {
     }
   };
 
-  // Occasion chip: re-ranks the wardrobe picks for it (offline, no AI call). Tap again to clear.
-  const askForOccasion = (occ: string) => {
-    const next = occasion === occ ? null : occ;
-    setOccasion(next);
-    if (!next || messages.length === 0) return; // the first-screen picks below re-rank by themselves
+  // Occasion / Place chip: advice for it + the wardrobe picks re-ranked for it (offline, no AI
+  // call). Tap again to clear.
+  const showChip = (next: string | null) => {
+    setFocus(next);
+    if (!next || messages.length === 0) return; // the first-screen card below updates by itself
     setMessages(prev => [
       ...prev,
       { id: `${Date.now()}_p`, role: 'model', text: pairsIntro(language, 3, occWord(next)), pairs: true, pairsCount: 3, occ: next },
     ]);
     scrollDown();
+  };
+  const askForOccasion = (occ: string) => {
+    const next = occasion === occ ? null : occ;
+    setOccasion(next);
+    showChip(next);
+  };
+  const askForPlace = (p: string) => {
+    const next = place === p ? null : p;
+    setPlace(next);
+    showChip(next);
   };
 
 
@@ -314,7 +356,7 @@ export default function StylistScreen() {
         {pickersOpen ? (
           <View style={styles.pickers}>
             {chips(OCCASIONS, occasion, askForOccasion)}
-            {chips(PLACES, place, v => setPlace(place === v ? null : v))}
+            {chips(PLACES, place, askForPlace)}
           </View>
         ) : null}
 
@@ -346,7 +388,7 @@ export default function StylistScreen() {
                 </View>
               ) : null}
               {/* Free offline picks: the default without AI, and a ready answer with it */}
-              <LuckyPairsView result={luckyPairs} language={language} />
+              {pairsAnswer(firstOcc, luckyPairs)}
             </>
           ) : (
             messages.map(m => (
@@ -363,7 +405,7 @@ export default function StylistScreen() {
                     {m.text}
                   </Text>
                 </View>
-                {m.pairs ? <LuckyPairsView result={pairsFor(m)} language={language} /> : null}
+                {m.pairs ? pairsAnswer(m.occ ?? null, pairsFor(m)) : null}
               </View>
             ))
           )}
@@ -488,6 +530,17 @@ const styles = themedStyles(() => StyleSheet.create({
   },
   offlineTitle: { fontSize: fontSize.base, fontWeight: fontWeight.bold, color: colors.textPrimary, marginBottom: 6 },
   offlineText: { fontSize: fontSize.base, color: colors.textSecondary, lineHeight: 22 },
+  adviceBox: {
+    alignSelf: 'stretch',
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    padding: spacing.md,
+    marginBottom: spacing.sm,
+  },
+  adviceBest: { fontSize: fontSize.base, fontWeight: fontWeight.bold, color: colors.textPrimary, lineHeight: 22 },
+  adviceLine: { fontSize: fontSize.sm, color: colors.textSecondary, lineHeight: 20, marginTop: 6 },
   pairsBox: {
     alignSelf: 'stretch',
     backgroundColor: colors.surface,

@@ -281,7 +281,7 @@ export const pairsSubtitle = (v: VaaraColour, lang: AiLanguage): string =>
 // ── Occasion fit ─────────────────────────────────────────────────────────
 export type OccKey =
   | 'work' | 'interview' | 'college' | 'date' | 'party' | 'wedding' | 'festival' | 'temple'
-  | 'beach' | 'gym' | 'travel' | 'casual';
+  | 'beach' | 'gym' | 'travel' | 'casual' | 'hill' | 'home' | 'indoor' | 'outdoor';
 
 // Occasion chip / detected word -> rule key
 export const occasionKey = (occ?: string | null): OccKey | null => {
@@ -297,8 +297,12 @@ export const occasionKey = (occ?: string | null): OccKey | null => {
   if (/temple/.test(o)) return 'temple';
   if (/beach/.test(o)) return 'beach';
   if (/gym|workout|sport/.test(o)) return 'gym';
-  if (/travel|trip|hill/.test(o)) return 'travel';
-  if (/casual|outing|restaurant|movie/.test(o)) return 'casual';
+  if (/hill|mountain|snow|cold|winter/.test(o)) return 'hill';
+  if (/home|night|sleep|pyjama|pajama|lounge/.test(o)) return 'home';
+  if (/travel|trip|journey/.test(o)) return 'travel';
+  if (/casual|outing|restaurant|movie|mall/.test(o)) return 'casual';
+  if (/indoor/.test(o)) return 'indoor';
+  if (/outdoor|picnic|park/.test(o)) return 'outdoor';
   return null;
 };
 
@@ -312,6 +316,9 @@ const WORDS = {
   sport: /track|jogger|gym|sport|active|legging|athletic/,
   smart: /shirt|chino|polo|dress\b|blouse|kurti/,
   party: /party|sequin|satin|silk|blazer/,
+  warm: /jacket|hoodie|sweat|sweater|coat|thermal|cardigan|fleece|shawl|blazer|woolen|woollen|wool/,
+  lounge: /night|pyjama|pajama|lounge|sleep|track|jogger|short/,
+  fullBottom: /jean|denim|trouser|pant|chino|legging|jogger/,
 };
 const LIGHT = new Set<Fam>(['white', 'lightblue', 'beige', 'yellow', 'pink', 'silver', 'grey']);
 const BRIGHT_AUSPICIOUS = new Set<Fam>(['yellow', 'red', 'maroon', 'orange', 'green', 'pink']);
@@ -365,6 +372,25 @@ export const occasionFit = (i: WardrobeItemResponse, key: OccKey | null): number
       if (f && ['black', 'maroon', 'navy', 'red', 'purple'].includes(f)) s += 1;
       if (has(WORDS.sport)) s -= 2;
       break;
+    case 'hill':
+      if (has(WORDS.warm)) s += 3;
+      if (has(WORDS.fullBottom) && !has(WORDS.shorts)) s += 1.5;
+      if (has(WORDS.shorts) || has(WORDS.linen)) s -= 2;
+      break;
+    case 'home':
+      if (has(WORDS.lounge) || /t-?shirt|tee|cotton|kurti|hoodie/.test(t)) s += 2.5;
+      if (has(WORDS.formal) || has(WORDS.party) || /saree|lehenga|sherwani/.test(t)) s -= 2;
+      if (has(WORDS.denim)) s -= 0.5;
+      break;
+    case 'indoor':
+      if (has(WORDS.casualTop) || /cotton|kurti|kurta|legging|pyjama|track/.test(t)) s += 1.5;
+      if (has(WORDS.warm) && !/blazer/.test(t)) s -= 0.5;
+      break;
+    case 'outdoor':
+      if (has(WORDS.casualTop) || has(WORDS.denim) || has(WORDS.linen) || /chino|polo/.test(t)) s += 1.5;
+      if (f && LIGHT.has(f)) s += 0.5;
+      if (/saree|lehenga|sherwani|blazer/.test(t)) s -= 1;
+      break;
     case 'travel':
     case 'casual':
       if (has(WORDS.casualTop) || has(WORDS.denim) || /casual|daily/.test(t)) s += 1.5;
@@ -376,9 +402,9 @@ export const occasionFit = (i: WardrobeItemResponse, key: OccKey | null): number
 
 // Occasion name in the chosen language
 export const OCC_WORD: Record<AiLanguage, Record<OccKey, string>> = {
-  English: { work: 'work', interview: 'an interview', college: 'college', date: 'a date', party: 'a party', wedding: 'a wedding / function', festival: 'the festival', temple: 'the temple', beach: 'the beach', gym: 'the gym', travel: 'travel', casual: 'a casual outing' },
-  Telugu: { work: 'ఆఫీస్', interview: 'ఇంటర్వ్యూ', college: 'కాలేజ్', date: 'డేట్', party: 'పార్టీ', wedding: 'పెళ్లి / ఫంక్షన్', festival: 'పండుగ', temple: 'గుడి', beach: 'బీచ్', gym: 'జిమ్', travel: 'ప్రయాణం', casual: 'సరదా బయటకు వెళ్లడం' },
-  Hindi: { work: 'ऑफिस', interview: 'इंटरव्यू', college: 'कॉलेज', date: 'डेट', party: 'पार्टी', wedding: 'शादी / फंक्शन', festival: 'त्योहार', temple: 'मंदिर', beach: 'बीच', gym: 'जिम', travel: 'सफ़र', casual: 'कैज़ुअल आउटिंग' },
+  English: { work: 'work', interview: 'an interview', college: 'college', date: 'a date', party: 'a party', wedding: 'a wedding / function', festival: 'the festival', temple: 'the temple', beach: 'the beach', gym: 'the gym', travel: 'travel', casual: 'a casual outing', hill: 'a hill station', home: 'home / night', indoor: 'indoors', outdoor: 'outdoors' },
+  Telugu: { work: 'ఆఫీస్', interview: 'ఇంటర్వ్యూ', college: 'కాలేజ్', date: 'డేట్', party: 'పార్టీ', wedding: 'పెళ్లి / ఫంక్షన్', festival: 'పండుగ', temple: 'గుడి', beach: 'బీచ్', gym: 'జిమ్', travel: 'ప్రయాణం', casual: 'సరదా బయటకు వెళ్లడం', hill: 'హిల్ స్టేషన్', home: 'ఇంట్లో / రాత్రి', indoor: 'ఇంటి లోపల', outdoor: 'బయట' },
+  Hindi: { work: 'ऑफिस', interview: 'इंटरव्यू', college: 'कॉलेज', date: 'डेट', party: 'पार्टी', wedding: 'शादी / फंक्शन', festival: 'त्योहार', temple: 'मंदिर', beach: 'बीच', gym: 'जिम', travel: 'सफ़र', casual: 'कैज़ुअल आउटिंग', hill: 'हिल स्टेशन', home: 'घर / रात', indoor: 'घर के अंदर', outdoor: 'बाहर' },
 };
 const OCC_LINE: Record<AiLanguage, string> = {
   English: 'Picked for {occ}.',

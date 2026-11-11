@@ -20,6 +20,9 @@ describe('parseIntent', () => {
     expect(parseIntent('గుడికి ఏం వేసుకోవాలి').occasion).toBe('Temple');
     expect(parseIntent('शादी में क्या पहनूं').occasion).toBe('Wedding / Function');
     expect(parseIntent('college').wantsPairs).toBe(true);
+    expect(parseIntent('trip to ooty, what to wear').occasion).toBe('Hill station');
+    expect(parseIntent('night wear for home').occasion).toBe('Home / Night');
+    expect(parseIntent('picnic outfit').occasion).toBe('Outdoor');
   });
 
   it('detects colour, goes-with and weather questions', () => {

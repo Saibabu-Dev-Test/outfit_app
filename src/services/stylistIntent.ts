@@ -19,6 +19,7 @@ export interface StylistIntent {
 const OCC_PATTERNS: [RegExp, string][] = [
   [/interview|ఇంటర్వ్యూ|इंटरव्यू/i, 'Interview'],
   [/\bbeach|samudram|sea ?side|బీచ్|సముద్ర|बीच|समुद्र/i, 'Beach'],
+  [/hill ?station|\bhills?\b|ooty|manali|shimla|araku|munnar|kodaikanal|mountain|snow|trek|కొండ|హిల్|पहाड़|हिल/i, 'Hill station'],
   [/college|campus|class\b|school|కాలేజ్|కాలేజీ|कॉलेज/i, 'College'],
   [/\bdate\b|\bdate ki\b|డేట్|डेट/i, 'Date'],
   [/party|పార్టీ|पार्टी/i, 'Party'],
@@ -26,8 +27,11 @@ const OCC_PATTERNS: [RegExp, string][] = [
   [/festival|panduga|pandaga|diwali|deepavali|sankranti|ugadi|dasara|dussehra|holi|పండుగ|पर्व|त्योहार|त्यौहार/i, 'Festival'],
   [/temple|gudi|\bpuja\b|pooja|గుడి|ఆలయ|मंदिर/i, 'Temple'],
   [/\bgym\b|workout|exercise|jogging|జిమ్|जिम/i, 'Gym'],
+  [/at home|home ?wear|\bnight ?(wear|dress|pants)|\bsleep|bed ?time|pyjama|pajama|lounge|ఇంట్లో|నిద్ర|నైట్|घर पर|सोने|नाइट/i, 'Home / Night'],
   [/travel|trip|journey|flight|train|ప్రయాణ|యాత్ర|यात्रा|सफ़र|सफर/i, 'Travel'],
   [/office|\bwork\b|meeting|ఆఫీస్|ऑफिस|दफ़्तर/i, 'Work'],
+  [/indoor|ఇంటి లోపల|घर के अंदर/i, 'Indoor'],
+  [/outdoor|picnic|\bpark\b|అవుట్‌డోర్|आउटडोर/i, 'Outdoor'],
   [/outing|movie|cinema|mall|hangout|casual|సినిమా|घूमने/i, 'Casual outing'],
 ];
 
