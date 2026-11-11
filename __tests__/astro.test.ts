@@ -56,7 +56,7 @@ describe('astro (offline panchang)', () => {
     const a = dailyReading(p, { uid: 'u1', date: at(2026, 11, 10, 7) });
     const b = dailyReading(p, { uid: 'u1', date: at(2026, 11, 10, 22) });
     expect(a.overview).toBe(b.overview);
-    expect(a.crush.text).toBe(b.crush.text);
+    expect(a.relation.text).toBe(b.relation.text);
     expect(a.stars).toBeGreaterThanOrEqual(3);
     expect(a.dress.colours.length).toBeGreaterThan(0);
     expect(a.dress.title).toMatch(/Red|Coral/); // Tuesday

@@ -53,12 +53,12 @@ export default function AstrologyPanel({ uid, profile, wardrobe, onEditProfile }
   const reading = useMemo(
     () => dailyReading(profile, { uid, lang, wardrobe }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [uid, lang, dayKey, profile.dob, profile.timeOfBirth, profile.placeOfBirth, profile.rashi, profile.gender, profile.name, wardrobe],
+    [uid, lang, dayKey, profile.dob, profile.timeOfBirth, profile.placeOfBirth, profile.rashi, profile.gender, profile.name, profile.maritalStatus, wardrobe],
   );
   const en = useMemo(
     () => (bi ? dailyReading(profile, { uid, lang: 'English', wardrobe }) : null),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [bi, uid, dayKey, profile.dob, profile.timeOfBirth, profile.placeOfBirth, profile.rashi, profile.gender, profile.name, wardrobe],
+    [bi, uid, dayKey, profile.dob, profile.timeOfBirth, profile.placeOfBirth, profile.rashi, profile.gender, profile.name, profile.maritalStatus, wardrobe],
   );
   // Text in the chosen language, with the English line under it when "Show English too" is on
   const Bi = ({ text, enText, style }: { text: string; enText?: string | null; style?: any }) => (
@@ -242,9 +242,10 @@ export default function AstrologyPanel({ uid, profile, wardrobe, onEditProfile }
         ) : null}
       </View>
 
-      <View style={[styles.card, styles.crushCard]}>
-        <Bi style={styles.title} text={reading.crush.title} enText={en?.crush.title} />
-        <Bi style={styles.body} text={reading.crush.text} enText={en?.crush.text} />
+      <View style={[styles.card, styles.relCard]}>
+        <Bi style={styles.title} text={reading.relation.title} enText={en?.relation.title} />
+        <Bi style={styles.body} text={reading.relation.text} enText={en?.relation.text} />
+        {reading.relation.outing ? <Bi style={[styles.body, styles.idea]} text={`🚗 ${reading.relation.outing}`} enText={en?.relation.outing ? `🚗 ${en.relation.outing}` : null} /> : null}
       </View>
 
       {!fest.today.length && !fest.upcoming.length && fest.next ? (
@@ -301,7 +302,7 @@ const styles = themedStyles(() => StyleSheet.create({
   },
   festCard: { borderColor: colors.accent, borderWidth: 1.5 },
   askCard: { borderColor: colors.primary },
-  crushCard: { borderColor: '#F48FB1' },
+  relCard: { borderColor: '#F48FB1' },
   festTag: { fontSize: fontSize.xs, color: colors.accent, fontWeight: fontWeight.bold, textTransform: 'uppercase', letterSpacing: 0.5 },
   festName: { fontSize: fontSize.base, fontWeight: fontWeight.extraBold, color: colors.textPrimary, marginTop: 2, marginBottom: 4 },
   title: { fontSize: fontSize.base, fontWeight: fontWeight.extraBold, color: colors.textPrimary, marginBottom: spacing.sm },

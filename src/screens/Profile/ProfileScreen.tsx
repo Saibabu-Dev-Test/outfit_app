@@ -59,6 +59,7 @@ interface UserProfile {
   rashi?: string;
   language?: string;
   gender?: string;
+  maritalStatus?: string;
   bio?: string;
   avatarUrl?: string | null;
   isPublic?: boolean;
@@ -71,6 +72,9 @@ const LANGUAGES = [
   'Telugu', 'Hindi', 'English', 'Tamil', 'Kannada', 'Malayalam',
   'Marathi', 'Bengali', 'Gujarati', 'Punjabi', 'Odia', 'Urdu',
 ];
+
+// Marital status: shapes the astrology relationship lines (married: spouse and family only)
+const MARITAL_OPTIONS = ['Single', 'Married', 'Prefer not to say'];
 
 const THEME_LABEL: Record<ThemeMode, string> = { system: 'System', light: 'Light', dark: 'Dark' };
 
@@ -114,6 +118,7 @@ export default function ProfileScreen() {
   const [editRashi, setEditRashi] = useState<string>('');
   const [editLanguage, setEditLanguage] = useState<string>('');
   const [editGender, setEditGender] = useState<string>('');
+  const [editMarital, setEditMarital] = useState<string>('');
   const [editBio, setEditBio] = useState<string>('');
   const [savingProfile, setSavingProfile] = useState<boolean>(false);
   const [uploadingAvatar, setUploadingAvatar] = useState<boolean>(false);
@@ -254,6 +259,7 @@ const fetchProfile = async () => {
       rashi: stored.rashi || '',
       language: stored.language || '',
       gender: stored.gender || '',
+      maritalStatus: stored.maritalStatus || '',
       bio: stored.bio || '',
       isPublic: stored.isPublic !== false,
       stylePrefs: Array.isArray(stored.stylePrefs) ? stored.stylePrefs : [],
@@ -355,6 +361,7 @@ const fetchProfile = async () => {
     setEditRashi(profileData?.rashi || '');
     setEditLanguage(profileData?.language || '');
     setEditGender(profileData?.gender || '');
+    setEditMarital(profileData?.maritalStatus || '');
     setEditBio(profileData?.bio || '');
     setEditIsPublic(profileData?.isPublic !== false);
     setIsGenderDropdownOpen(false);
@@ -384,6 +391,7 @@ const fetchProfile = async () => {
     rashi: editRashi.trim(),
     language: editLanguage.trim(),
     gender: editGender.trim(),
+    maritalStatus: editMarital,
     bio: editBio.trim(),
     avatarUrl: profileData?.avatarUrl || null,
     isPublic: editIsPublic,
@@ -401,6 +409,7 @@ const fetchProfile = async () => {
       rashi: updatedProfile.rashi,
       language: updatedProfile.language,
       gender: updatedProfile.gender,
+      maritalStatus: updatedProfile.maritalStatus,
       bio: updatedProfile.bio,
       isPublic: updatedProfile.isPublic,
     });
@@ -594,6 +603,12 @@ const fetchProfile = async () => {
                 <Text style={styles.infoLabel}>👤 Gender</Text>
                 <Text style={styles.infoValue}>
                   {profileData?.gender ? profileData.gender : 'Not specified'}
+                </Text>
+              </View>
+              <View style={styles.infoItem}>
+                <Text style={styles.infoLabel}>💍 Marital status</Text>
+                <Text style={styles.infoValue}>
+                  {profileData?.maritalStatus ? profileData.maritalStatus : 'Not specified'}
                 </Text>
               </View>
             </View>
@@ -987,6 +1002,24 @@ const fetchProfile = async () => {
               </View>
 
               <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Marital status</Text>
+                <View style={styles.chipRow}>
+                  {MARITAL_OPTIONS.map(m => {
+                    const on = editMarital === m;
+                    return (
+                      <TouchableOpacity
+                        key={m}
+                        style={[styles.chip, on && styles.chipOn]}
+                        onPress={() => setEditMarital(on ? '' : m)}
+                        activeOpacity={0.8}>
+                        <Text style={[styles.chipText, on && styles.chipTextOn]}>{m}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
+
+              <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>Bio</Text>
                 <TextInput
                   style={[styles.modalInput, styles.bioInput]}
@@ -1186,6 +1219,19 @@ const styles = themedStyles(() => StyleSheet.create({
   flexTitle: { flex: 1 },
   menuValue: { fontSize: fontSize.xs, color: colors.textSecondary, marginTop: 1 },
   flexShrink: { flexShrink: 1 },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap' },
+  chip: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: 6,
+    borderRadius: borderRadius.full,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    marginRight: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  chipOn: { borderColor: colors.primary, backgroundColor: colors.surface },
+  chipText: { fontSize: fontSize.sm, color: colors.textSecondary, fontWeight: fontWeight.semiBold },
+  chipTextOn: { color: colors.primary, fontWeight: fontWeight.bold },
   publicRow: {
     flexDirection: 'row',
     alignItems: 'center',

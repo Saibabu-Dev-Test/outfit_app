@@ -58,7 +58,17 @@ export interface AstroProfile {
   rashi?: string | null;
   gender?: string | null;
   language?: string | null;
+  maritalStatus?: string | null; // 'Single' | 'Married' | 'Prefer not to say'
 }
+
+export type MaritalKind = 'married' | 'single' | 'unsaid';
+// Profile marital status -> how relationship lines are worded (married: spouse and family only)
+export const maritalKind = (v?: string | null): MaritalKind => {
+  const s = (v || '').trim().toLowerCase();
+  if (s.startsWith('married')) return 'married';
+  if (s.startsWith('single')) return 'single';
+  return 'unsaid';
+};
 
 export interface DailyReading {
   dayKey: string;
@@ -86,7 +96,9 @@ export interface DailyReading {
     idea: string;
     pair: { top: WardrobeItemResponse; bottom: WardrobeItemResponse; why: string } | null;
   };
-  crush: { level: 'high' | 'good' | 'gentle'; title: string; text: string };
+  // Relationship card: married -> spouse and family at home (+ a good day for a family outing),
+  // single / not said -> neutral friendships and connections. Never predicts specific people.
+  relation: { kind: MaritalKind; level: 'high' | 'good' | 'gentle'; title: string; text: string; outing: string | null };
 }
 
 const fill = (t: string, v: Record<string, string>) => t.replace(/\{(\w+)\}/g, (_, k) => v[k] ?? '');
@@ -248,14 +260,39 @@ export const dailyReading = (
     colours.push({ name: colourName(lc.en, lang), hex: lc.hex });
   }
 
-  // "Chance to see the person you like": 5th / 7th / 11th house, Friday, Venus / Moon signs
+  // Relationship card strength: 5th / 7th / 11th house, Friday, Venus / Moon signs
   let score = seed % 3;
   if ([5, 7, 11].includes(house)) score += 2;
   else if ([1, 3, 10].includes(house)) score += 1;
   if (p.day.weekday === 5) score += 1;
   if ([1, 6, 3].includes(p.moonRashi)) score += 1;
   const level: 'high' | 'good' | 'gentle' = score >= 4 ? 'high' : score >= 2 ? 'good' : 'gentle';
-  const crushText = level === 'high' ? t.crushHigh : level === 'good' ? t.crushGood : t.crushGentle;
+  const kind = maritalKind(profile.maritalStatus);
+  const married = kind === 'married';
+  const relText = married
+    ? level === 'high' ? t.relHighM : level === 'good' ? t.relGoodM : t.relGentleM
+    : level === 'high' ? t.relHighS : level === 'good' ? t.relGoodS : t.relGentleS;
+  // Married: the best day in the coming week for a family outing (good Chandrabalam + Tarabalam,
+  // weekends preferred)
+  let outing: string | null = null;
+  if (married && chart) {
+    let best = -1;
+    let bestDay: Panchang | null = null;
+    for (let i = 0; i < 7; i++) {
+      const q = i === 0 ? p : panchangFor(new Date(date.getTime() + i * 86400000));
+      let sc = GOOD_HOUSES.has(chandraHouse(chart.rashi, q.moonRashi)) ? 2 : 0;
+      if (chart.nakshatra !== null && GOOD_TARAS.has(taraOf(chart.nakshatra, q.nakshatra))) sc += 1;
+      if (q.day.weekday === 0 || q.day.weekday === 6) sc += 1;
+      if (sc > best) {
+        best = sc;
+        bestDay = q;
+      }
+    }
+    if (bestDay) {
+      const [, mo, dd] = bestDay.day.key.split('-').map(Number);
+      outing = fill(t.outing, { date: `${WEEKDAY_NAMES[pn][bestDay.day.weekday]} ${dd} ${MONTHS[mo - 1]}` });
+    }
+  }
 
   const first = (profile.name || '').trim().split(/\s+/)[0];
   let note: string | null = null;
@@ -310,6 +347,6 @@ export const dailyReading = (
     luckyTime: luckyParts.join(' · '),
     calmTime,
     dress: { colours, title: fill(t.dressTitle, { colours: words(pn) }), why, idea, pair },
-    crush: { level, title: t.crushTitle, text: crushText },
+    relation: { kind, level, title: married ? t.relTitleM : t.relTitleS, text: relText, outing },
   };
 };

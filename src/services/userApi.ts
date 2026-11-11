@@ -26,6 +26,7 @@ export interface StoredProfile {
   rashi?: string;
   language?: string;
   gender?: string;
+  maritalStatus?: string; // 'Single' | 'Married' | 'Prefer not to say' (astrology relationship wording)
   bio?: string;
   avatarUrl?: string | null;
   isPublic?: boolean; // public profile; default true
@@ -65,7 +66,7 @@ export const ageFromDob = (dob?: string | null, now: Date = new Date()): number 
 };
 
 const PROFILE_KEYS: (keyof StoredProfile)[] = [
-  'name', 'phoneNumber', 'phone', 'dob', 'timeOfBirth', 'placeOfBirth', 'rashi', 'language', 'gender',
+  'name', 'phoneNumber', 'phone', 'dob', 'timeOfBirth', 'placeOfBirth', 'rashi', 'language', 'gender', 'maritalStatus',
   'bio', 'avatarUrl', 'isPublic', 'nameLower', 'role', 'lastLoginDate', 'streak', 'stylePrefs',
 ];
 
