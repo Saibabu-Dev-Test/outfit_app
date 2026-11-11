@@ -26,6 +26,7 @@ import { deletePost, deleteComment } from '../../services/feedApi';
 import { timeAgo } from '../../utils/date';
 import { Feedback, FeedbackStatus, getFeedback, setFeedbackStatus } from '../../services/feedbackApi';
 import { registerAdmin } from '../../services/adminConfig';
+import NameWithAge from '../../components/NameWithAge';
 import {
   AGE_GROUPS,
   AGE_LABEL,
@@ -271,7 +272,7 @@ export default function AdminScreen({ navigation }: { navigation: any }) {
           </TouchableOpacity>
         ) : null}
         <Text style={styles.meta}>
-          {item.name || 'Unknown'} ({item.uid.slice(0, 8)}…) · {item.platform} · v{item.appVersion}
+          <NameWithAge uid={item.uid} name={item.name || 'Unknown'} /> ({item.uid.slice(0, 8)}…) · {item.platform} · v{item.appVersion}
         </Text>
         <View style={styles.btnRow}>
           <TouchableOpacity style={styles.btn} onPress={() => navigation.navigate('UserProfile', { userId: item.uid })}>

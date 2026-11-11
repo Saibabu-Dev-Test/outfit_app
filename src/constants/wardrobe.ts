@@ -18,9 +18,11 @@ export const SHOE_TYPES = [
   'Sports Shoes', 'Heels', 'Flats', 'Ethnic (Mojari / Jutti)',
 ];
 
+// Stored values never change (items keep their subType); new types are only appended.
 export const ACCESSORY_TYPES = [
-  'Watches', 'Belts', 'Sunglasses', 'Caps / Hats', 'Bags', 'Handbags', 'Wallets', 'Jewellery', 'Ties',
-  'Scarves / Stoles', 'Socks',
+  'Earrings', 'Bangles', 'Bracelets', 'Necklace / Chain', 'Rings', 'Anklets (Payal)', 'Nose Pin',
+  'Maang Tikka', 'Watches', 'Bags', 'Handbags', 'Clutch', 'Belts', 'Sunglasses', 'Hair Accessories',
+  'Caps / Hats', 'Wallets', 'Jewellery', 'Ties', 'Scarves / Stoles', 'Socks',
 ];
 
 export const CATEGORY_GROUPS: CategoryGroup[] = [
@@ -64,7 +66,24 @@ Object.assign(ALIASES, {
   'bag': { category: 'Accessories', subType: 'Bags' }, 'handbag': { category: 'Accessories', subType: 'Handbags' }, 'purse': { category: 'Accessories', subType: 'Handbags' },
   'wallet': { category: 'Accessories', subType: 'Wallets' },
   'cap': { category: 'Accessories', subType: 'Caps / Hats' }, 'hat': { category: 'Accessories', subType: 'Caps / Hats' },
-  'tie': { category: 'Accessories', subType: 'Ties' }, 'scarf': { category: 'Accessories', subType: 'Scarves / Stoles' },
+  'tie': { category: 'Accessories', subType: 'Ties' },
+  'earring': { category: 'Accessories', subType: 'Earrings' }, 'jhumka': { category: 'Accessories', subType: 'Earrings' }, 'jhumkas': { category: 'Accessories', subType: 'Earrings' },
+  'studs': { category: 'Accessories', subType: 'Earrings' },
+  'bangle': { category: 'Accessories', subType: 'Bangles' }, 'gajulu': { category: 'Accessories', subType: 'Bangles' }, 'kada': { category: 'Accessories', subType: 'Bracelets' },
+  'bracelet': { category: 'Accessories', subType: 'Bracelets' },
+  'necklace': { category: 'Accessories', subType: 'Necklace / Chain' }, 'chain': { category: 'Accessories', subType: 'Necklace / Chain' },
+  'necklaces': { category: 'Accessories', subType: 'Necklace / Chain' }, 'chains': { category: 'Accessories', subType: 'Necklace / Chain' },
+  'mangalsutra': { category: 'Accessories', subType: 'Necklace / Chain' }, 'haram': { category: 'Accessories', subType: 'Necklace / Chain' },
+  'ring': { category: 'Accessories', subType: 'Rings' },
+  'anklet': { category: 'Accessories', subType: 'Anklets (Payal)' }, 'anklets': { category: 'Accessories', subType: 'Anklets (Payal)' },
+  'payal': { category: 'Accessories', subType: 'Anklets (Payal)' }, 'pattilu': { category: 'Accessories', subType: 'Anklets (Payal)' },
+  'nose pin': { category: 'Accessories', subType: 'Nose Pin' }, 'nose ring': { category: 'Accessories', subType: 'Nose Pin' }, 'nath': { category: 'Accessories', subType: 'Nose Pin' },
+  'maang tikka': { category: 'Accessories', subType: 'Maang Tikka' }, 'tikka': { category: 'Accessories', subType: 'Maang Tikka' }, 'papidi billa': { category: 'Accessories', subType: 'Maang Tikka' },
+  'hair accessory': { category: 'Accessories', subType: 'Hair Accessories' }, 'hair clip': { category: 'Accessories', subType: 'Hair Accessories' },
+  'hairband': { category: 'Accessories', subType: 'Hair Accessories' }, 'hair band': { category: 'Accessories', subType: 'Hair Accessories' },
+  'scrunchie': { category: 'Accessories', subType: 'Hair Accessories' },
+  'clutch': { category: 'Accessories', subType: 'Clutch' }, 'clutches': { category: 'Accessories', subType: 'Clutch' },
+  'sunglass': { category: 'Accessories', subType: 'Sunglasses' }, 'goggles': { category: 'Accessories', subType: 'Sunglasses' }, 'scarf': { category: 'Accessories', subType: 'Scarves / Stoles' },
   'sneaker': { category: 'Shoes', subType: 'Sneakers' }, 'sandal': { category: 'Shoes', subType: 'Sandals' },
   'slippers': { category: 'Shoes', subType: 'Slippers / Flip-flops' }, 'flip-flops': { category: 'Shoes', subType: 'Slippers / Flip-flops' },
   'heel': { category: 'Shoes', subType: 'Heels' }, 'mojari': { category: 'Shoes', subType: 'Ethnic (Mojari / Jutti)' },
@@ -115,6 +134,7 @@ const GENDER_OF: Record<string, 'male' | 'female'> = {
   'Leggings': 'female', 'Skirts': 'female', 'Dupattas': 'female',
   // shoe / accessory types
   'Heels': 'female', 'Flats': 'female', 'Handbags': 'female', 'Jewellery': 'female', 'Ties': 'male',
+  'Bangles': 'female', 'Anklets (Payal)': 'female', 'Nose Pin': 'female', 'Maang Tikka': 'female', 'Clutch': 'female',
 };
 
 export const genderKey = (gender?: string | null): 'male' | 'female' | null => {
@@ -208,6 +228,48 @@ export const CATEGORY_ICONS: Record<string, string> = {
   'Ties': '👔',
   'Scarves / Stoles': '🧣',
   'Socks': '🧦',
+  'Earrings': '💎',
+  'Bangles': '⭕',
+  'Bracelets': '📿',
+  'Necklace / Chain': '📿',
+  'Rings': '💍',
+  'Anklets (Payal)': '🔔',
+  'Nose Pin': '✨',
+  'Maang Tikka': '🪔',
+  'Clutch': '👛',
+  'Hair Accessories': '🎀',
+};
+
+// Labels for the accessory types in Telugu / Hindi (stored values stay English; anything
+// missing falls back to the English value)
+const ACCESSORY_LABELS: Record<string, { te: string; hi: string }> = {
+  'Earrings': { te: 'చెవి కమ్మలు', hi: 'झुमके / बालियाँ' },
+  'Bangles': { te: 'గాజులు', hi: 'चूड़ियाँ' },
+  'Bracelets': { te: 'బ్రేస్‌లెట్', hi: 'ब्रेसलेट' },
+  'Necklace / Chain': { te: 'హారం / గొలుసు', hi: 'हार / चेन' },
+  'Rings': { te: 'ఉంగరాలు', hi: 'अंगूठियाँ' },
+  'Anklets (Payal)': { te: 'పట్టీలు', hi: 'पायल' },
+  'Nose Pin': { te: 'ముక్కుపుడక', hi: 'नथ / नोज़ पिन' },
+  'Maang Tikka': { te: 'పాపిడి బిళ్ళ', hi: 'मांग टीका' },
+  'Watches': { te: 'గడియారం', hi: 'घड़ी' },
+  'Bags': { te: 'బ్యాగ్', hi: 'बैग' },
+  'Handbags': { te: 'హ్యాండ్‌బ్యాగ్', hi: 'हैंडबैग' },
+  'Clutch': { te: 'క్లచ్', hi: 'क्लच' },
+  'Belts': { te: 'బెల్ట్', hi: 'बेल्ट' },
+  'Sunglasses': { te: 'కళ్లజోడు (సన్‌గ్లాసెస్)', hi: 'धूप का चश्मा' },
+  'Hair Accessories': { te: 'జుట్టు అలంకరణలు', hi: 'बालों की एक्सेसरीज़' },
+  'Caps / Hats': { te: 'క్యాప్ / టోపీ', hi: 'कैप / टोपी' },
+  'Accessories': { te: 'యాక్సెసరీలు', hi: 'एक्सेसरीज़' },
+};
+
+/** Display label for a category / type in the user's language ('Telugu' / 'Hindi'); English fallback */
+export const typeLabel = (value: string, language?: string | null): string => {
+  const l = (language || '').trim().toLowerCase();
+  const row = ACCESSORY_LABELS[value];
+  if (!row) return value;
+  if (l === 'telugu' || l === 'te') return row.te || value;
+  if (l === 'hindi' || l === 'hi') return row.hi || value;
+  return value;
 };
 
 export const categoryIcon = (c?: string | null): string =>

@@ -44,6 +44,7 @@ import { inlineAvatar } from './userApi';
 import { assertClean } from '../utils/profanity';
 import { encodeGeohash, geohashNeighbours, haversineKm, roundCoord } from '../utils/geo';
 import { getApproxLocation } from '../native/location';
+import { cleanAge, myAgeFields } from '../utils/age';
 
 export interface Circle {
   id: string;
@@ -84,6 +85,7 @@ export interface ChatMessage {
   id: string;
   userId: string;
   userName: string;
+  userAge?: number | null;
   userAvatar: string | null;
   text?: string;
   imageData?: string;
@@ -140,6 +142,7 @@ const toMessage = (id: string, d: any): ChatMessage => {
     id,
     userId: String(d?.userId || ''),
     userName: d?.userName || 'Member',
+    userAge: cleanAge(d?.userAge),
     userAvatar: d?.userAvatar || null,
     type,
     createdAt: toDate(d?.createdAt),
@@ -740,6 +743,7 @@ const bumpLastMessage = async (circleId: string) => {
 const authorFields = (me: ChatAuthor) => ({
   userId: me.uid,
   userName: (me.name || '').trim() || 'Member',
+  ...myAgeFields(),
   userAvatar: inlineAvatar(me.avatar),
   createdAt: serverTimestamp(),
 });

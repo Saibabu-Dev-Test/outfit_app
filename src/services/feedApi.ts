@@ -37,6 +37,7 @@ import { inlineAvatar } from './userApi';
 import { assertClean } from '../utils/profanity';
 import { getUserLite, getUsersLite } from './userCache';
 import { getMyCircles } from './circlesApi';
+import { cleanAge, myAgeFields } from '../utils/age';
 
 export type FeedKind = 'post' | 'wardrobe';
 
@@ -45,6 +46,7 @@ export interface Post {
   kind: FeedKind; // 'wardrobe' = a public wardrobe photo shown in the feed
   userId: string;
   userName: string;
+  userAge?: number | null;
   userAvatar: string | null;
   imageData: string; // first photo (A): thumbnail on new posts, full photo on older ones
   photos: string[]; // all photos A..F (1 for a normal post), same sizes as imageData
@@ -85,6 +87,7 @@ const toPost = (id: string, d: any): Post => ({
   kind: 'post',
   userId: String(d?.userId || ''),
   userName: d?.userName || 'Outfit user',
+  userAge: cleanAge(d?.userAge),
   userAvatar: d?.userAvatar || null,
   imageData: d?.imageData || '',
   photos: [d?.imageData || '', ...(Array.isArray(d?.morePhotos) ? d.morePhotos : [])]
@@ -169,6 +172,7 @@ export const createPost = async (
     const data: any = {
       userId: me.uid,
       userName: (me.name || '').trim() || 'Outfit user',
+      ...myAgeFields(),
       userAvatar: inlineAvatar(me.avatar),
       imageData: shown[0],
       caption: caption.trim().slice(0, 500),
@@ -371,6 +375,7 @@ export interface Comment {
   id: string;
   userId: string;
   userName: string;
+  userAge?: number | null;
   userAvatar: string | null;
   text: string;
   createdAt: Date | null;
@@ -394,6 +399,7 @@ const toComment = (id: string, d: any): Comment => ({
   id,
   userId: String(d?.userId || ''),
   userName: d?.userName || 'Outfit user',
+  userAge: cleanAge(d?.userAge),
   userAvatar: d?.userAvatar || null,
   text: d?.text || '',
   createdAt: toDate(d?.createdAt),
@@ -443,6 +449,7 @@ export const addComment = async (
       tx.set(commentRef, {
         userId: me.uid,
         userName: (me.name || '').trim() || 'Outfit user',
+        ...myAgeFields(),
         userAvatar: inlineAvatar(me.avatar),
         text: t,
         createdAt: serverTimestamp(),

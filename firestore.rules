@@ -37,9 +37,13 @@ service cloud.firestore {
         || get(/databases/$(db)/documents/phones/$(request.resource.data.phone)).data.uid == me();
     }
 
-    // New comment {userId, userName, userAvatar, text, createdAt} by me, bad-word checked
+    // New comment {userId, userName, userAge?, userAvatar, text, createdAt} by me, bad-word checked
     function commentOk() {
-      return request.resource.data.keys().hasOnly(['userId', 'userName', 'userAvatar', 'text', 'createdAt'])
+      return request.resource.data.keys().hasOnly(['userId', 'userName', 'userAge', 'userAvatar', 'text', 'createdAt'])
+        && (request.resource.data.get('userAge', null) == null
+            || (request.resource.data.userAge is int
+                && request.resource.data.userAge >= 0
+                && request.resource.data.userAge < 130))
         && request.resource.data.userId == me()
         && request.resource.data.text is string
         && request.resource.data.text.size() >= 1
@@ -220,7 +224,11 @@ service cloud.firestore {
       allow read: if signedIn();
       allow create: if signedIn()
         && exists(/databases/$(db)/documents/birthdays/$(uid))
-        && request.resource.data.keys().hasOnly(['userId', 'userName', 'userAvatar', 'text', 'day', 'replyToUid', 'replyToName', 'createdAt'])
+        && request.resource.data.keys().hasOnly(['userId', 'userName', 'userAge', 'userAvatar', 'text', 'day', 'replyToUid', 'replyToName', 'createdAt'])
+        && (request.resource.data.get('userAge', null) == null
+            || (request.resource.data.userAge is int
+                && request.resource.data.userAge >= 0
+                && request.resource.data.userAge < 130))
         && request.resource.data.userId == me()
         && request.resource.data.createdAt == request.time
         && isDateKey(request.resource.data.day)
@@ -251,7 +259,11 @@ service cloud.firestore {
       allow read: if signedIn() && (myBirthdayNow(day) || isAdmin());
       allow create: if signedIn()
         && myBirthdayNow(day)
-        && request.resource.data.keys().hasOnly(['userId', 'userName', 'userAvatar', 'type', 'text', 'imageData', 'createdAt'])
+        && request.resource.data.keys().hasOnly(['userId', 'userName', 'userAge', 'userAvatar', 'type', 'text', 'imageData', 'createdAt'])
+        && (request.resource.data.get('userAge', null) == null
+            || (request.resource.data.userAge is int
+                && request.resource.data.userAge >= 0
+                && request.resource.data.userAge < 130))
         && request.resource.data.userId == me()
         && request.resource.data.createdAt == request.time
         && request.resource.data.userName is string

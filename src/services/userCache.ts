@@ -8,6 +8,7 @@ export interface UserLite {
   name: string;
   avatarUrl: string | null;
   isPublic: boolean;
+  dob: string | null; // 'YYYY-MM-DD' (age beside names)
 }
 
 const cache = new Map<string, { at: number; v: UserLite | null }>();
@@ -30,6 +31,7 @@ export const getUserLite = async (uid: string): Promise<UserLite | null> => {
             name: (d?.name || '').trim() || 'Outfit user',
             avatarUrl: d?.avatarUrl || null,
             isPublic: d?.isPublic !== false,
+            dob: typeof d?.dob === 'string' ? d.dob : null,
           }
         : null;
       cache.set(uid, { at: Date.now(), v });

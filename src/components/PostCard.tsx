@@ -41,6 +41,7 @@ import { follow, isFollowingCached, onFollowChange, unfollow } from '../services
 import { shareWithReferral } from '../utils/referralLink';
 import { logActivity } from '../services/activityApi';
 import { timeAgo } from '../utils/date';
+import NameWithAge from './NameWithAge';
 
 interface Props {
   post: Post;
@@ -379,9 +380,7 @@ export default function PostCard({ post, width, myUid, isAdmin, onDeleted, onOpe
         <TouchableOpacity style={styles.postUser} onPress={openProfile}>
           <Avatar uri={post.userAvatar} name={post.userName} size={34} />
           <View style={styles.postUserText}>
-            <Text style={styles.postName} numberOfLines={1}>
-              {post.userName}
-            </Text>
+            <NameWithAge style={styles.postName} numberOfLines={1} uid={post.userId} name={post.userName} age={(post as any).userAge} />
             <Text style={styles.postTime}>
               {timeAgo(post.createdAt)}
               {post.kind === 'wardrobe' ? ' · wardrobe' : multi ? ` · vote ${OPTION_LABELS.slice(0, post.photos.length).join('/')}` : ''}
@@ -523,9 +522,8 @@ export default function PostCard({ post, width, myUid, isAdmin, onDeleted, onOpe
       </View>
       {post.caption ? (
         <Text style={styles.caption}>
-          <Text style={styles.captionName} onPress={openProfile}>
-            {post.userName}{' '}
-          </Text>
+          <NameWithAge style={styles.captionName} onPress={openProfile} uid={post.userId} name={post.userName} age={(post as any).userAge} />
+          {' '}
           {post.caption}
         </Text>
       ) : null}

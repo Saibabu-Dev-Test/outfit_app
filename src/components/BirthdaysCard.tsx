@@ -7,6 +7,7 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles } from '../theme';
 import { useDayKey } from '../hooks/useDayKey';
 import Avatar from './Avatar';
+import NameWithAge from './NameWithAge';
 import {
   BirthdayEntry,
   getMyBirthday,
@@ -79,9 +80,7 @@ export default function BirthdaysCard({ uid }: { uid: string }) {
             onPress={() => navigation.navigate('BirthdayChat', { mode: 'wishes', uid: e.uid })}>
             <Avatar uri={e.avatar} name={e.name} size={38} />
             <View style={styles.flex1}>
-              <Text style={styles.name} numberOfLines={1}>
-                {e.name}
-              </Text>
+              <NameWithAge style={styles.name} numberOfLines={1} uid={e.uid} name={e.name} age={(e as any).age} />
               <Text style={[styles.when, e.inDays === 0 && styles.today]}>{whenLabel(e)}</Text>
             </View>
             <View style={styles.wishBtn}>

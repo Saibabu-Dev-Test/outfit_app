@@ -19,6 +19,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { spacing, borderRadius, themedStyles, statusBarStyle, colors } from '../../theme';
 import SelectModal from '../../components/SelectModal';
+import { DobField } from '../../components/DobPicker';
+import { isValidDob } from '../../utils/age';
 import {
   cancelAuthFlow,
   checkResetSim,
@@ -103,6 +105,7 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
   const [name, setName] = useState('');
   const [gender, setGender] = useState('');
   const [showGenderPicker, setShowGenderPicker] = useState(false);
+  const [dob, setDob] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -314,6 +317,7 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
     }
     if (isRegister && !name.trim()) return 'Please enter your name';
     if (isRegister && !gender) return 'Please select your gender';
+    if (isRegister && !isValidDob(dob)) return 'Please select your date of birth';
     if (!password) return isForgot ? 'Please enter a new password' : 'Please enter your password';
     if (needsConfirm) {
       if (password.length < MIN_PASSWORD) {
@@ -358,6 +362,7 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
           password,
           name,
           gender,
+          dob,
           referralCode: referralCode.trim() || undefined,
           phoneFromSim: !IS_WEB && simPicked && !manualPhone,
         });
@@ -530,6 +535,19 @@ export default function LoginScreen({ navigation, onLoginSuccess }: LoginScreenP
                       selected={gender}
                       onSelect={setGender}
                       onClose={() => setShowGenderPicker(false)}
+                    />
+
+                    <Text style={[styles.inputLabel, styles.labelSpacing]}>Date of Birth *</Text>
+                    <DobField
+                      value={dob}
+                      onChange={d => {
+                        setError('');
+                        setDob(d);
+                      }}
+                      disabled={busy}
+                      boxStyle={styles.selectBox}
+                      valueStyle={styles.selectValue}
+                      placeholderStyle={styles.selectPlaceholder}
                     />
 
                     <Text style={[styles.inputLabel, styles.labelSpacing]}>Referral Code</Text>

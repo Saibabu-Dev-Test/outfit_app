@@ -28,6 +28,7 @@ import Avatar from '../../components/Avatar';
 import ZoomableImage from '../../components/ZoomableImage';
 import { clockTime } from '../../utils/date';
 import { pickImages } from '../../utils/imagePicker';
+import NameWithAge from '../../components/NameWithAge';
 import {
   BdayMessage,
   birthdayDateFor,
@@ -244,7 +245,7 @@ export default function BirthdayChatScreen({ navigation, route }: { navigation: 
           onLongPress={() => onLongPress(item)}
           onPress={() => (item.imageData ? setViewer(item.imageData) : startReply(item))}
           style={[styles.bubble, mine ? styles.bubbleMine : styles.bubbleOther]}>
-          {showName ? <Text style={styles.name}>{item.userName}</Text> : null}
+          {showName ? <NameWithAge style={styles.name} uid={item.userId} name={item.userName} age={(item as any).userAge} /> : null}
           {item.imageData ? <Image source={{ uri: item.imageData }} style={styles.photo} resizeMode="cover" /> : null}
           {item.text ? renderText(item.text, mine) : null}
           <View style={styles.metaRow}>

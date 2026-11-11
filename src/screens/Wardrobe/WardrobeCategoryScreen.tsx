@@ -20,7 +20,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles, statusBarStyle } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
 import { deleteWardrobeItem, getWardrobeItems, WardrobeItemResponse } from '../../services/wardrobeApi';
-import { categoryIcon, colorToHex, inCategory, isForGender, itemSubType, normalizeCategory, subTypesFor } from '../../constants/wardrobe';
+import { categoryIcon, colorToHex, inCategory, isForGender, itemSubType, normalizeCategory, subTypesFor, typeLabel } from '../../constants/wardrobe';
 
 export default function WardrobeCategoryScreen({ navigation, route }: { navigation: any; route: any }) {
   // Old names map in (Footwear -> Shoes, Jewellery -> Accessories)
@@ -119,7 +119,7 @@ export default function WardrobeCategoryScreen({ navigation, route }: { navigati
                 onPress={() => setActiveType(t)}
                 activeOpacity={0.8}>
                 <Text style={[styles.typeText, active && styles.typeTextActive]}>
-                  {t === 'All' || t === 'Other' ? t : `${categoryIcon(t)} ${t}`}
+                  {t === 'All' || t === 'Other' ? t : `${categoryIcon(t)} ${typeLabel(t, user?.language)}`}
                   {n ? ` ${n}` : ''}
                 </Text>
               </TouchableOpacity>

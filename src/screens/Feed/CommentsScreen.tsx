@@ -29,6 +29,7 @@ import {
 import { containsProfanity, RESPECT_MESSAGE } from '../../utils/profanity';
 import { timeAgo } from '../../utils/date';
 import { logActivity } from '../../services/activityApi';
+import NameWithAge from '../../components/NameWithAge';
 
 export default function CommentsScreen({ navigation, route }: { navigation: any; route: any }) {
   // Old callers pass { postId }; new ones pass { target }
@@ -165,9 +166,8 @@ export default function CommentsScreen({ navigation, route }: { navigation: any;
       </TouchableOpacity>
       <View style={styles.body}>
         <Text style={styles.text}>
-          <Text style={styles.name} onPress={() => openProfile(item.userId)}>
-            {item.userName}{' '}
-          </Text>
+          <NameWithAge style={styles.name} onPress={() => openProfile(item.userId)} uid={item.userId} name={item.userName} age={(item as any).userAge} />
+          {' '}
           {item.text}
         </Text>
         <Text style={styles.time}>{timeAgo(item.createdAt)}</Text>

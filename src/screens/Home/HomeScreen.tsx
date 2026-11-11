@@ -22,7 +22,7 @@ import { colors, spacing, borderRadius, fontSize, fontWeight, themedStyles, stat
 import { useAuth } from '../../context/AuthContext';
 import { doc, setDoc, serverTimestamp, collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../../config/firebaseConfig';
-import { ageFromDob, getUserProfile, recordDailyLogin, saveUserProfile } from '../../services/userApi';
+import { getUserProfile, recordDailyLogin, saveUserProfile } from '../../services/userApi';
 import { compactMyClearCopies, hasUploadedToday } from '../../services/wardrobeApi';
 import { getTodayVaaraColour, getRashiLuckyColour, getTodayLuckyMessage } from '../../utils/panchangam';
 import { localDateKey, greetingForNow } from '../../utils/date';
@@ -30,6 +30,9 @@ import { useDayKey } from '../../hooks/useDayKey';
 import { markColourVoted } from '../../native/notifications';
 import { firestoreErrorMessage, SERVER_SETUP_MESSAGE } from '../../utils/firebaseErrors';
 import Avatar from '../../components/Avatar';
+import { DobRequiredModal } from '../../components/DobPicker';
+import NameWithAge from '../../components/NameWithAge';
+import { ageFromDobIST, isValidDob } from '../../utils/age';
 import BirthdaysCard from '../../components/BirthdaysCard';
 import {
   checkWeeklyStars,
@@ -158,6 +161,28 @@ export default function HomeScreen() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
+  // Date of birth is mandatory too: older accounts without one get a blocking prompt once
+  const [needDob, setNeedDob] = useState(false);
+  useEffect(() => {
+    const id = user?.id ? String(user.id) : null;
+    if (!id) return;
+    let alive = true;
+    getUserProfile(id)
+      .then((p: any) => {
+        if (alive && !isValidDob(p?.dob)) setNeedDob(true);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [user?.id]);
+  const saveDob = async (dob: string) => {
+    const id = String(user?.id || '');
+    if (!id) return;
+    await saveUserProfile(id, { dob } as any);
+    updateUserData({ dob } as any);
+    setNeedDob(false);
+  };
   const uid = user?.id;
   const [topColours, setTopColours] = useState<ColourTally[]>(emptyTally());
   const [myVote, setMyVote] = useState<string | null>(null);
@@ -230,7 +255,7 @@ export default function HomeScreen() {
           color: lw.color,
           gender: String(user?.gender || '').toLowerCase(),
           name: displayName,
-          age: ageFromDob(user?.dob),
+          age: ageFromDobIST(user?.dob),
         });
       }
       votesRef.current = map;
@@ -333,7 +358,7 @@ export default function HomeScreen() {
     const today = localDateKey();
     const voteId = `top_colors_${today}_${uid}`;
     const previous = myVote;
-    const age = ageFromDob(user?.dob);
+    const age = ageFromDobIST(user?.dob);
     setVoting(colorName);
     setMyVote(colorName); // optimistic
     try {
@@ -467,10 +492,7 @@ export default function HomeScreen() {
                   setVoterList(null);
                   navigation.navigate('UserProfile', { userId: item.uid });
                 }}>
-                <Text style={styles.voterName}>
-                  {item.name}
-                  {item.age !== null ? ` (${item.age})` : ''}
-                </Text>
+                <NameWithAge style={styles.voterName} uid={item.uid} name={item.name} age={item.age} />
                 <Text style={styles.voterArrow}>›</Text>
               </TouchableOpacity>
             )}
@@ -550,6 +572,7 @@ export default function HomeScreen() {
 
         {/* 🎂 Birthdays today + next 7 days (opt-in), wishes, and the birthday circle on my birthday */}
         {user?.id ? <BirthdaysCard uid={String(user.id)} /> : null}
+        <DobRequiredModal visible={needDob} onSave={saveDob} />
 
         {/* Last week's celebrities */}
         <View style={styles.plainHeaderRow}>

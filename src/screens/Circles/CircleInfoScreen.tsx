@@ -39,6 +39,7 @@ import { getApproxLocation } from '../../native/location';
 import { getPublicUser } from '../../services/userApi';
 import { PRIVATE_NOTICE, EMOJIS } from './CirclesScreen';
 import { shareWithReferral } from '../../utils/referralLink';
+import NameWithAge from '../../components/NameWithAge';
 
 interface MemberRow {
   id: string;
@@ -419,9 +420,7 @@ export default function CircleInfoScreen({ navigation, route }: { navigation: an
                 disabled={m.isPrivate}
                 onPress={() => navigation.navigate('UserProfile', { userId: m.id })}>
                 <Avatar uri={m.avatarUrl} name={m.name} size={36} />
-                <Text style={styles.memberName} numberOfLines={1}>
-                  {m.name}
-                </Text>
+                <NameWithAge style={styles.memberName} numberOfLines={1} uid={m.isPrivate || m.id === uid ? null : m.id} name={m.name} />
                 {m.id === circle.ownerId && <Text style={styles.ownerTag}>Owner</Text>}
               </TouchableOpacity>
             ))}

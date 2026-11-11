@@ -32,6 +32,7 @@ import {
   ALL_CATEGORIES,
   SHOE_TYPES,
   ACCESSORY_TYPES,
+  typeLabel,
   groupOfCategory,
   normalizeCategory,
   resolveCategory,
@@ -456,7 +457,7 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
                     onPress={() => pickType(t)}
                     activeOpacity={0.75}>
                     <Text style={styles.chipEmojiSmall}>{categoryIcon(t)}</Text>
-                    <Text style={[styles.pillText, isSelected && styles.itemChipTextSelected]}>{t}</Text>
+                    <Text style={[styles.pillText, isSelected && styles.itemChipTextSelected]}>{typeLabel(t, user?.language)}</Text>
                   </TouchableOpacity>
                 );
               })}

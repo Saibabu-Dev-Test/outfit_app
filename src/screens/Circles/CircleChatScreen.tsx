@@ -41,6 +41,7 @@ import {
 } from '../../services/circlesApi';
 import { MAX_BASE64_CHARS, pickImages } from '../../utils/imagePicker';
 import { clockTime } from '../../utils/date';
+import NameWithAge from '../../components/NameWithAge';
 
 export default function CircleChatScreen({ navigation, route }: { navigation: any; route: any }) {
   const circleId: string = route?.params?.circleId || '';
@@ -250,9 +251,7 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
             item.type !== 'text' && styles.bubbleMedia,
           ]}>
           {showName && (
-            <Text style={styles.name} onPress={() => openProfile(item.userId)}>
-              {item.userName}
-            </Text>
+            <NameWithAge style={styles.name} onPress={() => openProfile(item.userId)} uid={item.userId} name={item.userName} age={(item as any).userAge} />
           )}
           {item.type === 'image' && item.imageData ? (
             <Image source={{ uri: item.imageData }} style={styles.photo} resizeMode="cover" />

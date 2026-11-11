@@ -35,6 +35,7 @@ import { assertClean } from '../utils/profanity';
 import { localDateKey, toDate } from '../utils/date';
 import { inlineAvatar, saveUserProfile } from './userApi';
 import { logActivity } from './activityApi';
+import { cleanAge, myAgeFields } from '../utils/age';
 
 export const BIRTHDAYS = 'birthdays';
 export const BDAY_CIRCLES = 'bdayCircles';
@@ -230,6 +231,7 @@ export interface Wish {
   id: string;
   userId: string;
   userName: string;
+  userAge?: number | null;
   userAvatar: string | null;
   text: string;
   day: string;
@@ -242,6 +244,7 @@ const toWish = (id: string, d: any): Wish => ({
   id,
   userId: String(d?.userId || ''),
   userName: d?.userName || 'Outfit user',
+  userAge: cleanAge(d?.userAge),
   userAvatar: d?.userAvatar || null,
   text: d?.text || '',
   day: d?.day || '',
@@ -298,6 +301,7 @@ export const sendWish = async (
   const data: any = {
     userId: me.uid,
     userName: ((me.name || '').trim() || 'Outfit user').slice(0, 60),
+    ...myAgeFields(),
     userAvatar: inlineAvatar(me.avatar),
     text: t.slice(0, WISH_MAX),
     day,
@@ -333,6 +337,7 @@ export interface BdayMessage {
   id: string;
   userId: string;
   userName: string;
+  userAge?: number | null;
   userAvatar: string | null;
   type: 'text' | 'image';
   text: string;
@@ -344,6 +349,7 @@ const toBdayMsg = (id: string, d: any): BdayMessage => ({
   id,
   userId: String(d?.userId || ''),
   userName: d?.userName || 'Outfit user',
+  userAge: cleanAge(d?.userAge),
   userAvatar: d?.userAvatar || null,
   type: d?.type === 'image' ? 'image' : 'text',
   text: d?.text || '',
@@ -370,6 +376,7 @@ export const subscribeBdayCircle = (
 const bdayAuthor = (me: ChatAuthorLite) => ({
   userId: me.uid,
   userName: ((me.name || '').trim() || 'Outfit user').slice(0, 60),
+  ...myAgeFields(),
   userAvatar: inlineAvatar(me.avatar),
   createdAt: serverTimestamp(),
 });

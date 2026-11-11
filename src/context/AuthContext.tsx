@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
+import { setMyDob } from '../utils/age';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '../config/firebaseConfig';
 import { logoutUser, restoreSession, UserProfile } from '../services/authApi';
@@ -31,6 +32,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [initializing, setInitializing] = useState<boolean>(true);
   const [user, setUser] = useState<UserProfile | null>(null);
+  // New posts / comments / messages carry the author's age (utils/age.myAgeFields)
+  useEffect(() => setMyDob(user?.dob), [user?.dob]);
   const [freshLogin, setFreshLogin] = useState<boolean>(false);
   const restoredRef = useRef(false);
 

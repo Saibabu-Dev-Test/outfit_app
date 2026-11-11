@@ -19,6 +19,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { pickImage, AVATAR_PICK } from '../../utils/imagePicker';
 import { getUserProfile, saveUserProfile, uploadAvatar } from '../../services/userApi';
+import { isValidDob } from '../../utils/age';
 import { mdFromDob, mdLabel, setBirthdayListing } from '../../services/birthdayApi';
 import { checkNotifications, openNotificationSettings } from '../../native/notifications';
 import {
@@ -420,6 +421,11 @@ const fetchProfile = async () => {
 
   if (!editGender.trim()) {
     Alert.alert('Gender required', 'Please select your gender. It is needed for outfit and astrology suggestions.');
+    return;
+  }
+
+  if (!isValidDob(editDob)) {
+    Alert.alert('Date of birth required', 'Please select your date of birth. Your age is shown beside your name.');
     return;
   }
 
@@ -832,7 +838,7 @@ const fetchProfile = async () => {
                 <Text style={styles.menuLabel}>Show my birthday</Text>
                 <Text style={styles.lockValue}>
                   {profileData?.showBirthday
-                    ? `On: others see ${mdFromDob(profileData?.dob) ? mdLabel(mdFromDob(profileData?.dob) as string) : 'your birthday'} on Home and can send wishes (never your age or year)`
+                    ? `On: others see ${mdFromDob(profileData?.dob) ? mdLabel(mdFromDob(profileData?.dob) as string) : 'your birthday'} on Home and can send wishes (never the year)`
                     : 'Off: your birthday stays private'}
                 </Text>
               </View>

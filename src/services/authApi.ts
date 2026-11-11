@@ -331,6 +331,7 @@ export const completeSignUp = async ({
   password,
   name,
   gender,
+  dob,
   referralCode,
   phoneFromSim,
 }: {
@@ -338,6 +339,7 @@ export const completeSignUp = async ({
   password: string;
   name?: string;
   gender?: string;
+  dob?: string; // 'YYYY-MM-DD' (required on the sign-up screen)
   referralCode?: string;
   // true when the number came from the Android phone number hint (SIM) picker, false when typed
   phoneFromSim?: boolean;
@@ -438,6 +440,7 @@ export const completeSignUp = async ({
   };
   if (name?.trim()) profile.name = name.trim();
   if (gender) profile.gender = gender;
+  if (dob) profile.dob = dob;
   // Typed number (web, or no SIM number from the picker): not checked against the SIM
   profile.phoneVerified = Platform.OS !== 'web' && phoneFromSim === true;
   if (Platform.OS === 'web') profile.signupSource = 'web';

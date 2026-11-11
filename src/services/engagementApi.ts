@@ -30,6 +30,7 @@ import {
   deleteComment as deletePostComment,
   subscribeComments as subscribePostComments,
 } from './feedApi';
+import { cleanAge, myAgeFields } from '../utils/age';
 
 export type CommentTarget =
   | { kind: 'post'; id: string }
@@ -45,6 +46,7 @@ const toComment = (id: string, d: any): Comment => ({
   id,
   userId: String(d?.userId || ''),
   userName: d?.userName || 'Outfit user',
+  userAge: cleanAge(d?.userAge),
   userAvatar: d?.userAvatar || null,
   text: d?.text || '',
   createdAt: toDate(d?.createdAt),
@@ -80,6 +82,7 @@ export const addTargetComment = async (
     await addDoc(commentsCol(t), {
       userId: me.uid,
       userName: (me.name || '').trim() || 'Outfit user',
+      ...myAgeFields(),
       userAvatar: inlineAvatar(me.avatar),
       text: x,
       createdAt: serverTimestamp(),
