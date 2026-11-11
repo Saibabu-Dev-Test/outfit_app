@@ -28,6 +28,7 @@ import { getUserProfile, StoredProfile } from '../../services/userApi';
 import AstrologyPanel from '../../components/AstrologyPanel';
 import { countFriendsJoined, isWeeklyStar, joinedWithLinkText } from '../../services/rewardsApi';
 import { shareMyReferral } from '../../utils/referralLink';
+import useIsAdmin from '../../hooks/useIsAdmin';
 
 type Tab = 'astro' | 'wardrobe' | 'likes';
 
@@ -45,6 +46,8 @@ export default function MeScreen({ navigation }: { navigation: any }) {
   const [isStar, setIsStar] = useState(false);
   const [joined, setJoined] = useState<number | null>(null); // people who signed up with my link
   const [error, setError] = useState<string | null>(null);
+  // 👥 Users row: admins only (users/{uid}.role == 'admin', same check as Admin)
+  const { isAdmin } = useIsAdmin(uid);
 
   const load = useCallback(async () => {
     if (!uid) return;
@@ -202,6 +205,15 @@ export default function MeScreen({ navigation }: { navigation: any }) {
           </Text>
           <Text style={styles.inviteCta}>Invite</Text>
         </TouchableOpacity>
+
+        {isAdmin ? (
+          <TouchableOpacity style={styles.invite} onPress={() => navigation.navigate('AdminUsers')} activeOpacity={0.8}>
+            <Text style={styles.inviteText} numberOfLines={1}>
+              👥 Users
+            </Text>
+            <Text style={styles.inviteCta}>Admin ›</Text>
+          </TouchableOpacity>
+        ) : null}
 
         <View style={styles.tabs}>
           {(['astro', 'wardrobe', 'likes'] as Tab[]).map(t => (

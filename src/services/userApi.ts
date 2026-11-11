@@ -124,7 +124,8 @@ export const recordDailyLogin = async (
     const prevStreak: number = typeof data?.streak === 'number' ? data.streak : 0;
     if (last === today) return { streak: Math.max(prevStreak, 1), lastLoginDate: today };
     const streak = last === yesterdayKey() ? prevStreak + 1 : 1;
-    const update: any = { lastLoginDate: today, streak };
+    // lastActive: once a day (admin 👥 Users counts active-today with lastLoginDate, same value)
+    const update: any = { lastLoginDate: today, lastActive: today, streak };
     if (typeof data?.isPublic !== 'boolean') update.isPublic = true;
     // Backfill the search field for profiles saved before Phase 2
     if (typeof data?.name === 'string' && data.name.trim() && typeof data?.nameLower !== 'string') {

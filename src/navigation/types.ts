@@ -9,6 +9,7 @@ export type RootStackParamList = {
   // { postId } (old) or { target: CommentTarget }
   Comments: { postId?: string; highlightId?: string; target?: any };
   Admin: undefined;
+  AdminUsers: undefined;
   Settings: { edit?: boolean } | undefined;
   Achievements: undefined;
   Likes: { tab?: 'activity' | 'likes' } | undefined;

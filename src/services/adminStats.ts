@@ -12,11 +12,14 @@ import {
   query,
   startAfter,
   QueryDocumentSnapshot,
+  Timestamp,
+  where,
 } from 'firebase/firestore';
 import { db } from '../config/firebaseConfig';
 import { firestoreErrorMessage } from '../utils/firebaseErrors';
 import { genderKey } from '../constants/wardrobe';
 import { ageFromDob } from './userApi';
+import { localDateKey } from '../utils/date';
 
 export type GenderGroup = 'female' | 'male' | 'other';
 export type AgeGroup = 'under18' | '18-24' | '25-34' | '35+' | 'unknown';
@@ -105,4 +108,51 @@ export const getUserStats = async (): Promise<UserStats> => {
   if (!stats.total) stats.total = stats.counted;
   stats.at = new Date();
   return stats;
+};
+
+// ── 👥 Users (Me tab, admins only): four server-side count() aggregations, no user docs read ──
+// (Spark: each count costs 1 read per 1000 users matched.) Active today uses users/{uid}.lastLoginDate
+// ('YYYY-MM-DD', written once a day by recordDailyLogin together with lastActive), so every app
+// version counts. "This week" starts Monday 00:00 local time.
+export interface UserCounts {
+  total: number | null;
+  newToday: number | null;
+  newThisWeek: number | null;
+  activeToday: number | null;
+  at: Date;
+}
+
+export const startOfToday = (now: Date = new Date()): Date =>
+  new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+export const startOfWeek = (now: Date = new Date()): Date => {
+  const d = startOfToday(now);
+  const back = (d.getDay() + 6) % 7; // Mon = 0
+  d.setDate(d.getDate() - back);
+  return d;
+};
+
+const countOf = async (q: any): Promise<number | null> => {
+  try {
+    return (await getCountFromServer(q)).data().count;
+  } catch (e: any) {
+    console.warn('user count failed:', e?.code, e?.message);
+    return null;
+  }
+};
+
+// Admin only (rules: isAdmin() may read every user). Throws when every count is refused.
+export const getUserCounts = async (): Promise<UserCounts> => {
+  const col = collection(db, 'users');
+  const now = new Date();
+  const [total, newToday, newThisWeek, activeToday] = await Promise.all([
+    countOf(col),
+    countOf(query(col, where('createdAt', '>=', Timestamp.fromDate(startOfToday(now))))),
+    countOf(query(col, where('createdAt', '>=', Timestamp.fromDate(startOfWeek(now))))),
+    countOf(query(col, where('lastLoginDate', '==', localDateKey(now)))),
+  ]);
+  if (total === null && newToday === null && newThisWeek === null && activeToday === null) {
+    throw new Error('Could not load user counts (admins only). Pull down to try again.');
+  }
+  return { total, newToday, newThisWeek, activeToday, at: new Date() };
 };

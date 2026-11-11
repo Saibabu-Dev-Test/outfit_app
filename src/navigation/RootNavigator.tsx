@@ -17,6 +17,7 @@ import CommentsScreen from '../screens/Feed/CommentsScreen';
 import UserProfileScreen from '../screens/Profile/UserProfileScreen';
 import UserSearchScreen from '../screens/Profile/UserSearchScreen';
 import AdminScreen from '../screens/Admin/AdminScreen';
+import AdminUsersScreen from '../screens/Admin/AdminUsersScreen';
 import ProfileScreen from '../screens/Profile/ProfileScreen';
 import AchievementsScreen from '../screens/Profile/AchievementsScreen';
 import LikesScreen from '../screens/Profile/LikesScreen';
@@ -121,6 +122,7 @@ function NavigationContent() {
               <Stack.Screen name="UserProfile" component={UserProfileScreen} />
               <Stack.Screen name="UserSearch" component={UserSearchScreen} />
               <Stack.Screen name="Admin" component={AdminScreen} />
+              <Stack.Screen name="AdminUsers" component={AdminUsersScreen} />
             </Stack.Group>
           </>
         )}
