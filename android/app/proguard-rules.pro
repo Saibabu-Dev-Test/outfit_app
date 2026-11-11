@@ -27,3 +27,14 @@
 -keep class com.google.android.gms.tasks.** { *; }
 -keep class com.google.firebase.components.** { *; }
 -dontwarn com.google.mlkit.**
+
+# Reanimated / Worklets / Keyboard controller (keyboard animation, new arch)
+-keep class com.swmansion.reanimated.** { *; }
+-keep class com.swmansion.worklets.** { *; }
+-keep class com.reactnativekeyboardcontroller.** { *; }
+-dontwarn com.swmansion.**
+# Google Mobile Ads (AdMob) + react-native-google-mobile-ads
+-keep class io.invertase.googlemobileads.** { *; }
+-keep class com.google.android.gms.ads.** { *; }
+-keep class com.google.ads.** { *; }
+-dontwarn com.google.android.gms.ads.**

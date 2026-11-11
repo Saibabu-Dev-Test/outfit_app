@@ -1,32 +1,14 @@
-// Keyboard handling for the whole app, React Native built-ins only (no keyboard library, no
-// Reanimated): keeps the bottom of a screen or sheet (message box, comment box, send / save buttons)
-// sitting directly ON TOP of the soft keyboard.
-//
-// Why not plain <KeyboardAvoidingView>: the app is edge-to-edge (gradle edgeToEdgeEnabled, and
-// forced on Android 15+), so Android no longer resizes the window for the keyboard even with
-// windowSoftInputMode="adjustResize" (kept in the manifest: it is what delivers the keyboard insets
-// to the app on Android < 11). RN's KeyboardAvoidingView measures itself relative to its PARENT,
-// so under headers, tab bars and inside modals it needs a hand-tuned keyboardVerticalOffset per
-// screen. Here we measure where this view ends ON SCREEN (measureInWindow) and pad its bottom by
-// exactly the part the keyboard covers, so it is right inside tabs, stacks and edge-to-edge modals.
-//
-// The tab bar is never hidden while the keyboard is open (that changed the screen height after
-// the keyboard had opened and made the box jump); the keyboard simply covers it.
-// The padding is applied once per keyboard open/close (no per-frame JS work, nothing to lag).
-// Web (react-native-web): Keyboard never fires, so this is a plain View there.
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  Keyboard,
-  KeyboardEvent,
-  LayoutAnimation,
-  Platform,
-  StyleProp,
-  View,
-  ViewStyle,
-} from 'react-native';
-
-const SHOW = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-const HIDE = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+// Keeps the bottom of a screen or sheet (message box, comment box, send / save buttons) sitting
+// directly ON TOP of the soft keyboard, moving WITH the keyboard frame by frame (like a normal chat
+// app): react-native-keyboard-controller's KeyboardAvoidingView (behavior "padding") driven by the
+// native WindowInsets IME animation on the UI thread. No keyboardDidShow listener: the old version
+// padded only after the keyboard had finished opening, which made the box jump.
+// automaticOffset: the view measures its own position on screen, so it is right inside tabs,
+// stacks and edge-to-edge modals (no hand-tuned offsets).
+// Web: keyboard.web.tsx gives a plain View.
+import React, { useEffect, useRef } from 'react';
+import { StyleProp, ViewStyle } from 'react-native';
+import { KeyboardAvoidingView, KeyboardEvents } from './keyboard';
 
 interface Props {
   style?: StyleProp<ViewStyle>;
@@ -36,60 +18,29 @@ interface Props {
 }
 
 export default function KeyboardSafeView({ style, children, extraOffset = 0, pointerEvents }: Props) {
-  const ref = useRef<any>(null);
-  const [pad, setPad] = useState(0);
-  const kbTop = useRef<number | null>(null);
-
-  const recompute = useCallback(() => {
-    const top = kbTop.current;
-    if (top == null) {
-      setPad(p => (p === 0 ? p : 0));
-      return;
-    }
-    ref.current?.measureInWindow((_x: number, y: number, _w: number, h: number) => {
-      // Padding is inside the view, so its frame (and bottom edge) does not move with it
-      const next = Math.max(0, Math.round(y + h - top + extraOffset));
-      setPad(prev => (Math.abs(next - prev) < 1 ? prev : next));
-    });
-  }, [extraOffset]);
-
-  useEffect(() => {
-    const onShow = (e: KeyboardEvent) => {
-      kbTop.current = e.endCoordinates.screenY;
-      if (Platform.OS === 'ios' && e.duration) {
-        LayoutAnimation.configureNext({ duration: e.duration, update: { type: 'keyboard' } });
-      }
-      recompute();
-    };
-    const onHide = (e?: KeyboardEvent) => {
-      kbTop.current = null;
-      if (Platform.OS === 'ios' && e?.duration) {
-        LayoutAnimation.configureNext({ duration: e.duration, update: { type: 'keyboard' } });
-      }
-      setPad(0);
-    };
-    const subs = [Keyboard.addListener(SHOW, onShow), Keyboard.addListener(HIDE, onHide)];
-    if (Platform.OS === 'ios') subs.push(Keyboard.addListener('keyboardWillChangeFrame', onShow));
-    return () => subs.forEach(s => s.remove());
-  }, [recompute]);
-
   return (
-    <View
-      ref={ref}
+    <KeyboardAvoidingView
+      behavior="padding"
+      automaticOffset
+      keyboardVerticalOffset={extraOffset}
       pointerEvents={pointerEvents}
-      style={[{ flex: 1 }, style, { paddingBottom: pad }]}
-      onLayout={recompute}>
+      style={[{ flex: 1 }, style]}>
       {children}
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
-// Calls `fn` each time the keyboard opens (e.g. scroll a non-inverted chat to its newest message).
+// Calls `fn` as the keyboard starts opening (e.g. scroll a non-inverted chat to its newest message).
 export function useKeyboardShown(fn: () => void) {
   const fnRef = useRef(fn);
   fnRef.current = fn;
   useEffect(() => {
-    const sub = Keyboard.addListener(SHOW, () => fnRef.current());
-    return () => sub.remove();
+    let sub: { remove: () => void } | null = null;
+    try {
+      sub = KeyboardEvents.addListener('keyboardWillShow', () => fnRef.current());
+    } catch {
+      sub = null;
+    }
+    return () => sub?.remove();
   }, []);
 }

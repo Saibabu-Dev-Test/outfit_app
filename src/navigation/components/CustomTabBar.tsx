@@ -7,6 +7,8 @@ import {
 } from 'react-native';
 import { BottomTabBarHeightCallbackContext, BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Animated, { useAnimatedStyle } from 'react-native-reanimated';
+import { useReanimatedKeyboardAnimation } from '../../components/keyboard';
 import { colors, fontSize, fontWeight, spacing, themedStyles } from '../../theme';
 
 type TabItem = {
@@ -28,13 +30,15 @@ const TABS: TabItem[] = [
 export default function CustomTabBar({ state, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
   // Real height for useBottomTabBarHeight(): the AI Stylist message box uses it as its keyboard offset.
-  // The bar is NOT hidden while the keyboard is open: the keyboard covers it, and removing it changed
-  // the screen height mid-animation (the message box jumped after the keyboard had opened).
   const onHeightChange = React.useContext(BottomTabBarHeightCallbackContext);
+  // Hidden while the keyboard is open: it fades out with the keyboard's own animation (opacity only,
+  // no height change, so the message box above it never jumps); the keyboard covers its area.
+  const kb = useReanimatedKeyboardAnimation();
+  const hideStyle = useAnimatedStyle(() => ({ opacity: 1 - Math.min(1, Math.max(0, kb.progress.value)) }));
 
   return (
-    <View
-      style={[styles.container, { paddingBottom: insets.bottom || spacing.sm }]}
+    <Animated.View
+      style={[styles.container, { paddingBottom: insets.bottom || spacing.sm }, hideStyle]}
       onLayout={e => onHeightChange?.(e.nativeEvent.layout.height)}>
       {state.routes.map((route, index) => {
         const isFocused = state.index === index;
@@ -86,7 +90,7 @@ export default function CustomTabBar({ state, navigation }: BottomTabBarProps) {
           </TouchableOpacity>
         );
       })}
-    </View>
+    </Animated.View>
   );
 }
 
