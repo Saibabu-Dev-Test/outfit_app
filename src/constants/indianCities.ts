@@ -2,7 +2,8 @@
 // (UTC+5:30, no daylight saving since 1945), so tzMinutes is 330 for every entry.
 import type { BirthPlace } from '../utils/jathakam';
 
-export interface City { name: string; state: string; lat: number; lng: number }
+// district: set when the district's name differs from the city's (default: the city name)
+export interface City { name: string; state: string; lat: number; lng: number; district?: string }
 
 export const INDIAN_CITIES: City[] = [
   { name: 'Hyderabad', state: 'Telangana', lat: 17.385, lng: 78.4867 },
@@ -166,6 +167,22 @@ export const INDIAN_CITIES: City[] = [
 ];
 
 export const cityLabel = (c: City) => `${c.name}, ${c.state}`;
+
+// Districts whose name differs from the city's (Circles > Discover). Everything else: district = city.
+const DISTRICT_OF: Record<string, string> = {
+  Secunderabad: 'Hyderabad',
+  Hanamkonda: 'Hanumakonda',
+  Ramagundam: 'Peddapalli',
+  Bhadrachalam: 'Bhadradri Kothagudem',
+  Kothagudem: 'Bhadradri Kothagudem',
+  Rajahmundry: 'East Godavari',
+  Bengaluru: 'Bengaluru Urban',
+  Noida: 'Gautam Buddha Nagar',
+  Howrah: 'Howrah',
+};
+
+// District of a bundled city (for the profile district when location is off)
+export const cityDistrict = (c: City): string => c.district || DISTRICT_OF[c.name] || c.name;
 
 // 'Bhubaneswar, Odisha' / 'bhubaneswar' -> the city; null when not in the list
 export const findCity = (label?: string | null): City | null => {

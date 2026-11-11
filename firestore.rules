@@ -527,23 +527,21 @@ service cloud.firestore {
       function legacyCreate(d) {
         return !d.keys().hasAny(['nameKey', 'nameLower']);
       }
-      // Join without the code: within 3 km of a public circle's location (or a smaller legacy
-      // radiusKm). Approximate distance (equirectangular, cosLat stored with the location) with
-      // ~0.5 km slack for the ~100 m rounding of both points. The location comes from the phone.
-      function joinedNearby() {
-        let j = request.resource.data.get('lastJoin', {});
-        let c = resource.data;
-        let lim = c.get('radiusKm', null);
-        let r = (lim is number && lim < 3 ? lim : 3) + 0.5;
-        return j.get('uid', '') == me()
-          && j.get('lat', null) is number && j.get('lng', null) is number
-          && c.get('location', null) != null
-          && math.pow((j.lat - c.location.lat) * 111.32, 2)
-             + math.pow((j.lng - c.location.lng) * 111.32 * c.get('cosLat', 1.0), 2) <= r * r;
+      // District (Discover): optional strings; legacy docs have none
+      function validDistrict(d) {
+        return (d.get('district', null) == null || (d.district is string && d.district.size() <= 60))
+          && (d.get('districtKey', null) == null || (d.districtKey is string && d.districtKey.size() <= 60))
+          && (d.get('state', null) == null || (d.state is string && d.state.size() <= 60));
+      }
+      // isPublic (when present) must match isPrivate, so Discover never lists a private circle
+      function visibilityOk(d) {
+        return d.isPrivate is bool && d.get('isPublic', !d.isPrivate) == !d.isPrivate;
       }
 
+      // Discover queries isPublic == true (+ districtKey); Nearby isPrivate == false (+ geohash)
       allow read: if signedIn()
-        && (resource.data.isPrivate == false || me() in resource.data.memberIds || isAdmin());
+        && (resource.data.isPrivate == false || resource.data.get('isPublic', false) == true
+            || me() in resource.data.memberIds || isAdmin());
 
       allow create: if signedIn()
         && request.resource.data.ownerId == me()
@@ -561,11 +559,14 @@ service cloud.firestore {
         && (request.resource.data.get('location', null) == null
             || (request.resource.data.location.lat is number && request.resource.data.location.lng is number))
         && validRadius(request.resource.data)
+        && validDistrict(request.resource.data)
         && (
-          // Current builds (build 94+): unique name (circleNames doc written in the same
-          // transaction), and public circles carry a location (they are found only by distance)
+          // Current builds: unique name (circleNames doc written in the same transaction).
+          // Public circles carry a district (Discover); the location is optional (Nearby).
+          // Build 94-era public circles carry a location instead of a district: still allowed.
           (nameDocOk(request.resource.data)
             && (request.resource.data.isPrivate == true
+                || request.resource.data.get('districtKey', '') != ''
                 || (request.resource.data.get('location', null) != null
                     && request.resource.data.get('geohash', null) is string)))
           // Older builds (build 93 and earlier) send no nameKey / nameLower and may create a
@@ -581,20 +582,25 @@ service cloud.firestore {
                     && request.resource.data.name.size() > 0
                     && request.resource.data.name.size() <= 60
                     && nameDocOk(request.resource.data)))
+            && visibilityOk(request.resource.data)
+            && validDistrict(request.resource.data)
             && validRadius(request.resource.data))
         // Admin: only Public <-> Private and the Nearby location (isPublic must match isPrivate)
         || (isAdmin()
-            && onlyChanged(['isPrivate', 'isPublic', 'location', 'geohash', 'cosLat', 'radiusKm'])
+            && onlyChanged(['isPrivate', 'isPublic', 'location', 'geohash', 'cosLat', 'radiusKm', 'district', 'districtKey', 'state'])
+            && validDistrict(request.resource.data)
             && request.resource.data.isPrivate is bool
             && request.resource.data.get('isPublic', !request.resource.data.isPrivate) == !request.resource.data.isPrivate
             && validRadius(request.resource.data))
         // Join: add only yourself.
-        //   Invite code (any circle, private or public, any distance): lastJoin = {uid: me, code: inviteCode}
-        //   Public: lastJoin = {uid: me, lat, lng} within 3 km (or a smaller legacy radiusKm)
+        //   Private: only with the invite code: lastJoin = {uid: me, code: inviteCode}
+        //   Public: no code needed (district / 3 km checks are done in the app); lastJoin.uid == me
         || (onlyChanged(['memberIds', 'lastJoin'])
             && request.resource.data.memberIds.toSet() == resource.data.memberIds.toSet().union([me()].toSet())
             && (joinedWithCode()
-                || (resource.data.isPrivate == false && joinedNearby())))
+                || (resource.data.isPrivate == false
+                    && resource.data.get('isPublic', true) != false
+                    && request.resource.data.get('lastJoin', {}).get('uid', '') == me())))
         // Leave: remove only yourself (the owner deletes instead of leaving)
         || (onlyChanged(['memberIds'])
             && me() in resource.data.memberIds

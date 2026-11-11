@@ -1,4 +1,4 @@
-// Circles: unique names, public circles always located, nearby-only discovery, join-by-code.
+// Circles: unique names, district (Discover) + optional location (Nearby), join rules, join-by-code.
 // firebase/firestore is replaced by a tiny in-memory fake (no network, no rules: the rules are
 // checked in firestore.rules, this covers the client logic).
 
@@ -118,6 +118,7 @@ import {
   deleteCircle,
   isCircleNameAvailable,
   joinRadiusKm,
+  getDistrictCircles,
   nameVariants,
 } from '../src/services/circlesApi';
 
@@ -134,6 +135,8 @@ beforeEach(() => {
   mockLocation.mockReset();
   jest.spyOn(console, 'warn').mockImplementation(() => {});
 });
+
+const HYDD = { district: 'Hyderabad', districtKey: 'hyderabad', state: 'Telangana' };
 
 describe('circle name normalization', () => {
   it('trims, collapses spaces and lower-cases', () => {
@@ -153,7 +156,7 @@ describe('circle name normalization', () => {
 
 describe('createCircle', () => {
   it('public circle stores location + geohash + name doc', async () => {
-    const c = await createCircle({ ...base, name: ' Office  Looks ', isPrivate: false, location: HYD }, 'u1');
+    const c = await createCircle({ ...base, name: ' Office  Looks ', isPrivate: false, district: HYDD, location: HYD }, 'u1');
     const d = mockStore.get(`circles/${c.id}`);
     expect(d.name).toBe('Office Looks');
     expect(d.nameLower).toBe('office looks');
@@ -164,10 +167,13 @@ describe('createCircle', () => {
     expect(mockStore.get(`inviteCodes/${d.inviteCode}`).circleId).toBe(c.id);
   });
 
-  it('rejects a public circle without a location', async () => {
-    await expect(createCircle({ ...base, name: 'X', isPrivate: false, location: null }, 'u1')).rejects.toThrow(
-      /location/i,
+  it('rejects a public circle without a district; location is optional', async () => {
+    await expect(createCircle({ ...base, name: 'X', isPrivate: false, location: HYD }, 'u1')).rejects.toThrow(
+      /district/i,
     );
+    const c = await createCircle({ ...base, name: 'Y', isPrivate: false, district: HYDD, location: null }, 'u1');
+    expect(mockStore.get(`circles/${c.id}`)).toMatchObject({ district: 'Hyderabad', districtKey: 'hyderabad', isPublic: true });
+    expect(mockStore.get(`circles/${c.id}`).location).toBeUndefined();
   });
 
   it('private circle has no location', async () => {
@@ -176,7 +182,7 @@ describe('createCircle', () => {
   });
 
   it('rejects duplicate names (case / spacing insensitive)', async () => {
-    await createCircle({ ...base, name: 'Office Looks', isPrivate: false, location: HYD }, 'u1');
+    await createCircle({ ...base, name: 'Office Looks', isPrivate: false, district: HYDD, location: HYD }, 'u1');
     await expect(
       createCircle({ ...base, name: '  office   LOOKS', isPrivate: true }, 'u2'),
     ).rejects.toThrow(/already exists/);
@@ -239,10 +245,10 @@ describe('updateCircleDetails (rename)', () => {
 });
 
 describe('visibility', () => {
-  it('public needs a location; private removes it', async () => {
+  it('public saves district (+ optional location); private removes the location', async () => {
     const a = await createCircle({ ...base, name: 'Alpha', isPrivate: true }, 'u1');
-    await expect(updateCircleVisibility(a.id, false)).rejects.toThrow(/location/i);
-    await updateCircleVisibility(a.id, false, HYD);
+    await updateCircleVisibility(a.id, false, HYD, null, HYDD);
+    expect(mockStore.get(`circles/${a.id}`).districtKey).toBe('hyderabad');
     expect(mockStore.get(`circles/${a.id}`)).toMatchObject({ isPrivate: false, isPublic: true });
     expect(mockStore.get(`circles/${a.id}`).geohash).toBeTruthy();
     await updateCircleVisibility(a.id, true);
@@ -253,9 +259,9 @@ describe('visibility', () => {
 
 describe('nearby discovery + joining', () => {
   it('lists only public circles within 3 km, nearest first', async () => {
-    await createCircle({ ...base, name: 'Here', isPrivate: false, location: HYD }, 'o');
-    await createCircle({ ...base, name: 'Near', isPrivate: false, location: NEAR }, 'o');
-    await createCircle({ ...base, name: 'Far', isPrivate: false, location: FAR }, 'o');
+    await createCircle({ ...base, name: 'Here', isPrivate: false, district: HYDD, location: HYD }, 'o');
+    await createCircle({ ...base, name: 'Near', isPrivate: false, district: HYDD, location: NEAR }, 'o');
+    await createCircle({ ...base, name: 'Far', isPrivate: false, district: HYDD, location: FAR }, 'o');
     await createCircle({ ...base, name: 'Hidden', isPrivate: true }, 'o');
     const list = await getNearbyCircles(HYD.lat, HYD.lng);
     expect(list.map(c => c.name)).toEqual(['Here', 'Near']);
@@ -264,19 +270,31 @@ describe('nearby discovery + joining', () => {
   });
 
   it('join without code only from within 3 km', async () => {
-    const far = await createCircle({ ...base, name: 'Far', isPrivate: false, location: FAR }, 'o');
+    const far = await createCircle({ ...base, name: 'Far', isPrivate: false, district: HYDD, location: FAR }, 'o');
     mockLocation.mockResolvedValue({ ok: true, coords: HYD });
     await expect(joinCircle(far, 'u9')).rejects.toThrow(/invite/);
-    const near = await createCircle({ ...base, name: 'Near', isPrivate: false, location: NEAR }, 'o');
+    const near = await createCircle({ ...base, name: 'Near', isPrivate: false, district: HYDD, location: NEAR }, 'o');
     await joinCircle(near, 'u9');
     expect(mockStore.get(`circles/${near.id}`).memberIds).toContain('u9');
     expect(joinRadiusKm({ radiusKm: null })).toBe(3);
     expect(joinRadiusKm({ radiusKm: 1 })).toBe(1);
   });
 
+  it('Discover lists public circles of my district only; district members join without location', async () => {
+    const mine = await createCircle({ ...base, name: 'Mine D', isPrivate: false, district: HYDD, location: null }, 'o');
+    await createCircle({ ...base, name: 'Other D', isPrivate: false, district: { district: 'Warangal', districtKey: 'warangal', state: 'Telangana' } }, 'o');
+    await createCircle({ ...base, name: 'Priv D', isPrivate: true, district: HYDD }, 'o');
+    mockStore.set('circles/legacy-pub', { name: 'Legacy', isPrivate: false, isPublic: true, ownerId: 'x', memberIds: ['x'] });
+    const list = await getDistrictCircles('hyderabad');
+    expect(list.map(c => c.name)).toEqual(['Mine D']);
+    mockLocation.mockResolvedValue({ ok: false, reason: 'off', message: 'off' });
+    await joinCircle(mine, 'u7', { districtKey: 'hyderabad' });
+    expect(mockStore.get(`circles/${mine.id}`).memberIds).toContain('u7');
+      });
+
   it('join by code works for private and far-away public circles', async () => {
     const priv = await createCircle({ ...base, name: 'Priv', isPrivate: true }, 'o');
-    const far = await createCircle({ ...base, name: 'Far', isPrivate: false, location: FAR }, 'o');
+    const far = await createCircle({ ...base, name: 'Far', isPrivate: false, district: HYDD, location: FAR }, 'o');
     expect(await joinWithCode(priv.inviteCode.toLowerCase(), 'u9')).toBe(priv.id);
     expect(await joinWithCode(`Join: outfit://join/${far.inviteCode}`, 'u9')).toBe(far.id);
     expect(mockStore.get(`circles/${priv.id}`).memberIds).toContain('u9');

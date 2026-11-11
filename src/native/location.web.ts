@@ -24,3 +24,13 @@ export const getApproxLocation = (): Promise<LocationResult> =>
       { enableHighAccuracy: false, timeout: 20000, maximumAge: 10 * 60 * 1000 },
     );
   });
+
+// Location already allowed? (no prompt; false when the browser can't tell)
+export const hasLocationPermission = async (): Promise<boolean> => {
+  try {
+    const p: any = await (globalThis as any).navigator?.permissions?.query?.({ name: 'geolocation' });
+    return p?.state === 'granted';
+  } catch {
+    return false;
+  }
+};
