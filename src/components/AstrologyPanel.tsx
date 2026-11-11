@@ -286,6 +286,15 @@ export default function AstrologyPanel({ uid, profile, wardrobe, onEditProfile }
         ))}
         <Text style={styles.sub}>⏰ {t.lucky}</Text>
         <Bi style={styles.body} text={reading.luckyTime} enText={en?.luckyTime} />
+        {reading.luckyNumber !== null ? (
+          <>
+            <Text style={styles.sub}>🔢 {t.luckyNumber}</Text>
+            <Text style={styles.luckyNumber}>
+              {reading.luckyNumber}
+              {reading.luckyNumber2 !== null ? ` · ${reading.luckyNumber2}` : ''}
+            </Text>
+          </>
+        ) : null}
         <Text style={styles.sub}>🧘 {t.calm}</Text>
         <Bi style={styles.body} text={reading.calmTime} enText={en?.calmTime} />
         {reading.note ? (
@@ -402,6 +411,7 @@ const styles = themedStyles(() => StyleSheet.create({
   stars: { fontSize: 18, color: '#F9A825', marginBottom: 4 },
   sub: { fontSize: fontSize.sm, fontWeight: fontWeight.bold, color: colors.textPrimary, marginTop: spacing.sm },
   body: { fontSize: fontSize.sm, color: colors.textSecondary, lineHeight: 20, marginTop: 2 },
+  luckyNumber: { fontSize: fontSize.md, fontWeight: fontWeight.bold, color: colors.primary, marginTop: 2 },
   bullet: { fontSize: fontSize.sm, color: colors.textSecondary, lineHeight: 20, marginLeft: 4 },
   note: { fontSize: fontSize.xs, color: colors.textMuted, fontStyle: 'italic', marginTop: spacing.sm, lineHeight: 16 },
   row: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 3 },

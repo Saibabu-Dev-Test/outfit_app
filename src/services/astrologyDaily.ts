@@ -7,6 +7,8 @@
 // counted from the birth star), weekday ruling planet colours (utils/panchangam.ts), the rashi
 // lord's colour and the user's own wardrobe (services/luckyPairs.ts). Without a dob: the saved
 // rashi, else the name star (first syllable of the name, e.g. Sai -> Shatabhisha).
+// Lucky number (utils/luckyNumber.ts): numerology from the date of birth (birth, destiny and
+// today's day number, planetary friendship); without a dob the name number, else the rashi lord.
 // 12 languages: labels / names in all (i18n/astroLabels, astroNames), prose where written
 // (i18n/astroProse). The honest verdict (utils/astroVerdict.ts) adds a Good / Mixed / Caution
 // rating with Positive and Be careful bullets, inauspicious times and remedies: weak days
@@ -32,6 +34,7 @@ import { getTodayVaaraColour } from '../utils/panchangam';
 import { computeJathakam, DEFAULT_PLACE, Jathakam, nameStar } from '../utils/jathakam';
 import { birthPlaceOf } from '../constants/indianCities';
 import { pickLuckyPairs } from './luckyPairs';
+import { luckyNumbers } from '../utils/luckyNumber';
 import type { AiLanguage } from './aiStylist';
 import type { WardrobeItemResponse } from './wardrobeApi';
 import {
@@ -103,6 +106,8 @@ export interface DailyReading {
   doList: string[];
   avoidList: string[];
   luckyTime: string;
+  luckyNumber: number | null; // null only without dob, name and rashi
+  luckyNumber2: number | null; // a second friendly number (the destiny number when friendly)
   calmTime: string;
   dress: {
     colours: { name: string; hex: string }[];
@@ -378,6 +383,7 @@ export const dailyReading = (
     luckyParts.push(fill(chart && hora.planet === lord ? t.lucky : t.luckyHora, v));
   }
   if (p.abhijit) luckyParts.push(fill(t.luckyAbhijit, { from: istClock12(p.abhijit.start), to: istClock12(p.abhijit.end) }));
+  const ln = luckyNumbers({ dob: profile.dob, name: profile.name, rashiLord: chart && !fromName ? RASHI_LORD[chart.rashi] : null, dayKey: p.day.key, seed });
   const calmTime = fill(t.calm, { from: istClock12(p.rahu.start), to: istClock12(p.rahu.end) });
 
   // Dress: weekday colours first, the rashi lord's colour as a touch, wardrobe pick when possible
@@ -479,6 +485,8 @@ export const dailyReading = (
     doList,
     avoidList,
     luckyTime: luckyParts.join(' · '),
+    luckyNumber: ln ? ln.lucky : null,
+    luckyNumber2: ln ? ln.second : null,
     calmTime,
     dress: { colours, title: fill(t.dressTitle, { colours: words(pn) }), why, idea, pair },
     relation: { kind, level, title: married ? t.relTitleM : t.relTitleS, text: relText, outing },

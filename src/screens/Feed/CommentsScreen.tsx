@@ -32,6 +32,7 @@ import { containsProfanity, RESPECT_MESSAGE } from '../../utils/profanity';
 import { timeAgo } from '../../utils/date';
 import { logActivity } from '../../services/activityApi';
 import NameWithAge from '../../components/NameWithAge';
+import TranslatedText from '../../components/TranslatedText';
 import { replyParentId, threadComments } from '../../utils/commentThreads';
 
 export default function CommentsScreen({ navigation, route }: { navigation: any; route: any }) {
@@ -187,11 +188,16 @@ export default function CommentsScreen({ navigation, route }: { navigation: any;
         <Avatar uri={item.userAvatar} name={item.userName} size={32} />
       </TouchableOpacity>
       <View style={styles.body}>
-        <Text style={styles.text}>
-          <NameWithAge style={styles.name} onPress={() => openProfile(item.userId)} uid={item.userId} name={item.userName} age={(item as any).userAge} />
-          {' '}
-          {item.text}
-        </Text>
+        <TranslatedText
+          style={styles.text}
+          authorId={item.userId}
+          text={item.text}
+          prefix={
+            <>
+              <NameWithAge style={styles.name} onPress={() => openProfile(item.userId)} uid={item.userId} name={item.userName} age={(item as any).userAge} />{' '}
+            </>
+          }
+        />
         <Text style={styles.time}>
           {timeAgo(item.createdAt)}
           {canReply ? (
@@ -237,10 +243,12 @@ export default function CommentsScreen({ navigation, route }: { navigation: any;
                 <View style={[styles.row, styles.captionRow]}>
                   <Avatar uri={post.userAvatar} name={post.userName} size={32} />
                   <View style={styles.body}>
-                    <Text style={styles.text}>
-                      <Text style={styles.name}>{post.userName} </Text>
-                      {post.caption}
-                    </Text>
+                    <TranslatedText
+                      style={styles.text}
+                      authorId={post.userId}
+                      text={post.caption}
+                      prefix={<Text style={styles.name}>{post.userName} </Text>}
+                    />
                   </View>
                 </View>
               ) : undefined

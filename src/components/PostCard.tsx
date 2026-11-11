@@ -42,6 +42,7 @@ import { shareWithReferral } from '../utils/referralLink';
 import { logActivity } from '../services/activityApi';
 import { timeAgo } from '../utils/date';
 import NameWithAge from './NameWithAge';
+import TranslatedText from './TranslatedText';
 import InlineComments, { InlineCommentsHandle } from './InlineComments';
 
 interface Props {
@@ -537,11 +538,17 @@ export default function PostCard({
         </TouchableOpacity>
       </View>
       {post.caption ? (
-        <Text style={styles.caption}>
-          <NameWithAge style={styles.captionName} onPress={openProfile} uid={post.userId} name={post.userName} age={(post as any).userAge} />
-          {' '}
-          {post.caption}
-        </Text>
+        <TranslatedText
+          style={styles.caption}
+          chipsStyle={styles.captionChips}
+          authorId={post.userId}
+          text={post.caption}
+          prefix={
+            <>
+              <NameWithAge style={styles.captionName} onPress={openProfile} uid={post.userId} name={post.userName} age={(post as any).userAge} />{' '}
+            </>
+          }
+        />
       ) : null}
       {inlineComments ? (
         <InlineComments
@@ -659,4 +666,5 @@ const styles = themedStyles(() => StyleSheet.create({
   viewComments: { fontSize: fontSize.sm, color: colors.textMuted, paddingHorizontal: spacing.md, paddingTop: 4 },
   caption: { fontSize: fontSize.sm, color: colors.textPrimary, paddingHorizontal: spacing.md, paddingTop: 4, lineHeight: 19 },
   captionName: { fontWeight: fontWeight.bold },
+  captionChips: { paddingHorizontal: spacing.md },
 }));
