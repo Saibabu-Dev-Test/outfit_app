@@ -68,8 +68,12 @@ def enableProguardInReleaseBuilds = true
 // Legacy fallback (until those secrets exist): outfit-release.p12 + OUTFIT_KEYSTORE_PASSWORD.
 def envOr = { String name, String fallback -> def v = System.getenv(name); v ? v : fallback }
 def legacyPassword = System.getenv("OUTFIT_KEYSTORE_PASSWORD")
-def releaseStorePassword = envOr("RELEASE_KEYSTORE_PASSWORD", legacyPassword)
-def releaseKeyPassword = envOr("RELEASE_KEY_PASSWORD", releaseStorePassword)
+// The committed legacy .p12 still has the OLD password (OUTFIT_KEYSTORE_PASSWORD). RELEASE_KEYSTORE_PASSWORD
+// belongs to the new re-passworded keystore, so only use it when CI decoded RELEASE_KEYSTORE_BASE64
+// (RELEASE_KEYSTORE_FILE set). Otherwise the legacy file is opened with the legacy password.
+def usingLegacyFile = !System.getenv("RELEASE_KEYSTORE_FILE")
+def releaseStorePassword = usingLegacyFile ? (legacyPassword ?: System.getenv("RELEASE_KEYSTORE_PASSWORD")) : envOr("RELEASE_KEYSTORE_PASSWORD", legacyPassword)
+def releaseKeyPassword = usingLegacyFile ? releaseStorePassword : envOr("RELEASE_KEY_PASSWORD", releaseStorePassword)
 def releaseKeyAlias = envOr("RELEASE_KEY_ALIAS", "outfit")
 def releaseStoreFile = envOr("RELEASE_KEYSTORE_FILE", "outfit-release.p12")
 def hasReleaseKey = releaseStorePassword && file(releaseStoreFile).exists()
