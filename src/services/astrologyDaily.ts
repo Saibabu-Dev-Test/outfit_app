@@ -8,7 +8,10 @@
 // lord's colour and the user's own wardrobe (services/luckyPairs.ts). Without a dob: the saved
 // rashi, else the name star (first syllable of the name, e.g. Sai -> Shatabhisha).
 // 12 languages: labels / names in all (i18n/astroLabels, astroNames), prose where written
-// (i18n/astroProse). Wording is always positive; guidance for fun and reflection, not a promise.
+// (i18n/astroProse). The honest verdict (utils/astroVerdict.ts) adds a Good / Mixed / Caution
+// rating with Positive and Be careful bullets, inauspicious times and remedies: weak days
+// (Ashtama Chandra, Vipat / Pratyak / Naidhana tara, Sade Sati...) are said plainly.
+// Traditional guidance for reflection, not a promise.
 import {
   birthChart,
   BirthChart,
@@ -44,7 +47,18 @@ import {
   WEEKDAY_NAMES,
   YONI_NAMES,
 } from '../i18n/astroNames';
-import { LABELS } from '../i18n/astroLabels';
+import { hasOwnVerdict, LABELS, verdictFor } from '../i18n/astroLabels';
+import {
+  Area,
+  AREAS,
+  assessDay,
+  AVOID_COLOUR,
+  DayRating,
+  durmuhurtam,
+  remedyPlanet,
+  saturnRashiAt,
+  yamagandam,
+} from '../utils/astroVerdict';
 import { hasOwnProse, proseFor } from '../i18n/astroProse';
 
 export type { AstroLang };
@@ -81,7 +95,8 @@ export interface DailyReading {
   panchang: { label: string; value: string }[];
   rashiLine: string | null;
   note: string | null; // e.g. "approximate: add your time of birth"
-  stars: number; // 3..5, always encouraging
+  stars: number; // 1..5 from the verdict (Caution 1-2, Mixed 3, Good 4-5)
+  verdict: DayVerdict | null; // null without a birth chart
   greeting: string;
   overview: string;
   mood: string;
@@ -99,6 +114,23 @@ export interface DailyReading {
   // Relationship card: married -> spouse and family at home (+ a good day for a family outing),
   // single / not said -> neutral friendships and connections. Never predicts specific people.
   relation: { kind: MaritalKind; level: 'high' | 'good' | 'gentle'; title: string; text: string; outing: string | null };
+}
+
+export interface VerdictBullet {
+  area: Area;
+  areaLabel: string;
+  text: string;
+}
+export interface DayVerdict {
+  lang: AstroLang; // language of the texts (English when `lang` has no verdict text yet)
+  rating: DayRating;
+  ratingLabel: string;
+  summary: string;
+  positives: VerdictBullet[];
+  cautions: VerdictBullet[];
+  badTimes: { label: string; value: string }[];
+  remedies: { label: string; value: string }[];
+  headings: { title: string; positive: string; careful: string; remedies: string; badTimes: string; timingLine: string };
 }
 
 const fill = (t: string, v: Record<string, string>) => t.replace(/\{(\w+)\}/g, (_, k) => v[k] ?? '');
@@ -139,9 +171,9 @@ const horaFor = (p: Panchang, planet: number) =>
   null;
 
 // Birth chart from the profile: computed chart (dob) > saved rashi > name star
-const chartFor = (profile: AstroProfile): { chart: BirthChart | null; jathakam: Jathakam | null; fromName: boolean } => {
+const chartFor = (profile: AstroProfile, nowMs: number): { chart: BirthChart | null; jathakam: Jathakam | null; fromName: boolean } => {
   const place = birthPlaceOf(profile.placeOfBirth) || DEFAULT_PLACE;
-  const j = computeJathakam(profile, place);
+  const j = computeJathakam(profile, place, nowMs);
   const saved = rashiIndex(profile.rashi);
   if (j) {
     const rashi = saved >= 0 ? saved : j.rashi;
@@ -193,6 +225,90 @@ export const birthChartRows = (j: Jathakam, lang: AstroLang): { key: string; lab
   return rows;
 };
 
+// Honest verdict for the day: traditional factors (utils/astroVerdict.ts) -> rating, Positive /
+// Be careful bullets by life area, inauspicious times and remedies. Same user + day = same text.
+const HOUSE_AREA: Record<number, Area> = { 1: 'health', 2: 'money', 3: 'work', 4: 'travel', 5: 'relationships', 6: 'health', 7: 'relationships', 9: 'travel', 10: 'work', 11: 'money', 12: 'money' };
+export const buildVerdict = (chart: BirthChart, jathakam: Jathakam | null, p: Panchang, lang: AstroLang, seed: number): DayVerdict => {
+  const vl: AstroLang = hasOwnVerdict(lang) ? lang : 'English';
+  const V = verdictFor(vl);
+  const md = jathakam?.mahadasha?.lord ?? null;
+  const ad = jathakam?.antardasha?.lord ?? null;
+  const a = assessDay({
+    janmaRashi: chart.rashi,
+    janmaStar: chart.nakshatra,
+    moonRashi: p.moonRashi,
+    todayStar: p.nakshatra,
+    weekdayLord: p.weekdayLord,
+    saturnRashi: saturnRashiAt(p.sunrise),
+    mahadashaLord: md,
+    antardashaLord: ad,
+  });
+  const v = {
+    tara: a.tara ? V.taras[a.tara - 1] : '',
+    day: PLANET_NAMES[vl][p.weekdayLord],
+    lord: md !== null ? PLANET_NAMES[vl][md] : '',
+  };
+  // Texts never repeat the area: the panel shows "Area: text"
+  const b = (area: Area, text: string): VerdictBullet => ({ area, areaLabel: V.areas[area], text: fill(text, v) });
+  const positives: VerdictBullet[] = [];
+  const cautions: VerdictBullet[] = [];
+  a.plus.forEach(f => {
+    if (f === 'chandraGood') positives.push(b(HOUSE_AREA[a.house], V.chandraGood[a.house]));
+    else if (f === 'taraGood') positives.push(b('work', V.taraGood));
+    else if (f === 'dashaFriend') positives.push(b('work', V.dashaFriend));
+    else if (f === 'antarFriend' && ad !== null) positives.push(b('work', fill(V.antarFriend, { ...v, lord: PLANET_NAMES[vl][ad] })));
+  });
+  a.minus.forEach(f => {
+    if (f === 'ashtamaChandra') cautions.push(b('travel', V.ashtamaChandra), b('health', V.ashtamaChandra2));
+    else if (f === 'chandraBad') cautions.push(b(HOUSE_AREA[a.house], V.chandraBad[a.house]));
+    else if (f === 'chandraMixed') cautions.push(b(HOUSE_AREA[a.house], V.chandraMixed[a.house]));
+    else if (f === 'taraBad') cautions.push(b('work', V.taraBad));
+    else if (f === 'taraJanma') cautions.push(b('health', V.taraJanma));
+    else if (f === 'sadeSati') cautions.push(b('work', V[a.shani as 'sadeSatiRising' | 'sadeSatiPeak' | 'sadeSatiSetting']));
+    else if (f === 'ashtamaShani') cautions.push(b('health', V.ashtamaShani));
+    else if (f === 'ardhashtamaShani') cautions.push(b('relationships', V.ardhashtamaShani));
+    else if (f === 'dashaEnemy') cautions.push(b('work', V.dashaEnemy));
+    else if (f === 'antarEnemy' && ad !== null) cautions.push(b('work', fill(V.antarEnemy, { ...v, lord: PLANET_NAMES[vl][ad] })));
+  });
+  // Area advice: more Positive on good days, more Be careful on weak ones (areas rotate by user + day)
+  const order = AREAS.map((ar, i) => ({ ar, k: Math.floor(seed / 8 ** i) % 97 })).sort((x, y) => x.k - y.k).map(x => x.ar);
+  const extraGood = a.rating === 'good' ? 2 : a.rating === 'mixed' ? 1 : 0;
+  const extraBad = a.rating === 'caution' ? 2 : 1;
+  const used = new Set<Area>();
+  order.filter(ar => !cautions.some(c => c.area === ar)).slice(0, extraGood).forEach(ar => {
+    used.add(ar);
+    positives.push(b(ar, V.goodArea[ar]));
+  });
+  order.filter(ar => !used.has(ar) && !positives.some(c => c.area === ar)).slice(0, extraBad).forEach(ar => cautions.push(b(ar, V.badArea[ar])));
+  if (!positives.length) positives.push(b('work', V.quietPositive));
+
+  const range = (r: { start: number; end: number }) => `${istClock12(r.start)} – ${istClock12(r.end)}`;
+  const badTimes = [
+    { label: V.rahu, value: range(p.rahu) },
+    { label: V.yama, value: range(yamagandam(p.day.weekday, p.sunrise, p.sunset)) },
+    { label: V.durmuhurtam, value: durmuhurtam(p.day.weekday, p.sunrise, p.sunset).map(range).join(', ') },
+  ];
+  const pl = remedyPlanet(a, p.weekdayLord, md);
+  const remedies = [
+    { label: V.deity, value: V.deities[pl] },
+    { label: V.mantra, value: V.mantras[pl] },
+    { label: V.donate, value: V.donations[pl] },
+  ];
+  if (a.taraKind === 'bad' && a.tara) remedies.push({ label: `${V.taraDonate} (${v.tara})`, value: V.taraGifts[a.tara] });
+  remedies.push({ label: V.avoidColour, value: colourName(AVOID_COLOUR[p.weekdayLord], vl) });
+  return {
+    lang: vl,
+    rating: a.rating,
+    ratingLabel: V.rating[a.rating],
+    summary: V.summary[a.rating],
+    positives,
+    cautions,
+    badTimes,
+    remedies,
+    headings: { title: V.title, positive: V.positive, careful: V.careful, remedies: V.remedies, badTimes: V.badTimes, timingLine: V.timingLine },
+  };
+};
+
 export const dailyReading = (
   profile: AstroProfile,
   opts: { uid?: string | null; date?: Date; lang?: AstroLang; wardrobe?: WardrobeItemResponse[] | null } = {},
@@ -206,7 +322,7 @@ export const dailyReading = (
   // Names follow the prose language inside sentences, the chosen language in labels / rows
   const pn = proseLang;
   const p = panchangFor(date);
-  const { chart, jathakam, fromName } = chartFor(profile);
+  const { chart, jathakam, fromName } = chartFor(profile, date.getTime());
   const seed = hashString(`${opts.uid || profile.name || 'guest'}|${p.day.key}`);
 
   const nakName = (n: number, l: AstroLang = lang) => NAKSHATRA_NAMES[l][n];
@@ -221,7 +337,7 @@ export const dailyReading = (
     { label: L.sun, value: `${istClock12(p.sunrise)} / ${istClock12(p.sunset)}` },
   ];
 
-  // Personal strength: Chandrabalam (+ Tarabalam when the birth star is known). Always 3..5 stars.
+  // Personal strength: Chandrabalam (+ Tarabalam when the birth star is known); the verdict below sets the stars.
   let house = 0;
   let stars = 3 + (seed % 2);
   let overview: string;
@@ -244,6 +360,13 @@ export const dailyReading = (
     mood = t.generalMood;
     doList = [...prose.generalDo[p.weekdayLord]];
     avoidList = [t.generalAvoid];
+  }
+
+  // Honest verdict decides the stars: Good 4-5, Mixed 3, Caution 1-2
+  const verdict = chart ? buildVerdict(chart, jathakam, p, lang, seed) : null;
+  if (verdict) {
+    const ashtama = house === 8;
+    stars = verdict.rating === 'good' ? (stars >= 5 ? 5 : 4) : verdict.rating === 'mixed' ? 3 : ashtama ? 1 : 2;
   }
 
   // Lucky time: the rashi lord's hora (else the weekday lord's), and Abhijit muhurtam
@@ -349,6 +472,7 @@ export const dailyReading = (
       : null,
     note,
     stars,
+    verdict,
     greeting: first ? fill(t.greeting, { name: first }) : t.greetingNoName,
     overview,
     mood,

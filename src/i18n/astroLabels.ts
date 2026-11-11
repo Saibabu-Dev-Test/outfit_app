@@ -133,3 +133,185 @@ export const LABELS: Record<AstroLang, AstroLabels> = {
     nameNumber: 'نام کا نمبر', place: 'جائے پیدائش', nameStar: 'نام کا نکشتر',
   },
 };
+
+// ── Honest daily verdict (utils/astroVerdict.ts): rating, Positive / Be careful bullets, timings
+// and remedies. English, Telugu and Hindi written; the other languages use English for now.
+// Placeholders: {house} Moon's house, {tara} tara name, {lord} dasha lord, {day} weekday lord.
+export interface VerdictText {
+  title: string; positive: string; careful: string; remedies: string; badTimes: string;
+  rating: { good: string; mixed: string; caution: string };
+  summary: { good: string; mixed: string; caution: string };
+  areas: { health: string; money: string; work: string; travel: string; relationships: string };
+  taras: string[]; // 9 tara names, Janma..Parama Mitra
+  rahu: string; yama: string; durmuhurtam: string;
+  chandraGood: string[]; // by house 1,3,6,7,10,11 (index = house)
+  chandraMixed: string[]; // houses 2,5,9
+  chandraBad: string[]; // houses 4,12
+  ashtamaChandra: string; ashtamaChandra2: string;
+  taraGood: string; taraJanma: string; taraBad: string;
+  sadeSatiRising: string; sadeSatiPeak: string; sadeSatiSetting: string; ashtamaShani: string; ardhashtamaShani: string;
+  dashaFriend: string; dashaEnemy: string; antarFriend: string; antarEnemy: string;
+  goodArea: { health: string; money: string; work: string; travel: string; relationships: string };
+  badArea: { health: string; money: string; work: string; travel: string; relationships: string };
+  timingLine: string; quietPositive: string;
+  deity: string; mantra: string; donate: string; avoidColour: string; taraDonate: string;
+  deities: string[]; mantras: string[]; donations: string[]; // by planet 0 Sun .. 8 Ketu
+  taraGifts: Record<number, string>; // 3 Vipat, 5 Pratyak, 7 Naidhana
+}
+
+const EN_VERDICT: VerdictText = {
+  title: "Today's honest reading", positive: 'Positive', careful: 'Be careful', remedies: 'Remedies', badTimes: 'Inauspicious times',
+  rating: { good: 'Good day', mixed: 'Mixed day', caution: 'Caution day' },
+  summary: {
+    good: 'Chandrabalam and Tarabalam both support you today: a good day to start and push important things.',
+    mixed: 'A mixed day: some factors help, some do not. Go ahead with routine work; plan big decisions carefully.',
+    caution: 'A weak day for you: keep it simple, postpone big decisions, investments and long travel if you can.',
+  },
+  areas: { health: 'Health', money: 'Money', work: 'Work', travel: 'Travel', relationships: 'Relationships' },
+  taras: ['Janma', 'Sampat', 'Vipat', 'Kshema', 'Pratyak', 'Sadhana', 'Naidhana', 'Mitra', 'Parama Mitra'],
+  rahu: 'Rahu kalam', yama: 'Yamagandam', durmuhurtam: 'Durmuhurtam',
+  chandraGood: ['', 'Moon in your 1st house: good energy, confidence and a clear mind.', '', 'Moon in your 3rd house: courage and effort pay off; good for short trips and calls.', '', '', 'Moon in your 6th house: you win over obstacles, rivals and pending health issues.', 'Moon in your 7th house: good for partnerships, meetings and time with people close to you.', '', '', 'Moon in your 10th house: work and reputation are supported; good for important tasks.', 'Moon in your 11th house: gains, good news and help from friends.'],
+  chandraMixed: ['', '', 'Moon in your 2nd house: money matters are mixed; speak gently and check bills before paying.', '', '', 'Moon in your 5th house: mind may wander; fine for learning, careful with speculation.', '', '', '', 'Moon in your 9th house: blessings are there but plans may change; keep travel flexible.'],
+  chandraBad: ['', '', '', '', 'Moon in your 4th house: restlessness at home and mental unease; drive carefully.', '', '', '', '', '', '', '', 'Moon in your 12th house: unexpected expenses and poor sleep; avoid lending money.'],
+  ashtamaChandra: 'Ashtama Chandra (Moon in your 8th house): the weakest day of the month for you. Avoid new starts, big purchases, arguments and risky travel.',
+  ashtamaChandra2: 'Health can be low today: eat light, rest well and do not ignore small symptoms.',
+  taraGood: '{tara} tara today: the day\'s star is friendly to your birth star.',
+  taraJanma: 'Janma tara (your own birth star) today: stay calm, avoid strain and new risks.',
+  taraBad: '{tara} tara today: the day\'s star is unfriendly to your birth star; expect delays and obstacles.',
+  sadeSatiRising: 'Sade Sati (first phase) is running: Saturn in the 12th from your Moon sign brings expenses and pressure; be patient.',
+  sadeSatiPeak: 'Sade Sati (peak phase) is running: Saturn on your Moon sign brings heavy work and stress; avoid shortcuts.',
+  sadeSatiSetting: 'Sade Sati (last phase) is running: Saturn in the 2nd from your Moon sign tests money and speech; save and speak softly.',
+  ashtamaShani: 'Ashtama Shani is running: Saturn in the 8th from your Moon sign; take extra care of health and avoid risky deals.',
+  ardhashtamaShani: 'Ardhashtama Shani is running: Saturn in the 4th from your Moon sign; peace at home and vehicles need care.',
+  dashaFriend: 'Your {lord} dasha is friendly with today\'s lord {day}: efforts move forward.',
+  dashaEnemy: 'Your {lord} dasha is hostile to today\'s lord {day}: work may feel blocked; avoid confrontations.',
+  antarFriend: 'Your {lord} antardasha supports today\'s lord {day}.',
+  antarEnemy: 'Your {lord} antardasha clashes with today\'s lord {day}: double-check details.',
+  goodArea: {
+    health: 'energy is steady; a good day to start a healthy habit.',
+    money: 'a fair day for planned payments and savings.',
+    work: 'good for finishing pending tasks and meeting seniors.',
+    travel: 'short trips go smoothly.',
+    relationships: 'a good day to clear misunderstandings with people close to you.',
+  },
+  badArea: {
+    health: 'watch diet and sleep; avoid overexertion.',
+    money: 'avoid lending, borrowing and impulse buying today.',
+    work: 'avoid signing important papers or starting new projects today.',
+    travel: 'postpone long or night travel if you can; drive carefully.',
+    relationships: 'words can hurt today; avoid arguments and keep patience.',
+  },
+  timingLine: 'Do not start anything important during the inauspicious times below.',
+  quietPositive: 'Routine work, prayer and rest go well today; keep important work for the lucky time.',
+  deity: 'Pray to', mantra: 'Chant (108 times)', donate: 'Donate', avoidColour: 'Colour to avoid', taraDonate: 'For the tara',
+  deities: ['Surya Narayana', 'Lord Shiva and Goddess Parvati', 'Lord Subrahmanya (Kartikeya)', 'Lord Vishnu', 'Lord Dakshinamurthy (Guru)', 'Goddess Lakshmi', 'Lord Hanuman and Shani Deva', 'Goddess Durga', 'Lord Ganesha'],
+  mantras: ['Om Suryaya Namah', 'Om Somaya Namah', 'Om Angarakaya Namah', 'Om Budhaya Namah', 'Om Gurave Namah', 'Om Shukraya Namah', 'Om Shanaischaraya Namah', 'Om Rahave Namah', 'Om Ketave Namah'],
+  donations: ['wheat and jaggery', 'rice, milk or white cloth', 'red lentils (masoor dal)', 'green gram (moong dal)', 'chana dal and turmeric', 'curd, sugar or white cloth', 'sesame seeds, black urad dal or mustard oil', 'black gram or a blanket', 'seven grains (saptadhanya) or food for street dogs'],
+  taraGifts: { 3: 'jaggery', 5: 'salt', 7: 'sesame seeds' },
+};
+
+const TE_VERDICT: VerdictText = {
+  title: 'ఈ రోజు నిజమైన ఫలితం', positive: 'అనుకూలం', careful: 'జాగ్రత్తలు', remedies: 'పరిహారాలు', badTimes: 'అశుభ సమయాలు',
+  rating: { good: 'మంచి రోజు', mixed: 'మిశ్రమ ఫలితం', caution: 'జాగ్రత్త రోజు' },
+  summary: {
+    good: 'ఈ రోజు చంద్రబలం, తారాబలం రెండూ అనుకూలం: ముఖ్యమైన పనులు మొదలుపెట్టడానికి మంచి రోజు.',
+    mixed: 'మిశ్రమ రోజు: కొన్ని అనుకూలం, కొన్ని ప్రతికూలం. రోజువారీ పనులు చేయండి; పెద్ద నిర్ణయాలు ఆలోచించి తీసుకోండి.',
+    caution: 'మీకు బలహీనమైన రోజు: సాధ్యమైతే పెద్ద నిర్ణయాలు, పెట్టుబడులు, దూర ప్రయాణాలు వాయిదా వేయండి.',
+  },
+  areas: { health: 'ఆరోగ్యం', money: 'ధనం', work: 'ఉద్యోగం / పని', travel: 'ప్రయాణం', relationships: 'సంబంధాలు' },
+  taras: ['జన్మ', 'సంపత్', 'విపత్', 'క్షేమ', 'ప్రత్యక్', 'సాధన', 'నైధన', 'మిత్ర', 'పరమ మిత్ర'],
+  rahu: 'రాహుకాలం', yama: 'యమగండం', durmuhurtam: 'దుర్ముహూర్తం',
+  chandraGood: ['', 'చంద్రుడు 1వ స్థానంలో: మంచి ఉత్సాహం, ఆత్మవిశ్వాసం, స్పష్టమైన ఆలోచన.', '', 'చంద్రుడు 3వ స్థానంలో: ధైర్యం, ప్రయత్నం ఫలిస్తాయి; చిన్న ప్రయాణాలకు అనుకూలం.', '', '', 'చంద్రుడు 6వ స్థానంలో: అడ్డంకులు, శత్రువులపై విజయం; ఆరోగ్యం మెరుగు.', 'చంద్రుడు 7వ స్థానంలో: భాగస్వామ్యాలు, సమావేశాలు, ఆత్మీయులతో సమయానికి అనుకూలం.', '', '', 'చంద్రుడు 10వ స్థానంలో: పని, పేరు ప్రతిష్ఠలకు అనుకూలం; ముఖ్యమైన పనులకు మంచిది.', 'చంద్రుడు 11వ స్థానంలో: లాభాలు, శుభవార్తలు, స్నేహితుల సహాయం.'],
+  chandraMixed: ['', '', 'చంద్రుడు 2వ స్థానంలో: ధన విషయాలు మిశ్రమం; మృదువుగా మాట్లాడండి, బిల్లులు చూసి చెల్లించండి.', '', '', 'చంద్రుడు 5వ స్థానంలో: మనసు చంచలం; చదువుకు సరే, జూదం / స్పెక్యులేషన్ వద్దు.', '', '', '', 'చంద్రుడు 9వ స్థానంలో: దైవానుగ్రహం ఉంది కానీ ప్రణాళికలు మారవచ్చు; ప్రయాణాలు సర్దుబాటుగా ఉంచండి.'],
+  chandraBad: ['', '', '', '', 'చంద్రుడు 4వ స్థానంలో: ఇంట్లో అశాంతి, మనసులో ఆందోళన; వాహనం జాగ్రత్తగా నడపండి.', '', '', '', '', '', '', '', 'చంద్రుడు 12వ స్థానంలో: అనుకోని ఖర్చులు, నిద్రలేమి; అప్పు ఇవ్వకండి.'],
+  ashtamaChandra: 'అష్టమ చంద్రుడు (చంద్రుడు 8వ స్థానంలో): ఈ నెలలో మీకు అత్యంత బలహీనమైన రోజు. కొత్త పనులు, పెద్ద కొనుగోళ్లు, వాదనలు, ప్రమాదకర ప్రయాణాలు వద్దు.',
+  ashtamaChandra2: 'ఈ రోజు ఆరోగ్యం బలహీనంగా ఉండవచ్చు: తేలికపాటి ఆహారం, విశ్రాంతి; చిన్న లక్షణాలను నిర్లక్ష్యం చేయకండి.',
+  taraGood: 'ఈ రోజు {tara} తార: నేటి నక్షత్రం మీ జన్మ నక్షత్రానికి అనుకూలం.',
+  taraJanma: 'ఈ రోజు జన్మ తార (మీ జన్మ నక్షత్రమే): ప్రశాంతంగా ఉండండి, అధిక శ్రమ, కొత్త రిస్కులు వద్దు.',
+  taraBad: 'ఈ రోజు {tara} తార: నేటి నక్షత్రం మీ జన్మ నక్షత్రానికి ప్రతికూలం; ఆలస్యాలు, అడ్డంకులు రావచ్చు.',
+  sadeSatiRising: 'ఏలినాటి శని (మొదటి దశ) నడుస్తోంది: శని మీ రాశికి 12వ స్థానంలో; ఖర్చులు, ఒత్తిడి; ఓపిక అవసరం.',
+  sadeSatiPeak: 'ఏలినాటి శని (జన్మ శని) నడుస్తోంది: శని మీ రాశిలోనే; పని భారం, ఒత్తిడి; అడ్డదారులు వద్దు.',
+  sadeSatiSetting: 'ఏలినాటి శని (చివరి దశ) నడుస్తోంది: శని మీ రాశికి 2వ స్థానంలో; ధనం, మాటలలో జాగ్రత్త; పొదుపు చేయండి.',
+  ashtamaShani: 'అష్టమ శని నడుస్తోంది: శని మీ రాశికి 8వ స్థానంలో; ఆరోగ్యం పట్ల అదనపు జాగ్రత్త, రిస్కీ వ్యవహారాలు వద్దు.',
+  ardhashtamaShani: 'అర్ధాష్టమ శని నడుస్తోంది: శని మీ రాశికి 4వ స్థానంలో; ఇంటి శాంతి, వాహనాల విషయంలో జాగ్రత్త.',
+  dashaFriend: 'మీ {lord} మహాదశ నేటి వారాధిపతి {day}కి మిత్రుడు: ప్రయత్నాలు ముందుకు సాగుతాయి.',
+  dashaEnemy: 'మీ {lord} మహాదశ నేటి వారాధిపతి {day}కి శత్రువు: పనులు ఆగినట్టు అనిపించవచ్చు; ఘర్షణలు వద్దు.',
+  antarFriend: 'మీ {lord} అంతర్దశ నేటి వారాధిపతి {day}కి అనుకూలం.',
+  antarEnemy: 'మీ {lord} అంతర్దశ నేటి వారాధిపతి {day}కి ప్రతికూలం: వివరాలు రెండుసార్లు సరిచూసుకోండి.',
+  goodArea: {
+    health: 'శక్తి స్థిరంగా ఉంటుంది; మంచి అలవాటు మొదలుపెట్టడానికి అనుకూలం.',
+    money: 'ప్రణాళిక ప్రకారం చెల్లింపులు, పొదుపుకు అనుకూలం.',
+    work: 'పెండింగ్ పనులు పూర్తి చేయడానికి, పెద్దలను కలవడానికి మంచిది.',
+    travel: 'చిన్న ప్రయాణాలు సాఫీగా సాగుతాయి.',
+    relationships: 'ఆత్మీయులతో అపార్థాలు తొలగించుకోవడానికి మంచి రోజు.',
+  },
+  badArea: {
+    health: 'ఆహారం, నిద్ర జాగ్రత్త; అధిక శ్రమ వద్దు.',
+    money: 'ఈ రోజు అప్పు ఇవ్వడం, తీసుకోవడం, అనవసర కొనుగోళ్లు వద్దు.',
+    work: 'ఈ రోజు ముఖ్యమైన పత్రాలపై సంతకాలు, కొత్త ప్రాజెక్టులు వద్దు.',
+    travel: 'వీలైతే దూర / రాత్రి ప్రయాణాలు వాయిదా వేయండి; జాగ్రత్తగా నడపండి.',
+    relationships: 'మాటలు బాధ పెట్టవచ్చు; వాదనలు వద్దు, ఓపికగా ఉండండి.',
+  },
+  timingLine: 'కింది అశుభ సమయాల్లో ముఖ్యమైన పనులు మొదలుపెట్టకండి.',
+  quietPositive: 'రోజువారీ పనులు, పూజ, విశ్రాంతి ఈ రోజు బాగా సాగుతాయి; ముఖ్యమైన పని శుభ సమయంలో చేయండి.',
+  deity: 'పూజించవలసిన దైవం', mantra: 'జపం (108 సార్లు)', donate: 'దానం', avoidColour: 'వద్దనుకునే రంగు', taraDonate: 'తారా దోష పరిహారం',
+  deities: ['సూర్య నారాయణుడు', 'శివ పార్వతులు', 'సుబ్రహ్మణ్య స్వామి', 'శ్రీ మహావిష్ణువు', 'దక్షిణామూర్తి (గురువు)', 'లక్ష్మీ దేవి', 'ఆంజనేయ స్వామి, శనైశ్చరుడు', 'దుర్గా దేవి', 'వినాయకుడు'],
+  mantras: ['ఓం సూర్యాయ నమః', 'ఓం సోమాయ నమః', 'ఓం అంగారకాయ నమః', 'ఓం బుధాయ నమః', 'ఓం గురవే నమః', 'ఓం శుక్రాయ నమః', 'ఓం శనైశ్చరాయ నమః', 'ఓం రాహవే నమః', 'ఓం కేతవే నమః'],
+  donations: ['గోధుమలు, బెల్లం', 'బియ్యం, పాలు లేదా తెల్లని వస్త్రం', 'ఎర్ర కందిపప్పు (మసూర్)', 'పెసలు', 'శనగపప్పు, పసుపు', 'పెరుగు, చక్కెర లేదా తెల్లని వస్త్రం', 'నువ్వులు, మినుములు లేదా నువ్వుల నూనె', 'మినుములు లేదా కంబళి', 'నవధాన్యాలు లేదా వీధి కుక్కలకు ఆహారం'],
+  taraGifts: { 3: 'బెల్లం', 5: 'ఉప్పు', 7: 'నువ్వులు' },
+};
+
+const HI_VERDICT: VerdictText = {
+  title: 'आज का सच्चा फल', positive: 'अनुकूल', careful: 'सावधान रहें', remedies: 'उपाय', badTimes: 'अशुभ समय',
+  rating: { good: 'शुभ दिन', mixed: 'मिश्रित दिन', caution: 'सावधानी का दिन' },
+  summary: {
+    good: 'आज चंद्रबल और ताराबल दोनों आपके साथ हैं: ज़रूरी काम शुरू करने के लिए अच्छा दिन।',
+    mixed: 'मिश्रित दिन: कुछ बातें अनुकूल, कुछ प्रतिकूल। रोज़ के काम करें; बड़े फ़ैसले सोच-समझकर लें।',
+    caution: 'आपके लिए कमज़ोर दिन: हो सके तो बड़े फ़ैसले, निवेश और लंबी यात्रा टाल दें।',
+  },
+  areas: { health: 'स्वास्थ्य', money: 'धन', work: 'काम', travel: 'यात्रा', relationships: 'संबंध' },
+  taras: ['जन्म', 'संपत', 'विपत', 'क्षेम', 'प्रत्यक', 'साधक', 'नैधन', 'मित्र', 'परम मित्र'],
+  rahu: 'राहु काल', yama: 'यमगंड', durmuhurtam: 'दुर्मुहूर्त',
+  chandraGood: ['', 'चंद्र पहले भाव में: अच्छी ऊर्जा, आत्मविश्वास और साफ़ सोच।', '', 'चंद्र तीसरे भाव में: साहस और मेहनत का फल; छोटी यात्राओं के लिए अच्छा।', '', '', 'चंद्र छठे भाव में: बाधाओं और विरोधियों पर जीत; सेहत में सुधार।', 'चंद्र सातवें भाव में: साझेदारी, मुलाक़ातों और अपनों के साथ समय के लिए अच्छा।', '', '', 'चंद्र दसवें भाव में: काम और मान-सम्मान को सहारा; ज़रूरी कामों के लिए अच्छा।', 'चंद्र ग्यारहवें भाव में: लाभ, शुभ समाचार और मित्रों से मदद।'],
+  chandraMixed: ['', '', 'चंद्र दूसरे भाव में: धन के मामले मिश्रित; नरमी से बोलें, भुगतान से पहले बिल जाँचें।', '', '', 'चंद्र पाँचवें भाव में: मन चंचल; पढ़ाई ठीक, सट्टे से बचें।', '', '', '', 'चंद्र नौवें भाव में: भाग्य साथ है पर योजनाएँ बदल सकती हैं; यात्रा में लचीलापन रखें।'],
+  chandraBad: ['', '', '', '', 'चंद्र चौथे भाव में: घर में अशांति और मन में बेचैनी; वाहन सावधानी से चलाएँ।', '', '', '', '', '', '', '', 'चंद्र बारहवें भाव में: अचानक ख़र्च और नींद की कमी; उधार न दें।'],
+  ashtamaChandra: 'अष्टम चंद्र (चंद्र आठवें भाव में): इस महीने का आपके लिए सबसे कमज़ोर दिन। नई शुरुआत, बड़ी ख़रीदारी, बहस और जोखिम भरी यात्रा से बचें।',
+  ashtamaChandra2: 'आज सेहत कमज़ोर रह सकती है: हल्का भोजन, पूरा आराम; छोटे लक्षणों को नज़रअंदाज़ न करें।',
+  taraGood: 'आज {tara} तारा: आज का नक्षत्र आपके जन्म नक्षत्र के अनुकूल है।',
+  taraJanma: 'आज जन्म तारा (आपका अपना जन्म नक्षत्र): शांत रहें, ज़्यादा थकान और नए जोखिम से बचें।',
+  taraBad: 'आज {tara} तारा: आज का नक्षत्र आपके जन्म नक्षत्र के प्रतिकूल है; देरी और रुकावटें संभव।',
+  sadeSatiRising: 'साढ़ेसाती (पहला चरण) चल रही है: शनि आपकी राशि से बारहवें भाव में; ख़र्च और दबाव; धैर्य रखें।',
+  sadeSatiPeak: 'साढ़ेसाती (मध्य चरण) चल रही है: शनि आपकी ही राशि में; काम का बोझ और तनाव; शॉर्टकट से बचें।',
+  sadeSatiSetting: 'साढ़ेसाती (अंतिम चरण) चल रही है: शनि आपकी राशि से दूसरे भाव में; धन और वाणी पर संयम; बचत करें।',
+  ashtamaShani: 'अष्टम शनि (ढैया) चल रहा है: शनि आपकी राशि से आठवें भाव में; सेहत का विशेष ध्यान, जोखिम भरे सौदों से बचें।',
+  ardhashtamaShani: 'अर्धाष्टम शनि (कंटक शनि / ढैया) चल रहा है: शनि आपकी राशि से चौथे भाव में; घर की शांति और वाहन का ध्यान रखें।',
+  dashaFriend: 'आपकी {lord} महादशा आज के वार स्वामी {day} की मित्र है: प्रयास आगे बढ़ेंगे।',
+  dashaEnemy: 'आपकी {lord} महादशा आज के वार स्वामी {day} की शत्रु है: काम अटक सकते हैं; टकराव से बचें।',
+  antarFriend: 'आपकी {lord} अंतर्दशा आज के वार स्वामी {day} के अनुकूल है।',
+  antarEnemy: 'आपकी {lord} अंतर्दशा आज के वार स्वामी {day} के प्रतिकूल है: बातें दोबारा जाँचें।',
+  goodArea: {
+    health: 'ऊर्जा स्थिर; अच्छी आदत शुरू करने का अच्छा दिन।',
+    money: 'योजना के अनुसार भुगतान और बचत के लिए ठीक दिन।',
+    work: 'अधूरे काम पूरे करने और बड़ों से मिलने के लिए अच्छा।',
+    travel: 'छोटी यात्राएँ आसानी से होंगी।',
+    relationships: 'अपनों से ग़लतफ़हमी दूर करने का अच्छा दिन।',
+  },
+  badArea: {
+    health: 'खान-पान और नींद का ध्यान रखें; ज़्यादा मेहनत से बचें।',
+    money: 'आज उधार देने-लेने और बेवजह ख़रीदारी से बचें।',
+    work: 'आज ज़रूरी काग़ज़ों पर हस्ताक्षर या नया प्रोजेक्ट शुरू करने से बचें।',
+    travel: 'हो सके तो लंबी या रात की यात्रा टालें; सावधानी से चलाएँ।',
+    relationships: 'आज शब्द चुभ सकते हैं; बहस से बचें, धैर्य रखें।',
+  },
+  timingLine: 'नीचे दिए अशुभ समय में कोई ज़रूरी काम शुरू न करें।',
+  quietPositive: 'रोज़ के काम, पूजा और आराम आज अच्छे रहेंगे; ज़रूरी काम शुभ समय में करें।',
+  deity: 'पूजा करें', mantra: 'जाप (108 बार)', donate: 'दान करें', avoidColour: 'इस रंग से बचें', taraDonate: 'तारा दोष के लिए',
+  deities: ['सूर्य नारायण', 'भगवान शिव और माता पार्वती', 'भगवान कार्तिकेय', 'भगवान विष्णु', 'दक्षिणामूर्ति (गुरु)', 'माता लक्ष्मी', 'हनुमान जी और शनि देव', 'माँ दुर्गा', 'भगवान गणेश'],
+  mantras: ['ॐ सूर्याय नमः', 'ॐ सोमाय नमः', 'ॐ अंगारकाय नमः', 'ॐ बुधाय नमः', 'ॐ गुरवे नमः', 'ॐ शुक्राय नमः', 'ॐ शनैश्चराय नमः', 'ॐ राहवे नमः', 'ॐ केतवे नमः'],
+  donations: ['गेहूँ और गुड़', 'चावल, दूध या सफ़ेद वस्त्र', 'मसूर दाल', 'मूँग दाल', 'चने की दाल और हल्दी', 'दही, चीनी या सफ़ेद वस्त्र', 'तिल, काली उड़द या सरसों का तेल', 'काली उड़द या कंबल', 'सप्तधान्य या गली के कुत्तों को भोजन'],
+  taraGifts: { 3: 'गुड़', 5: 'नमक', 7: 'तिल' },
+};
+
+export const VERDICT_TEXT: Partial<Record<AstroLang, VerdictText>> = { English: EN_VERDICT, Telugu: TE_VERDICT, Hindi: HI_VERDICT };
+export const hasOwnVerdict = (lang: AstroLang) => !!VERDICT_TEXT[lang];
+export const verdictFor = (lang: AstroLang): VerdictText => VERDICT_TEXT[lang] || EN_VERDICT;
