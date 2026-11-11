@@ -16,4 +16,6 @@ export type RootStackParamList = {
   LikedBy: { kind: 'post' | 'wardrobe'; id: string };
   PostDetail: { kind: 'post' | 'wardrobe'; id: string };
   FollowList: { userId: string; mode: 'followers' | 'following'; name?: string };
+  // Birthday wishes for one person, or today's "Happy birthday to all" circle
+  BirthdayChat: { mode: 'wishes'; uid?: string } | { mode: 'circle' };
 };

@@ -24,6 +24,7 @@ import LikesScreen from '../screens/Profile/LikesScreen';
 import LikedByScreen from '../screens/Profile/LikedByScreen';
 import FollowListScreen from '../screens/Profile/FollowListScreen';
 import PostDetailScreen from '../screens/Feed/PostDetailScreen';
+import BirthdayChatScreen from '../screens/Home/BirthdayChatScreen';
 import { colors, themedStyles, useTheme } from '../theme';
 import AppLockGate from '../components/AppLockGate';
 import ActivityWatcher from '../components/ActivityWatcher';
@@ -119,6 +120,7 @@ function NavigationContent() {
               <Stack.Screen name="PostDetail" component={PostDetailScreen} />
               <Stack.Screen name="FollowList" component={FollowListScreen} />
               <Stack.Screen name="Comments" component={CommentsScreen} />
+              <Stack.Screen name="BirthdayChat" component={BirthdayChatScreen} />
               <Stack.Screen name="UserProfile" component={UserProfileScreen} />
               <Stack.Screen name="UserSearch" component={UserSearchScreen} />
               <Stack.Screen name="Admin" component={AdminScreen} />

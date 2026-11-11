@@ -19,6 +19,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { pickImage, AVATAR_PICK } from '../../utils/imagePicker';
 import { getUserProfile, saveUserProfile, uploadAvatar } from '../../services/userApi';
+import { mdFromDob, mdLabel, setBirthdayListing } from '../../services/birthdayApi';
 import { checkNotifications, openNotificationSettings } from '../../native/notifications';
 import {
   astroChartStale,
@@ -75,6 +76,7 @@ interface UserProfile {
   avatarUrl?: string | null;
   isPublic?: boolean;
   stylePrefs?: string[];
+  showBirthday?: boolean; // "Show my birthday" on Home (default off)
   createdAt?: any;
   updatedAt?: any;
 }
@@ -104,6 +106,7 @@ export default function ProfileScreen() {
   // App lock (fingerprint): hidden when the phone has no biometrics
   const [lockSupported, setLockSupported] = useState(false);
   const [lockOn, setLockOn] = useState(false);
+  const [bdayBusy, setBdayBusy] = useState(false);
   // Automatic updates: user's choice, OFF by default
   const [autoUpdate, setAutoUpdateState] = useState(false);
   useEffect(() => {
@@ -277,6 +280,7 @@ const fetchProfile = async () => {
       bio: stored.bio || '',
       isPublic: stored.isPublic !== false,
       stylePrefs: Array.isArray(stored.stylePrefs) ? stored.stylePrefs : [],
+      showBirthday: stored.showBirthday === true,
     };
     setIsAdmin(stored.role === 'admin');
     // Birth chart saved for other details (or before this screen computed it): recompute and save
@@ -351,6 +355,25 @@ const fetchProfile = async () => {
   // App lock switch. ON: fingerprint (session encrypted) or, without one, the phone's screen lock.
   // OFF: one fingerprint / screen-lock check, then the app opens straight in again.
   const [lockBusy, setLockBusy] = useState(false);
+  // "Show my birthday": day + month on friends' Home (never the year / age). Default off.
+  const handleToggleBirthday = async (value: boolean) => {
+    const uid = profileData?.id || authUser?.id;
+    if (!uid || bdayBusy) return;
+    if (value && !mdFromDob(profileData?.dob)) {
+      Alert.alert('Add your date of birth', 'Add your date of birth in Edit profile first, then turn this on.');
+      return;
+    }
+    setBdayBusy(true);
+    try {
+      await setBirthdayListing(uid, value, { dob: profileData?.dob, name: profileData?.name, avatar: profileData?.avatarUrl });
+      setProfileData(prev => (prev ? { ...prev, showBirthday: value } : prev));
+    } catch (e: any) {
+      Alert.alert('Could not save', e?.message || 'Please try again.');
+    } finally {
+      setBdayBusy(false);
+    }
+  };
+
   const handleToggleLock = async (value: boolean) => {
     if (lockBusy) return;
     setLockBusy(true);
@@ -439,6 +462,15 @@ const fetchProfile = async () => {
       bio: updatedProfile.bio,
       isPublic: updatedProfile.isPublic,
     });
+    // Keep the birthday listing in step with the new name / date of birth (off if no date)
+    updatedProfile.showBirthday = profileData?.showBirthday === true;
+    if (updatedProfile.showBirthday) {
+      const keep = !!mdFromDob(updatedProfile.dob);
+      updatedProfile.showBirthday = keep;
+      setBirthdayListing(uid, keep, { dob: updatedProfile.dob, name: updatedProfile.name, avatar: updatedProfile.avatarUrl }).catch(e =>
+        console.warn('Birthday listing update failed:', e?.message),
+      );
+    }
     setProfileData(updatedProfile);
     updateUserData(updatedProfile as any);
     setIsEditModalVisible(false);
@@ -786,6 +818,32 @@ const fetchProfile = async () => {
             )}
             {!!referralError && <Text style={styles.inviteError}>{referralError}</Text>}
             <Text style={styles.inviteFriends}>👥 {joinedWithLinkText(friendsJoined)}</Text>
+          </View>
+        </View>
+
+        {/* Show my birthday: opt-in, off by default (day + month only) */}
+        <View style={styles.menuSection}>
+          <View style={styles.menuItem}>
+            <View style={[styles.menuLeft, styles.flexTitle]}>
+              <View style={styles.menuIconBox}>
+                <Text style={styles.menuIcon}>🎂</Text>
+              </View>
+              <View style={styles.flexTitle}>
+                <Text style={styles.menuLabel}>Show my birthday</Text>
+                <Text style={styles.lockValue}>
+                  {profileData?.showBirthday
+                    ? `On: others see ${mdFromDob(profileData?.dob) ? mdLabel(mdFromDob(profileData?.dob) as string) : 'your birthday'} on Home and can send wishes (never your age or year)`
+                    : 'Off: your birthday stays private'}
+                </Text>
+              </View>
+            </View>
+            <Switch
+              value={profileData?.showBirthday === true}
+              onValueChange={handleToggleBirthday}
+              disabled={bdayBusy}
+              trackColor={{ false: colors.border, true: colors.accent }}
+              thumbColor={colors.textInverse}
+            />
           </View>
         </View>
 

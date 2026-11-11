@@ -30,6 +30,7 @@ import { useDayKey } from '../../hooks/useDayKey';
 import { markColourVoted } from '../../native/notifications';
 import { firestoreErrorMessage, SERVER_SETUP_MESSAGE } from '../../utils/firebaseErrors';
 import Avatar from '../../components/Avatar';
+import BirthdaysCard from '../../components/BirthdaysCard';
 import {
   checkWeeklyStars,
   getDay,
@@ -546,6 +547,9 @@ export default function HomeScreen() {
           </View>
           <Text style={styles.panchangNote}>Traditional Panchangam guidance (weekday ruling planet)</Text>
         </View>
+
+        {/* 🎂 Birthdays today + next 7 days (opt-in), wishes, and the birthday circle on my birthday */}
+        {user?.id ? <BirthdaysCard uid={String(user.id)} /> : null}
 
         {/* Last week's celebrities */}
         <View style={styles.plainHeaderRow}>

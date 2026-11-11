@@ -11,6 +11,7 @@ import { LABELS } from '../i18n/astroLabels';
 import { colourName, LANG_META } from '../i18n/astroNames';
 import { proseFor } from '../i18n/astroProse';
 import { festivalsAround, festivalText, FestivalHit } from '../services/festivals';
+import { festivalDressFor, PLAN_LABELS, planText } from '../services/festivalPlans';
 import { astroAiAvailable, fetchAstroDetails, getCachedAstroDetails } from '../services/astrologyAi';
 import type { WardrobeItemResponse } from '../services/wardrobeApi';
 
@@ -123,11 +124,41 @@ export default function AstrologyPanel({ uid, profile, wardrobe, onEditProfile }
         <Text style={styles.sub}>{t.wear}</Text>
         <Bi style={styles.body} text={f.wear} enText={fe.wear} />
         {swatches(h.festival.colours.map(c => ({ name: colourName(c.name, lang), en: c.name, hex: c.hex })))}
+        {planBlock(h)}
       </View>
     );
   };
 
-  const shownFest = [...fest.today, ...fest.upcoming].slice(0, 2);
+  // Festival planning (from 7 days before): get ready, fasting, food, and my colour by rashi
+  const planBlock = (h: FestivalHit) => {
+    const pl = PLAN_LABELS[lang];
+    const ple = PLAN_LABELS.English;
+    const p = planText(h.festival.id, lang);
+    const pe = planText(h.festival.id, 'English');
+    const dress = festivalDressFor(h.festival, reading.chart?.rashi ?? null);
+    const head = (k: 'prep' | 'fast' | 'food' | 'yourColour') => (bi && pl[k] !== ple[k] ? `${pl[k]} · ${ple[k]}` : pl[k]);
+    return (
+      <View style={styles.planBox}>
+        <Text style={styles.planTitle}>📝 {bi && pl.plan !== ple.plan ? `${pl.plan} · ${ple.plan}` : pl.plan}</Text>
+        <Text style={styles.sub}>🧹 {head('prep')}</Text>
+        <Bi style={styles.body} text={p.prep} enText={pe.prep} />
+        <Text style={styles.sub}>🙏 {head('fast')}</Text>
+        <Bi style={styles.body} text={p.fast} enText={pe.fast} />
+        <Text style={styles.sub}>🍲 {head('food')}</Text>
+        <Bi style={styles.body} text={p.food} enText={pe.food} />
+        {dress ? (
+          <>
+            <Text style={styles.sub}>👗 {head('yourColour')}</Text>
+            {swatches(
+              [dress.main, ...(dress.accent ? [dress.accent] : [])].map(c => ({ name: colourName(c.name, lang), en: c.name, hex: c.hex })),
+            )}
+          </>
+        ) : null}
+      </View>
+    );
+  };
+
+  const shownFest = [...fest.today, ...fest.upcoming].slice(0, 3);
 
   return (
     <View style={styles.wrap}>
@@ -300,6 +331,8 @@ const styles = themedStyles(() => StyleSheet.create({
     padding: spacing.md,
     marginBottom: spacing.md,
   },
+  planBox: { marginTop: spacing.sm, paddingTop: spacing.sm, borderTopWidth: 1, borderTopColor: colors.border },
+  planTitle: { fontSize: fontSize.sm, fontWeight: fontWeight.bold, color: colors.textPrimary },
   festCard: { borderColor: colors.accent, borderWidth: 1.5 },
   askCard: { borderColor: colors.primary },
   relCard: { borderColor: '#F48FB1' },

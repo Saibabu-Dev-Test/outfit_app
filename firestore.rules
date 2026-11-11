@@ -52,6 +52,25 @@ service cloud.firestore {
         && !request.resource.data.text.lower().matches('(([a-z]|[^a-z])*[^a-z])?(fuck[a-z]*|motherfucker[a-z]*|bitch(es)?|cunts?|nigg(er|a)s?|faggots?|madarchod|behenchod|bhenchod|chutiy[ae]|bhosdike|lanja|lanjakodaka|dengu|puku|modda|randi|gandu|lavda)([^a-z]([a-z]|[^a-z])*)?');
     }
 
+    // Same worst-words check as commentOk, for birthday wishes / birthday circle messages
+    function noAbuse(t) {
+      return !t.lower().matches('(([a-z]|[^a-z])*[^a-z])?(fuck[a-z]*|motherfucker[a-z]*|bitch(es)?|cunts?|nigg(er|a)s?|faggots?|madarchod|behenchod|bhenchod|chutiy[ae]|bhosdike|lanja|lanjakodaka|dengu|puku|modda|randi|gandu|lavda)([^a-z]([a-z]|[^a-z])*)?');
+    }
+    // 'YYYY-MM-DD' is the birthday 'MM-DD' (29 Feb birthdays also count on 28 Feb)
+    function isBirthdayOn(md, day) {
+      return day.matches('^[0-9]{4}-' + md + '$')
+        || (md == '02-29' && day.matches('^[0-9]{4}-02-28$'));
+    }
+    // My opted-in birthday (birthdays/{me}) is `day`, and it is that day now (any Indian / nearby timezone)
+    function myBirthdayNow(day) {
+      let p = /databases/$(db)/documents/birthdays/$(request.auth.uid);
+      return isDateKey(day)
+        && exists(p)
+        && isBirthdayOn(get(p).data.md, day)
+        && request.time > dateTs(day) - duration.value(14, 'h')
+        && request.time < dateTs(day) + duration.value(38, 'h');
+    }
+
     // ── Rewards helpers (daily tasks, points, weekly celebrities) ─────────
     // Days in a Mon-Sun week with all 3 tasks done to become a weekly celebrity.
     // Keep in sync with WEEKLY_REQUIRED_DAYS in src/services/rewardsApi.ts
@@ -174,6 +193,84 @@ service cloud.firestore {
       allow delete: if signedIn() && me() == uid;
     }
 
+    // ── Birthdays (opt-in "Show my birthday"): birthdays/{uid} {name, avatar, md: 'MM-DD', updatedAt} ──
+    // Day + month only (never the year). Only the owner writes it, and md must match the owner's
+    // own users/{uid}.dob. Everyone signed in can read the list (Home card, one query).
+    match /birthdays/{uid} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && me() == uid
+        && request.resource.data.keys().hasOnly(['name', 'avatar', 'md', 'updatedAt'])
+        && request.resource.data.md is string
+        && request.resource.data.md.matches('^(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$')
+        && get(/databases/$(db)/documents/users/$(request.auth.uid)).data.get('dob', '') is string
+        && get(/databases/$(db)/documents/users/$(request.auth.uid)).data.get('dob', '').matches('^[0-9]{4}-' + request.resource.data.md + '$')
+        && request.resource.data.name is string
+        && request.resource.data.name.size() <= 60
+        && (request.resource.data.get('avatar', null) == null
+            || (request.resource.data.avatar is string && request.resource.data.avatar.size() <= 60000))
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if signedIn() && (me() == uid || isAdmin());
+    }
+
+    // ── Birthday wishes: birthdays/{uid}/wishes/{autoId} ──
+    // {userId, userName, userAvatar, text, day, replyToUid, replyToName, createdAt}
+    // day = that year's birthday; accepted from 7 days before until the day ends. Readable by
+    // everyone signed in; the author, the birthday person or an admin can delete. No updates.
+    match /birthdays/{uid}/wishes/{wid} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && exists(/databases/$(db)/documents/birthdays/$(uid))
+        && request.resource.data.keys().hasOnly(['userId', 'userName', 'userAvatar', 'text', 'day', 'replyToUid', 'replyToName', 'createdAt'])
+        && request.resource.data.userId == me()
+        && request.resource.data.createdAt == request.time
+        && isDateKey(request.resource.data.day)
+        && isBirthdayOn(get(/databases/$(db)/documents/birthdays/$(uid)).data.md, request.resource.data.day)
+        && request.time > dateTs(request.resource.data.day) - duration.value(182, 'h')
+        && request.time < dateTs(request.resource.data.day) + duration.value(38, 'h')
+        && request.resource.data.text is string
+        && request.resource.data.text.size() >= 1
+        && request.resource.data.text.size() <= 300
+        && noAbuse(request.resource.data.text)
+        && request.resource.data.userName is string
+        && request.resource.data.userName.size() <= 60
+        && (request.resource.data.get('userAvatar', null) == null
+            || (request.resource.data.userAvatar is string && request.resource.data.userAvatar.size() <= 60000))
+        && (request.resource.data.get('replyToUid', null) == null
+            || (request.resource.data.replyToUid is string && request.resource.data.replyToUid.size() <= 128))
+        && (request.resource.data.get('replyToName', null) == null
+            || (request.resource.data.replyToName is string && request.resource.data.replyToName.size() <= 60));
+      allow delete: if signedIn()
+        && (resource.data.userId == me() || uid == me() || isAdmin());
+    }
+
+    // ── "Happy birthday to all": bdayCircles/{YYYY-MM-DD}/messages/{autoId} ──
+    // {userId, userName, userAvatar, type: 'text' | 'image', text, imageData, createdAt}
+    // Only people whose opted-in birthday is that day, and only on that day: the circle is gone
+    // (unreadable) the next day. Admins may read / delete for moderation.
+    match /bdayCircles/{day}/messages/{mid} {
+      allow read: if signedIn() && (myBirthdayNow(day) || isAdmin());
+      allow create: if signedIn()
+        && myBirthdayNow(day)
+        && request.resource.data.keys().hasOnly(['userId', 'userName', 'userAvatar', 'type', 'text', 'imageData', 'createdAt'])
+        && request.resource.data.userId == me()
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.userName is string
+        && request.resource.data.userName.size() <= 60
+        && (request.resource.data.get('userAvatar', null) == null
+            || (request.resource.data.userAvatar is string && request.resource.data.userAvatar.size() <= 60000))
+        && ((request.resource.data.type == 'text'
+              && request.resource.data.text is string
+              && request.resource.data.text.size() >= 1
+              && request.resource.data.text.size() <= 1000
+              && noAbuse(request.resource.data.text)
+              && !('imageData' in request.resource.data))
+            || (request.resource.data.type == 'image'
+              && request.resource.data.imageData is string
+              && request.resource.data.imageData.size() <= 150000
+              && !('text' in request.resource.data)));
+      allow delete: if signedIn() && (resource.data.userId == me() || isAdmin());
+    }
+
     // ── Activity ("who liked my photos"): users/{uid}/activity/{autoId} ──
     // {type, actorId, actorName, actorAvatar, targetKind, targetId, thumbnail, text, createdAt}
     // Written by the person who liked / disliked / commented / followed (never by the owner);
@@ -184,14 +281,14 @@ service cloud.firestore {
         && request.resource.data.actorId == me()
         && uid != me()
         && request.resource.data.keys().hasOnly(['type', 'actorId', 'actorName', 'actorAvatar', 'targetKind', 'targetId', 'thumbnail', 'text', 'createdAt'])
-        && request.resource.data.type in ['like', 'dislike', 'comment', 'follow', 'feedback', 'referral']
+        && request.resource.data.type in ['like', 'dislike', 'comment', 'follow', 'feedback', 'referral', 'wish', 'mention']
         && request.resource.data.createdAt == request.time
         && (request.resource.data.get('actorName', null) == null
             || (request.resource.data.actorName is string && request.resource.data.actorName.size() <= 60))
         && (request.resource.data.get('actorAvatar', null) == null
             || (request.resource.data.actorAvatar is string && request.resource.data.actorAvatar.size() <= 60000))
         && (request.resource.data.get('targetKind', null) == null
-            || request.resource.data.targetKind in ['post', 'wardrobe'])
+            || request.resource.data.targetKind in ['post', 'wardrobe', 'birthday'])
         && (request.resource.data.get('targetId', null) == null
             || (request.resource.data.targetId is string && request.resource.data.targetId.size() <= 128))
         && (request.resource.data.get('thumbnail', null) == null
