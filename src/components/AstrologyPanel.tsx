@@ -223,6 +223,52 @@ export default function AstrologyPanel({ uid, profile, wardrobe, onEditProfile }
         </View>
       ) : null}
 
+      {reading.verdict ? (
+        <View style={[styles.card, reading.verdict.rating === 'good' ? styles.vGoodCard : reading.verdict.rating === 'caution' ? styles.vBadCard : styles.vMixedCard]}>
+          <Bi style={styles.title} text={`⚖️ ${reading.verdict.headings.title}`} enText={en?.verdict ? `⚖️ ${en.verdict.headings.title}` : null} />
+          <View style={[styles.badge, reading.verdict.rating === 'good' ? styles.badgeGood : reading.verdict.rating === 'caution' ? styles.badgeBad : styles.badgeMixed]}>
+            <Text style={styles.badgeText}>
+              {reading.verdict.ratingLabel}
+              {bi && en?.verdict && en.verdict.ratingLabel !== reading.verdict.ratingLabel ? ` · ${en.verdict.ratingLabel}` : ''}
+            </Text>
+          </View>
+          <Bi style={styles.body} text={reading.verdict.summary} enText={en?.verdict?.summary} />
+          <View style={[styles.vBox, styles.vGoodBox]}>
+            <Text style={[styles.sub, styles.vGoodText]}>✅ {reading.verdict.headings.positive}</Text>
+            {reading.verdict.positives.map((x, i) => (
+              <Bi key={x.text} style={[styles.bullet, styles.vGoodText]} text={`• ${x.areaLabel}: ${x.text}`} enText={en?.verdict?.positives[i] ? `  ${en.verdict.positives[i].text}` : null} />
+            ))}
+          </View>
+          <View style={[styles.vBox, styles.vBadBox]}>
+            <Text style={[styles.sub, styles.vBadText]}>⚠️ {reading.verdict.headings.careful}</Text>
+            {reading.verdict.cautions.map((x, i) => (
+              <Bi key={x.text} style={[styles.bullet, styles.vBadText]} text={`• ${x.areaLabel}: ${x.text}`} enText={en?.verdict?.cautions[i] ? `  ${en.verdict.cautions[i].text}` : null} />
+            ))}
+          </View>
+          <Text style={styles.sub}>⏳ {reading.verdict.headings.badTimes}</Text>
+          <Bi style={styles.note} text={reading.verdict.headings.timingLine} enText={en?.verdict?.headings.timingLine} />
+          {reading.verdict.badTimes.map(r => (
+            <View key={r.label} style={styles.row}>
+              <Text style={styles.rowLabel}>{r.label}</Text>
+              <Text style={styles.rowValue}>{r.value}</Text>
+            </View>
+          ))}
+          <Text style={styles.sub}>🙏 {reading.verdict.headings.remedies}</Text>
+          {reading.verdict.remedies.map((r, i) => (
+            <View key={r.label} style={styles.row}>
+              <Text style={styles.rowLabel}>
+                {r.label}
+                {bi && en?.verdict?.remedies[i] && en.verdict.remedies[i].label !== r.label ? `\n${en.verdict.remedies[i].label}` : ''}
+              </Text>
+              <Text style={styles.rowValue}>
+                {r.value}
+                {bi && en?.verdict?.remedies[i] && en.verdict.remedies[i].value !== r.value ? `\n${en.verdict.remedies[i].value}` : ''}
+              </Text>
+            </View>
+          ))}
+        </View>
+      ) : null}
+
       <View style={styles.card}>
         <Text style={styles.title}>🔮 {t.jathakam}</Text>
         {reading.rashiLine ? <Bi style={styles.rashi} text={reading.rashiLine} enText={en?.rashiLine} /> : null}
@@ -336,6 +382,19 @@ const styles = themedStyles(() => StyleSheet.create({
   festCard: { borderColor: colors.accent, borderWidth: 1.5 },
   askCard: { borderColor: colors.primary },
   relCard: { borderColor: '#F48FB1' },
+  vGoodCard: { borderColor: '#2E7D32', borderWidth: 1.5 },
+  vMixedCard: { borderColor: '#F9A825', borderWidth: 1.5 },
+  vBadCard: { borderColor: '#C62828', borderWidth: 1.5 },
+  badge: { alignSelf: 'flex-start', borderRadius: borderRadius.full, paddingHorizontal: spacing.md, paddingVertical: 3, marginBottom: 4 },
+  badgeGood: { backgroundColor: '#2E7D32' },
+  badgeMixed: { backgroundColor: '#F9A825' },
+  badgeBad: { backgroundColor: '#C62828' },
+  badgeText: { color: '#FFFFFF', fontWeight: fontWeight.bold, fontSize: fontSize.sm },
+  vBox: { borderRadius: borderRadius.md, padding: spacing.sm, marginTop: spacing.sm, borderWidth: 1 },
+  vGoodBox: { backgroundColor: 'rgba(46,125,50,0.08)', borderColor: 'rgba(46,125,50,0.35)' },
+  vBadBox: { backgroundColor: 'rgba(198,40,40,0.08)', borderColor: 'rgba(198,40,40,0.35)' },
+  vGoodText: { color: '#2E7D32' },
+  vBadText: { color: '#C62828' },
   festTag: { fontSize: fontSize.xs, color: colors.accent, fontWeight: fontWeight.bold, textTransform: 'uppercase', letterSpacing: 0.5 },
   festName: { fontSize: fontSize.base, fontWeight: fontWeight.extraBold, color: colors.textPrimary, marginTop: 2, marginBottom: 4 },
   title: { fontSize: fontSize.base, fontWeight: fontWeight.extraBold, color: colors.textPrimary, marginBottom: spacing.sm },

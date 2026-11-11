@@ -51,13 +51,14 @@ describe('astro (offline panchang)', () => {
     expect(taraOf(0, 1)).toBe(2);
   });
 
-  it('is the same all day for a user and positive', () => {
+  it('is the same all day for a user', () => {
     const p = { name: 'Sai Babu', dob: '1996-05-14', gender: 'Male' };
     const a = dailyReading(p, { uid: 'u1', date: at(2026, 11, 10, 7) });
     const b = dailyReading(p, { uid: 'u1', date: at(2026, 11, 10, 22) });
     expect(a.overview).toBe(b.overview);
     expect(a.relation.text).toBe(b.relation.text);
-    expect(a.stars).toBeGreaterThanOrEqual(3);
+    expect(a.stars).toBeGreaterThanOrEqual(1);
+    expect(a.verdict).toEqual(b.verdict);
     expect(a.dress.colours.length).toBeGreaterThan(0);
     expect(a.dress.title).toMatch(/Red|Coral/); // Tuesday
     expect(a.needsDob).toBe(false);
