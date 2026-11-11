@@ -25,6 +25,8 @@ import {
 import { KeyboardAvoidingView } from '../../components/keyboard';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
+import { useDayKey } from '../../hooks/useDayKey';
+import { getMyBirthday, isMyBirthdayToday } from '../../services/birthdayApi';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles, statusBarStyle } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
 import {
@@ -138,6 +140,17 @@ export default function CirclesScreen() {
   // private), otherwise it reloads the next time it is opened
   const tabRef = useRef<TabKey>(tab);
   tabRef.current = tab;
+  // Birthday circle visibility (one cached read of birthdays/{me})
+  const [bdayToday, setBdayToday] = useState(false);
+  const bdayDay = useDayKey();
+  useEffect(() => {
+    if (!uid) return;
+    let alive = true;
+    getMyBirthday(uid).then(m => alive && setBdayToday(isMyBirthdayToday(m)));
+    return () => {
+      alive = false;
+    };
+  }, [uid, bdayDay]);
   useFocusEffect(
     useCallback(() => {
       load(false);
@@ -317,6 +330,21 @@ export default function CirclesScreen() {
       </View>
 
       <Text style={styles.codeHint}>Private or further than {NEARBY_KM} km? Join with the invite code or link.</Text>
+
+      {/* 🎉 Today's "Happy birthday to all" circle: only on my own (opted-in) birthday */}
+      {bdayToday ? (
+        <TouchableOpacity
+          style={styles.bdayCircle}
+          activeOpacity={0.8}
+          onPress={() => navigation.navigate('BirthdayChat', { mode: 'circle' })}>
+          <Text style={styles.bdayEmoji}>🎉</Text>
+          <View style={styles.bdayMid}>
+            <Text style={styles.bdayTitle}>Happy birthday to all</Text>
+            <Text style={styles.bdaySub}>Everyone with a birthday today · chat and photos · gone tomorrow</Text>
+          </View>
+          <Text style={styles.bdayArrow}>›</Text>
+        </TouchableOpacity>
+      ) : null}
 
       {/* Tabs */}
       <View style={styles.tabs}>
@@ -585,6 +613,22 @@ const styles = themedStyles(() => StyleSheet.create({
     marginTop: -spacing.sm,
     marginBottom: spacing.md,
   },
+  bdayCircle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: spacing.base,
+    marginTop: spacing.md,
+    padding: spacing.md,
+    borderRadius: borderRadius.lg,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.accent,
+  },
+  bdayEmoji: { fontSize: 30, marginRight: spacing.sm },
+  bdayMid: { flex: 1 },
+  bdayTitle: { fontSize: fontSize.base, fontWeight: fontWeight.bold, color: colors.textPrimary },
+  bdaySub: { fontSize: fontSize.xs, color: colors.textSecondary },
+  bdayArrow: { fontSize: 22, color: colors.textMuted },
   tabs: {
     flexDirection: 'row',
     marginHorizontal: spacing.base,

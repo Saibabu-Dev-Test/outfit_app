@@ -33,7 +33,7 @@ function RowThumb({ item }: { item: ActivityItem }) {
   const [uri, setUri] = useState<string | null>(item.thumbnail);
   useEffect(() => {
     let alive = true;
-    if (!item.thumbnail && item.targetKind && item.targetId) {
+    if (!item.thumbnail && item.targetKind && item.targetKind !== 'birthday' && item.targetId) {
       getTargetThumbnail(item.targetKind, item.targetId).then(u => alive && setUri(u));
     }
     return () => {
@@ -112,6 +112,10 @@ export default function LikesScreen({ navigation, route }: { navigation: any; ro
   );
 
   const openActivity = (a: ActivityItem) => {
+    if (a.targetKind === 'birthday') {
+      navigation.navigate('BirthdayChat', { mode: 'wishes', uid: a.targetId || user?.id });
+      return;
+    }
     if (a.type === 'follow' || !a.targetKind || !a.targetId) {
       if (a.actorId) navigation.navigate('UserProfile', { userId: a.actorId });
       return;

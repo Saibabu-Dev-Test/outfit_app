@@ -40,6 +40,9 @@ import {
 } from '../../services/aiStylist';
 import { LuckyPairsResult, OCC_WORD, occasionKey, PAIR_TEXT, pairsSubtitle, pickLuckyPairs } from '../../services/luckyPairs';
 import { offlineAnswer, pairsIntro, parseIntent } from '../../services/stylistIntent';
+import { offlineTopicAnswer, politeLine } from '../../services/stylistOffline';
+import { getUserProfile } from '../../services/userApi';
+import type { AstroProfile } from '../../services/astrologyDaily';
 import { PLACES } from '../../services/stylistChips';
 import { PlaceAdvice, placeAdvice } from '../../services/stylistPlaces';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -182,6 +185,27 @@ export default function StylistScreen() {
   const scrollDown = (animated = true) =>
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated }), 80);
 
+  // Birth details for offline astrology answers: from the signed-in user, else one profile read
+  const astroRef = useRef<AstroProfile | null>(null);
+  const u0: any = user || {};
+  useEffect(() => {
+    astroRef.current = null;
+  }, [u0.dob, u0.timeOfBirth, u0.placeOfBirth, u0.rashi, u0.language, u0.maritalStatus]);
+  const astroProfileFor = async (): Promise<AstroProfile> => {
+    if (astroRef.current) return astroRef.current;
+    const u: any = user || {};
+    let p: AstroProfile = {
+      name: u.name, dob: u.dob, timeOfBirth: u.timeOfBirth, placeOfBirth: u.placeOfBirth, rashi: u.rashi,
+      gender: u.gender, language: u.language, maritalStatus: u.maritalStatus,
+    };
+    if (!p.dob && uid) {
+      const s = await getUserProfile(uid);
+      p = { ...p, ...s };
+    }
+    astroRef.current = p;
+    return p;
+  };
+
   const send = async (raw?: string) => {
     const text = (raw ?? input).trim();
     if (!text || sending || !uid) return;
@@ -197,6 +221,17 @@ export default function StylistScreen() {
     setInput('');
     scrollDown();
 
+    // 0) "How do I add to wardrobe / vote / join a circle..." (before the wardrobe-pick intent,
+    //    which would read "add a dress" as "pick a dress")
+    const say = (t: string, suffix: string) => {
+      setMessages(prev => [...prev, { id: `${Date.now()}_${suffix}`, role: 'model', text: t }]);
+      scrollDown();
+    };
+    const early = offlineTopicAnswer(text, language);
+    if (early && early.topic === 'help') {
+      say(early.text, 'h');
+      return;
+    }
     // 1) Offline first: wardrobe picks (count / occasion), colour, "goes with", weather questions
     const intent = parseIntent(text);
     const occ = effOcc(intent.occasion || occasion);
@@ -219,15 +254,20 @@ export default function StylistScreen() {
       scrollDown();
       return;
     }
-    // 2) Other questions: free Gemini (cached per question / day / language), else the offline picks
+    // 1b) Astrology (offline jathakam / panchang), style and life tips: answered on the phone
+    const topical = offlineTopicAnswer(text, language, { profile: await astroProfileFor(), uid });
+    if (topical) {
+      say(topical.text, 't');
+      return;
+    }
+    // 2) Other questions: free Gemini (cached per question / day / language), else a polite line
     const fallback = () =>
       setMessages(prev => [
         ...prev,
         { id: `${Date.now()}_p`, role: 'model', text: pairsIntro(language, 3, occWord(occ)), pairs: true, pairsCount: 3, occ },
       ]);
     if (!aiReady || left <= 0) {
-      fallback();
-      scrollDown();
+      say(politeLine(language), 'x');
       return;
     }
     const cacheKey = `outfit.stylist.ai.${uid}.${new Date().toISOString().slice(0, 10)}.${language}.${hashString(
