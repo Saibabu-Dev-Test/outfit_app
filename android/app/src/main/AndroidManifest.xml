@@ -6,9 +6,8 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- Nearby circles: approximate location only (rounded to ~100 m before saving) -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
-    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <!-- No storage / media permissions: photos come from the system photo picker and camera
+         capture goes to the app's cache via FileProvider (react-native-image-picker, saveToPhotos off) -->
 
     <application
       android:name=".MainApplication"

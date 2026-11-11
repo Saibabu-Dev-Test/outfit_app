@@ -14,8 +14,6 @@ import * as picker from '../src/utils/imagePicker';
 import * as pickerWeb from '../src/utils/imagePicker.web';
 import * as fb from '../src/config/firebaseConfig';
 import * as fbWeb from '../src/config/firebaseConfig.web';
-import * as kb from '../src/components/keyboard';
-import * as kbWeb from '../src/components/keyboard.web';
 
 type Same<A> = { [K in keyof A]: unknown };
 export const parity: [
@@ -26,5 +24,4 @@ export const parity: [
   Same<typeof gauth>,
   Same<typeof picker>,
   Same<typeof fb>,
-  Same<typeof kb>,
-] = [vaultWeb, lockWeb, hintWeb, notifWeb, gauthWeb, pickerWeb, fbWeb, kbWeb];
+] = [vaultWeb, lockWeb, hintWeb, notifWeb, gauthWeb, pickerWeb, fbWeb];

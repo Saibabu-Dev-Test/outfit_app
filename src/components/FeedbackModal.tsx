@@ -14,7 +14,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { KeyboardAvoidingView } from './keyboard';
+import KeyboardSafeView from './KeyboardSafeView';
 import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { borderRadius, colors, fontSize, fontWeight, spacing, themedStyles } from '../theme';
 import { pickImage, POLL_PICK } from '../utils/imagePicker';
@@ -121,9 +121,9 @@ export default function FeedbackModal({ visible, uid, name, onClose, quote, edit
       statusBarTranslucent
       navigationBarTranslucent>
       <SafeAreaProvider>
-      {/* Sheet rides on the keyboard, frame by frame (react-native-keyboard-controller). The sheet
-          already pads for the nav bar, so the keyboard padding leaves that part out. */}
-      <KeyboardAvoidingView style={styles.overlay} behavior="padding" keyboardVerticalOffset={-bottomInset}>
+      {/* Sheet sits right on the keyboard (KeyboardSafeView). The sheet already pads for the nav
+          bar, so the keyboard padding leaves that part out. */}
+      <KeyboardSafeView style={styles.overlay} extraOffset={-bottomInset}>
         <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={onClose} />
         {/* Sheet stays below the status bar and above the phone's navigation buttons */}
         <SafeAreaView edges={['top']} style={styles.topGap} pointerEvents="box-none" />
@@ -235,7 +235,7 @@ export default function FeedbackModal({ visible, uid, name, onClose, quote, edit
             </ScrollView>
           )}
         </SafeAreaView>
-      </KeyboardAvoidingView>
+      </KeyboardSafeView>
       </SafeAreaProvider>
     </Modal>
   );

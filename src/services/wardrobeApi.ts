@@ -21,7 +21,6 @@ import {
 } from 'firebase/firestore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { db } from '../config/firebaseConfig';
-import { BACKEND_IP } from '../config/apiConfig';
 import { MAX_BASE64_CHARS } from '../utils/imagePicker';
 import { firestoreErrorMessage } from '../utils/firebaseErrors';
 import { recordTask } from './rewardsApi';
@@ -352,34 +351,14 @@ export interface ClothingAnalysisResult {
   confidence: number;
 }
 
-// Optional AI vision server. Returns null if it is not reachable (4s timeout).
+// AI vision auto-fill for a new item's photo. The old vision server (plain http to a raw IP, port
+// 8000) is switched off: it sent wardrobe photos unencrypted, needed a cleartext-traffic exception
+// in the APK (a Play Protect / safety red flag) and was not reachable, so every photo waited 4 s for
+// nothing. Always null now: the Add item screen asks the user to pick the category and colour.
+// To bring it back, serve it over HTTPS and call it here.
 export const analyzeClothingPhoto = async (
-  imageUri: string,
-): Promise<ClothingAnalysisResult | null> => {
-  const uriParts = imageUri.split('.');
-  const ext = uriParts[uriParts.length - 1] || 'jpg';
-  const mimeType = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
-  const url = `http://${BACKEND_IP}:8000/api/vision/analyze-clothing`;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 4000);
-  try {
-    const formData = new FormData();
-    formData.append('file', {
-      uri: imageUri,
-      name: `photo_${Date.now()}.${ext}`,
-      type: mimeType,
-    } as any);
-    const res = await fetch(url, { method: 'POST', body: formData, signal: controller.signal });
-    if (!res.ok) return null;
-    const json = await res.json();
-    const analysis = json?.analysis || json;
-    return analysis && analysis.category ? (analysis as ClothingAnalysisResult) : null;
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
-};
+  _imageUri: string,
+): Promise<ClothingAnalysisResult | null> => null;
 
 // ── One-time clean-up of the old separate feed copies (build 94) ──────────────────────────
 // Items saved between the "clear feed" and "one sharp copy" passes kept TWO big photos
