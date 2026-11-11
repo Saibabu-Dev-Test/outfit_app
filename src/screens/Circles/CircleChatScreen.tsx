@@ -39,6 +39,7 @@ import {
   deleteMessage,
   joinCircle,
 } from '../../services/circlesApi';
+import { resolveMyPlace } from '../../services/districtApi';
 import { MAX_BASE64_CHARS, pickImages } from '../../utils/imagePicker';
 import { clockTime } from '../../utils/date';
 import NameWithAge from '../../components/NameWithAge';
@@ -181,8 +182,9 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
     if (!uid || !circle) return;
     setJoining(true);
     try {
-      // Distance-limited circles check the user's location (see joinCircle)
-      await joinCircle(circle, uid);
+      // Public: my district or within 3 km (see joinCircle); private circles need the code
+      const place = await resolveMyPlace(uid);
+      await joinCircle(circle, uid, { districtKey: place.district?.districtKey, coords: place.coords });
     } catch (e: any) {
       Alert.alert('Could not join', e?.message || 'Please try again.');
     } finally {

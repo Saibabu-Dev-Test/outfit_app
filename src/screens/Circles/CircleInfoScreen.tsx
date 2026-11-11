@@ -35,7 +35,7 @@ import {
   NEARBY_KM,
   MAX_NAME_CHARS,
 } from '../../services/circlesApi';
-import { getApproxLocation } from '../../native/location';
+import { resolveMyPlace } from '../../services/districtApi';
 import { getPublicUser } from '../../services/userApi';
 import { PRIVATE_NOTICE, EMOJIS } from './CirclesScreen';
 import { shareWithReferral } from '../../utils/referralLink';
@@ -151,7 +151,7 @@ export default function CircleInfoScreen({ navigation, route }: { navigation: an
     const title = makePrivate ? 'Make circle private?' : 'Make circle public?';
     const body = makePrivate
       ? 'It will be removed from Nearby and its location deleted. Members stay, and new people join with the invite code or link.'
-      : `Your approximate location (about 100 m) is saved as the circle's location, so people within ${NEARBY_KM} km can find and join it in Nearby. Anyone further away joins with the invite code.`;
+      : `It shows in Discover to people of your district (set from your location or profile), and anyone can join. With Location on, your approximate location (about 100 m) is also saved so people within ${NEARBY_KM} km see it in Nearby.`;
     Alert.alert(title, body, [
       { text: 'Cancel', style: 'cancel' },
       {
@@ -162,15 +162,16 @@ export default function CircleInfoScreen({ navigation, route }: { navigation: an
             if (makePrivate) {
               await updateCircleVisibility(circle.id, true);
             } else {
-              const loc = await getApproxLocation();
-              if (!loc.ok) {
+              // District always (Discover); location only when available (Nearby)
+              const place = await resolveMyPlace(uid || '', true);
+              if (!place.district) {
                 Alert.alert(
-                  'Location needed',
-                  `A public circle needs your approximate location to show in Nearby.\n${loc.message}`,
+                  'District needed',
+                  'Turn on Location, or choose your district on the Circles > Discover tab, then try again.',
                 );
                 return;
               }
-              await updateCircleVisibility(circle.id, false, loc.coords, null);
+              await updateCircleVisibility(circle.id, false, place.coords, null, place.district);
             }
           } catch (e: any) {
             Alert.alert('Could not change', e?.message || 'Please try again.');

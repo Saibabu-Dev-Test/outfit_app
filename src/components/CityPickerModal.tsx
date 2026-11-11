@@ -10,9 +10,10 @@ interface Props {
   selected?: string | null;
   onSelect: (label: string) => void;
   onClose: () => void;
+  title?: string; // default 'Place of birth'
 }
 
-export default function CityPickerModal({ visible, selected, onSelect, onClose }: Props) {
+export default function CityPickerModal({ visible, selected, onSelect, onClose, title = 'Place of birth' }: Props) {
   const [q, setQ] = useState('');
   const results = useMemo(() => searchCities(q, 40), [q]);
   const pick = (c: City | null) => {
@@ -25,7 +26,7 @@ export default function CityPickerModal({ visible, selected, onSelect, onClose }
       <View style={styles.overlay}>
         <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={onClose} />
         <View style={styles.card}>
-          <Text style={styles.title}>Place of birth</Text>
+          <Text style={styles.title}>{title}</Text>
           <TextInput
             value={q}
             onChangeText={setQ}

@@ -51,3 +51,13 @@ export const getApproxLocation = async (): Promise<LocationResult> => {
     return { ok: false, reason: 'error', message: e?.message || 'Could not get your location.' };
   }
 };
+
+// Location already allowed? (no prompt) Circles > Discover uses the location only when it is.
+export const hasLocationPermission = async (): Promise<boolean> => {
+  if (Platform.OS !== 'android' || !Native?.getApproxLocation) return false;
+  try {
+    return await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION);
+  } catch {
+    return false;
+  }
+};

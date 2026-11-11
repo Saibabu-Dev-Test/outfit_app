@@ -15,7 +15,7 @@ export type BottomTabParamList = {
   Stylist: undefined;
   Wardrobe: undefined;
   // tab: open a Circles tab directly
-  Circles: { tab?: 'mine' | 'discover' } | undefined;
+  Circles: { tab?: 'mine' | 'discover' | 'nearby' } | undefined;
   Me: undefined;
 };
 

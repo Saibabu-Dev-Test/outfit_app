@@ -39,6 +39,11 @@ export interface StoredProfile {
   lastLoginDate?: string;
   streak?: number;
   stylePrefs?: string[]; // multi-select style preference
+  // Circles > Discover: my district (from location reverse-geocode, or picked by me)
+  district?: string;
+  districtKey?: string;
+  districtState?: string;
+  districtSource?: 'location' | 'picked';
   showBirthday?: boolean; // "Show my birthday" (day + month on Home); default off (services/birthdayApi.ts)
 }
 
@@ -73,6 +78,7 @@ export const ageFromDob = (dob?: string | null, now: Date = new Date()): number 
 const PROFILE_KEYS: (keyof StoredProfile)[] = [
   'name', 'phoneNumber', 'phone', 'dob', 'timeOfBirth', 'placeOfBirth', 'rashi', 'language', 'gender', 'maritalStatus', 'astroChart', 'birthConfirmed', 'birthConfirmedKey',
   'bio', 'avatarUrl', 'isPublic', 'nameLower', 'role', 'lastLoginDate', 'streak', 'stylePrefs', 'showBirthday',
+  'district', 'districtKey', 'districtState', 'districtSource',
 ];
 
 // Returns {} when missing or on error (never throws)

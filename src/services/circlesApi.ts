@@ -4,13 +4,16 @@
 //   circles/{id}/messages/{msgId}/votes/{uid}   one poll vote per user
 //   inviteCodes/{code}                    -> { circleId } so any circle can be joined by code
 //   circleNames/{nameId}                  -> { circleId, ownerId, createdAt } unique circle names
-// circles/{id}.isPublic (= !isPrivate). Discovery is ONLY by distance: a public circle always stores
-// its approximate location (~100 m) + geohash, and getNearbyCircles lists public circles within
-// NEARBY_KM (3 km) of the user, nearest first. There is no global Discover list. Circles further
-// away, private circles and legacy public circles without a location are joined with the invite
-// link / code (joinWithCode works for public and private circles alike).
+// circles/{id}.isPublic (= !isPrivate). Circles screen tabs:
+//   Mine:     circles I belong to.
+//   Discover: public circles of my district (circles/{id}.district / districtKey / state, set on
+//             create from the creator's location or profile district), location on or off.
+//   Nearby:   public circles with a location (optional, ~100 m + geohash) within NEARBY_KM (3 km).
+// Public circles are joined without a code (my district or within 3 km, checked in the app);
+// private circles are never listed and are joined only with the invite code / link (joinWithCode).
+// Legacy circles without a district simply don't show in Discover.
 // The owner can edit name / description / emoji (updateCircleDetails) and switch public <-> private
-// (updateCircleVisibility: public saves the owner's current approximate location, private removes it).
+// (updateCircleVisibility: public saves the district and, when known, the approximate location).
 // Names are unique (case-insensitive, trimmed, spaces collapsed): circles/{id}.nameLower is the
 // normalized name, circles/{id}.nameKey the circleNames doc id, both written in the same transaction
 // as the circleNames doc (Firestore rules check the pairing).
@@ -43,6 +46,7 @@ import { toDate } from '../utils/date';
 import { inlineAvatar } from './userApi';
 import { assertClean } from '../utils/profanity';
 import { encodeGeohash, geohashNeighbours, haversineKm, roundCoord } from '../utils/geo';
+import { DistrictInfo, canJoinWithoutCode, filterDistrictCircles, filterNearbyCircles } from '../utils/district';
 import { getApproxLocation } from '../native/location';
 import { cleanAge, myAgeFields } from '../utils/age';
 
@@ -63,6 +67,10 @@ export interface Circle {
   nameKey: string | null;
   // Distance limit in km (null = no limit: everyone can see and join it)
   radiusKm: number | null;
+  // District (Discover). null on legacy circles created before districts.
+  district: string | null;
+  districtKey: string | null;
+  state: string | null;
   distanceKm?: number; // Nearby list only
 }
 
@@ -134,7 +142,13 @@ const toCircle = (id: string, d: any): Circle => ({
   geohash: typeof d?.geohash === 'string' ? d.geohash : null,
   nameKey: typeof d?.nameKey === 'string' && d.nameKey ? d.nameKey : null,
   radiusKm: typeof d?.radiusKm === 'number' && d.radiusKm > 0 ? d.radiusKm : null,
+  district: typeof d?.district === 'string' && d.district ? d.district : null,
+  districtKey: typeof d?.districtKey === 'string' && d.districtKey ? d.districtKey : null,
+  state: typeof d?.state === 'string' && d.state ? d.state : null,
 });
+
+const districtFields = (d?: DistrictInfo | null) =>
+  d && d.districtKey ? { district: d.district, districtKey: d.districtKey, state: d.state || '' } : {};
 
 const toMessage = (id: string, d: any): ChatMessage => {
   const type: MessageType = d?.type === 'image' || d?.type === 'poll' ? d.type : 'text';
@@ -295,9 +309,10 @@ const nameDocTakenBy = async (nameId: string, circleId: string): Promise<boolean
 
 // ── Create ─────────────────────────────────────────────────────────────────
 
-const LOCATION_NEEDED =
-  `Public circles show to people within 3 km, so they need your approximate location. ` +
-  `Turn on Location, or make the circle private (joined with the invite code).`;
+const DISTRICT_NEEDED =
+  `Public circles show in Discover to people of your district. Turn on Location or choose your ` +
+  `district on the Discover tab, or make the circle private (joined with the invite code).`;
+const LOCATION_NEEDED = 'This needs your approximate location. Turn on Location and try again.';
 
 export const createCircle = async (
   input: {
@@ -305,8 +320,10 @@ export const createCircle = async (
     description: string;
     emoji: string;
     isPrivate: boolean;
-    // Required for public circles (shown in Nearby). Rounded to ~100 m before saving.
+    // Optional (public only): also shows in Nearby. Rounded to ~100 m before saving.
     location?: { lat: number; lng: number } | null;
+    // Public circles: creator's district (from location, else profile). Required for public.
+    district?: DistrictInfo | null;
     // Legacy distance limit (public circles only; needs location). null = no limit.
     radiusKm?: number | null;
   },
@@ -316,7 +333,7 @@ export const createCircle = async (
   if (!name) throw new Error('Please give your circle a name.');
   const nameLower = name.toLowerCase();
   const nameKey = circleNameDocId(nameLower);
-  if (!input.isPrivate && !input.location) throw new Error(LOCATION_NEEDED);
+  if (!input.isPrivate && !input.district?.districtKey) throw new Error(DISTRICT_NEEDED);
   const radiusKm = !input.isPrivate && input.radiusKm ? input.radiusKm : null;
   const ref = doc(collection(db, CIRCLES));
   try {
@@ -343,6 +360,7 @@ export const createCircle = async (
       emoji: input.emoji || '👗',
       isPrivate: input.isPrivate,
       isPublic: !input.isPrivate,
+      ...(input.isPrivate ? {} : districtFields(input.district)),
       ...(loc ? locationFields(loc) : {}),
       ...(loc && radiusKm ? { radiusKm } : {}),
       ownerId: uid,
@@ -445,7 +463,25 @@ export const getMyCircles = async (uid: string): Promise<Circle[]> => {
   }
 };
 
-// No global Discover list: circles are found by distance (getNearbyCircles) or joined by code.
+// Discover: public circles of my district (isPublic == true && districtKey == X; equality-only, so
+// Firestore's single-field indexes serve it, plus a composite in firestore.indexes.json). Circles
+// I'm already in are included (shown as members).
+export const getDistrictCircles = async (myDistrictKey: string): Promise<Circle[]> => {
+  if (!myDistrictKey) return [];
+  try {
+    const snap = await getDocs(
+      query(
+        collection(db, CIRCLES),
+        where('isPublic', '==', true),
+        where('districtKey', '==', myDistrictKey),
+        limit(200),
+      ),
+    );
+    return filterDistrictCircles(snap.docs.map(d => toCircle(d.id, d.data())), myDistrictKey).sort(byRecent);
+  } catch (e: any) {
+    return fail(e, 'Loading circles in your district');
+  }
+};
 
 export const NEARBY_KM = 3;
 
@@ -460,18 +496,7 @@ export const joinRadiusKm = (c: Pick<Circle, 'radiusKm'>): number =>
 // filtered on the phone. (isPrivate == false because the read rule is written on isPrivate.)
 export const getNearbyCircles = async (lat: number, lng: number): Promise<Circle[]> => {
   const col = collection(db, CIRCLES);
-  const within = (cs: Circle[]): Circle[] => {
-    const seen = new Set<string>();
-    const out: Circle[] = [];
-    cs.forEach(c => {
-      if (seen.has(c.id) || c.isPrivate || !c.location) return;
-      seen.add(c.id);
-      const km = haversineKm(lat, lng, c.location.lat, c.location.lng);
-      // Only circles this user can actually join from here (legacy limits may be < 3 km)
-      if (km <= joinRadiusKm(c)) out.push({ ...c, distanceKm: km });
-    });
-    return out.sort((a, b) => (a.distanceKm || 0) - (b.distanceKm || 0));
-  };
+  const within = (cs: Circle[]): Circle[] => filterNearbyCircles(cs, lat, lng, NEARBY_KM);
   try {
     const cells = geohashNeighbours(lat, lng, 5, NEARBY_KM);
     const snaps = await Promise.all(
@@ -509,9 +534,10 @@ export const updateCircleVisibility = async (
   isPrivate: boolean,
   location?: { lat: number; lng: number } | null,
   radiusKm?: number | null,
+  district?: DistrictInfo | null,
 ): Promise<void> => {
-  if (!isPrivate && !location) throw new Error(LOCATION_NEEDED);
   const data: any = { isPrivate, isPublic: !isPrivate };
+  if (!isPrivate && district?.districtKey) Object.assign(data, districtFields(district));
   if (isPrivate || !location) {
     data.location = deleteField();
     data.geohash = deleteField();
@@ -582,38 +608,40 @@ export const subscribeCircle = (
   }
 };
 
-// Join without a code (Nearby list / circle screen): public circles only, and only from within
-// joinRadiusKm (3 km, or a smaller legacy limit) of the circle. The approximate location (~100 m)
-// goes into lastJoin so the rules can check the distance. Private circles, circles further away and
-// public circles without a location are joined with the invite link / code (joinWithCode).
-export const joinCircle = async (circle: Circle, uid: string): Promise<void> => {
+// Join without a code (Discover / Nearby / circle screen): public circles only, and (checked here
+// in the app) only when the circle is in my district or within NEARBY_KM of me. me.districtKey comes
+// from districtApi.resolveMyPlace; the location is read only when the district doesn't match.
+// Private circles are joined only with the invite link / code (joinWithCode).
+export const joinCircle = async (
+  circle: Circle,
+  uid: string,
+  me: { districtKey?: string | null; coords?: { lat: number; lng: number } | null } = {},
+): Promise<void> => {
   const codeHint = 'Ask a member for the invite link or code.';
   if (circle.isPrivate) throw new Error(`${circle.name} is private. Join it with an invite code.`);
-  if (!circle.location) {
-    throw new Error(`${circle.name} can only be joined with its invite code. ${codeHint}`);
+  let coords = me.coords || null;
+  if (!canJoinWithoutCode(circle, { districtKey: me.districtKey, coords }, NEARBY_KM) && circle.location && !coords) {
+    const loc = await getApproxLocation();
+    if (loc.ok) coords = loc.coords;
   }
-  const radius = joinRadiusKm(circle);
-  const loc = await getApproxLocation();
-  if (!loc.ok) {
+  if (!canJoinWithoutCode(circle, { districtKey: me.districtKey, coords }, NEARBY_KM)) {
+    const inDistrict = circle.district ? ` (${circle.district} district)` : '';
+    const dist =
+      circle.location && coords
+        ? ` You are about ${formatKm(haversineKm(coords.lat, coords.lng, circle.location.lat, circle.location.lng))} away.`
+        : '';
     throw new Error(
-      `Circles nearby can be joined from within ${radius} km. Turn on Location to join, or use the invite code.\n${loc.message}`,
-    );
-  }
-  const km = haversineKm(loc.coords.lat, loc.coords.lng, circle.location.lat, circle.location.lng);
-  if (km > radius) {
-    throw new Error(
-      `${circle.name} can be joined from within ${radius} km, and you are about ${formatKm(km)} away. ${codeHint}`,
+      `${circle.name}${inDistrict} can be joined by people of its district or within ${NEARBY_KM} km.${dist} ${codeHint}`,
     );
   }
   try {
     await updateDoc(doc(db, CIRCLES, circle.id), {
       memberIds: arrayUnion(uid),
-      lastJoin: { uid, lat: roundCoord(loc.coords.lat), lng: roundCoord(loc.coords.lng) },
+      lastJoin: coords
+        ? { uid, lat: roundCoord(coords.lat), lng: roundCoord(coords.lng) }
+        : { uid, districtKey: me.districtKey || '' },
     });
   } catch (e: any) {
-    if (e?.code === 'permission-denied') {
-      throw new Error(`You need to be within ${radius} km of ${circle.name} to join. ${codeHint}`);
-    }
     fail(e, 'Joining circle');
   }
 };
