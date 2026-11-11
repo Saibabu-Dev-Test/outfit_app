@@ -5,7 +5,6 @@ import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
-  KeyboardAvoidingView,
   Modal,
   Switch,
   ScrollView,
@@ -15,7 +14,8 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import { KeyboardAvoidingView } from './keyboard';
+import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { borderRadius, colors, fontSize, fontWeight, spacing, themedStyles } from '../theme';
 import { pickImage, POLL_PICK } from '../utils/imagePicker';
 import { containsProfanity } from '../utils/profanity';
@@ -43,6 +43,7 @@ interface Props {
 const TYPE_ICON: Record<FeedbackType, string> = { Suggestion: '💡', Complaint: '😕', Bug: '🐞', Other: '💬' };
 
 export default function FeedbackModal({ visible, uid, name, onClose, quote, editing, onDone }: Props) {
+  const bottomInset = useSafeAreaInsets().bottom;
   const [type, setType] = useState<FeedbackType>('Suggestion');
   const [text, setText] = useState('');
   const [image, setImage] = useState<string | null>(null);
@@ -120,8 +121,9 @@ export default function FeedbackModal({ visible, uid, name, onClose, quote, edit
       statusBarTranslucent
       navigationBarTranslucent>
       <SafeAreaProvider>
-      {/* Edge-to-edge window: pad for the keyboard on both platforms (adjustResize does not apply) */}
-      <KeyboardAvoidingView style={styles.overlay} behavior="padding">
+      {/* Sheet rides on the keyboard, frame by frame (react-native-keyboard-controller). The sheet
+          already pads for the nav bar, so the keyboard padding leaves that part out. */}
+      <KeyboardAvoidingView style={styles.overlay} behavior="padding" keyboardVerticalOffset={-bottomInset}>
         <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={onClose} />
         {/* Sheet stays below the status bar and above the phone's navigation buttons */}
         <SafeAreaView edges={['top']} style={styles.topGap} pointerEvents="box-none" />

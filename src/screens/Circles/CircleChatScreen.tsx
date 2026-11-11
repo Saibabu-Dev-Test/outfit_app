@@ -1,5 +1,5 @@
 // Realtime circle chat: text, photos, photo polls. Admins who are not members read it read-only.
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -13,8 +13,8 @@ import {
   ActivityIndicator,
   StatusBar,
 } from 'react-native';
-import KeyboardSafeView from '../../components/KeyboardSafeView';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { KeyboardChatScrollView, KeyboardStickyView } from '../../components/keyboard';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles, statusBarStyle } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
 import useIsAdmin from '../../hooks/useIsAdmin';
@@ -43,6 +43,13 @@ import { MAX_BASE64_CHARS, pickImages } from '../../utils/imagePicker';
 import { clockTime } from '../../utils/date';
 
 export default function CircleChatScreen({ navigation, route }: { navigation: any; route: any }) {
+  // Message box sits above the nav bar (SafeAreaView bottom edge) while the keyboard is closed, and
+  // slides up glued to the keyboard, frame by frame, with the newest messages kept in view.
+  const bottomInset = useSafeAreaInsets().bottom;
+  const renderChatScroll = useCallback(
+    (props: any) => <KeyboardChatScrollView {...props} inverted offset={bottomInset} keyboardLiftBehavior="always" />,
+    [bottomInset],
+  );
   const circleId: string = route?.params?.circleId || '';
   const { user } = useAuth();
   const uid = user?.id;
@@ -346,6 +353,7 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
         <FlatList
           data={messages}
           inverted
+          renderScrollComponent={renderChatScroll}
           keyExtractor={m => m.id}
           renderItem={renderMessage}
           contentContainerStyle={styles.listContent}
@@ -357,6 +365,7 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
           }
         />
         {isMember && (
+          <KeyboardStickyView offset={{ closed: 0, opened: bottomInset }}>
           <View style={styles.inputBar}>
             <TouchableOpacity style={styles.attachBtn} onPress={openAttach} disabled={sending}>
               <Text style={styles.attachText}>＋</Text>
@@ -381,6 +390,7 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
               )}
             </TouchableOpacity>
           </View>
+          </KeyboardStickyView>
         )}
       </>
     );
@@ -393,9 +403,7 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
         {...(Platform.OS === 'android' ? { backgroundColor: colors.surface } : {})}
       />
       {header}
-      <KeyboardSafeView style={styles.flex1}>
-        {body}
-      </KeyboardSafeView>
+      <View style={styles.flex1}>{body}</View>
 
       <CreatePollModal
         visible={pollOpen}

@@ -2,6 +2,7 @@ import 'react-native-gesture-handler';
 import React, { useEffect } from 'react';
 import { StatusBar } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { KeyboardProvider } from './src/components/keyboard';
 import RootNavigator from './src/navigation/RootNavigator';
 import NotificationGate from './src/components/NotificationGate';
 import { captureClipboardReferral } from './src/utils/referralLink';
@@ -29,7 +30,10 @@ function App() {
   return (
     <ThemeProvider>
       <SafeAreaProvider>
-        <Themed />
+        {/* Keyboard animation for every message box / form (edge-to-edge window: bars translucent) */}
+        <KeyboardProvider statusBarTranslucent navigationBarTranslucent>
+          <Themed />
+        </KeyboardProvider>
       </SafeAreaProvider>
     </ThemeProvider>
   );

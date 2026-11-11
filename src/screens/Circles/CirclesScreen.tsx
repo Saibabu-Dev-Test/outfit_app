@@ -18,11 +18,11 @@ import {
   Alert,
   RefreshControl,
   Modal,
-  KeyboardAvoidingView,
   ScrollView,
   Switch,
   Linking,
 } from 'react-native';
+import { KeyboardAvoidingView } from '../../components/keyboard';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles, statusBarStyle } from '../../theme';
@@ -445,9 +445,8 @@ export default function CirclesScreen() {
         animationType="slide"
         transparent
         onRequestClose={() => setCreateOpen(false)}>
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.modalOverlay}>
+        {/* Sheet bottom rides on the keyboard, frame by frame (react-native-keyboard-controller) */}
+        <KeyboardAvoidingView behavior="padding" style={styles.modalOverlay}>
           <TouchableOpacity
             style={styles.flex1}
             activeOpacity={1}

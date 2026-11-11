@@ -5,10 +5,9 @@ import {
   TouchableOpacity,
   StyleSheet,
 } from 'react-native';
-import { BottomTabBarProps } from '@react-navigation/bottom-tabs';
+import { BottomTabBarHeightCallbackContext, BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, fontSize, fontWeight, spacing, themedStyles } from '../../theme';
-import useKeyboardVisible from '../../hooks/useKeyboardVisible';
 
 type TabItem = {
   name: string;
@@ -28,12 +27,15 @@ const TABS: TabItem[] = [
 
 export default function CustomTabBar({ state, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
-  // Keyboard open: hide the tab bar so the message / comment box sits right on the keyboard
-  const keyboardOpen = useKeyboardVisible();
-  if (keyboardOpen) return null;
+  // Real height for useBottomTabBarHeight(): the AI Stylist message box uses it as its keyboard offset.
+  // The bar is NOT hidden while the keyboard is open: the keyboard covers it, and removing it changed
+  // the screen height mid-animation (the message box jumped after the keyboard had opened).
+  const onHeightChange = React.useContext(BottomTabBarHeightCallbackContext);
 
   return (
-    <View style={[styles.container, { paddingBottom: insets.bottom || spacing.sm }]}>
+    <View
+      style={[styles.container, { paddingBottom: insets.bottom || spacing.sm }]}
+      onLayout={e => onHeightChange?.(e.nativeEvent.layout.height)}>
       {state.routes.map((route, index) => {
         const isFocused = state.index === index;
         // Look tabs up by route name so the bar stays right if the navigator order changes

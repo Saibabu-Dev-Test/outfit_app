@@ -12,9 +12,8 @@ import {
   Alert,
   ActivityIndicator,
   ScrollView,
-  KeyboardAvoidingView,
-  Platform,
 } from 'react-native';
+import { KeyboardAvoidingView } from './keyboard';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles } from '../theme';
 import { pickImage, pickImages, POLL_PICK } from '../utils/imagePicker';
 import ActionSheet from './ActionSheet';
@@ -122,9 +121,8 @@ export default function CreatePollModal({ visible, onClose, onSubmit, initialIma
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={close}>
-      <KeyboardAvoidingView
-        behavior="padding"
-        style={styles.overlay}>
+      {/* Sheet bottom rides on the keyboard, frame by frame (react-native-keyboard-controller) */}
+      <KeyboardAvoidingView behavior="padding" style={styles.overlay}>
         <TouchableOpacity style={styles.flex1} activeOpacity={1} onPress={close} />
         <View style={styles.card}>
           <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>

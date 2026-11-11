@@ -14,7 +14,6 @@ import {
   Alert,
   FlatList,
   Image,
-  KeyboardAvoidingView,
   Modal,
   Platform,
   RefreshControl,
@@ -25,7 +24,8 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import { KeyboardAvoidingView } from './keyboard';
+import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   borderRadius,
   colors,
@@ -479,6 +479,7 @@ export default function FeedbackBoardModal({
   name,
   onClose,
 }: Props) {
+  const bottomInset = useSafeAreaInsets().bottom;
   const [isAdmin, setIsAdmin] = useState(false);
   const [scope, setScope] = useState<FeedbackScope>('board');
   const [items, setItems] = useState<Feedback[]>([]);
@@ -613,8 +614,9 @@ export default function FeedbackBoardModal({
           ? { backgroundColor: 'transparent', translucent: true }
           : {})}
       />
-      {/* Edge-to-edge window: adjustResize does not shrink it, so pad for the keyboard on both platforms */}
-      <KeyboardAvoidingView style={styles.root} behavior="padding">
+      {/* Reply box rides on the keyboard, frame by frame (react-native-keyboard-controller). The
+          SafeAreaView inside already pads for the nav bar, so the keyboard padding leaves that out. */}
+      <KeyboardAvoidingView style={styles.root} behavior="padding" keyboardVerticalOffset={-bottomInset}>
       <SafeAreaView style={styles.root} edges={['top', 'bottom', 'left', 'right']}>
         <View style={styles.header}>
           <TouchableOpacity

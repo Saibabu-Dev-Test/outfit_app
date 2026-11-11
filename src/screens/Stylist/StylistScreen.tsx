@@ -17,7 +17,8 @@ import {
   Image,
   StyleSheet,
 } from 'react-native';
-import KeyboardSafeView from '../../components/KeyboardSafeView';
+import { KeyboardChatScrollView, KeyboardStickyView } from '../../components/keyboard';
+import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles, statusBarStyle } from '../../theme';
@@ -120,6 +121,7 @@ function LuckyPairsView({ result, language }: { result: LuckyPairsResult; langua
 
 export default function StylistScreen() {
   const { user } = useAuth();
+  const tabBarHeight = useBottomTabBarHeight();
   const uid = user?.id;
   const aiOn = isAiConfigured();
   useDayKey(); // re-render at midnight so the day's colour updates
@@ -321,7 +323,7 @@ export default function StylistScreen() {
         barStyle={statusBarStyle()}
         {...(Platform.OS === 'android' ? { backgroundColor: colors.background } : {})}
       />
-      <KeyboardSafeView style={styles.flex1}>
+      <View style={styles.flex1}>
         {/* Compact header: title + language pills */}
         <View style={styles.header}>
           <View style={styles.flex1}>
@@ -361,8 +363,12 @@ export default function StylistScreen() {
         ) : null}
 
         {/* Chat history takes the rest of the screen */}
-        <ScrollView
+        {/* Chat list + message box move together with the keyboard, frame by frame. offset = tab bar
+            (the space under the box while the keyboard is closed; the keyboard covers the tab bar). */}
+        <KeyboardChatScrollView
           ref={scrollRef}
+          offset={tabBarHeight}
+          keyboardLiftBehavior="always"
           style={styles.chatScroll}
           contentContainerStyle={styles.chat}
           keyboardShouldPersistTaps="handled"
@@ -415,9 +421,9 @@ export default function StylistScreen() {
               <Text style={styles.typingText}>Stylist is typing…</Text>
             </View>
           ) : null}
-        </ScrollView>
+        </KeyboardChatScrollView>
 
-        {true ? (
+        <KeyboardStickyView offset={{ closed: 0, opened: tabBarHeight }}>
           <View style={styles.inputBar}>
             <TextInput
               style={styles.input}
@@ -437,8 +443,8 @@ export default function StylistScreen() {
               <Text style={styles.sendText}>➤</Text>
             </TouchableOpacity>
           </View>
-        ) : null}
-      </KeyboardSafeView>
+        </KeyboardStickyView>
+      </View>
     </SafeAreaView>
   );
 }
