@@ -39,7 +39,7 @@ service cloud.firestore {
 
     // New comment {userId, userName, userAge?, userAvatar, text, createdAt} by me, bad-word checked
     function commentOk() {
-      return request.resource.data.keys().hasOnly(['userId', 'userName', 'userAge', 'userAvatar', 'text', 'createdAt'])
+      return request.resource.data.keys().hasOnly(['userId', 'userName', 'userAge', 'userAvatar', 'text', 'createdAt', 'parentId'])
         && (request.resource.data.get('userAge', null) == null
             || (request.resource.data.userAge is int
                 && request.resource.data.userAge >= 0
@@ -49,6 +49,10 @@ service cloud.firestore {
         && request.resource.data.text.size() >= 1
         && request.resource.data.text.size() <= 300
         && request.resource.data.createdAt == request.time
+        // Optional reply parent (one level; the post / wardrobe comment blocks check it exists)
+        && (request.resource.data.get('parentId', null) == null
+            || (request.resource.data.parentId is string
+                && request.resource.data.parentId.size() <= 64))
         && (request.resource.data.get('userAvatar', null) == null
             || (request.resource.data.userAvatar is string
                 && request.resource.data.userAvatar.size() <= 60000))
@@ -449,12 +453,41 @@ service cloud.firestore {
         allow delete: if signedIn() && dislikerId == me();
         allow update: if false;
       }
+      // ── Comments: wardrobe/{id}/comments/{cid} {userId, userName, userAvatar, text, createdAt,
+      //    parentId?} + replyCount/lastReplyId on top-level comments (one level of replies) ──
       match /comments/{cid} {
+        function wCommentPath(x) {
+          return /databases/$(db)/documents/wardrobe/$(itemId)/comments/$(x);
+        }
+        function replyOk() {
+          let p = request.resource.data.get('parentId', null);
+          return p == null
+            || (p is string && p != cid
+                && exists(wCommentPath(p))
+                && get(wCommentPath(p)).data.get('parentId', null) == null);
+        }
+        function replyCountUpdate() {
+          let rid = request.resource.data.lastReplyId;
+          let before = resource.data.get('replyCount', 0);
+          return onlyChanged(['replyCount', 'lastReplyId'])
+            && rid is string
+            && (
+              (request.resource.data.replyCount == before + 1
+                && !exists(wCommentPath(rid)) && existsAfter(wCommentPath(rid))
+                && getAfter(wCommentPath(rid)).data.get('parentId', null) == cid)
+              || (request.resource.data.replyCount == before - 1
+                && before > 0
+                && exists(wCommentPath(rid)) && !existsAfter(wCommentPath(rid))
+                && get(wCommentPath(rid)).data.get('parentId', null) == cid)
+            );
+        }
         allow read: if signedIn() && itemVisible();
-        allow create: if signedIn() && itemVisible() && commentOk();
-        allow update: if false;
+        allow create: if signedIn() && itemVisible() && commentOk() && replyOk();
+        allow update: if signedIn() && itemVisible() && replyCountUpdate();
         allow delete: if signedIn()
-          && (resource.data.userId == me() || itemData().userId == me() || isAdmin());
+          && (resource.data.userId == me() || itemData().userId == me() || isAdmin()
+              || (resource.data.get('parentId', null) is string
+                  && get(wCommentPath(resource.data.parentId)).data.userId == me()));
       }
 
       // ── Full-size photo: wardrobe/{id}/media/full {imageData, userId, updatedAt} ──
@@ -790,18 +823,46 @@ service cloud.firestore {
           && (get(postPath()).data.userId == me() || isAdmin() || resource.data.userId == me());
       }
 
-      // ── Comments: posts/{postId}/comments/{cid} {userId, userName, userAvatar, text, createdAt} ──
+      // ── Comments: posts/{postId}/comments/{cid} {userId, userName, userAvatar, text, createdAt,
+      //    parentId?} + replyCount/lastReplyId on top-level comments (one level of replies) ──
       match /comments/{cid} {
+        // A reply points at an existing TOP-LEVEL comment of this post (no replyCount on create)
+        function replyOk() {
+          let p = request.resource.data.get('parentId', null);
+          return p == null
+            || (p is string && p != cid
+                && exists(commentPath(p))
+                && get(commentPath(p)).data.get('parentId', null) == null);
+        }
+        // replyCount changes by exactly 1, together with the reply named in lastReplyId
+        function replyCountUpdate() {
+          let rid = request.resource.data.lastReplyId;
+          let before = resource.data.get('replyCount', 0);
+          return onlyChanged(['replyCount', 'lastReplyId'])
+            && rid is string
+            && (
+              (request.resource.data.replyCount == before + 1
+                && !exists(commentPath(rid)) && existsAfter(commentPath(rid))
+                && getAfter(commentPath(rid)).data.get('parentId', null) == cid)
+              || (request.resource.data.replyCount == before - 1
+                && before > 0
+                && exists(commentPath(rid)) && !existsAfter(commentPath(rid))
+                && get(commentPath(rid)).data.get('parentId', null) == cid)
+            );
+        }
         allow read: if signedIn();
         allow create: if signedIn()
           && exists(postPath())
-          && commentOk();
-        allow update: if false;
-        // Comment author, post owner or admin
+          && commentOk()
+          && replyOk();
+        allow update: if signedIn() && replyCountUpdate();
+        // Comment author, post owner, admin, or (for a reply) the parent comment's author
         allow delete: if signedIn()
           && (resource.data.userId == me()
               || get(postPath()).data.userId == me()
-              || isAdmin());
+              || isAdmin()
+              || (resource.data.get('parentId', null) is string
+                  && get(commentPath(resource.data.parentId)).data.userId == me()));
       }
     }
 
