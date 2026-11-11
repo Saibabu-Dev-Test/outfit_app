@@ -17,6 +17,7 @@ class OutfitNativePackage : ReactPackage {
       LocationModule(reactContext),
       ImageResizeModule(reactContext),
       TranslateModule(reactContext),
+      CrashModule(reactContext),
     )
 
   override fun createViewManagers(reactContext: ReactApplicationContext): List<ViewManager<in Nothing, in Nothing>> =

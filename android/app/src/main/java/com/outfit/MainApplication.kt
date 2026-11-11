@@ -22,6 +22,8 @@ class MainApplication : Application(), ReactApplication {
   }
 
   override fun onCreate() {
+    // Save any native crash to files/last_crash.txt so the next launch shows it (CrashModule)
+    CrashModule.install(this)
     super.onCreate()
     loadReactNative(this)
   }

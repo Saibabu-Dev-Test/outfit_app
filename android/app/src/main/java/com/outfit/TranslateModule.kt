@@ -23,7 +23,8 @@ import com.google.mlkit.nl.translate.TranslatorOptions
 // app shows the original text (src/services/translate.ts decides when ensureModel() runs).
 class TranslateModule(ctx: ReactApplicationContext) : ReactContextBaseJavaModule(ctx) {
 
-  private val models = RemoteModelManager.getInstance()
+  // Lazy + guarded: nothing ML Kit runs at app start, so a missing / broken ML Kit can never crash launch
+  private val models: RemoteModelManager? by lazy { try { RemoteModelManager.getInstance() } catch (t: Throwable) { null } }
   private val translators = HashMap<String, Translator>() // "te|hi" -> open translator
   private var identifier: LanguageIdentifier? = null
 
@@ -37,83 +38,103 @@ class TranslateModule(ctx: ReactApplicationContext) : ReactContextBaseJavaModule
   // BCP-47 code ("te", "hi-Latn" ...) or "und" when unsure
   @ReactMethod
   fun identify(text: String, promise: Promise) {
-    if (text.isBlank()) {
-      promise.resolve("und")
-      return
+    try {
+      if (text.isBlank()) {
+        promise.resolve("und")
+        return
+      }
+      langId().identifyLanguage(text)
+        .addOnSuccessListener { code -> promise.resolve(code ?: "und") }
+        .addOnFailureListener { e -> promise.reject("IDENTIFY_FAILED", e.message ?: "Could not identify language", e) }
+    } catch (t: Throwable) {
+      promise.reject("MLKIT_ERROR", t.message ?: "ML Kit unavailable", t)
     }
-    langId().identifyLanguage(text)
-      .addOnSuccessListener { code -> promise.resolve(code ?: "und") }
-      .addOnFailureListener { e -> promise.reject("IDENTIFY_FAILED", e.message ?: "Could not identify language", e) }
   }
 
   // Translates with models already on the phone. Rejects UNSUPPORTED / NO_MODEL / TRANSLATE_FAILED.
   @ReactMethod
   fun translate(text: String, from: String, to: String, promise: Promise) {
-    val src = TranslateLanguage.fromLanguageTag(from)
-    val tgt = TranslateLanguage.fromLanguageTag(to)
-    if (src == null || tgt == null) {
-      promise.reject("UNSUPPORTED", "Translation not supported: $from -> $to")
-      return
-    }
-    if (src == tgt || text.isBlank()) {
-      promise.resolve(text)
-      return
-    }
-    val srcModel = TranslateRemoteModel.Builder(src).build()
-    val tgtModel = TranslateRemoteModel.Builder(tgt).build()
-    Tasks.whenAllSuccess<Boolean>(models.isModelDownloaded(srcModel), models.isModelDownloaded(tgtModel))
-      .addOnSuccessListener { ready ->
-        if (ready.any { it != true }) {
-          promise.reject("NO_MODEL", "Language model not downloaded: $from -> $to")
-          return@addOnSuccessListener
-        }
-        val key = "$src|$tgt"
-        val translator = synchronized(translators) {
-          translators.getOrPut(key) {
-            Translation.getClient(TranslatorOptions.Builder().setSourceLanguage(src).setTargetLanguage(tgt).build())
-          }
-        }
-        translator.translate(text)
-          .addOnSuccessListener { out -> promise.resolve(out) }
-          .addOnFailureListener { e -> promise.reject("TRANSLATE_FAILED", e.message ?: "Translation failed", e) }
+    try {
+      val src = TranslateLanguage.fromLanguageTag(from)
+      val tgt = TranslateLanguage.fromLanguageTag(to)
+      if (src == null || tgt == null) {
+        promise.reject("UNSUPPORTED", "Translation not supported: $from -> $to")
+        return
       }
-      .addOnFailureListener { e -> promise.reject("NO_MODEL", e.message ?: "Could not check language model", e) }
+      if (src == tgt || text.isBlank()) {
+        promise.resolve(text)
+        return
+      }
+      val mm = models ?: run { promise.reject("NO_MODEL", "ML Kit unavailable"); return }
+      val srcModel = TranslateRemoteModel.Builder(src).build()
+      val tgtModel = TranslateRemoteModel.Builder(tgt).build()
+      Tasks.whenAllSuccess<Boolean>(mm.isModelDownloaded(srcModel), mm.isModelDownloaded(tgtModel))
+        .addOnSuccessListener { ready ->
+          if (ready.any { it != true }) {
+            promise.reject("NO_MODEL", "Language model not downloaded: $from -> $to")
+            return@addOnSuccessListener
+          }
+          val key = "$src|$tgt"
+          val translator = synchronized(translators) {
+            translators.getOrPut(key) {
+              Translation.getClient(TranslatorOptions.Builder().setSourceLanguage(src).setTargetLanguage(tgt).build())
+            }
+          }
+          translator.translate(text)
+            .addOnSuccessListener { out -> promise.resolve(out) }
+            .addOnFailureListener { e -> promise.reject("TRANSLATE_FAILED", e.message ?: "Translation failed", e) }
+        }
+        .addOnFailureListener { e -> promise.reject("NO_MODEL", e.message ?: "Could not check language model", e) }
+    } catch (t: Throwable) {
+      promise.reject("MLKIT_ERROR", t.message ?: "ML Kit unavailable", t)
+    }
   }
 
   // Downloads a language model if missing (no-op when present). Resolves true when ready.
   @ReactMethod
   fun ensureModel(lang: String, wifiOnly: Boolean, promise: Promise) {
-    val code = TranslateLanguage.fromLanguageTag(lang)
-    if (code == null) {
-      promise.reject("UNSUPPORTED", "No translation model for $lang")
-      return
+    try {
+      val code = TranslateLanguage.fromLanguageTag(lang)
+      if (code == null) {
+        promise.reject("UNSUPPORTED", "No translation model for $lang")
+        return
+      }
+      val conditions = if (wifiOnly) DownloadConditions.Builder().requireWifi().build() else DownloadConditions.Builder().build()
+      val mm = models ?: run { promise.reject("DOWNLOAD_FAILED", "ML Kit unavailable"); return }
+      mm.download(TranslateRemoteModel.Builder(code).build(), conditions)
+        .addOnSuccessListener { promise.resolve(true) }
+        .addOnFailureListener { e -> promise.reject("DOWNLOAD_FAILED", e.message ?: "Model download failed", e) }
+    } catch (t: Throwable) {
+      promise.reject("MLKIT_ERROR", t.message ?: "ML Kit unavailable", t)
     }
-    val conditions = if (wifiOnly) DownloadConditions.Builder().requireWifi().build() else DownloadConditions.Builder().build()
-    models.download(TranslateRemoteModel.Builder(code).build(), conditions)
-      .addOnSuccessListener { promise.resolve(true) }
-      .addOnFailureListener { e -> promise.reject("DOWNLOAD_FAILED", e.message ?: "Model download failed", e) }
   }
 
   // True when the model is already on the phone (never downloads)
   @ReactMethod
   fun hasModel(lang: String, promise: Promise) {
-    val code = TranslateLanguage.fromLanguageTag(lang)
-    if (code == null) {
-      promise.resolve(false)
-      return
+    try {
+      val code = TranslateLanguage.fromLanguageTag(lang)
+      if (code == null) {
+        promise.resolve(false)
+        return
+      }
+      val mm = models ?: run { promise.resolve(false); return }
+      mm.isModelDownloaded(TranslateRemoteModel.Builder(code).build())
+        .addOnSuccessListener { ok -> promise.resolve(ok == true) }
+        .addOnFailureListener { promise.resolve(false) }
+    } catch (t: Throwable) {
+      promise.reject("MLKIT_ERROR", t.message ?: "ML Kit unavailable", t)
     }
-    models.isModelDownloaded(TranslateRemoteModel.Builder(code).build())
-      .addOnSuccessListener { ok -> promise.resolve(ok == true) }
-      .addOnFailureListener { promise.resolve(false) }
   }
 
   override fun invalidate() {
-    synchronized(translators) {
+    try { synchronized(translators) {
       translators.values.forEach { it.close() }
       translators.clear()
     }
     identifier?.close()
     identifier = null
+    } catch (_: Throwable) {}
     super.invalidate()
   }
 

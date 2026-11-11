@@ -20,3 +20,10 @@
 # Google Sign-In / Play services
 -keep class com.google.android.gms.auth.** { *; }
 -dontwarn com.google.android.gms.**
+
+# ML Kit (offline translation + language id): components are found by reflection
+-keep class com.google.mlkit.** { *; }
+-keep class com.google.android.gms.internal.mlkit_** { *; }
+-keep class com.google.android.gms.tasks.** { *; }
+-keep class com.google.firebase.components.** { *; }
+-dontwarn com.google.mlkit.**
