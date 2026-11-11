@@ -145,6 +145,9 @@ dependencies {
     // Phone Number Hint (SIM number picker) + fingerprint app lock
     implementation("com.google.android.gms:play-services-auth:21.4.0")
     implementation("androidx.biometric:biometric:1.1.0")
+    // Offline translation of other users' posts / comments / chat (on-device ML Kit, free, no server)
+    implementation("com.google.mlkit:translate:17.0.3")
+    implementation("com.google.mlkit:language-id:17.0.6")
 
     if (hermesEnabled.toBoolean()) {
         implementation("com.facebook.react:hermes-android")

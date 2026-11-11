@@ -30,6 +30,7 @@ import { latestTopLevel, mergeComments, replyParentId, replyTotal, threadComment
 import { containsProfanity, RESPECT_MESSAGE } from '../utils/profanity';
 import { logActivity } from '../services/activityApi';
 import { timeAgo } from '../utils/date';
+import TranslatedText from './TranslatedText';
 
 // Provided by the feed: called with the focused comment box so the list can scroll it above the keyboard
 export const CommentInputFocusContext = createContext<((box: FocusBox | null) => void) | null>(null);
@@ -236,12 +237,16 @@ const InlineComments = forwardRef<InlineCommentsHandle, Props>(function InlineCo
       delayLongPress={350}
       style={[styles.row, reply && styles.replyRow]}
     >
-      <Text style={styles.text}>
-        <Text style={styles.name} onPress={() => openProfile(c.userId)}>
-          {c.userName}{' '}
-        </Text>
-        {c.text}
-      </Text>
+      <TranslatedText
+        style={styles.text}
+        authorId={c.userId}
+        text={c.text}
+        prefix={
+          <Text style={styles.name} onPress={() => openProfile(c.userId)}>
+            {c.userName}{' '}
+          </Text>
+        }
+      />
       <View style={styles.meta}>
         <Text style={styles.time}>{timeAgo(c.createdAt)}</Text>
         <Text style={styles.action} onPress={() => startReply(c)}>

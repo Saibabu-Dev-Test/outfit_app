@@ -43,6 +43,7 @@ import { resolveMyPlace } from '../../services/districtApi';
 import { MAX_BASE64_CHARS, pickImages } from '../../utils/imagePicker';
 import { clockTime } from '../../utils/date';
 import NameWithAge from '../../components/NameWithAge';
+import TranslatedText from '../../components/TranslatedText';
 
 export default function CircleChatScreen({ navigation, route }: { navigation: any; route: any }) {
   const circleId: string = route?.params?.circleId || '';
@@ -268,7 +269,7 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
               onOpenImages={(images, at, labels) => setViewer({ images, index: at, labels })}
             />
           ) : null}
-          {item.text ? <Text style={[styles.text, mine && styles.textMine]}>{item.text}</Text> : null}
+          {item.text ? <TranslatedText style={[styles.text, mine && styles.textMine]} authorId={item.userId} text={item.text} /> : null}
           {item.type !== 'text' ? (
             <ReactionBar
               circleId={circleId}

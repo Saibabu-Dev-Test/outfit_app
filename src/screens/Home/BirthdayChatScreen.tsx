@@ -29,6 +29,7 @@ import ZoomableImage from '../../components/ZoomableImage';
 import { clockTime } from '../../utils/date';
 import { pickImages } from '../../utils/imagePicker';
 import NameWithAge from '../../components/NameWithAge';
+import TranslatedText from '../../components/TranslatedText';
 import {
   BdayMessage,
   birthdayDateFor,
@@ -212,18 +213,24 @@ export default function BirthdayChatScreen({ navigation, route }: { navigation: 
     ]);
   };
 
-  const renderText = (t: string, mine: boolean) => (
-    <Text style={[styles.text, mine && styles.textMine]}>
-      {mentionParts(t).map((p, i) =>
-        p.mention ? (
-          <Text key={i} style={[styles.mention, mine && styles.textMine]}>
-            {p.text}
-          </Text>
-        ) : (
-          p.text
-        ),
-      )}
-    </Text>
+  // Others' wishes show in the reader's language (TranslatedText, offline); @mentions stay highlighted
+  const renderText = (t: string, mine: boolean, authorId?: string | null) => (
+    <TranslatedText
+      style={[styles.text, mine && styles.textMine]}
+      authorId={authorId}
+      text={t}
+      renderBody={body =>
+        mentionParts(body).map((p, i) =>
+          p.mention ? (
+            <Text key={i} style={[styles.mention, mine && styles.textMine]}>
+              {p.text}
+            </Text>
+          ) : (
+            p.text
+          ),
+        )
+      }
+    />
   );
 
   const renderRow = ({ item, index }: { item: Row; index: number }) => {
@@ -247,7 +254,7 @@ export default function BirthdayChatScreen({ navigation, route }: { navigation: 
           style={[styles.bubble, mine ? styles.bubbleMine : styles.bubbleOther]}>
           {showName ? <NameWithAge style={styles.name} uid={item.userId} name={item.userName} age={(item as any).userAge} /> : null}
           {item.imageData ? <Image source={{ uri: item.imageData }} style={styles.photo} resizeMode="cover" /> : null}
-          {item.text ? renderText(item.text, mine) : null}
+          {item.text ? renderText(item.text, mine, item.userId) : null}
           <View style={styles.metaRow}>
             {mode === 'wishes' && !mine && canWrite ? <Text style={styles.replyHint}>Reply</Text> : null}
             <Text style={[styles.time, mine && styles.timeMine]}>{clockTime(item.createdAt)}</Text>
