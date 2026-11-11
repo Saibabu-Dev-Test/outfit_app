@@ -1,4 +1,21 @@
-pluginManagement { includeBuild("../node_modules/@react-native/gradle-plugin") }
+pluginManagement {
+    includeBuild("../node_modules/@react-native/gradle-plugin")
+    // Reanimated 4 / Worklets apply the Spotless Gradle plugin. Declaring repositories here
+    // (CI also prepends Maven mirrors) removes Gradle's implicit plugin portal, so list it
+    // explicitly and map Spotless to its Maven Central artifact so it resolves from any mirror.
+    repositories {
+        gradlePluginPortal()
+        google()
+        mavenCentral()
+    }
+    resolutionStrategy {
+        eachPlugin {
+            if (requested.id.id == "com.diffplug.spotless") {
+                useModule("com.diffplug.spotless:spotless-plugin-gradle:${requested.version ?: '8.4.0'}")
+            }
+        }
+    }
+}
 plugins { id("com.facebook.react.settings") }
 extensions.configure(com.facebook.react.ReactSettingsExtension){ ex -> ex.autolinkLibrariesFromCommand() }
 rootProject.name = 'outfit'
