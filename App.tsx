@@ -5,7 +5,8 @@ import { KeyboardProvider } from './src/components/keyboard';
 import RootNavigator from './src/navigation/RootNavigator';
 import NotificationGate from './src/components/NotificationGate';
 import { captureClipboardReferral } from './src/utils/referralLink';
-import { initAds } from './src/native/ads';
+import { allowAds, initAds } from './src/native/ads';
+import { isSafeMode, markBootOk } from './src/native/safeMode';
 import { ThemeProvider, useTheme } from './src/theme';
 import CoinFlipProvider from './src/components/coins/CoinFlipProvider';
 
@@ -14,12 +15,26 @@ function Themed() {
   // Android first launch after installing from an invite link: keep the referral code the
   // download page copied (OUTFITREF:CODE) for the sign-up screen
   useEffect(() => {
-    captureClipboardReferral();
-    // Mobile Ads SDK, a few seconds after start so it never slows the first screen (never throws)
-    const t = setTimeout(() => {
-      initAds().catch(() => undefined);
-    }, 3000);
-    return () => clearTimeout(t);
+    try {
+      captureClipboardReferral();
+    } catch {}
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    // Start-up health: the first screen has been up for 8 s -> this launch counts as good
+    // (CrashModule safe-mode counter, native/safeMode.ts)
+    timers.push(setTimeout(markBootOk, 8000));
+    // Mobile Ads SDK: only after the first screen is up and settled (never during start-up), and
+    // never in start-up safe mode. Ad slots render nothing until then. Never throws.
+    if (!isSafeMode()) {
+      timers.push(
+        setTimeout(() => {
+          try {
+            allowAds();
+            initAds().catch(() => undefined);
+          } catch {}
+        }, 10000),
+      );
+    }
+    return () => timers.forEach(clearTimeout);
   }, []);
   return (
     <>

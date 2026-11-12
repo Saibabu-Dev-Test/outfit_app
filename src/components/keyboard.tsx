@@ -7,11 +7,30 @@
 //     with automaticOffset (measures its own position on screen, so it is right under headers,
 //     inside tabs and inside edge-to-edge modals without per-screen offsets).
 // The browser build gets plain views from keyboard.web.tsx (no reanimated on the web).
-export {
-  KeyboardProvider,
-  KeyboardAvoidingView,
-  KeyboardStickyView,
-  KeyboardChatScrollView,
-  KeyboardEvents,
-  useReanimatedKeyboardAnimation,
-} from 'react-native-keyboard-controller';
+// Start-up safety: the library is loaded lazily and guarded. In start-up safe mode (the app died
+// while opening twice, native/safeMode.ts) or if the library fails to load, the plain stand-ins from
+// keyboard.web.tsx are used instead (the window still resizes for the keyboard: adjustResize).
+import * as Plain from './keyboard.web';
+import { isSafeMode } from '../native/safeMode';
+
+type Lib = typeof import('react-native-keyboard-controller');
+
+const load = (): Lib => {
+  if (isSafeMode()) return Plain as unknown as Lib;
+  try {
+    const lib = require('react-native-keyboard-controller') as Lib;
+    if (lib && typeof lib.KeyboardProvider !== 'undefined') return lib;
+  } catch (e: any) {
+    console.warn('Keyboard controller unavailable:', e?.message);
+  }
+  return Plain as unknown as Lib;
+};
+
+const lib = load();
+
+export const KeyboardProvider = lib.KeyboardProvider;
+export const KeyboardAvoidingView = lib.KeyboardAvoidingView;
+export const KeyboardStickyView = lib.KeyboardStickyView;
+export const KeyboardChatScrollView = lib.KeyboardChatScrollView;
+export const KeyboardEvents = lib.KeyboardEvents;
+export const useReanimatedKeyboardAnimation = lib.useReanimatedKeyboardAnimation;

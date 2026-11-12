@@ -7,6 +7,11 @@ interface NativeResize {
   resize: (uri: string, maxEdge: number, maxBytes: number) => Promise<{ base64: string; bytes: number; mime?: string }>;
   // Newer APKs: same with an explicit sharpen amount (< 0 = default)
   resizeSharp?: (uri: string, maxEdge: number, maxBytes: number, sharpen: number) => Promise<{ base64: string; bytes: number; mime?: string }>;
+  // Build 115+: every option (JPEG, no filter, quality range)
+  resizeOpts?: (
+    uri: string,
+    opts: { maxEdge: number; maxBytes: number; sharpen?: number; jpeg?: boolean; enhance?: boolean; minQ?: number; maxQ?: number },
+  ) => Promise<{ base64: string; bytes: number; mime?: string }>;
 }
 const Native: NativeResize | undefined = NativeModules.OutfitImageResize;
 
@@ -17,10 +22,21 @@ export const canResize = (): boolean => !!Native?.resize;
 export const resizeImage = async (uri: string, spec: ImageSpec): Promise<string> => {
   if (!Native?.resize) throw new Error('Photo tools need the latest app. Please update Outfit.');
   try {
-    const r =
-      spec.sharpen != null && Native.resizeSharp
-        ? await Native.resizeSharp(uri, spec.maxEdge, spec.maxBytes, spec.sharpen)
-        : await Native.resize(uri, spec.maxEdge, spec.maxBytes);
+    const wantsOpts = spec.jpeg != null || spec.enhance != null || spec.minQ != null || spec.maxQ != null;
+    let r: { base64: string; bytes: number; mime?: string };
+    if (wantsOpts && Native.resizeOpts) {
+      const o: any = { maxEdge: spec.maxEdge, maxBytes: spec.maxBytes };
+      if (spec.sharpen != null) o.sharpen = spec.sharpen;
+      if (spec.jpeg != null) o.jpeg = spec.jpeg;
+      if (spec.enhance != null) o.enhance = spec.enhance;
+      if (spec.minQ != null) o.minQ = spec.minQ;
+      if (spec.maxQ != null) o.maxQ = spec.maxQ;
+      r = await Native.resizeOpts(uri, o);
+    } else if (spec.sharpen != null && Native.resizeSharp) {
+      r = await Native.resizeSharp(uri, spec.maxEdge, spec.maxBytes, spec.sharpen);
+    } else {
+      r = await Native.resize(uri, spec.maxEdge, spec.maxBytes);
+    }
     const mime = r.mime === 'image/webp' ? 'image/webp' : 'image/jpeg';
     return `data:${mime};base64,${r.base64}`;
   } catch (e: any) {

@@ -4,10 +4,11 @@
 // The picker hands over the original file (no pre-shrink), so every size is made from the original.
 import { launchCamera, launchImageLibrary, Asset, ImagePickerResponse, CameraOptions } from 'react-native-image-picker';
 import { canResize, resizeImage } from './imageResize';
-import { AVATAR_SPEC, AVATAR_THUMB_SPEC, CLEAR_SPEC, FULL_SPEC, ImageSpec, POLL_SPEC, THUMB_SPEC } from './imageSpecs';
+import { AVATAR_SPEC, AVATAR_THUMB_SPEC, CLEAR_SPEC, FULL_MAX_CHARS, FULL_SPEC, ImageSpec, POLL_SPEC, THUMB_SPEC } from './imageSpecs';
 
-// Firestore doc limit is 1 MiB; old (pre-split) photos were up to this size
-export const MAX_BASE64_CHARS = 700000;
+// Largest photo data URI accepted anywhere (one full photo: JPEG <= 690 KB = ~942K base64 chars,
+// still one per Firestore document under the 1 MiB limit). Old photos were smaller.
+export const MAX_BASE64_CHARS = FULL_MAX_CHARS;
 
 export interface PickedImage {
   dataUri: string; // full photo (spec size)
@@ -21,15 +22,19 @@ export interface PickOptions {
   thumb?: ImageSpec | null; // also make a thumbnail of this size
   clear?: ImageSpec | null; // also make a clear feed-size copy (CLEAR_SPEC)
   maxChars?: number; // extra cap on the full photo's base64 length
+  ifSeveral?: PickOptions; // pickImages: options used instead when more than one photo was picked
 }
 
-// Posts and wardrobe items: full photo (1600 px) + 360 px thumbnail + 1080 px clear feed photo
-export const PHOTO_PICK: PickOptions = { spec: FULL_SPEC, thumb: THUMB_SPEC, clear: null };
-void CLEAR_SPEC; // kept for older code paths
+// Posts and wardrobe items: near-original full photo (2048 px JPEG <= 690 KB, opened on tap) + 360 px
+// thumbnail (grids) + ~1080 px clear copy (feed cards)
+export const PHOTO_PICK: PickOptions = { spec: FULL_SPEC, thumb: THUMB_SPEC, clear: CLEAR_SPEC };
 // Avatars are shown small; the tiny copy goes on posts / comments / likes
 export const AVATAR_PICK: PickOptions = { spec: AVATAR_SPEC, thumb: AVATAR_THUMB_SPEC };
 // A poll message / chat photo set holds up to 6 photos in one Firestore doc (1 MiB limit)
 export const POLL_PICK: PickOptions = { spec: POLL_SPEC, thumb: null };
+// Circle / birthday chat: one photo = near-original full photo (opened in the viewer) + a ~1080 px
+// clear copy shown in the chat bubble; several photos (an A-F vote) = poll-size photos as before
+export const CHAT_PICK: PickOptions = { spec: FULL_SPEC, thumb: null, clear: CLEAR_SPEC, ifSeveral: POLL_PICK };
 
 const specOf = (o: PickOptions) => o.spec || FULL_SPEC;
 
@@ -111,9 +116,11 @@ export const pickImages = (max: number, opts: PickOptions = POLL_PICK): Promise<
         }
         const images: PickedImage[] = [];
         let skipped = 0;
-        for (const a of (res.assets || []).slice(0, max)) {
+        const assets = (res.assets || []).slice(0, max);
+        const o = assets.length > 1 && opts.ifSeveral ? opts.ifSeveral : opts;
+        for (const a of assets) {
           try {
-            const p = await fromAsset(a, opts);
+            const p = await fromAsset(a, o);
             if (p) images.push(p);
             else skipped += 1;
           } catch {

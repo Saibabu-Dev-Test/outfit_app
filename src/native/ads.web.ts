@@ -11,3 +11,7 @@ export const watchAdToUnlock = async (_slot: RewardedSlot): Promise<boolean> => 
   await new Promise<void>(r => setTimeout(r, REWARDED_FALLBACK_WAIT_MS));
   return true;
 };
+export const adsAllowed = (): boolean => false;
+export const allowAds = (): void => {};
+export const onAdsAllowed = (_fn: () => void): (() => void) => () => {};
+export const whenAdsAllowed = (): Promise<void> => new Promise<void>(() => {});

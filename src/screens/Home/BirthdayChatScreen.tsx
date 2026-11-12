@@ -27,7 +27,7 @@ import { useDayKey } from '../../hooks/useDayKey';
 import Avatar from '../../components/Avatar';
 import ZoomableImage from '../../components/ZoomableImage';
 import { clockTime } from '../../utils/date';
-import { pickImages } from '../../utils/imagePicker';
+import { CHAT_PICK, pickImages } from '../../utils/imagePicker';
 import NameWithAge from '../../components/NameWithAge';
 import TranslatedText from '../../components/TranslatedText';
 import {
@@ -35,6 +35,7 @@ import {
   birthdayDateFor,
   daysUntil,
   deleteBdayMessage,
+  getBdayFullPhoto,
   deleteWish,
   getBirthday,
   getMyBirthday,
@@ -59,6 +60,7 @@ type Row = {
   userAvatar: string | null;
   text: string;
   imageData?: string | null;
+  hasFull?: boolean;
   createdAt: Date | null;
   wish?: Wish;
 };
@@ -171,16 +173,28 @@ export default function BirthdayChatScreen({ navigation, route }: { navigation: 
   const sendPhoto = async () => {
     if (sending) return;
     try {
-      const r = await pickImages(1);
-      const img = r.images[0]?.dataUri;
-      if (!img) return;
+      // Near-original photo (opened on tap) + small chat copy
+      const r = await pickImages(1, CHAT_PICK);
+      const picked = r.images[0];
+      if (!picked?.dataUri) return;
       setSending(true);
-      await sendBdayPhoto(todayKey, me, img);
+      await sendBdayPhoto(todayKey, me, picked.clearUri || picked.dataUri, picked.clearUri ? picked.dataUri : null);
     } catch (e: any) {
       Alert.alert('Photo not sent', e?.message || 'Please try again.');
     } finally {
       setSending(false);
     }
+  };
+
+  // Chat copy at once, then the near-original photo when there is one
+  const openPhoto = (r: Row) => {
+    if (!r.imageData) return;
+    const shown = r.imageData;
+    setViewer(shown);
+    if (mode !== 'circle' || !r.hasFull) return;
+    getBdayFullPhoto(todayKey, r).then(full => {
+      if (full && full !== shown) setViewer(v => (v === shown ? full : v));
+    });
   };
 
   const startReply = (r: Row) => {
@@ -203,7 +217,7 @@ export default function BirthdayChatScreen({ navigation, route }: { navigation: 
         style: 'destructive',
         onPress: async () => {
           try {
-            if (mode === 'circle') await deleteBdayMessage(todayKey, r.id);
+            if (mode === 'circle') await deleteBdayMessage(todayKey, r.id, r.hasFull);
             else await deleteWish(personUid, r.id);
           } catch (e: any) {
             Alert.alert('Delete failed', e?.message || 'Please try again.');
@@ -250,7 +264,7 @@ export default function BirthdayChatScreen({ navigation, route }: { navigation: 
           activeOpacity={0.9}
           delayLongPress={350}
           onLongPress={() => onLongPress(item)}
-          onPress={() => (item.imageData ? setViewer(item.imageData) : startReply(item))}
+          onPress={() => (item.imageData ? openPhoto(item) : startReply(item))}
           style={[styles.bubble, mine ? styles.bubbleMine : styles.bubbleOther]}>
           {showName ? <NameWithAge style={styles.name} uid={item.userId} name={item.userName} age={(item as any).userAge} /> : null}
           {item.imageData ? <Image source={{ uri: item.imageData }} style={styles.photo} resizeMode="cover" /> : null}
