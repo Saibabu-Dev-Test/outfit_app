@@ -4,6 +4,6 @@
   "description": "FCM push sender + token cleanup for Outfit (run by .github/workflows/push.yml)",
   "engines": { "node": ">= 20" },
   "dependencies": {
-    "firebase-admin": "^12.7.0"
+    "firebase-admin": "^13.10.0"
   }
 }
