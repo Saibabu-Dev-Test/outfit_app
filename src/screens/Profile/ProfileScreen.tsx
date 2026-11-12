@@ -50,6 +50,7 @@ import { getLockCapability, isAppLockOn, turnOffAppLock, turnOnAppLock } from '.
 import { signOutKeepLock } from '../../services/authApi';
 import { auth } from '../../config/firebaseConfig';
 import { isAutoUpdateOn, isUpdateSupported, setAutoUpdate } from '../../native/appUpdate';
+import { isCoinSoundOn, isCoinSoundSupported, setCoinSound } from '../../native/coinSound';
 
 // "+91 98765 43210" from users/{uid}.phone (10 digits), else the saved phoneNumber
 const phoneLabel = (p?: { phone?: string; phoneNumber?: string } | null): string => {
@@ -113,6 +114,15 @@ export default function ProfileScreen() {
   useEffect(() => {
     isAutoUpdateOn().then(setAutoUpdateState);
   }, []);
+  // Coin sound: plays with each coin flip, ON by default
+  const [coinSound, setCoinSoundState] = useState(true);
+  useEffect(() => {
+    isCoinSoundOn().then(setCoinSoundState);
+  }, []);
+  const toggleCoinSound = (on: boolean) => {
+    setCoinSoundState(on);
+    setCoinSound(on);
+  };
   const toggleAutoUpdate = (on: boolean) => {
     setAutoUpdateState(on);
     setAutoUpdate(on);
@@ -872,6 +882,31 @@ const fetchProfile = async () => {
                 value={lockOn}
                 onValueChange={handleToggleLock}
                 disabled={lockBusy}
+                trackColor={{ false: colors.border, true: colors.accent }}
+                thumbColor={colors.textInverse}
+              />
+            </View>
+          </View>
+        )}
+
+        {/* Coin sound: on by default */}
+        {isCoinSoundSupported() && (
+          <View style={styles.menuSection}>
+            <View style={styles.menuItem}>
+              <View style={[styles.menuLeft, styles.flexTitle]}>
+                <View style={styles.menuIconBox}>
+                  <Text style={styles.menuIcon}>🪙</Text>
+                </View>
+                <View style={styles.flexTitle}>
+                  <Text style={styles.menuLabel}>Coin sound</Text>
+                  <Text style={styles.lockValue}>
+                    {coinSound ? 'On: a short ding when you earn coins (follows media volume)' : 'Off: coin flips are silent'}
+                  </Text>
+                </View>
+              </View>
+              <Switch
+                value={coinSound}
+                onValueChange={toggleCoinSound}
                 trackColor={{ false: colors.border, true: colors.accent }}
                 thumbColor={colors.textInverse}
               />
