@@ -165,10 +165,10 @@ export const resizeLoaded = (img: any, spec: ImageSpec): string => {
   let best = '';
   for (let round = 0; round < 8; round++) {
     const canvas = fit(img, w0, h0, edge);
-    enhance(canvas, spec.sharpen);
-    const type = outType(canvas);
-    let lowQ = MIN_Q;
-    let highQ = MAX_Q;
+    if (spec.enhance !== false) enhance(canvas, spec.sharpen);
+    const type = spec.jpeg ? 'image/jpeg' : outType(canvas);
+    let lowQ = spec.minQ ?? MIN_Q;
+    let highQ = spec.maxQ ?? MAX_Q;
     let fitUri = '';
     while (lowQ <= highQ) {
       const mid = Math.floor((lowQ + highQ) / 2);
@@ -181,7 +181,7 @@ export const resizeLoaded = (img: any, spec: ImageSpec): string => {
       }
     }
     if (fitUri) return fitUri;
-    best = canvas.toDataURL(type, MIN_Q / 100);
+    best = canvas.toDataURL(type, (spec.minQ ?? MIN_Q) / 100);
     if (edge <= 64) break;
     edge = Math.max(64, Math.round(edge * 0.85));
   }

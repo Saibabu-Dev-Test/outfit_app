@@ -7,9 +7,11 @@ import { borderRadius, colors, fontSize, fontWeight, spacing, themedStyles } fro
 import AdErrorBoundary from './AdErrorBoundary';
 import { adsModule, initAds } from '../../native/ads';
 import { adUnitId } from '../../config/ads';
+import useAdsAllowed from './useAdsAllowed';
 
 function NativeCard() {
-  const m = adsModule();
+  const allowed = useAdsAllowed();
+  const m = allowed ? adsModule() : null;
   const [ad, setAd] = useState<any>(null);
 
   useEffect(() => {

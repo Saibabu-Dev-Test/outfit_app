@@ -1,9 +1,9 @@
 // Web build: photos come from <input type="file"> and are shrunk with a canvas to the same sizes
 // as the Android picker (imageSpecs.ts): full photo + optional thumbnail, JPEG data URIs.
 import { loadImage, resizeLoaded } from './imageResize.web';
-import { AVATAR_SPEC, AVATAR_THUMB_SPEC, CLEAR_SPEC, FULL_SPEC, ImageSpec, POLL_SPEC, THUMB_SPEC } from './imageSpecs';
+import { AVATAR_SPEC, AVATAR_THUMB_SPEC, CLEAR_SPEC, FULL_MAX_CHARS, FULL_SPEC, ImageSpec, POLL_SPEC, THUMB_SPEC } from './imageSpecs';
 
-export const MAX_BASE64_CHARS = 700000;
+export const MAX_BASE64_CHARS = FULL_MAX_CHARS; // one full photo (~942K chars), see imagePicker.ts
 
 export interface PickedImage {
   dataUri: string;
@@ -17,12 +17,15 @@ export interface PickOptions {
   thumb?: ImageSpec | null;
   clear?: ImageSpec | null;
   maxChars?: number;
+  ifSeveral?: PickOptions;
 }
 
-export const PHOTO_PICK: PickOptions = { spec: FULL_SPEC, thumb: THUMB_SPEC, clear: null };
-void CLEAR_SPEC; // kept for older code paths
+export const PHOTO_PICK: PickOptions = { spec: FULL_SPEC, thumb: THUMB_SPEC, clear: CLEAR_SPEC };
 export const AVATAR_PICK: PickOptions = { spec: AVATAR_SPEC, thumb: AVATAR_THUMB_SPEC };
 export const POLL_PICK: PickOptions = { spec: POLL_SPEC, thumb: null };
+// Circle / birthday chat: one photo = near-original full photo (opened in the viewer) + a ~1080 px
+// clear copy shown in the chat bubble; several photos (an A-F vote) = poll-size photos as before
+export const CHAT_PICK: PickOptions = { spec: FULL_SPEC, thumb: null, clear: CLEAR_SPEC, ifSeveral: POLL_PICK };
 
 export const isDataUri = (s?: string | null): boolean => !!s && s.startsWith('data:');
 
@@ -87,9 +90,10 @@ export const pickImages = async (max: number, opts: PickOptions = POLL_PICK): Pr
   const files = (await chooseFiles(false, max > 1)).slice(0, Math.max(1, max));
   const images: PickedImage[] = [];
   let skipped = 0;
+  const o = files.length > 1 && opts.ifSeveral ? opts.ifSeveral : opts;
   for (const f of files) {
     try {
-      const p = isImage(f) ? await processFile(f, opts) : null;
+      const p = isImage(f) ? await processFile(f, o) : null;
       if (p) images.push(p);
       else skipped += 1;
     } catch {

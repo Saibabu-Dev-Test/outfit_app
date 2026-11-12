@@ -4,6 +4,10 @@ on:
   push:
     branches:
       - main
+  # Pull requests into main: same build + tests (APK kept as a workflow artifact), no release
+  pull_request:
+    branches:
+      - main
 permissions:
   contents: write
 jobs:
@@ -34,6 +38,10 @@ jobs:
       # 4. Install JavaScript dependencies
       - name: Install dependencies
         run: npm install
+
+      # 4.2. Unit tests (Jest) must pass before the APK is built
+      - name: Run tests
+        run: npx jest --ci
 
       # 4.5. AI stylist key from the GEMINI_API_KEY secret (empty when the secret is missing)
       - name: Write AI config
@@ -168,7 +176,9 @@ jobs:
           retention-days: 3
 
       # 8. Create GitHub Release (not a prerelease, so /releases/latest/download/<name> points here)
+      # Only for pushes to main: pull-request builds are checks (artifact only), never a release
       - name: Create GitHub Release
+        if: github.event_name == 'push'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}

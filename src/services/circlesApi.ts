@@ -41,6 +41,7 @@ import {
 } from 'firebase/firestore';
 import { awardCoins } from './coinsApi';
 import { db } from '../config/firebaseConfig';
+import { splitChatPhoto } from './photoSplit';
 import { firestoreErrorMessage } from '../utils/firebaseErrors';
 import { MAX_BASE64_CHARS } from '../utils/imagePicker';
 import { toDate } from '../utils/date';
@@ -97,7 +98,8 @@ export interface ChatMessage {
   userAge?: number | null;
   userAvatar: string | null;
   text?: string;
-  imageData?: string;
+  imageData?: string; // photo shown in the chat (clear copy on new messages)
+  hasFull?: boolean; // near-original photo in messages/{id}/media/full (getMessageFullPhoto)
   type: MessageType;
   poll?: Poll;
   createdAt: Date | null;
@@ -164,6 +166,7 @@ const toMessage = (id: string, d: any): ChatMessage => {
   };
   if (typeof d?.text === 'string') m.text = d.text;
   if (typeof d?.imageData === 'string') m.imageData = d.imageData;
+  if (d?.full === 1) m.hasFull = true;
   if (type === 'poll' && d?.poll && Array.isArray(d.poll.options)) {
     const kind: PollKind = d.poll.kind === 'wear' ? 'wear' : 'buy';
     m.poll = {
@@ -803,13 +806,30 @@ export const sendImageMessage = async (
   me: ChatAuthor,
   imageData: string,
   caption?: string,
+  fullImage?: string | null,
 ): Promise<void> => {
   checkImage(imageData);
+  if (fullImage) checkImage(fullImage);
   if (caption) assertClean(caption, 'Please keep messages respectful 🙏');
+  // Small copy in the message (chat list), near-original photo in media/full (opened on tap)
+  const photo = await splitChatPhoto(imageData, fullImage);
   try {
-    const data: any = { ...authorFields(me), type: 'image', imageData };
+    const data: any = { ...authorFields(me), type: 'image', imageData: photo.inline };
     if (caption && caption.trim()) data.text = caption.trim().slice(0, 500);
-    const ref = await addDoc(collection(db, CIRCLES, circleId, 'messages'), data);
+    const ref = doc(collection(db, CIRCLES, circleId, 'messages'));
+    const b = writeBatch(db);
+    if (photo.full) {
+      data.full = 1;
+      b.set(ref, data);
+      b.set(doc(db, CIRCLES, circleId, 'messages', ref.id, 'media', 'full'), {
+        imageData: photo.full,
+        userId: me.uid,
+        createdAt: serverTimestamp(),
+      });
+    } else {
+      b.set(ref, data);
+    }
+    await b.commit();
     awardCoins('upload', `msg_${circleId}_${ref.id}`); // coins (fire-and-forget)
   } catch (e: any) {
     fail(e, 'Sending photo');
@@ -868,9 +888,38 @@ export const deleteMessage = async (circleId: string, message: ChatMessage): Pro
     }
   }
   try {
-    await deleteDoc(ref);
+    if (message.hasFull) {
+      const b = writeBatch(db);
+      b.delete(doc(ref, 'media', 'full'));
+      b.delete(ref);
+      await b.commit();
+    } else {
+      await deleteDoc(ref);
+    }
   } catch (e: any) {
     fail(e, 'Deleting message');
+  }
+};
+
+// Near-original photo of an image message (1 read, cached for the session). Never throws: falls
+// back to the photo shown in the chat.
+const msgFullCache = new Map<string, string>();
+export const getMessageFullPhoto = async (circleId: string, message: ChatMessage): Promise<string> => {
+  const shown = message.imageData || '';
+  if (!message.hasFull) return shown;
+  const key = `${circleId}_${message.id}`;
+  const hit = msgFullCache.get(key);
+  if (hit) return hit;
+  try {
+    const s = await getDoc(doc(db, CIRCLES, circleId, 'messages', message.id, 'media', 'full'));
+    const full = s.exists() ? (s.data() as any)?.imageData : null;
+    if (typeof full !== 'string' || !full) return shown;
+    if (msgFullCache.size >= 12) msgFullCache.delete(msgFullCache.keys().next().value as string);
+    msgFullCache.set(key, full);
+    return full;
+  } catch (e: any) {
+    console.warn('message full photo failed:', e?.code, e?.message);
+    return shown;
   }
 };
 

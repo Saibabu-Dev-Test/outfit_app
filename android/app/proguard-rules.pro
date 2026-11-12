@@ -38,3 +38,27 @@
 -keep class com.google.android.gms.ads.** { *; }
 -keep class com.google.ads.** { *; }
 -dontwarn com.google.android.gms.ads.**
+
+# Start-up safety (build 115): keep every autolinked React Native library's classes as they are.
+# Their native (C++/JNI) code and the new-arch TurboModule/Fabric registries look classes, methods
+# and fields up by name; a stripped or renamed one is a crash at launch in release only.
+-keep class com.swmansion.** { *; }
+-keep class com.th3rdwave.safeareacontext.** { *; }
+-keep class com.reactnativecommunity.** { *; }
+-keep class com.reactnativegooglesignin.** { *; }
+-keep class com.imagepicker.** { *; }
+-keep class com.facebook.yoga.** { *; }
+-keep class com.facebook.fbreact.** { *; }
+-keep class com.facebook.proguard.annotations.** { *; }
+-keep @com.facebook.proguard.annotations.DoNotStrip class * { *; }
+-keepclassmembers class * { @com.facebook.proguard.annotations.DoNotStrip *; }
+-keep @com.facebook.jni.annotations.DoNotStrip class * { *; }
+-keepclassmembers class * { @com.facebook.jni.annotations.DoNotStrip *; }
+-keepclassmembers class * { native <methods>; }
+# Google Mobile Ads SDK internals + its WorkManager / Room start-up pieces
+-keep class com.google.android.gms.internal.ads.** { *; }
+-keep class androidx.work.** { *; }
+-keep class * extends androidx.room.RoomDatabase { *; }
+-keep class androidx.startup.** { *; }
+-dontwarn androidx.work.**
+-dontwarn com.google.android.gms.internal.ads.**

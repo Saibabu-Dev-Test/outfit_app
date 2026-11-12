@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- shrinkResources: never strip the coin sound (CoinSoundModule.kt loads it by R.raw id) -->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@raw/coin_flip" />

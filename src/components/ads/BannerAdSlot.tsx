@@ -5,6 +5,7 @@ import { StyleSheet, View, ViewStyle } from 'react-native';
 import AdErrorBoundary from './AdErrorBoundary';
 import { adsModule, initAds } from '../../native/ads';
 import { adUnitId } from '../../config/ads';
+import useAdsAllowed from './useAdsAllowed';
 
 interface Props {
   slot: 'circlesBanner' | 'searchBanner';
@@ -15,10 +16,11 @@ interface Props {
 
 function Banner({ slot, style, onLoaded }: Props) {
   const [failed, setFailed] = useState(false);
+  const allowed = useAdsAllowed();
   useEffect(() => {
-    initAds().catch(() => undefined);
-  }, []);
-  const m = adsModule();
+    if (allowed) initAds().catch(() => undefined);
+  }, [allowed]);
+  const m = allowed ? adsModule() : null;
   if (!m || failed) return null;
   const BannerAd = m.BannerAd;
   const sizes = m.BannerAdSize || {};

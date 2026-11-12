@@ -26,16 +26,19 @@ class MainActivity : ReactActivity() {
   // calling Fragment constructor caused an exception". React Navigation rebuilds the screens itself.
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(null)
+    // Last run crashed / was killed: show why in a native dialog before JavaScript starts, so the
+    // tester sees it even if the app closes again a moment later (CrashModule.kt)
+    CrashModule.showPendingCrash(this)
   }
 
   // App lock privacy: FLAG_SECURE on the lock screen, and no recents preview while the lock is on
   override fun onPause() {
-    AppLockModule.applyPrivacy(this, true)
+    try { AppLockModule.applyPrivacy(this, true) } catch (_: Throwable) {}
     super.onPause()
   }
 
   override fun onResume() {
     super.onResume()
-    AppLockModule.applyPrivacy(this, false)
+    try { AppLockModule.applyPrivacy(this, false) } catch (_: Throwable) {}
   }
 }

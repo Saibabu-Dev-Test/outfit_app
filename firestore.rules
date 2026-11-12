@@ -297,7 +297,8 @@ service cloud.firestore {
       allow read: if signedIn() && (myBirthdayNow(day) || isAdmin());
       allow create: if signedIn()
         && myBirthdayNow(day)
-        && request.resource.data.keys().hasOnly(['userId', 'userName', 'userAge', 'userAvatar', 'type', 'text', 'imageData', 'createdAt'])
+        && request.resource.data.keys().hasOnly(['userId', 'userName', 'userAge', 'userAvatar', 'type', 'text', 'imageData', 'full', 'createdAt'])
+        && request.resource.data.get('full', 1) == 1
         && (request.resource.data.get('userAge', null) == null
             || (request.resource.data.userAge is int
                 && request.resource.data.userAge >= 0
@@ -316,9 +317,26 @@ service cloud.firestore {
               && !('imageData' in request.resource.data))
             || (request.resource.data.type == 'image'
               && request.resource.data.imageData is string
-              && request.resource.data.imageData.size() <= 150000
+              && request.resource.data.imageData.size() <= 240000
               && !('text' in request.resource.data)));
       allow delete: if signedIn() && (resource.data.userId == me() || isAdmin());
+
+      // ── Near-original photo (since build 115): .../messages/{mid}/media/full
+      //    {imageData (JPEG <= 690 KB, ~942K chars), userId, createdAt}; the message keeps a small
+      //    chat copy (+ full: 1). Written with the message in one batch, read when opened. ──
+      match /media/{x} {
+        allow read: if signedIn() && (myBirthdayNow(day) || isAdmin());
+        allow create: if signedIn()
+          && myBirthdayNow(day)
+          && x == 'full'
+          && getAfter(/databases/$(db)/documents/bdayCircles/$(day)/messages/$(mid)).data.userId == me()
+          && request.resource.data.keys().hasOnly(['imageData', 'userId', 'createdAt'])
+          && request.resource.data.userId == me()
+          && request.resource.data.imageData is string
+          && request.resource.data.imageData.size() <= 950000;
+        allow update: if false;
+        allow delete: if signedIn() && (resource.data.userId == me() || isAdmin());
+      }
     }
 
     // ── Activity ("who liked my photos"): users/{uid}/activity/{autoId} ──
@@ -536,7 +554,9 @@ service cloud.firestore {
           && request.resource.data.keys().hasOnly(['imageData', 'userId', 'updatedAt'])
           && request.resource.data.userId == me()
           && request.resource.data.imageData is string
-          && request.resource.data.imageData.size() <= 300000;
+          // full: near-original JPEG <= 690 KB (~942K chars, build 115+); clear: ~1080 px feed copy
+          && ((mid == 'full' && request.resource.data.imageData.size() <= 950000)
+              || (mid == 'clear' && request.resource.data.imageData.size() <= 300000));
         // In the same batch as the item delete (get() = before the batch), or a leftover of mine
         allow delete: if signedIn()
           && (itemData().userId == me() || isAdmin() || resource.data.userId == me());
@@ -713,6 +733,24 @@ service cloud.firestore {
         allow delete: if signedIn()
           && (resource.data.userId == me() || isCircleOwner(cid) || isAdmin());
 
+        // ── Near-original photo of an image message (since build 115):
+        //    circles/{cid}/messages/{mid}/media/full {imageData (JPEG <= 690 KB, ~942K chars),
+        //    userId, createdAt}; the message keeps a small chat copy (+ full: 1). Written with the
+        //    message in one batch, read only when the photo is opened. ──
+        match /media/{x} {
+          allow read: if isMember(cid) || isAdmin();
+          allow create: if isMember(cid)
+            && x == 'full'
+            && getAfter(/databases/$(db)/documents/circles/$(cid)/messages/$(mid)).data.userId == me()
+            && request.resource.data.keys().hasOnly(['imageData', 'userId', 'createdAt'])
+            && request.resource.data.userId == me()
+            && request.resource.data.imageData is string
+            && request.resource.data.imageData.size() <= 950000;
+          allow update: if false;
+          allow delete: if signedIn()
+            && (resource.data.userId == me() || isCircleOwner(cid) || isAdmin());
+        }
+
         // ── Poll votes: one doc per voter, so a new vote replaces the old one ──
         match /votes/{voterId} {
           allow read: if isMember(cid) || isAdmin();
@@ -845,18 +883,26 @@ service cloud.firestore {
 
       // ── Full-size photos: posts/{postId}/media/full {photos: [A, B...], userId, createdAt} ──
       // The post keeps ~200 px thumbnails (media: 1); written by the author in the same batch
-      // as the post, read only on the detail screen.
+      // as the post, read only on the detail screen. When the near-original photos (build 115+)
+      // don't fit one doc together, each is in media/full0..full5 {imageData, userId, createdAt}
+      // and the post has media: 2.
       // ── Clear feed photos: posts/{postId}/media/clear {photos: [~720 px A, B...], userId,
       //    createdAt} (+ clear: 1 on the post), shown full width on feed cards ──
       match /media/{mid} {
         allow read: if signedIn();
-        allow create: if signedIn() && mid in ['full', 'clear']
+        allow create: if signedIn()
           && getAfter(postPath()).data.userId == me()
-          && request.resource.data.keys().hasOnly(['photos', 'userId', 'createdAt'])
           && request.resource.data.userId == me()
-          && request.resource.data.photos is list
-          && request.resource.data.photos.size() >= 1
-          && request.resource.data.photos.size() <= 6;
+          && ((mid in ['full', 'clear']
+                && request.resource.data.keys().hasOnly(['photos', 'userId', 'createdAt'])
+                && request.resource.data.photos is list
+                && request.resource.data.photos.size() >= 1
+                && request.resource.data.photos.size() <= 6)
+              // media: 2 posts (build 115+): one near-original photo per doc, full0..full5
+              || (mid in ['full0', 'full1', 'full2', 'full3', 'full4', 'full5']
+                && request.resource.data.keys().hasOnly(['imageData', 'userId', 'createdAt'])
+                && request.resource.data.imageData is string
+                && request.resource.data.imageData.size() <= 950000));
         allow update: if false;
         // With the post delete (get() = before the batch), or a leftover of mine
         allow delete: if signedIn()

@@ -35,12 +35,13 @@ import {
   subscribeMessages,
   sendTextMessage,
   sendImageMessage,
+  getMessageFullPhoto,
   sendPollMessage,
   deleteMessage,
   joinCircle,
 } from '../../services/circlesApi';
 import { resolveMyPlace } from '../../services/districtApi';
-import { MAX_BASE64_CHARS, pickImages } from '../../utils/imagePicker';
+import { CHAT_PICK, MAX_BASE64_CHARS, pickImages } from '../../utils/imagePicker';
 import { clockTime } from '../../utils/date';
 import { isPhotoExpired, PHOTO_EXPIRED_TEXT } from '../../utils/photoExpiry';
 import NameWithAge from '../../components/NameWithAge';
@@ -139,12 +140,14 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
   // Several photos together: 1 = normal photo, 2-6 = A-F vote post
   const sendSeveral = async () => {
     try {
-      const r = await pickImages(6);
+      // One photo: near-original full photo + small chat copy; 2-6: poll-size photos (CHAT_PICK)
+      const r = await pickImages(6, CHAT_PICK);
       if (r.skipped) Alert.alert('Some photos skipped', `${r.skipped} photo(s) were too large.`);
       if (!r.images.length) return;
       if (r.images.length === 1) {
         setSending(true);
-        await sendImageMessage(circleId, me, r.images[0].dataUri);
+        const img = r.images[0];
+        await sendImageMessage(circleId, me, img.clearUri || img.dataUri, undefined, img.clearUri ? img.dataUri : null);
         return;
       }
       setPollImages(r.images.map(i => i.dataUri));
@@ -154,6 +157,18 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
     } finally {
       setSending(false);
     }
+  };
+
+  // Opens the chat copy at once, then swaps in the near-original photo when it has one
+  const openPhoto = (m: ChatMessage) => {
+    if (!m.imageData) return;
+    setViewer({ images: [m.imageData], index: 0 });
+    if (!m.hasFull) return;
+    getMessageFullPhoto(circleId, m).then(full => {
+      if (full && full !== m.imageData) {
+        setViewer(v => (v && v.images.length === 1 && v.images[0] === m.imageData ? { ...v, images: [full] } : v));
+      }
+    });
   };
 
   const openComments = (m: ChatMessage) =>
@@ -249,7 +264,7 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
           onLongPress={() => onMessageLongPress(item)}
           delayLongPress={350}
           onPress={() =>
-            !expired && item.type === 'image' && item.imageData ? setViewer({ images: [item.imageData], index: 0 }) : undefined
+            !expired && item.type === 'image' && item.imageData ? openPhoto(item) : undefined
           }
           style={[
             styles.bubble,

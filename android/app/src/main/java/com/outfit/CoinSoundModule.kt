@@ -16,7 +16,11 @@ class CoinSoundModule(ctx: ReactApplicationContext) : ReactContextBaseJavaModule
   private var soundId = 0
   @Volatile private var loaded = false
 
-  init {
+  // Lazy: the SoundPool is made on the first play(), never at app start (and never in safe mode)
+  @Synchronized
+  private fun ensurePool(): SoundPool? {
+    pool?.let { return it }
+    if (CrashModule.safeMode) return null
     try {
       val attrs = AudioAttributes.Builder()
         .setUsage(AudioAttributes.USAGE_GAME)
@@ -24,17 +28,24 @@ class CoinSoundModule(ctx: ReactApplicationContext) : ReactContextBaseJavaModule
         .build()
       val p = SoundPool.Builder().setMaxStreams(4).setAudioAttributes(attrs).build()
       p.setOnLoadCompleteListener { _, _, status -> loaded = status == 0 }
-      soundId = p.load(ctx, R.raw.coin_flip, 1)
+      soundId = p.load(reactApplicationContext, R.raw.coin_flip, 1)
       pool = p
     } catch (_: Throwable) {
       pool = null
     }
+    return pool
+  }
+
+  // Optional warm-up (loads the sound so the first flip is not silent). Never throws.
+  @ReactMethod
+  fun preload() {
+    try { ensurePool() } catch (_: Throwable) {}
   }
 
   @ReactMethod
   fun play() {
     try {
-      val p = pool ?: return
+      val p = ensurePool() ?: return
       if (loaded) p.play(soundId, 1f, 1f, 1, 0, 1f)
     } catch (_: Throwable) {}
   }
