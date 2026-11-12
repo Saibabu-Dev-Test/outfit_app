@@ -94,6 +94,18 @@ def ciBuildNumber = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInteger()
  */
 def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
 
+// Firebase Cloud Messaging (push) without the google-services Gradle plugin: the same string
+// resources that plugin would generate (google_app_id, gcm_defaultSenderId, ...), read from
+// google-services.json for this applicationId. FirebaseInitProvider then starts Firebase by itself.
+def gsFile = file("google-services.json")
+def gsClient = null
+def gsProject = null
+if (gsFile.exists()) {
+    def gs = new groovy.json.JsonSlurper().parse(gsFile)
+    gsProject = gs.project_info
+    gsClient = gs.client.find { it.client_info.android_client_info.package_name == "com.saibabu.outfit" }
+}
+
 android {
     ndkVersion rootProject.ext.ndkVersion
     buildToolsVersion rootProject.ext.buildToolsVersion
@@ -108,6 +120,17 @@ android {
         // download installs over the old one. Local builds: 1.
         versionCode ciBuildNumber
         versionName "1.0.${ciBuildNumber}"
+        if (gsClient != null) {
+            resValue "string", "google_app_id", gsClient.client_info.mobilesdk_app_id
+            resValue "string", "gcm_defaultSenderId", gsProject.project_number
+            resValue "string", "project_id", gsProject.project_id
+            resValue "string", "google_api_key", gsClient.api_key[0].current_key
+            resValue "string", "google_crash_reporting_api_key", gsClient.api_key[0].current_key
+            if (gsProject.storage_bucket) resValue "string", "google_storage_bucket", gsProject.storage_bucket
+        }
+    }
+    buildFeatures {
+        resValues true
     }
 
     // One APK only: arm64-v8a (every 64-bit phone; 32-bit/x86 dropped to keep it small).
@@ -149,6 +172,9 @@ dependencies {
     // Phone Number Hint (SIM number picker) + fingerprint app lock
     implementation("com.google.android.gms:play-services-auth:21.4.0")
     implementation("androidx.biometric:biometric:1.1.0")
+    // Push notifications (FCM): token + OutfitMessagingService; Firebase starts from the resValues above
+    implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
+    implementation("com.google.firebase:firebase-messaging")
     // Offline translation of other users' posts / comments / chat (on-device ML Kit, free, no server)
     implementation("com.google.mlkit:translate:17.0.3")
     implementation("com.google.mlkit:language-id:17.0.6")

@@ -59,6 +59,22 @@
         </intent-filter>
       </receiver>
 
+      <!-- Push (FCM): shown on the "activity" channel; a tap opens the app with the data payload
+           (outfit_payload) as intent extras, which MainActivity hands to the app -->
+      <service
+        android:name=".OutfitMessagingService"
+        android:exported="false">
+        <intent-filter>
+          <action android:name="com.google.firebase.MESSAGING_EVENT" />
+        </intent-filter>
+      </service>
+      <meta-data
+        android:name="com.google.firebase.messaging.default_notification_channel_id"
+        android:value="activity" />
+      <meta-data
+        android:name="com.google.firebase.messaging.default_notification_icon"
+        android:resource="@drawable/ic_stat_outfit" />
+
       <!-- Camera capture (react-native-image-picker) and in-app update APKs (xml/file_paths) -->
       <provider
         android:name="androidx.core.content.FileProvider"

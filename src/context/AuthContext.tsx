@@ -3,6 +3,7 @@ import { setMyDob } from '../utils/age';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '../config/firebaseConfig';
 import { logoutUser, restoreSession, UserProfile } from '../services/authApi';
+import { unregisterPush } from '../services/pushApi';
 import { cancelVoteReminder, setNotificationName, syncVoteReminder } from '../native/notifications';
 
 interface AuthContextType {
@@ -89,6 +90,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const logout = async () => {
     try {
+      // Stop this phone's pushes for this account (best effort, max 3 s)
+      await Promise.race([unregisterPush(user?.id ? String(user.id) : null), new Promise<void>(r => setTimeout(() => r(), 3000))]);
       await logoutUser();
     } catch (e) {
       console.log('Logout error:', e);

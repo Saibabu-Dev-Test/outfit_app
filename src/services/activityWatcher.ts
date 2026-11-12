@@ -11,6 +11,7 @@ import { postNotification, postNotificationWithPayload } from '../native/notific
 import { likeLevelFor } from '../config/likeLevels';
 import { loadLikesReceived } from './coinsApi';
 import { countLikers, encodeCoinRain, likeNotificationText } from './likeCoins';
+import { serverPushActive } from './pushApi';
 
 const seenKey = (uid: string) => `outfitact:lastSeen:${uid}`;
 const notifiedKey = (uid: string) => `outfitact:lastNotified:${uid}`;
@@ -93,6 +94,10 @@ export const startActivityWatcher = (uid: string): (() => void) => {
     }
     if (!alive) return;
     const since = lastSeen;
+    let pushOn = false;
+    serverPushActive()
+      .then(v => (pushOn = v))
+      .catch(() => undefined);
     let notifiedMark = lastNotified;
     try {
       unsub = onSnapshot(
@@ -109,6 +114,8 @@ export const startActivityWatcher = (uid: string): (() => void) => {
           if (!fresh.length) return;
           notifiedMark = Math.max(...fresh.map(a => a.createdAt?.getTime() || 0));
           writeMs(notifiedKey(uid), notifiedMark);
+          // Push sender live and this phone registered: the push shows it (no double notification)
+          if (pushOn) return;
           // Likes: ONE notification with the coin level and how many people liked; tapping it
           // flips those coins across the screen (CoinRain)
           const liked = countLikers(fresh);
