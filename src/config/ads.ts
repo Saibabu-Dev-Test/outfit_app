@@ -11,14 +11,14 @@ export type AdSlot = 'feedNative' | 'circlesBanner' | 'searchBanner' | 'pollBann
 
 // Real ids (AdMob > Apps > Outfit). Unit names as in the AdMob console.
 export const REAL_ADS = {
-  appId: 'ca-app-pub-6289221123241733~9168675820',
-  feedNative: 'ca-app-pub-6289221123241733/4435223895', // feed_native (Native advanced): Feed, after every 5 posts
-  circlesBanner: 'ca-app-pub-6289221123241733/6542512483', // circles_banner (Banner): under the Circles list
-  searchBanner: 'ca-app-pub-6289221123241733/8214686801', // search_banner (Banner): people search
+  appId: 'ca-app-pub-8006246175093661~4589468267',
+  feedNative: 'ca-app-pub-8006246175093661/9650223257', // feed_native (Native advanced): Feed, after every 5 posts
+  circlesBanner: 'ca-app-pub-8006246175093661/4345035031', // circles_banner (Banner): under the Circles list
+  searchBanner: 'ca-app-pub-8006246175093661/1718871690', // search_banner (Banner): people search
   // Polls in circle chats: uses the circles banner unit until a poll_banner unit is made in AdMob
-  pollBanner: 'ca-app-pub-6289221123241733/6542512483',
-  astroRewarded: 'ca-app-pub-6289221123241733/3122142221', // astro_rewarded (Rewarded): "See full reading"
-  poruthamRewarded: 'ca-app-pub-6289221123241733/4303361956', // porutham_rewarded (Rewarded): full Pelli Porutham
+  pollBanner: 'ca-app-pub-8006246175093661/9905142618',
+  astroRewarded: 'ca-app-pub-8006246175093661/8348090730', // astro_rewarded (Rewarded): "See full reading"
+  poruthamRewarded: 'ca-app-pub-8006246175093661/4708656255', // porutham_rewarded (Rewarded): full Pelli Porutham
 } as const;
 
 // Google's official test ids (Android): https://developers.google.com/admob/android/test-ads
