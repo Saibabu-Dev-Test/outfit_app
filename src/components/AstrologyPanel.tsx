@@ -1,10 +1,12 @@
 // Me > 🔮 Astrology (జాతకం) tab: today's offline reading (services/astrologyDaily.ts), festival of
 // the day / coming soon (services/festivals.ts), and an optional one-a-day AI "More details".
-// Everything shows instantly from the phone; nothing here needs the network except "More details".
+// Free: a short summary (Good / Mixed / Caution, rashi + nakshatra, 1-2 lines). Everything else
+// (full verdict, remedies, Rahu kalam, panchang, dasha, chart, dress, festivals + plans, Porutham)
+// opens after ONE rewarded ad and stays open for the rest of the IST day (services/astroUnlock.ts).
 import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, TouchableOpacity, Image, ActivityIndicator, StyleSheet, Switch } from 'react-native';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles } from '../theme';
-import { useDayKey } from '../hooks/useDayKey';
+import { useDayKey, useIstDayKey } from '../hooks/useDayKey';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AstroLang, AstroProfile, astroLanguage, dailyReading } from '../services/astrologyDaily';
 import { LABELS } from '../i18n/astroLabels';
@@ -14,7 +16,8 @@ import { festivalsAround, festivalText, FestivalHit } from '../services/festival
 import { festivalDressFor, PLAN_LABELS, planText } from '../services/festivalPlans';
 import { astroAiAvailable, fetchAstroDetails, getCachedAstroDetails } from '../services/astrologyAi';
 import { loadAstroUnlock, saveAstroUnlock, shortText } from '../services/astroUnlock';
-import { watchAdToUnlock } from '../native/ads';
+import { showRewardedAd } from '../native/ads';
+import { REWARDED_FALLBACK_WAIT_MS } from '../config/ads';
 import type { WardrobeItemResponse } from '../services/wardrobeApi';
 import { formatDate } from '../utils/formatDate';
 
@@ -29,23 +32,25 @@ interface Props {
 const SHOW_EN_KEY = 'outfit.astro.showEnglish';
 
 // Free summary / rewarded-ad lock texts (English + Telugu; other languages show English)
-const LOCK_TEXT: Record<string, { summary: string; title: string; body: string; btn: string; busy: string; closed: string; open: string }> = {
+const LOCK_TEXT: Record<string, { summary: string; title: string; body: string; btn: string; busy: string; closed: string; noAd: string; open: string }> = {
   English: {
-    summary: "Today in short",
-    title: '🔒 Full reading',
-    body: "Panchang, birth chart, good / avoid, timings, remedies and what to wear. Watch a short ad to open it for today.",
-    btn: '▶ Watch ad · see full reading',
+    summary: 'Today in short',
+    title: '🔒 Full astrology',
+    body: 'Full verdict, positives and cautions, remedies, Rahu kalam and timings, panchang, dasha, birth chart, what to wear, festivals and festival plans, and Pelli Porutham. One short ad opens everything for the rest of today.',
+    btn: '▶ Watch 1 ad to see full astrology',
     busy: 'Loading ad…',
-    closed: 'The ad was closed early, so the full reading stays locked. Try again any time.',
-    open: '🔓 Full reading open for today',
+    closed: 'The ad was closed before the end, so full astrology stays locked. Tap the button to try again.',
+    noAd: 'No ad was available right now, so full astrology is open free for today.',
+    open: '🔓 Full astrology open for today',
   },
   Telugu: {
     summary: 'ఈ రోజు సంక్షిప్తంగా',
     title: '🔒 పూర్తి జాతకం',
-    body: 'పంచాంగం, జన్మ చార్ట్, చేయదగినవి / వద్దు, సమయాలు, పరిహారాలు, దుస్తులు. ఈ రోజుకు తెరవడానికి చిన్న యాడ్ చూడండి.',
-    btn: '▶ యాడ్ చూసి పూర్తి జాతకం చూడండి',
+    body: 'పూర్తి ఫలితం, మంచి / జాగ్రత్తలు, పరిహారాలు, రాహు కాలం, పంచాంగం, దశ, జన్మ చార్ట్, దుస్తులు, పండుగలు, పండుగ ప్లాన్లు, పెళ్లి పొరుత్తం. ఒక్క చిన్న యాడ్ చూస్తే ఈ రోజంతా అన్నీ తెరుచుకుంటాయి.',
+    btn: '▶ 1 యాడ్ చూసి పూర్తి జాతకం చూడండి',
     busy: 'యాడ్ లోడ్ అవుతోంది…',
-    closed: 'యాడ్ మధ్యలో మూసేశారు, అందుకే పూర్తి జాతకం తెరవలేదు. మళ్లీ ప్రయత్నించండి.',
+    closed: 'యాడ్ పూర్తి కాకముందే మూసేశారు, అందుకే పూర్తి జాతకం తెరవలేదు. మళ్లీ ప్రయత్నించండి.',
+    noAd: 'ఇప్పుడు యాడ్ అందుబాటులో లేదు, అందుకే ఈ రోజుకు పూర్తి జాతకం ఉచితంగా తెరిచాం.',
     open: '🔓 ఈ రోజుకు పూర్తి జాతకం తెరిచి ఉంది',
   },
 };
@@ -72,8 +77,9 @@ export default function AstrologyPanel({ uid, profile, wardrobe, onEditProfile, 
   };
   const bi = lang !== 'English' && showEn;
 
-  // Full reading: open for the rest of the local day after a rewarded ad (services/astroUnlock.ts).
-  // dayKey changes at local midnight, which re-reads the saved day and locks it again.
+  // Full astrology: open for the rest of the IST day after ONE rewarded ad (services/astroUnlock.ts).
+  // istDay changes at 12:00 AM IST, which re-reads the saved day and locks it again.
+  const istDay = useIstDayKey();
   const [unlocked, setUnlocked] = useState(false);
   const [unlockBusy, setUnlockBusy] = useState(false);
   const [unlockMsg, setUnlockMsg] = useState<string | null>(null);
@@ -81,22 +87,31 @@ export default function AstrologyPanel({ uid, profile, wardrobe, onEditProfile, 
     let alive = true;
     setUnlocked(false);
     setUnlockMsg(null);
-    loadAstroUnlock(uid, dayKey).then(v => alive && setUnlocked(v));
+    loadAstroUnlock(uid, istDay).then(v => alive && setUnlocked(v));
     return () => {
       alive = false;
     };
-  }, [uid, dayKey]);
+  }, [uid, istDay]);
   const lt = LOCK_TEXT[lang] || LOCK_TEXT.English;
   const unlockFull = async () => {
     if (unlockBusy) return;
     setUnlockBusy(true);
     setUnlockMsg(null);
     try {
-      const day = dayKey;
-      if (await watchAdToUnlock('astroRewarded')) {
+      const day = istDay;
+      const r = await showRewardedAd('astroRewarded');
+      if (r === 'earned') {
         await saveAstroUnlock(uid, day);
         setUnlocked(true);
+      } else if (r === 'no_ad') {
+        // No fill / offline / web / ads off: never leave the user stuck. Open for today after a
+        // short wait and say why (counts as today's one unlock).
+        await new Promise<void>(res => setTimeout(res, REWARDED_FALLBACK_WAIT_MS));
+        await saveAstroUnlock(uid, day);
+        setUnlocked(true);
+        setUnlockMsg(lt.noAd);
       } else {
+        // Closed before the reward: stays locked, the button stays there to try again
         setUnlockMsg(lt.closed);
       }
     } finally {
@@ -248,6 +263,7 @@ export default function AstrologyPanel({ uid, profile, wardrobe, onEditProfile, 
       {unlocked ? (
         <>
           <Text style={styles.unlockedTag}>{lt.open}</Text>
+          {unlockMsg ? <Text style={[styles.note, styles.centerNote]}>{unlockMsg}</Text> : null}
         <View style={styles.card}>
           <Text style={styles.title}>🗓️ {t.panchang}</Text>
           {reading.panchang.map((p, i) => (
@@ -415,19 +431,34 @@ export default function AstrologyPanel({ uid, profile, wardrobe, onEditProfile, 
           </TouchableOpacity>
         ) : null}
         {moreErr ? <Text style={styles.note}>{t.moreFail}</Text> : null}
+
+        {/* Festivals and festival plans come after today's astrology reading (full view only) */}
+        {shownFest.map(festivalCard)}
+
+        {onOpenPorutham ? (
+          <TouchableOpacity style={styles.moreBtn} onPress={onOpenPorutham} accessibilityLabel="Pelli Porutham">
+            <Text style={styles.moreText}>💑 Pelli Porutham · పెళ్లి పొరుత్తం</Text>
+          </TouchableOpacity>
+        ) : null}
         </>
       ) : (
         <>
           <View style={styles.card}>
             <Text style={styles.title}>🌟 {lt.summary}</Text>
+            {reading.verdict ? (
+              <View style={[styles.badge, reading.verdict.rating === 'good' ? styles.badgeGood : reading.verdict.rating === 'caution' ? styles.badgeBad : styles.badgeMixed]}>
+                <Text style={styles.badgeText}>
+                  {reading.verdict.ratingLabel}
+                  {bi && en?.verdict && en.verdict.ratingLabel !== reading.verdict.ratingLabel ? ` · ${en.verdict.ratingLabel}` : ''}
+                </Text>
+              </View>
+            ) : null}
             {reading.rashiLine ? <Bi style={styles.rashi} text={reading.rashiLine} enText={en?.rashiLine} /> : null}
-            <Text style={styles.stars}>{'★'.repeat(reading.stars)}{'☆'.repeat(5 - reading.stars)}</Text>
             <Bi
               style={styles.body}
               text={shortText(reading.verdict?.summary || reading.overview)}
               enText={en ? shortText(en.verdict?.summary || en.overview) : null}
             />
-            {swatches(reading.dress.colours.slice(0, 2).map((c, i) => ({ ...c, en: en?.dress.colours[i]?.name })))}
           </View>
           <View style={[styles.card, styles.lockCard]}>
             <Text style={styles.title}>{lt.title}</Text>
@@ -436,7 +467,7 @@ export default function AstrologyPanel({ uid, profile, wardrobe, onEditProfile, 
               style={[styles.askBtn, styles.unlockBtn]}
               onPress={unlockFull}
               disabled={unlockBusy}
-              accessibilityLabel="Watch an ad to see the full reading for today">
+              accessibilityLabel="Watch 1 ad to see full astrology for today">
               {unlockBusy ? (
                 <View style={styles.moreRow}>
                   <ActivityIndicator size="small" color={colors.textInverse} />
@@ -451,15 +482,6 @@ export default function AstrologyPanel({ uid, profile, wardrobe, onEditProfile, 
         </>
       )}
 
-      {/* Festivals come after today's astrology reading */}
-      {shownFest.map(festivalCard)}
-
-      {onOpenPorutham ? (
-        <TouchableOpacity style={styles.moreBtn} onPress={onOpenPorutham} accessibilityLabel="Pelli Porutham">
-          <Text style={styles.moreText}>💑 Pelli Porutham · పెళ్లి పొరుత్తం</Text>
-        </TouchableOpacity>
-      ) : null}
-
       <Bi style={styles.disclaimer} text={t.disclaimer} enText={proseFor('English').t.disclaimer} />
     </View>
   );
@@ -468,6 +490,7 @@ export default function AstrologyPanel({ uid, profile, wardrobe, onEditProfile, 
 const styles = themedStyles(() => StyleSheet.create({
   lockCard: { borderWidth: 1, borderColor: colors.primary },
   unlockBtn: { alignSelf: 'stretch', alignItems: 'center' },
+  centerNote: { textAlign: 'center', marginBottom: spacing.sm },
   unlockedTag: { fontSize: fontSize.xs, color: colors.textSecondary, marginBottom: spacing.sm, textAlign: 'center' },
   wrap: { paddingHorizontal: spacing.base, paddingTop: spacing.md, paddingBottom: spacing.xxl },
   topRow: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.sm },

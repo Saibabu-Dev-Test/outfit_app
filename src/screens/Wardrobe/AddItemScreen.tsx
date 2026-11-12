@@ -34,7 +34,7 @@ import {
   ALL_CATEGORIES,
   SHOE_TYPES,
   ACCESSORY_TYPES,
-  typeLabel,
+  appTypeLabel,
   groupOfCategory,
   normalizeCategory,
   resolveCategory,
@@ -534,7 +534,7 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
                     onPress={() => pickType(t)}
                     activeOpacity={0.75}>
                     <Text style={styles.chipEmojiSmall}>{categoryIcon(t)}</Text>
-                    <Text style={[styles.pillText, isSelected && styles.itemChipTextSelected]}>{typeLabel(t, appLanguage)}</Text>
+                    <Text style={[styles.pillText, isSelected && styles.itemChipTextSelected]}>{appTypeLabel(t, appLanguage)}</Text>
                   </TouchableOpacity>
                 );
               })}
@@ -543,7 +543,7 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
         ) : null}
         {selectedSubType && ACCESSORY_KINDS[selectedSubType] ? (
           <>
-            <Text style={styles.swipeHint}>{typeLabel(selectedSubType, appLanguage)} kind (optional) · swipe ›</Text>
+            <Text style={styles.swipeHint}>{appTypeLabel(selectedSubType, appLanguage)} kind (optional) · swipe ›</Text>
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
@@ -561,7 +561,7 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
                     }}
                     activeOpacity={0.75}>
                     <Text style={styles.chipEmojiSmall}>{categoryIcon(k)}</Text>
-                    <Text style={[styles.pillText, on && styles.itemChipTextSelected]}>{typeLabel(k, appLanguage)}</Text>
+                    <Text style={[styles.pillText, on && styles.itemChipTextSelected]}>{appTypeLabel(k, appLanguage)}</Text>
                   </TouchableOpacity>
                 );
               })}

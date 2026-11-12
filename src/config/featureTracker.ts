@@ -28,7 +28,7 @@ export const TRACKED_FEATURES: TrackedFeature[] = [
   { title: 'Push notifications + 24 h polls', status: 'live', pr: 26 },
   { title: 'Profile style chips and Fabric Type removed', status: 'in_review', pr: 27 },
   { title: 'Wardrobe labels English by default + App language', status: 'in_review', pr: 27 },
-  { title: 'Smaller coins, soft slow coin flip and sound', status: 'in_review', pr: 27 },
+  { title: 'Smaller coins, soft slow coin flip and sound', status: 'live', pr: 29 },
   { title: 'Photo background: Original / Blur (level) / Remove BG', status: 'in_review', pr: 27 },
   { title: 'Clearer photos (sharper grid and feed copies)', status: 'in_review', pr: 27 },
   { title: 'Rings: finger, ear, nose, toe, couple rings', status: 'in_review', pr: 27 },
@@ -38,6 +38,7 @@ export const TRACKED_FEATURES: TrackedFeature[] = [
   { title: 'Admin tracking screen + admin can remove any wardrobe item', status: 'in_review', pr: 27 },
   { title: 'Terms & About this app (Settings)', status: 'in_review', pr: 27 },
   { title: 'Sign up required before upload, vote, like, comment', status: 'in_review', pr: 27 },
+  { title: 'Astrology: free summary; full astrology, festivals and Porutham after 1 ad a day (IST)', status: 'in_review' },
   {
     title: 'Push notifications on phones',
     status: 'owner_todo',
