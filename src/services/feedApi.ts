@@ -600,6 +600,8 @@ export const castPostVote = async (postId: string, uid: string, optionIndex: num
   } catch (e: any) {
     fail(e, 'Voting');
   }
+  // +1 coin on my first vote on this poll (coinEvents/vote_post_<id> is create-only) + coin flip
+  awardCoins('vote', `post_${postId}`);
 };
 
 // ── Public wardrobe photos in the feed ──────────────────────────────────

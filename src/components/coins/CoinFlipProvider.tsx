@@ -1,6 +1,6 @@
 // Global coin flip overlay, mounted once at the app root. Any award calls showCoinFlip()
 // (services/coinBus). Every award gets its own flip: awards are queued and played one after
-// another (~1.4 s slow spin that lands on the coin sound's settle ring + ~1 s text). When more than 3 are waiting the rest play faster so a run
+// another (~2.4 s slow spin that lands on the coin sound's settle ring + ~1 s text). When more than 3 are waiting the rest play faster so a run
 // of likes never lags behind. Non-blocking (pointerEvents none), the flip runs on the UI thread
 // (Reanimated), the coin sound plays at flip start, and an error here never reaches the app.
 import React, { useEffect, useRef, useState } from 'react';
