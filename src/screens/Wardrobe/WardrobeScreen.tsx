@@ -138,12 +138,21 @@ export default function WardrobeScreen({ navigation }: { navigation: any }) {
             <Text style={styles.subtitle}>My Collection</Text>
             <Text style={styles.title}>Wardrobe</Text>
           </View>
-          <TouchableOpacity
-            style={styles.addButton}
-            onPress={() => navigation.navigate('AddItem')}
-            activeOpacity={0.8}>
-            <Text style={styles.addButtonText}>+ Add</Text>
-          </TouchableOpacity>
+          <View style={styles.headerBtns}>
+            <TouchableOpacity
+              style={[styles.addButton, styles.quickButton]}
+              onPress={() => navigation.navigate('QuickAdd')}
+              activeOpacity={0.8}
+              accessibilityLabel="Quick add several photos">
+              <Text style={styles.addButtonText}>⚡ Quick</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.addButton}
+              onPress={() => navigation.navigate('AddItem')}
+              activeOpacity={0.8}>
+              <Text style={styles.addButtonText}>+ Add</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Stats Row */}
@@ -319,6 +328,8 @@ export default function WardrobeScreen({ navigation }: { navigation: any }) {
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = themedStyles(() => StyleSheet.create({
+  headerBtns: { flexDirection: 'row', alignItems: 'center' },
+  quickButton: { marginRight: 8, opacity: 0.92 },
   modeRow: { paddingHorizontal: spacing.base, paddingBottom: spacing.sm, gap: 8 },
   modeChip: {
     paddingHorizontal: 14,
