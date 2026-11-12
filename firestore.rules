@@ -390,6 +390,27 @@ service cloud.firestore {
       allow update: if false;
     }
 
+    // ── Push tokens (FCM): users/{uid}/pushTokens/{tokenId} {token, platform, updatedAt} ──
+    // Only the owner writes / removes their phone's token; the sender job reads them with admin
+    // credentials (scripts/push).
+    match /users/{uid}/pushTokens/{tid} {
+      allow read, delete: if signedIn() && me() == uid;
+      allow create, update: if signedIn() && me() == uid
+        && request.resource.data.keys().hasOnly(['token', 'platform', 'updatedAt'])
+        && request.resource.data.token is string
+        && request.resource.data.token.size() > 0
+        && request.resource.data.token.size() <= 4096
+        && request.resource.data.platform in ['android', 'web']
+        && request.resource.data.updatedAt == request.time
+        && tid.matches('^t_[a-z0-9]{1,40}$');
+    }
+
+    // ── Push sender heartbeat: config/push {lastRunAt} (written only by the sender job) ──
+    match /config/push {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
     // ── Public list of admin uids: config/admins {uids, updatedAt} ──
     // Read by any signed-in user (feedback notifies the admins); written only by an admin
     // (AdminScreen adds the admin who opens it).
@@ -806,8 +827,10 @@ service cloud.firestore {
         // ── Poll votes: one doc per voter, so a new vote replaces the old one ──
         match /votes/{voterId} {
           allow read: if isMember(cid) || isAdmin();
+          // 24-hour polls (src/utils/pollWindow.ts): votes only within 24 h of the poll's createdAt
           allow create, update: if isMember(cid)
             && voterId == me()
+            && request.time < get(/databases/$(db)/documents/circles/$(cid)/messages/$(mid)).data.get('createdAt', request.time + duration.value(1, 'm')) + duration.value(24, 'h')
             && request.resource.data.keys().hasOnly(['optionIndex', 'updatedAt'])
             && request.resource.data.optionIndex is int
             && request.resource.data.optionIndex >= 0

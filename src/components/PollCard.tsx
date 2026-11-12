@@ -2,6 +2,7 @@
 // Tap a photo to see it full screen (swipe A-F, pinch-zoom, vote there); tap the A-F bar under it to vote.
 import React, { useEffect, useState } from 'react';
 import { View, Text, Image, TouchableOpacity, StyleSheet, Alert, ActivityIndicator } from 'react-native';
+import { isPollOpen, pollTimeLeft, pollWinners } from '../utils/pollWindow';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles } from '../theme';
 import { ChatMessage, POLL_LETTERS, PollTally, castPollVote, subscribePollVotes } from '../services/circlesApi';
 import FullScreenImageViewer, { ViewerVoteBar } from './FullScreenImageViewer';
@@ -18,8 +19,17 @@ interface Props {
   onOpenImages?: (uris: string[], index: number, labels: string[]) => void;
 }
 
-export default function PollCard({ circleId, message, myUid, canVote, onLongPress }: Props) {
+export default function PollCard({ circleId, message, myUid, canVote: memberCanVote, onLongPress }: Props) {
   const options = message.poll?.options || [];
+  // 24-hour polls: voting locks 24 h after the poll was posted (utils/pollWindow.ts)
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!isPollOpen(message.createdAt)) return;
+    const t = setInterval(() => setNow(Date.now()), 60000);
+    return () => clearInterval(t);
+  }, [message.createdAt]);
+  const open = isPollOpen(message.createdAt, now);
+  const canVote = memberCanVote && open;
   const [tally, setTally] = useState<PollTally>({
     counts: new Array(options.length).fill(0),
     total: 0,
@@ -153,6 +163,14 @@ export default function PollCard({ circleId, message, myUid, canVote, onLongPres
             : ' · tap a letter to vote, a photo to see it big'
           : ' · tap a photo to see it big'}
       </Text>
+      {open ? (
+        pollTimeLeft(message.createdAt, now) ? <Text style={styles.window}>⏳ {pollTimeLeft(message.createdAt, now)} to vote</Text> : null
+      ) : (
+        <Text style={styles.window}>
+          🔒 Voting closed
+          {pollWinners(tally.counts).length ? ` · ${pollWinners(tally.counts).map(i => POLL_LETTERS[i]).join(' & ')} won` : ''}
+        </Text>
+      )}
       <FullScreenImageViewer
         visible={viewIndex !== null}
         photos={options.map((o, i) => ({ uri: o.imageData, label: optionName(i) }))}
@@ -165,6 +183,7 @@ export default function PollCard({ circleId, message, myUid, canVote, onLongPres
 }
 
 const styles = themedStyles(() => StyleSheet.create({
+  window: { fontSize: fontSize.xs, color: colors.textSecondary, marginTop: 2, fontWeight: fontWeight.semiBold },
   card: { width: 260 },
   question: { fontSize: fontSize.base, fontWeight: fontWeight.bold, color: colors.textPrimary, marginBottom: spacing.sm },
   grid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },

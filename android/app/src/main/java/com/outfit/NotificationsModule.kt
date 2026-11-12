@@ -151,6 +151,28 @@ class NotificationsModule(private val ctx: ReactApplicationContext) : ReactConte
     }
   }
 
+  // FCM registration token for push, or null (no Firebase / Play services / offline). Never rejects.
+  @ReactMethod
+  fun getPushToken(promise: Promise) {
+    try {
+      OutfitNotifier.ensureChannels(ctx)
+      if (com.google.firebase.FirebaseApp.getApps(ctx).isEmpty()) {
+        promise.resolve(null)
+        return
+      }
+      com.google.firebase.messaging.FirebaseMessaging.getInstance().token
+        .addOnCompleteListener { t ->
+          try {
+            promise.resolve(if (t.isSuccessful) t.result else null)
+          } catch (e: Exception) {
+            promise.resolve(null)
+          }
+        }
+    } catch (e: Throwable) {
+      promise.resolve(null)
+    }
+  }
+
   companion object {
     const val NAME = "OutfitNotifications"
   }

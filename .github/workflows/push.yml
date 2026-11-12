@@ -1,0 +1,96 @@
+name: Push notifications (FCM sender + token cleanup)
+
+# Sends pushes for new likes / comments / follows while users' apps are closed
+# (scripts/push/send-activity-push.js) every 15 minutes, and once a week removes dead FCM tokens
+# (scripts/push/cleanup-tokens.js). Run by hand from the Actions tab too (dry run optional).
+# Auth: same as firestore.yml - keyless Workload Identity Federation (github-deployer service
+# account), else the optional FIREBASE_SERVICE_ACCOUNT secret. With neither, the job skips with a
+# warning. The service account needs Cloud Datastore User + Firebase Cloud Messaging API Admin
+# (see scripts/push/README.md).
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+    - cron: '30 3 * * 1'
+  workflow_dispatch:
+    inputs:
+      job:
+        description: 'send or cleanup'
+        default: send
+        type: choice
+        options: [send, cleanup]
+      dry_run:
+        description: 'Only print what would happen'
+        default: false
+        type: boolean
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: push-sender
+  cancel-in-progress: false
+
+jobs:
+  push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Firebase project
+        id: cfg
+        run: |
+          PROJECT=$(node -e "try{console.log(require('./.firebaserc').projects.default||'')}catch(e){console.log('')}")
+          if [ -z "$PROJECT" ]; then
+            PROJECT=$(node -e "console.log(require('./android/app/google-services.json').project_info.project_id)")
+          fi
+          echo "project=$PROJECT" >> "$GITHUB_OUTPUT"
+
+      - name: Google auth (Workload Identity Federation)
+        id: wif
+        continue-on-error: true
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/791853722614/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+          service_account: github-deployer@outfit-vote-9edca.iam.gserviceaccount.com
+          create_credentials_file: true
+
+      - name: Google auth (FIREBASE_SERVICE_ACCOUNT fallback)
+        id: sa
+        if: steps.wif.outcome != 'success'
+        env:
+          SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          if [ -z "$SA" ]; then
+            echo "::warning::No Google credentials (Workload Identity failed and FIREBASE_SERVICE_ACCOUNT is not set): pushes were NOT sent."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          umask 077
+          printf '%s' "$SA" > "$RUNNER_TEMP/sa.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/sa.json" >> "$GITHUB_ENV"
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+
+      - name: Install sender
+        if: steps.wif.outcome == 'success' || steps.sa.outputs.ready == 'true'
+        working-directory: scripts/push
+        run: npm install --no-audit --no-fund --omit=dev
+
+      - name: Send pushes / clean tokens
+        if: steps.wif.outcome == 'success' || steps.sa.outputs.ready == 'true'
+        working-directory: scripts/push
+        env:
+          FIREBASE_PROJECT: ${{ steps.cfg.outputs.project }}
+          GCLOUD_PROJECT: ${{ steps.cfg.outputs.project }}
+          DRY_RUN: ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) && '1' || '0' }}
+          JOB: ${{ github.event_name == 'workflow_dispatch' && inputs.job || (github.event.schedule == '30 3 * * 1' && 'cleanup' || 'send') }}
+        run: |
+          if [ "$JOB" = "cleanup" ]; then node cleanup-tokens.js; else node send-activity-push.js; fi
+
+      - name: Remove key file
+        if: always()
+        run: rm -f "$RUNNER_TEMP/sa.json"
