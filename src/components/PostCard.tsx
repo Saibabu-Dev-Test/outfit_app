@@ -1,5 +1,6 @@
 // One feed item (post or public wardrobe photo), Instagram style:
 // header, photo(s), double-tap like, 👍 / 👎 / 💬 / Follow / Share, caption. 2-6 photos = A-F vote post.
+// Single tap on a photo opens it full screen (swipe A-F, pinch-zoom, vote from there).
 import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
@@ -19,6 +20,7 @@ import { useNavigation } from '@react-navigation/native';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles } from '../theme';
 import Avatar from './Avatar';
 import ReportModal, { ReportTarget } from './ReportModal';
+import FullScreenImageViewer, { ViewerVoteBar } from './FullScreenImageViewer';
 import { useAuth } from '../context/AuthContext';
 import {
   OPTION_LABELS,
@@ -94,6 +96,7 @@ export default function PostCard({
     [],
   );
   const [shownPhotos, setShownPhotos] = useState<string[]>(post.photos);
+  const [viewIndex, setViewIndex] = useState<number | null>(null);
   const heart = useRef(new Animated.Value(0)).current;
   const multi = post.kind === 'post' && post.photos.length > 1;
   const isMine = !!myUid && post.userId === myUid;
@@ -311,23 +314,14 @@ export default function PostCard({
       if (!liked) like(true);
     } else {
       lastTap.current = now;
-      if (onOpenPhoto) {
-        if (openTimer.current) clearTimeout(openTimer.current);
-        openTimer.current = setTimeout(() => {
-          openTimer.current = null;
-          if (lastTap.current === now) {
-            lastTap.current = 0;
-            onOpenPhoto(shownPhotos.length ? shownPhotos : [post.imageData], index);
-          }
-        }, 310);
-      } else if (!detail) {
-        // Single tap in a list: open the full-size photo (after the double-tap window)
-        if (openTimer.current) clearTimeout(openTimer.current);
-        openTimer.current = setTimeout(() => {
-          openTimer.current = null;
-          navigation.navigate('PostDetail', { kind: post.kind, id: post.id });
-        }, 300);
-      }
+      if (openTimer.current) clearTimeout(openTimer.current);
+      openTimer.current = setTimeout(() => {
+        openTimer.current = null;
+        if (lastTap.current !== now) return;
+        lastTap.current = 0;
+        if (onOpenPhoto) onOpenPhoto(shownPhotos.length ? shownPhotos : [post.imageData], index);
+        else setViewIndex(index); // full-screen viewer (pinch-zoom, swipe, vote on A-F posts)
+      }, 310);
     }
   };
 
@@ -342,6 +336,22 @@ export default function PostCard({
     } finally {
       setVoting(null);
     }
+  };
+
+  // Full-screen footer on A-F posts: vote for the photo on screen
+  const viewerFooter = (i: number) => {
+    const c = votes?.counts[i] || 0;
+    const pct = votes && votes.total ? Math.round((c / votes.total) * 100) : 0;
+    const mine = votes?.myVote === i;
+    return (
+      <ViewerVoteBar
+        label={mine ? `✓ You voted ${OPTION_LABELS[i]}` : `Vote ${OPTION_LABELS[i]}`}
+        info={`${pct}% · ${c} ${c === 1 ? 'vote' : 'votes'}`}
+        active={mine}
+        busy={voting === i}
+        onPress={myUid ? () => vote(i) : undefined}
+      />
+    );
   };
 
   const openProfile = () => {
@@ -569,6 +579,16 @@ export default function PostCard({
         </TouchableOpacity>
       )}
       <ReportModal target={reportTarget} reporterId={myUid} onClose={() => setReportTarget(null)} />
+      <FullScreenImageViewer
+        visible={viewIndex !== null}
+        photos={(multi ? (shownPhotos.length ? shownPhotos : post.photos) : [shownPhotos[0] || post.imageData]).map((uri, i) => ({
+          uri,
+          label: multi ? `${OPTION_LABELS[i]} · ${post.userName}` : post.userName,
+        }))}
+        index={viewIndex ?? 0}
+        onClose={() => setViewIndex(null)}
+        renderFooter={multi ? viewerFooter : undefined}
+      />
     </View>
   );
 }

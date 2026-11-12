@@ -1,9 +1,10 @@
 // Photo poll in a circle chat: live vote counts, the user's choice highlighted.
-// Tap a photo to open it in the zoom viewer (swipe between options); tap the bar under it to vote or change.
+// Tap a photo to see it full screen (swipe A-F, pinch-zoom, vote there); tap the A-F bar under it to vote.
 import React, { useEffect, useState } from 'react';
 import { View, Text, Image, TouchableOpacity, StyleSheet, Alert, ActivityIndicator } from 'react-native';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles } from '../theme';
 import { ChatMessage, POLL_LETTERS, PollTally, castPollVote, subscribePollVotes } from '../services/circlesApi';
+import FullScreenImageViewer, { ViewerVoteBar } from './FullScreenImageViewer';
 
 interface Props {
   circleId: string;
@@ -11,12 +12,13 @@ interface Props {
   myUid?: string;
   canVote: boolean; // false for admins reading a circle they are not in
   onLongPress?: () => void;
+  // Kept for callers; photos now open in the built-in full-screen viewer (vote there)
   onOpenImage?: (uri: string) => void;
   // Opens all option photos in the zoom viewer at `index` (preferred over onOpenImage)
   onOpenImages?: (uris: string[], index: number, labels: string[]) => void;
 }
 
-export default function PollCard({ circleId, message, myUid, canVote, onLongPress, onOpenImage, onOpenImages }: Props) {
+export default function PollCard({ circleId, message, myUid, canVote, onLongPress }: Props) {
   const options = message.poll?.options || [];
   const [tally, setTally] = useState<PollTally>({
     counts: new Array(options.length).fill(0),
@@ -24,6 +26,7 @@ export default function PollCard({ circleId, message, myUid, canVote, onLongPres
     myVote: null,
   });
   const [pending, setPending] = useState<number | null>(null);
+  const [viewIndex, setViewIndex] = useState<number | null>(null);
 
   useEffect(() => {
     const unsub = subscribePollVotes(circleId, message.id, options.length, myUid, setTally);
@@ -49,23 +52,25 @@ export default function PollCard({ circleId, message, myUid, canVote, onLongPres
 
   if (!message.poll) return null;
 
-  const labelOf = (i: number) => {
+  const optionName = (i: number) => {
     const o = options[i];
     return !o?.label || o.label === POLL_LETTERS[i] ? POLL_LETTERS[i] : `${POLL_LETTERS[i]} · ${o.label}`;
   };
-  const openPhoto = (i: number) => {
-    if (onOpenImages) {
-      const withImg = options.map((o, j) => ({ uri: o.imageData, j })).filter(x => !!x.uri);
-      const at = Math.max(0, withImg.findIndex(x => x.j === i));
-      onOpenImages(
-        withImg.map(x => x.uri),
-        at,
-        withImg.map(x => labelOf(x.j)),
-      );
-    } else if (options[i]?.imageData) {
-      onOpenImage?.(options[i].imageData);
-    }
+  const stats = (i: number) => {
+    const count = tally.counts[i] || 0;
+    const pct = tally.total ? Math.round((count / tally.total) * 100) : 0;
+    return `${pct}% · ${count} ${count === 1 ? 'vote' : 'votes'}`;
   };
+  // Full-screen footer: vote for the photo on screen
+  const viewerFooter = (i: number) => (
+    <ViewerVoteBar
+      label={tally.myVote === i ? `✓ You voted ${POLL_LETTERS[i]}` : canVote ? `Vote ${POLL_LETTERS[i]}` : POLL_LETTERS[i]}
+      info={stats(i)}
+      active={tally.myVote === i}
+      busy={pending === i}
+      onPress={canVote && myUid ? () => vote(i) : undefined}
+    />
+  );
 
   return (
     <View style={styles.card}>
@@ -83,10 +88,10 @@ export default function PollCard({ circleId, message, myUid, canVote, onLongPres
             <View key={i} style={[styles.option, mine && styles.optionMine]}>
               <TouchableOpacity
                 activeOpacity={0.85}
-                onPress={() => openPhoto(i)}
+                onPress={() => setViewIndex(i)}
                 onLongPress={onLongPress}
                 delayLongPress={350}
-                accessibilityLabel={`View photo ${POLL_LETTERS[i]}`}>
+                accessibilityLabel={`Open photo ${POLL_LETTERS[i]} full screen`}>
                 {o.imageData ? (
                   <Image source={{ uri: o.imageData }} style={styles.image} resizeMode="cover" />
                 ) : (
@@ -116,7 +121,7 @@ export default function PollCard({ circleId, message, myUid, canVote, onLongPres
                 accessibilityLabel={`Vote for ${POLL_LETTERS[i]}`}>
                 <View style={styles.labelRow}>
                   <Text style={styles.optionLabel} numberOfLines={1}>
-                    {labelOf(i)}
+                    {optionName(i)}
                   </Text>
                   {canVote ? (
                     <Text style={[styles.votePill, mine && styles.votePillMine]}>{mine ? 'Voted' : 'Vote'}</Text>
@@ -144,10 +149,17 @@ export default function PollCard({ circleId, message, myUid, canVote, onLongPres
         {tally.total} {tally.total === 1 ? 'vote' : 'votes'}
         {canVote
           ? tally.myVote !== null
-            ? ' · tap Vote under another photo to change'
-            : ' · tap Vote under a photo · tap a photo to zoom'
-          : ''}
+            ? ' · tap another letter to change your vote'
+            : ' · tap a letter to vote, a photo to see it big'
+          : ' · tap a photo to see it big'}
       </Text>
+      <FullScreenImageViewer
+        visible={viewIndex !== null}
+        photos={options.map((o, i) => ({ uri: o.imageData, label: optionName(i) }))}
+        index={viewIndex ?? 0}
+        onClose={() => setViewIndex(null)}
+        renderFooter={viewerFooter}
+      />
     </View>
   );
 }

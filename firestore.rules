@@ -420,6 +420,34 @@ service cloud.firestore {
       allow update: if false;
     }
 
+    // ── "Wear today" votes on someone's wardrobe: users/{uid}/wearVotes/{date}_{voterId} ──
+    // {voterId, itemId, date, updatedAt}. Like a daily vote: one doc per voter per owner per day
+    // (voting for another item overwrites it). Only the voter writes their own doc; nobody votes on
+    // their own clothes; only public items of an open (public) profile; only around that date.
+    // Counts are readable by the owner and by anyone who can see the profile.
+    match /users/{uid}/wearVotes/{vid} {
+      function wearItem() {
+        return get(/databases/$(db)/documents/wardrobe/$(request.resource.data.itemId)).data;
+      }
+      allow read: if signedIn() && (me() == uid || profileOpen(uid));
+      allow create, update: if signedIn()
+        && me() != uid
+        && profileOpen(uid)
+        && request.resource.data.keys().hasOnly(['voterId', 'itemId', 'date', 'updatedAt'])
+        && request.resource.data.voterId == me()
+        && isDateKey(request.resource.data.date)
+        && vid == request.resource.data.date + '_' + me()
+        && request.time > dateTs(request.resource.data.date) - duration.value(14, 'h')
+        && request.time < dateTs(request.resource.data.date) + duration.value(38, 'h')
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.itemId is string
+        && request.resource.data.itemId.size() > 0
+        && request.resource.data.itemId.size() <= 128
+        && wearItem().userId == uid
+        && wearItem().isPublic == true;
+      allow delete: if signedIn() && resource.data.voterId == me();
+    }
+
     // ── Week counter: users/{uid}/weeks/{mondayKey} {fullDays, lastDay, updatedAt} ──
     // +1 only in the same write that makes lastDay (a day of that week) fully done.
     function weekCountOk(uid, week, oldCount) {

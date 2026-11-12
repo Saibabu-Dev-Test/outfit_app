@@ -1,8 +1,8 @@
-// "Me" tab, Instagram-like: avatar, counts (posts, wardrobe, followers, following), bio,
-// Edit profile, and 🔮 Astrology / Wardrobe / Likes. Astrology (components/AstrologyPanel.tsx) is
-// computed on the phone from the saved profile (dob, time of birth, rashi, gender, language).
-// It replaced the old Posts grid (new posts can't be made any more; old posts stay in the DB and
-// still open from the Feed / Likes). Settings live behind the ⚙️ button.
+// "Me" tab, Instagram-like: avatar (tap for full screen), counts (wear votes today, wardrobe, followers,
+// following), bio, Edit profile, and 🔮 Astrology / Wardrobe / Today's pick / Likes tabs.
+// Astrology (components/AstrologyPanel.tsx) is computed on the phone from the saved profile.
+// The old Posts tab was replaced by the wardrobe "Wear today" votes (old posts still open from the
+// Feed / Likes). Settings live behind the ⚙️ button.
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
@@ -22,6 +22,9 @@ import { useAuth } from '../../context/AuthContext';
 import ProfileHeader, { headerButtonStyles as hb } from '../../components/ProfileHeader';
 import CoinBadge from '../../components/coins/CoinBadge';
 import PhotoGrid from '../../components/PhotoGrid';
+import WardrobeVoteGrid from '../../components/WardrobeVoteGrid';
+import TodaysPick from '../../components/TodaysPick';
+import useWearVotes from '../../hooks/useWearVotes';
 import { getProfileCounts, ProfileCounts } from '../../services/socialApi';
 import { getCachedLikedItems, getLikedItems, Post, rememberPosts } from '../../services/feedApi';
 import { getWardrobeItems, WardrobeItemResponse } from '../../services/wardrobeApi';
@@ -32,17 +35,19 @@ import { countFriendsJoined, isWeeklyStar, joinedWithLinkText } from '../../serv
 import { shareMyReferral } from '../../utils/referralLink';
 import useIsAdmin from '../../hooks/useIsAdmin';
 
-type Tab = 'astro' | 'wardrobe' | 'likes';
+type Tab = 'astro' | 'wardrobe' | 'pick' | 'likes';
 
 export default function MeScreen({ navigation }: { navigation: any }) {
   const { user, updateUserData } = useAuth();
   const uid = user?.id || '';
   const [counts, setCounts] = useState<ProfileCounts | null>(null);
+  const [privateIds, setPrivateIds] = useState<Set<string>>(new Set());
   const [wardrobe, setWardrobe] = useState<Post[]>([]);
   const [wardrobeItems, setWardrobeItems] = useState<WardrobeItemResponse[] | null>(null);
   const [profile, setProfile] = useState<StoredProfile>({});
   const [likes, setLikes] = useState<Post[] | null>(null);
   const [tab, setTab] = useState<Tab>('astro');
+  const wear = useWearVotes(uid, uid);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [isStar, setIsStar] = useState(false);
@@ -71,6 +76,7 @@ export default function MeScreen({ navigation }: { navigation: any }) {
       saveUserProfile(uid, upd).catch(e => console.warn('Birth chart save failed:', e?.message));
     }
     setProfile(prof);
+    setPrivateIds(new Set(w.filter(i => !!i.imageUrl && !i.isPublic).map(i => i.id)));
     const wardrobePosts: Post[] = w
         .filter(i => !!i.imageUrl)
         .map(i => ({
@@ -97,6 +103,7 @@ export default function MeScreen({ navigation }: { navigation: any }) {
     setRefreshing(false);
     isWeeklyStar(uid).then(setIsStar);
     countFriendsJoined(uid).then(setJoined);
+    wear.refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uid]);
 
@@ -142,7 +149,6 @@ export default function MeScreen({ navigation }: { navigation: any }) {
   };
 
   const open = (p: Post) => navigation.navigate('PostDetail', { kind: p.kind, id: p.id });
-  const grid = tab === 'wardrobe' ? wardrobe : likes || [];
   const editProfile = () => navigation.navigate('Settings', { edit: true });
   // Saved profile (fresh read) over the signed-in copy
   const astroProfile = {
@@ -166,6 +172,12 @@ export default function MeScreen({ navigation }: { navigation: any }) {
         <Text style={styles.barTitle} numberOfLines={1}>
           {user?.name || 'Me'}
         </Text>
+        <TouchableOpacity
+          style={styles.barBtn}
+          onPress={() => navigation.navigate('Wardrobe', { screen: 'AddItem' })}
+          accessibilityLabel="Add clothes to my wardrobe">
+          <Text style={styles.barIcon}>＋👗</Text>
+        </TouchableOpacity>
         <TouchableOpacity style={styles.barBtn} onPress={invite} accessibilityLabel="Invite friends to download the app">
           <Text style={styles.barIcon}>🎁</Text>
         </TouchableOpacity>
@@ -198,6 +210,8 @@ export default function MeScreen({ navigation }: { navigation: any }) {
           counts={counts}
           isStar={isStar}
           isPrivate={user?.isPublic === false}
+          todayVotes={wear.loading ? undefined : wear.tally.total}
+          onPressTodayVotes={() => openTab('pick')}
           badge={<CoinBadge uid={uid} />}>
           <TouchableOpacity style={hb.btn} onPress={editProfile}>
             <Text style={hb.btnText}>Edit profile</Text>
@@ -225,10 +239,10 @@ export default function MeScreen({ navigation }: { navigation: any }) {
         ) : null}
 
         <View style={styles.tabs}>
-          {(['astro', 'wardrobe', 'likes'] as Tab[]).map(t => (
+          {(['astro', 'wardrobe', 'pick', 'likes'] as Tab[]).map(t => (
             <TouchableOpacity key={t} style={[styles.tab, tab === t && styles.tabOn]} onPress={() => openTab(t)}>
               <Text style={[styles.tabText, tab === t && styles.tabTextOn]}>
-                {t === 'astro' ? '🔮 Astrology' : t === 'wardrobe' ? '👗 Wardrobe' : '♡ Likes'}
+                {t === 'astro' ? '🔮 Astro' : t === 'wardrobe' ? '👗 Wardrobe' : t === 'pick' ? "⭐ Today's pick" : '♡ Likes'}
               </Text>
             </TouchableOpacity>
           ))}
@@ -244,15 +258,29 @@ export default function MeScreen({ navigation }: { navigation: any }) {
           />
         ) : loading || (tab === 'likes' && likes === null) ? (
           <ActivityIndicator style={styles.spinner} color={colors.primary} />
+        ) : tab === 'wardrobe' ? (
+          <WardrobeVoteGrid
+            items={wardrobe}
+            ownerId={uid}
+            ownerName={user?.name}
+            isOwner
+            wear={wear}
+            privateIds={privateIds}
+            empty="No wardrobe photos yet. Tap ＋👗 to add clothes."
+          />
+        ) : tab === 'pick' ? (
+          <TodaysPick
+            items={wardrobe}
+            ownerName={user?.name}
+            isOwner
+            wear={wear}
+            onOpenWardrobe={() => openTab('wardrobe')}
+          />
         ) : (
           <PhotoGrid
-            items={grid}
+            items={likes || []}
             onPress={open}
-            empty={
-              tab === 'wardrobe'
-                ? 'No wardrobe photos yet.'
-                : 'No likes yet. Photos you like (double-tap in the Feed) show up here.'
-            }
+            empty="No likes yet. Photos you like (double-tap in the Feed) show up here."
           />
         )}
       </ScrollView>

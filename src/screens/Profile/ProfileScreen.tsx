@@ -250,6 +250,8 @@ export default function ProfileScreen() {
     }
   };
 
+
+
   const handleSelectAvatarSource = () => {
     Alert.alert(
       'Change Profile Photo',

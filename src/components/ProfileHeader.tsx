@@ -1,10 +1,11 @@
-// Instagram-like profile header: avatar, counts (tap followers/following to open lists), name, bio, style chips
+// Instagram-like profile header: avatar (tap to see it full screen), counts (wear votes today, wardrobe,
+// followers / following: tap to open lists), name, bio, style chips
 import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles } from '../theme';
 import Avatar from './Avatar';
-import ZoomableImage from './ZoomableImage';
+import FullScreenImageViewer from './FullScreenImageViewer';
 import { ProfileCounts } from '../services/socialApi';
 
 interface Props {
@@ -16,13 +17,28 @@ interface Props {
   counts: ProfileCounts | null;
   isStar?: boolean;
   isPrivate?: boolean;
+  todayVotes?: number; // "Wear today" votes this person got today (replaces the old Posts count)
+  onPressTodayVotes?: () => void;
   children?: React.ReactNode; // buttons row
   badge?: React.ReactNode; // small line under the name (e.g. coins + tier)
 }
 
-export default function ProfileHeader({ userId, name, avatarUrl, bio, stylePrefs, counts, isStar, isPrivate, children, badge }: Props) {
+export default function ProfileHeader({
+  userId,
+  name,
+  avatarUrl,
+  bio,
+  stylePrefs,
+  counts,
+  isStar,
+  isPrivate,
+  todayVotes,
+  onPressTodayVotes,
+  children,
+  badge,
+}: Props) {
   const navigation = useNavigation<any>();
-  const [photoOpen, setPhotoOpen] = useState(false);
+  const [avatarOpen, setAvatarOpen] = useState(false);
   const stat = (label: string, value: number | undefined, onPress?: () => void) => (
     <TouchableOpacity style={styles.stat} onPress={onPress} disabled={!onPress} activeOpacity={0.7}>
       <Text style={styles.statValue}>{value === undefined ? '–' : value.toLocaleString()}</Text>
@@ -36,14 +52,14 @@ export default function ProfileHeader({ userId, name, avatarUrl, bio, stylePrefs
     <View style={styles.wrap}>
       <View style={styles.top}>
         <TouchableOpacity
+          onPress={() => setAvatarOpen(true)}
           disabled={!avatarUrl}
-          activeOpacity={0.8}
-          onPress={() => setPhotoOpen(true)}
+          activeOpacity={0.85}
           accessibilityLabel="View profile photo">
           <Avatar uri={avatarUrl} name={name} size={84} />
         </TouchableOpacity>
         <View style={styles.stats}>
-          {stat('Posts', counts?.posts)}
+          {stat('Votes today', todayVotes, onPressTodayVotes)}
           {stat('Wardrobe', counts?.wardrobe)}
           {stat('Followers', counts?.followers, openList('followers'))}
           {stat('Following', counts?.following, openList('following'))}
@@ -66,9 +82,11 @@ export default function ProfileHeader({ userId, name, avatarUrl, bio, stylePrefs
         </View>
       ) : null}
       {children ? <View style={styles.buttons}>{children}</View> : null}
-      {avatarUrl ? (
-        <ZoomableImage visible={photoOpen} images={[avatarUrl]} onClose={() => setPhotoOpen(false)} />
-      ) : null}
+      <FullScreenImageViewer
+        visible={avatarOpen && !!avatarUrl}
+        photos={avatarUrl ? [{ uri: avatarUrl, label: name }] : []}
+        onClose={() => setAvatarOpen(false)}
+      />
     </View>
   );
 }

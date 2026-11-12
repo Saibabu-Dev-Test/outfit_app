@@ -174,7 +174,7 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
   const openComments = (m: ChatMessage) =>
     navigation.navigate('Comments', { target: { kind: 'circle', circleId, id: m.id } });
 
-  // Wardrobe photos: 1 = normal photo, 2-6 = A-F vote (poll editor opens with them)
+  // Wardrobe photos / camera shots: 1 = normal photo, 2-6 = A-F vote (poll editor opens with them)
   const sendFromWardrobe = async (images: string[]) => {
     if (images.length === 1) {
       setSending(true);
@@ -191,7 +191,7 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
     setPollOpen(true);
   };
 
-  // Attach: From Wardrobe / Take photo / Several photos (A-F vote) / Cancel.
+  // Attach: From Wardrobe / Take photo (several shots in a row) / Several photos (A-F vote) / Cancel.
   // (Android's Alert shows only 3 buttons, so this is an ActionSheet.)
   const openAttach = () => setAttachOpen(true);
 

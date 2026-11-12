@@ -1,5 +1,6 @@
-// Another user's profile (Instagram style): counts, Follow / Unfollow, Share profile, their posts as a
-// scrolling feed (like, comment, A-F vote) and their public wardrobe photos as a grid.
+// Another user's profile (Instagram style): avatar (tap for full screen), counts, Follow / Unfollow,
+// Share profile, their public wardrobe (vote "Wear today" once a day, like, comment) and "Today's pick"
+// (the item with the most wear votes today). The old Posts tab was replaced; posts stay in the Feed.
 // Private profiles show "This account is private".
 import React, { useCallback, useEffect, useState } from 'react';
 import {
@@ -12,43 +13,41 @@ import {
   StatusBar,
   Platform,
   Alert,
-  useWindowDimensions,
   StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, fontSize, fontWeight, spacing, themedStyles, statusBarStyle } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
-import useIsAdmin from '../../hooks/useIsAdmin';
 import ProfileHeader, { headerButtonStyles as hb } from '../../components/ProfileHeader';
-import PhotoGrid from '../../components/PhotoGrid';
-import PostCard from '../../components/PostCard';
+import WardrobeVoteGrid from '../../components/WardrobeVoteGrid';
+import TodaysPick from '../../components/TodaysPick';
+import useWearVotes from '../../hooks/useWearVotes';
 import { getPublicUser, PublicUser } from '../../services/userApi';
-import { getUserPosts, getUserPublicWardrobePosts, Post } from '../../services/feedApi';
+import { getUserPublicWardrobePosts, Post } from '../../services/feedApi';
 import { isWeeklyStar } from '../../services/rewardsApi';
 import { follow, getProfileCounts, isFollowing, ProfileCounts, unfollow } from '../../services/socialApi';
 import { shareWithReferral } from '../../utils/referralLink';
 
-type TabKey = 'posts' | 'wardrobe';
+type TabKey = 'wardrobe' | 'pick';
 
 export default function UserProfileScreen({ navigation, route }: { navigation: any; route: any }) {
   const userId: string = route?.params?.userId || '';
   const { user: me } = useAuth();
   const isMe = !!me?.id && me.id === userId;
-  const { isAdmin } = useIsAdmin(me?.id);
-  const { width } = useWindowDimensions();
 
   const [profile, setProfile] = useState<PublicUser | null>(null);
   const [status, setStatus] = useState<'loading' | 'ok' | 'private' | 'missing' | 'error'>('loading');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [posts, setPosts] = useState<Post[]>([]);
   const [items, setItems] = useState<Post[]>([]);
   const [counts, setCounts] = useState<ProfileCounts | null>(null);
   const [following, setFollowing] = useState(false);
   const [followBusy, setFollowBusy] = useState(false);
-  const [tab, setTab] = useState<TabKey>('posts');
+  const [tab, setTab] = useState<TabKey>('wardrobe');
   const [refreshing, setRefreshing] = useState(false);
   const [sectionError, setSectionError] = useState<string | null>(null);
   const [isStar, setIsStar] = useState(false);
+  // Only when the profile is visible (private profiles can't be voted on)
+  const wear = useWearVotes(status === 'ok' ? userId : undefined, me?.id);
 
   const load = useCallback(async () => {
     if (!userId) {
@@ -70,11 +69,7 @@ export default function UserProfileScreen({ navigation, route }: { navigation: a
     setProfile(r.user);
     setStatus('ok');
     const errs: string[] = [];
-    const [p, w, c, f] = await Promise.all([
-      getUserPosts(userId).catch(e => {
-        errs.push(e?.message);
-        return [] as Post[];
-      }),
+    const [w, c, f] = await Promise.all([
       getUserPublicWardrobePosts(userId).catch(e => {
         errs.push(e?.message);
         return [] as Post[];
@@ -82,12 +77,13 @@ export default function UserProfileScreen({ navigation, route }: { navigation: a
       getProfileCounts(userId, isMe),
       me?.id && !isMe ? isFollowing(me.id, userId) : Promise.resolve(false),
     ]);
-    setPosts(p.map(x => ({ ...x, userName: r.user.name, userAvatar: r.user.avatarUrl || x.userAvatar })));
     setItems(w);
     setCounts(c);
     setFollowing(f);
     setSectionError(errs.length ? errs[0] : null);
     setRefreshing(false);
+    wear.refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId, isMe, me?.id]);
 
   useEffect(() => {
@@ -196,7 +192,9 @@ export default function UserProfileScreen({ navigation, route }: { navigation: a
           stylePrefs={profile.stylePrefs}
           counts={counts}
           isStar={isStar}
-          isPrivate={!profile.isPublic}>
+          isPrivate={!profile.isPublic}
+          todayVotes={wear.loading ? undefined : wear.tally.total}
+          onPressTodayVotes={() => setTab('pick')}>
           {isMe ? (
             <TouchableOpacity style={hb.btn} onPress={() => navigation.navigate('Settings', { edit: true })}>
               <Text style={hb.btnText}>Edit profile</Text>
@@ -221,36 +219,32 @@ export default function UserProfileScreen({ navigation, route }: { navigation: a
         {profile.rashi ? <Text style={styles.rashi}>✨ {profile.rashi}</Text> : null}
 
         <View style={styles.tabs}>
-          {(['posts', 'wardrobe'] as TabKey[]).map(t => (
+          {(['wardrobe', 'pick'] as TabKey[]).map(t => (
             <TouchableOpacity key={t} style={[styles.tab, tab === t && styles.tabOn]} onPress={() => setTab(t)}>
               <Text style={[styles.tabText, tab === t && styles.tabTextOn]}>
-                {t === 'posts' ? `▤ Posts (${posts.length})` : `👗 Wardrobe (${items.length})`}
+                {t === 'wardrobe' ? `👗 Wardrobe (${items.length})` : "⭐ Today's pick"}
               </Text>
             </TouchableOpacity>
           ))}
         </View>
         {sectionError ? <Text style={styles.error}>{sectionError}</Text> : null}
 
-        {tab === 'posts' ? (
-          posts.length ? (
-            posts.map(p => (
-              <PostCard
-                key={p.id}
-                post={p}
-                width={width}
-                myUid={me?.id}
-                isAdmin={isAdmin}
-                onDeleted={d => setPosts(prev => prev.filter(x => x.id !== d.id))}
-              />
-            ))
-          ) : (
-            <Text style={styles.empty}>No posts yet.</Text>
-          )
-        ) : (
-          <PhotoGrid
+        {tab === 'wardrobe' ? (
+          <WardrobeVoteGrid
             items={items}
-            onPress={p => navigation.navigate('PostDetail', { kind: p.kind, id: p.id })}
+            ownerId={userId}
+            ownerName={profile.name}
+            isOwner={isMe}
+            wear={wear}
             empty="No public wardrobe items."
+          />
+        ) : (
+          <TodaysPick
+            items={items}
+            ownerName={profile.name}
+            isOwner={isMe}
+            wear={wear}
+            onOpenWardrobe={() => setTab('wardrobe')}
           />
         )}
       </ScrollView>
@@ -281,5 +275,4 @@ const styles = themedStyles(() => StyleSheet.create({
   tabText: { fontSize: fontSize.sm, color: colors.textMuted, fontWeight: fontWeight.semiBold },
   tabTextOn: { color: colors.textPrimary, fontWeight: fontWeight.bold },
   error: { color: colors.error, textAlign: 'center', padding: spacing.sm },
-  empty: { textAlign: 'center', color: colors.textMuted, padding: spacing.xxl },
 }));
