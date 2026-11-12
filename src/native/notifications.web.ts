@@ -45,6 +45,10 @@ export const postNotificationWithPayload = (title: string, body: string, _payloa
   postNotification(title, body);
 export const consumeLaunchPayload = async (): Promise<string | null> => null;
 
+// One-off reminders: Android only
+export const scheduleReminder = async (_id: number, _at: number, _title: string, _body: string): Promise<boolean> => false;
+export const cancelReminder = async (_id: number): Promise<void> => {};
+
 // Android only (the 8 AM greeting's name); nothing to save in the browser
 export const firstNameOf = (displayName?: string | null): string =>
   String(displayName || '').trim().split(/\s+/)[0] || '';

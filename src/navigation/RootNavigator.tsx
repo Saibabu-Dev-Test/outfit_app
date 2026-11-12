@@ -20,12 +20,15 @@ import AdminScreen from '../screens/Admin/AdminScreen';
 import AdminUsersScreen from '../screens/Admin/AdminUsersScreen';
 import ProfileScreen from '../screens/Profile/ProfileScreen';
 import AchievementsScreen from '../screens/Profile/AchievementsScreen';
+import MonthlyTasksScreen from '../screens/Profile/MonthlyTasksScreen';
+import AdminRewardsScreen from '../screens/Admin/AdminRewardsScreen';
 import LikesScreen from '../screens/Profile/LikesScreen';
 import LikedByScreen from '../screens/Profile/LikedByScreen';
 import FollowListScreen from '../screens/Profile/FollowListScreen';
 import PostDetailScreen from '../screens/Feed/PostDetailScreen';
 import BirthdayChatScreen from '../screens/Home/BirthdayChatScreen';
 import PoruthamScreen from '../screens/Astrology/PoruthamScreen';
+import FunctionPlannerScreen from '../screens/Home/FunctionPlannerScreen';
 import { colors, themedStyles, useTheme } from '../theme';
 import AppLockGate from '../components/AppLockGate';
 import ActivityWatcher from '../components/ActivityWatcher';
@@ -116,6 +119,8 @@ function NavigationContent() {
               <Stack.Screen name="CircleInfo" component={CircleInfoScreen} />
               <Stack.Screen name="Settings" component={ProfileScreen} />
               <Stack.Screen name="Achievements" component={AchievementsScreen} />
+              <Stack.Screen name="MonthlyTasks" component={MonthlyTasksScreen} />
+              <Stack.Screen name="AdminRewards" component={AdminRewardsScreen} />
               <Stack.Screen name="Likes" component={LikesScreen} />
               <Stack.Screen name="LikedBy" component={LikedByScreen} />
               <Stack.Screen name="PostDetail" component={PostDetailScreen} />
@@ -123,6 +128,7 @@ function NavigationContent() {
               <Stack.Screen name="Comments" component={CommentsScreen} />
               <Stack.Screen name="BirthdayChat" component={BirthdayChatScreen} />
               <Stack.Screen name="Porutham" component={PoruthamScreen} />
+              <Stack.Screen name="FunctionPlanner" component={FunctionPlannerScreen} />
               <Stack.Screen name="UserProfile" component={UserProfileScreen} />
               <Stack.Screen name="UserSearch" component={UserSearchScreen} />
               <Stack.Screen name="Admin" component={AdminScreen} />

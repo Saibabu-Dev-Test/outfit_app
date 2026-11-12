@@ -151,6 +151,27 @@ class NotificationsModule(private val ctx: ReactApplicationContext) : ReactConte
     }
   }
 
+  // One-off reminder (function planner) at a time in ms; same id replaces it
+  @ReactMethod
+  fun scheduleReminder(id: Double, at: Double, title: String, body: String, promise: Promise) {
+    try {
+      OutfitNotifier.scheduleReminder(ctx, id.toInt(), at.toLong(), title, body)
+      promise.resolve(true)
+    } catch (e: Exception) {
+      promise.resolve(false)
+    }
+  }
+
+  @ReactMethod
+  fun cancelReminder(id: Double, promise: Promise) {
+    try {
+      OutfitNotifier.cancelReminder(ctx, id.toInt())
+      promise.resolve(true)
+    } catch (e: Exception) {
+      promise.resolve(false)
+    }
+  }
+
   // FCM registration token for push, or null (no Firebase / Play services / offline). Never rejects.
   @ReactMethod
   fun getPushToken(promise: Promise) {
