@@ -7,6 +7,7 @@ import NotificationGate from './src/components/NotificationGate';
 import { captureClipboardReferral } from './src/utils/referralLink';
 import { initAds } from './src/native/ads';
 import { ThemeProvider, useTheme } from './src/theme';
+import CoinFlipProvider from './src/components/coins/CoinFlipProvider';
 
 function Themed() {
   const { isDark } = useTheme();
@@ -24,9 +25,12 @@ function Themed() {
     <>
       <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
       {/* Notifications must be on to use the app */}
-      <NotificationGate>
-        <RootNavigator />
-      </NotificationGate>
+      {/* Coin flip overlay for coin rewards (likes, uploads, shares) */}
+      <CoinFlipProvider>
+        <NotificationGate>
+          <RootNavigator />
+        </NotificationGate>
+      </CoinFlipProvider>
     </>
   );
 }

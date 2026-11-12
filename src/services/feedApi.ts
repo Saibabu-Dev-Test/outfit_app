@@ -31,6 +31,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { db } from '../config/firebaseConfig';
 import { firestoreErrorMessage } from '../utils/firebaseErrors';
 import { recordTask } from './rewardsApi';
+import { awardCoins } from './coinsApi';
 import { MAX_BASE64_CHARS } from '../utils/imagePicker';
 import { toDate } from '../utils/date';
 import { inlineAvatar } from './userApi';
@@ -207,6 +208,7 @@ export const createPost = async (
     }
     await b.commit();
     recordTask(me.uid, 'uploaded'); // daily task (never throws)
+    awardCoins('upload', `post_${ref.id}`); // coins (fire-and-forget)
   } catch (e: any) {
     fail(e, 'Posting');
   }
@@ -341,7 +343,7 @@ export const toggleLike = async (
   const likeRef = doc(db, POSTS, postId, 'likes', uid);
   const dislikeRef = doc(db, POSTS, postId, 'dislikes', uid);
   try {
-    return await runTransaction(db, async tx => {
+    const res = await runTransaction(db, async tx => {
       const post = await tx.get(postRef);
       if (!post.exists()) throw new Error('This post was deleted.');
       const like = await tx.get(likeRef);
@@ -364,6 +366,8 @@ export const toggleLike = async (
       if (clearDislike) tx.delete(dislikeRef);
       return { liked: true, likeCount: current + 1 };
     });
+    if (res.liked) awardCoins('like', `post_${postId}`); // coins once per post (fire-and-forget)
+    return res;
   } catch (e: any) {
     if (!e?.code && e instanceof Error) throw e;
     return fail(e, 'Liking');
@@ -629,6 +633,7 @@ export const toggleWardrobeLike = async (
   }
   try {
     await b.commit();
+    if (!likedNow) awardCoins('like', `wardrobe_${itemId}`); // coins once per photo (fire-and-forget)
     return !likedNow;
   } catch (e: any) {
     return fail(e, 'Liking');

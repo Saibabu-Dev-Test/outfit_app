@@ -17,9 +17,10 @@ interface Props {
   isStar?: boolean;
   isPrivate?: boolean;
   children?: React.ReactNode; // buttons row
+  badge?: React.ReactNode; // small line under the name (e.g. coins + tier)
 }
 
-export default function ProfileHeader({ userId, name, avatarUrl, bio, stylePrefs, counts, isStar, isPrivate, children }: Props) {
+export default function ProfileHeader({ userId, name, avatarUrl, bio, stylePrefs, counts, isStar, isPrivate, children, badge }: Props) {
   const navigation = useNavigation<any>();
   const [photoOpen, setPhotoOpen] = useState(false);
   const stat = (label: string, value: number | undefined, onPress?: () => void) => (
@@ -53,6 +54,7 @@ export default function ProfileHeader({ userId, name, avatarUrl, bio, stylePrefs
         {isStar ? ' ⭐' : ''}
         {isPrivate ? ' 🔒' : ''}
       </Text>
+      {badge || null}
       {bio ? <Text style={styles.bio}>{bio}</Text> : null}
       {stylePrefs && stylePrefs.length ? (
         <View style={styles.chips}>

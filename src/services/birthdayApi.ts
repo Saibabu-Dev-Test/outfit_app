@@ -30,6 +30,7 @@ import {
   where,
 } from 'firebase/firestore';
 import { db } from '../config/firebaseConfig';
+import { awardCoins } from './coinsApi';
 import { firestoreErrorMessage } from '../utils/firebaseErrors';
 import { assertClean } from '../utils/profanity';
 import { localDateKey, toDate } from '../utils/date';
@@ -396,7 +397,8 @@ export const sendBdayPhoto = async (day: string, me: ChatAuthorLite, imageData: 
   if (!/^data:image\//.test(imageData)) throw new Error('Photo could not be read. Please pick it again.');
   if (imageData.length > BDAY_PHOTO_MAX_CHARS) throw new Error('This photo is too large to send. Please pick a smaller photo.');
   try {
-    await addDoc(collection(db, BDAY_CIRCLES, day, 'messages'), { ...bdayAuthor(me), type: 'image', imageData });
+    const ref = await addDoc(collection(db, BDAY_CIRCLES, day, 'messages'), { ...bdayAuthor(me), type: 'image', imageData });
+    awardCoins('upload', `bday_${day}_${ref.id}`); // coins (fire-and-forget)
   } catch (e: any) {
     throw new Error(firestoreErrorMessage(e, 'Sending photo'));
   }

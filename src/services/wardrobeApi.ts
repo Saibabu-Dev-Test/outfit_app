@@ -24,6 +24,7 @@ import { db } from '../config/firebaseConfig';
 import { MAX_BASE64_CHARS } from '../utils/imagePicker';
 import { firestoreErrorMessage } from '../utils/firebaseErrors';
 import { recordTask } from './rewardsApi';
+import { awardCoins } from './coinsApi';
 import { toDate } from '../utils/date';
 
 export interface WardrobeItemPayload {
@@ -181,6 +182,7 @@ export const addWardrobeItem = async (
     if (clear) b.set(clearRef(ref.id), { imageData: clear, userId: uid, updatedAt: serverTimestamp() });
     await b.commit();
     recordTask(uid, 'uploaded'); // daily task (never throws)
+    awardCoins('upload', `wardrobe_${ref.id}`); // coins (fire-and-forget)
     const now = new Date().toISOString();
     const item = { ...toItem(ref.id, data), createdAt: now, updatedAt: now };
     patchCache(uid, items => [item, ...items.filter(i => i.id !== item.id)]);

@@ -127,6 +127,27 @@ service cloud.firestore {
             && newP > oldP
             && newP - oldP == scoreAfter(me(), day) - scoreBefore(me(), day));
     }
+    // ── Coins (src/config/coins.ts): users/{uid}/coinEvents/{type}_{targetId} {type, points, createdAt} ──
+    // Fixed points per action. If you change them, change COIN_POINTS in src/config/coins.ts too.
+    function coinPoints(t) {
+      return t == 'like' ? 1 : (t == 'upload' ? 10 : (t == 'share' ? 5 : -1));
+    }
+    function coinEventPath(uid, eid) {
+      return /databases/$(db)/documents/users/$(uid)/coinEvents/$(eid);
+    }
+    // users.coins may only grow by the points of the coin event (named in users.coinEvent)
+    // that this same write creates (event docs are create-only, so each counts once)
+    function coinsOk() {
+      let newC = request.resource.data.get('coins', 0);
+      let oldC = resource.data.get('coins', 0);
+      let ev = request.resource.data.get('coinEvent', '');
+      return newC == oldC
+        || (ev is string
+            && ev.matches('^(like|upload|share)_[A-Za-z0-9_-]{1,200}$')
+            && !exists(coinEventPath(me(), ev))
+            && existsAfter(coinEventPath(me(), ev))
+            && newC == oldC + getAfter(coinEventPath(me(), ev)).data.points);
+    }
     // users.referralCode is set once, together with referralCodes/{code} -> this user
     function referralCodeOk() {
       let oldC = resource.data.get('referralCode', null);
@@ -146,11 +167,13 @@ service cloud.firestore {
         && !('role' in request.resource.data)
         && phoneOk(null)
         && request.resource.data.get('points', 0) == 0
+        && request.resource.data.get('coins', 0) == 0
         && !('referralCode' in request.resource.data);
       allow update: if signedIn() && me() == uid
         && request.resource.data.get('role', null) == resource.data.get('role', null)
         && phoneOk(resource.data.get('phone', null))
         && pointsOk()
+        && coinsOk()
         && referralCodeOk();
       // Referral reward: a newly signed-up user adds exactly REFERRAL_POINTS (50) to the referrer's
       // points, only in the same write that creates referrals/{newUid} naming this referrer
@@ -187,6 +210,17 @@ service cloud.firestore {
                 && (resource.data.get('voted', false) == false || request.resource.data.get('voted', false) == true)
                 && (resource.data.get('uploaded', false) == false || request.resource.data.get('uploaded', false) == true)));
       allow delete: if false;
+    }
+
+    // ── Coin events: once per action + target, never changed or removed ──
+    match /users/{uid}/coinEvents/{eid} {
+      allow read: if signedIn() && me() == uid;
+      allow create: if signedIn() && me() == uid
+        && request.resource.data.keys().hasOnly(['type', 'points', 'createdAt'])
+        && request.resource.data.type in ['like', 'upload', 'share']
+        && eid.matches('^' + request.resource.data.type + '_[A-Za-z0-9_-]{1,200}$')
+        && request.resource.data.points == coinPoints(request.resource.data.type);
+      allow update, delete: if false;
     }
 
     // ── Likes list: users/{uid}/liked/{p_postId | w_wardrobeId} {kind, refId, createdAt} ──

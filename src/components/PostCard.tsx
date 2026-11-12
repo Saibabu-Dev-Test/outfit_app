@@ -294,7 +294,7 @@ export default function PostCard({
     const what = post.kind === 'wardrobe' ? 'wardrobe pick' : multi ? 'outfit vote (help pick one!)' : 'look';
     const cap = post.caption.trim();
     const line = `Check out ${who} ${what} on Outfit${cap ? `: "${cap.length > 80 ? `${cap.slice(0, 77)}...` : cap}"` : ''}`;
-    shareWithReferral(myUid, line);
+    shareWithReferral(myUid, line, `${post.kind}_${post.id}`);
   };
 
   const onImagePress = (index: number = 0) => {
