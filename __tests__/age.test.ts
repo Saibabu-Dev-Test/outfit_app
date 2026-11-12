@@ -35,12 +35,13 @@ describe('accessory types', () => {
     expect(resolveCategory('payal')).toEqual({ category: 'Accessories', subType: 'Anklets (Payal)' });
     expect(itemSubType({ category: 'Accessories', subType: 'Bangles' })).toBe('Bangles');
   });
-  it('hides female-only types for men and labels in Telugu / Hindi', () => {
+  it('hides female-only types for men and labels stay English by default', () => {
     const acc = CATEGORY_GROUPS.find(g => g.key === 'accessories')!;
     expect(groupSubTypesFor(acc, 'Male')).not.toContain('Bangles');
     expect(groupSubTypesFor(acc, 'Female')).toContain('Bangles');
-    expect(typeLabel('Bangles', 'Telugu')).toBe('గాజులు');
-    expect(typeLabel('Bangles', 'Hindi')).toBe('चूड़ियाँ');
-    expect(typeLabel('Bangles', 'Tamil')).toBe('Bangles');
+    expect(typeLabel('Bangles')).toBe('Bangles');
+    expect(typeLabel('Earrings', 'Telugu')).toBe('Earrings');
+    expect(typeLabel('Necklace / Chain', 'Telugu')).toBe('Necklace / Chain');
+    expect(typeLabel('Bracelets', 'Hindi')).toBe('Bracelets');
   });
 });

@@ -192,7 +192,6 @@ export default function UserProfileScreen({ navigation, route }: { navigation: a
           name={profile.name}
           avatarUrl={profile.avatarUrl}
           bio={profile.bio}
-          stylePrefs={profile.stylePrefs}
           counts={counts}
           isStar={isStar}
           isPrivate={!profile.isPublic}
