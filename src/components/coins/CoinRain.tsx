@@ -1,11 +1,12 @@
-// Like coins flipping across the screen, opened from a like notification
-// ("🪙 Gold coin likes! 12 people liked your photos"). One coin per person (max 15), each in the
-// level's colours (Bronze / Silver / Gold / Diamond), spinning while it falls, with the coin
-// flip sound (Settings switch respected). Non-blocking (pointerEvents none), Reanimated on the
-// UI thread, and any error just hides it.
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { AppState, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
-import Animated, { Easing, useAnimatedStyle, useSharedValue, withDelay, withRepeat, withTiming } from 'react-native-reanimated';
+// Like coins flipping together, opened from a like notification
+// ("🪙 Gold coin likes! 12 people liked your photos"). One small coin per person (max 20), each in
+// the level's colours (Bronze / Silver / Gold / Diamond). All coins flip AT THE SAME TIME with the
+// same slow 2.4 s flip as the award overlay (CoinFlipProvider) and the coin sound plays ONCE at
+// the start (Settings switch + volume respected). Visual only: no coins are awarded here.
+// Non-blocking (pointerEvents none), Reanimated on the UI thread, and any error just hides it.
+import React, { useEffect, useRef, useState } from 'react';
+import { AppState, StyleSheet, Text, View } from 'react-native';
+import Animated, { Easing, useAnimatedStyle, useSharedValue, withSequence, withTiming } from 'react-native-reanimated';
 import { likeLevelLabel } from '../../config/likeLevels';
 import { CoinRainBusEvent, onCoinRain, showCoinRain } from '../../services/coinBus';
 import { decodeCoinRain, rainCoinCount } from '../../services/likeCoins';
@@ -13,38 +14,39 @@ import { consumeLaunchPayload } from '../../native/notifications';
 import { playCoinSound } from '../../native/coinSound';
 import Coin from './Coin';
 
-const FALL_MS = 2200;
-const STAGGER_MS = 170;
-const COIN = 30; // small coins
+const FLIP_MS = 2400; // same slow flip as CoinFlipProvider (matches the 2.4 s coin sound)
+const HOLD_MS = 1000;
+const FADE_MS = 200;
+const COIN = 36; // small coins
+const TOSS = 28;
+const PER_ROW = 5;
 
-function RainCoin({ e, index, width, height }: { e: CoinRainBusEvent; index: number; width: number; height: number }) {
-  const y = useSharedValue(-COIN * 2);
-  const spin = useSharedValue(0);
-  // Spread across the screen (deterministic per index so it never jumps on re-render)
-  const x = useMemo(() => {
-    const slots = Math.max(1, Math.floor(width / (COIN * 0.9)));
-    const col = (index * 7) % slots;
-    return Math.min(width - COIN, col * (width / slots) + ((index * 13) % 17));
-  }, [index, width]);
+// One coin: 3 full turns slowing down like a settling coin, with a small toss (all start together)
+function BurstCoin({ e }: { e: CoinRainBusEvent }) {
+  const rotate = useSharedValue(0);
+  const lift = useSharedValue(0);
   useEffect(() => {
-    const delay = index * STAGGER_MS;
-    y.value = withDelay(delay, withTiming(height + COIN, { duration: FALL_MS, easing: Easing.in(Easing.quad) }));
-    spin.value = withDelay(delay, withRepeat(withTiming(360, { duration: 420, easing: Easing.linear }), -1, false));
-  }, [index, height, y, spin]);
+    rotate.value = withTiming(1080, { duration: FLIP_MS, easing: Easing.out(Easing.cubic) });
+    lift.value = withSequence(
+      withTiming(-TOSS, { duration: FLIP_MS / 2, easing: Easing.out(Easing.quad) }),
+      withTiming(0, { duration: FLIP_MS / 2, easing: Easing.in(Easing.quad) }),
+    );
+  }, [rotate, lift]);
   const style = useAnimatedStyle(() => ({
-    transform: [{ translateY: y.value }, { perspective: 600 }, { rotateY: `${spin.value}deg` }],
+    transform: [{ perspective: 800 }, { translateY: lift.value }, { rotateY: `${rotate.value}deg` }],
   }));
   return (
-    <Animated.View style={[styles.coin, { left: x }, style]}>
+    <Animated.View style={[styles.coin, style]}>
       <Coin tier={e.level} size={COIN} />
     </Animated.View>
   );
 }
 
 function CoinRainOverlay() {
-  const { width, height } = useWindowDimensions();
   const [shown, setShown] = useState<{ e: CoinRainBusEvent; key: number } | null>(null);
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const opacity = useSharedValue(0);
+  const wrapStyle = useAnimatedStyle(() => ({ opacity: opacity.value }));
 
   useEffect(() => {
     const clear = () => {
@@ -54,15 +56,16 @@ function CoinRainOverlay() {
     const off = onCoinRain(e => {
       try {
         clear();
-        const n = rainCoinCount(e.count);
         setShown({ e: { level: e.level, count: e.count }, key: Date.now() });
-        // The coin sound is a 1.8 s small-coin jingle: start at most 4 (SoundPool plays 4 at once),
-        // spread across the rain so it never turns into noise
-        const step = Math.max(1, Math.ceil(n / 4));
-        for (let i = 0; i < n; i += step) {
-          timers.current.push(setTimeout(playCoinSound, i * STAGGER_MS));
-        }
-        timers.current.push(setTimeout(() => setShown(null), n * STAGGER_MS + FALL_MS + 300));
+        opacity.value = withTiming(1, { duration: 80 });
+        // One coin sound for the whole burst (never N overlapping sounds)
+        playCoinSound();
+        timers.current.push(
+          setTimeout(() => {
+            opacity.value = withTiming(0, { duration: FADE_MS });
+          }, FLIP_MS + HOLD_MS),
+        );
+        timers.current.push(setTimeout(() => setShown(null), FLIP_MS + HOLD_MS + FADE_MS + 50));
       } catch {
         setShown(null);
       }
@@ -86,22 +89,24 @@ function CoinRainOverlay() {
       clearTimeout(first);
       sub.remove();
     };
-  }, []);
+  }, [opacity]);
 
   if (!shown) return null;
   const n = rainCoinCount(shown.e.count);
   const lbl = likeLevelLabel(shown.e.level);
   return (
-    <View pointerEvents="none" style={styles.fill}>
-      {Array.from({ length: n }, (_, i) => (
-        <RainCoin key={`${shown.key}_${i}`} e={shown.e} index={i} width={width} height={height} />
-      ))}
+    <Animated.View pointerEvents="none" style={[styles.fill, wrapStyle]}>
+      <View style={[styles.grid, { width: Math.min(n, PER_ROW) * (COIN + 14) }]}>
+        {Array.from({ length: n }, (_, i) => (
+          <BurstCoin key={`${shown.key}_${i}`} e={shown.e} />
+        ))}
+      </View>
       <View style={styles.label}>
         <Text style={styles.labelText}>
           🪙 {shown.e.count.toLocaleString()} {lbl} coin {shown.e.count === 1 ? 'like' : 'likes'}!
         </Text>
       </View>
-    </View>
+    </Animated.View>
   );
 }
 
@@ -127,9 +132,10 @@ export default function CoinRain() {
 }
 
 const styles = StyleSheet.create({
-  fill: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 9998, elevation: 9998 },
-  coin: { position: 'absolute', top: 0 },
-  label: { position: 'absolute', top: '42%', left: 0, right: 0, alignItems: 'center' },
+  fill: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', zIndex: 9998, elevation: 9998 },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', paddingTop: 60 },
+  coin: { margin: 7 },
+  label: { alignItems: 'center', marginTop: 14 },
   labelText: {
     color: '#FFFFFF',
     fontSize: 18,

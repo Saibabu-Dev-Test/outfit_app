@@ -137,7 +137,7 @@ service cloud.firestore {
     // ── Coins (src/config/coins.ts): users/{uid}/coinEvents/{type}_{targetId} {type, points, createdAt} ──
     // Fixed points per action. If you change them, change COIN_POINTS in src/config/coins.ts too.
     function coinPoints(t) {
-      return t == 'like' ? 1 : (t == 'upload' ? 10 : (t == 'share' ? 50 : (t == 'task' ? 100 : -1)));
+      return t == 'like' ? 1 : (t == 'upload' ? 10 : (t == 'share' ? 50 : (t == 'task' ? 100 : (t == 'vote' ? 1 : -1))));
     }
     function coinEventPath(uid, eid) {
       return /databases/$(db)/documents/users/$(uid)/coinEvents/$(eid);
@@ -150,7 +150,7 @@ service cloud.firestore {
       let ev = request.resource.data.get('coinEvent', '');
       return newC == oldC
         || (ev is string
-            && ev.matches('^(like|upload|share|task)_[A-Za-z0-9_-]{1,200}$')
+            && ev.matches('^(like|upload|share|task|vote)_[A-Za-z0-9_-]{1,200}$')
             && !exists(coinEventPath(me(), ev))
             && existsAfter(coinEventPath(me(), ev))
             && newC == oldC + getAfter(coinEventPath(me(), ev)).data.points);
@@ -288,7 +288,7 @@ service cloud.firestore {
       allow read: if signedIn() && me() == uid;
       allow create: if signedIn() && me() == uid
         && request.resource.data.keys().hasOnly(['type', 'points', 'createdAt'])
-        && request.resource.data.type in ['like', 'upload', 'share', 'task']
+        && request.resource.data.type in ['like', 'upload', 'share', 'task', 'vote']
         && eid.matches('^' + request.resource.data.type + '_[A-Za-z0-9_-]{1,200}$')
         // Monthly task coins: task_{YYYY-MM}_{taskId}, only during that month (any timezone)
         && (request.resource.data.type != 'task' || monthTaskOk(eid))

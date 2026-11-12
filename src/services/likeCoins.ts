@@ -8,7 +8,7 @@ export interface CoinRainEvent {
   count: number; // people who liked (coins to flip, capped on screen)
 }
 
-export const MAX_RAIN_COINS = 15;
+export const MAX_RAIN_COINS = 20;
 
 // Distinct people among new like activity (the same person liking 3 photos counts once)
 export const countLikers = (items: { type: string; actorId: string }[]): { likes: number; people: number } => {

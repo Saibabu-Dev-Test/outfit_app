@@ -988,4 +988,6 @@ export const castPollVote = async (
   } catch (e: any) {
     fail(e, 'Voting');
   }
+  // +1 coin on my first vote on this poll (coinEvents/vote_poll_<circleId>_<msgId>) + coin flip
+  awardCoins('vote', `poll_${circleId}_${messageId}`);
 };
