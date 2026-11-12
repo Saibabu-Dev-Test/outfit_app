@@ -4,6 +4,7 @@
 // The picker hands over the original file (no pre-shrink), so every size is made from the original.
 import { launchCamera, launchImageLibrary, Asset, ImagePickerResponse, CameraOptions } from 'react-native-image-picker';
 import { canResize, resizeImage } from './imageResize';
+import { applyPhotoBg } from '../native/photoBackground';
 import { AVATAR_SPEC, AVATAR_THUMB_SPEC, CLEAR_SPEC, FULL_MAX_CHARS, FULL_SPEC, ImageSpec, POLL_SPEC, THUMB_SPEC } from './imageSpecs';
 
 // Largest photo data URI accepted anywhere (one full photo: JPEG <= 690 KB = ~942K base64 chars,
@@ -23,15 +24,16 @@ export interface PickOptions {
   clear?: ImageSpec | null; // also make a clear feed-size copy (CLEAR_SPEC)
   maxChars?: number; // extra cap on the full photo's base64 length
   ifSeveral?: PickOptions; // pickImages: options used instead when more than one photo was picked
+  bg?: boolean; // clothing photo: apply Settings > Photo background (plain white / black or blur)
 }
 
 // Posts and wardrobe items: near-original full photo (2048 px JPEG <= 690 KB, opened on tap) + 360 px
 // thumbnail (grids) + ~1080 px clear copy (feed cards)
-export const PHOTO_PICK: PickOptions = { spec: FULL_SPEC, thumb: THUMB_SPEC, clear: CLEAR_SPEC };
+export const PHOTO_PICK: PickOptions = { spec: FULL_SPEC, thumb: THUMB_SPEC, clear: CLEAR_SPEC, bg: true };
 // Avatars are shown small; the tiny copy goes on posts / comments / likes
 export const AVATAR_PICK: PickOptions = { spec: AVATAR_SPEC, thumb: AVATAR_THUMB_SPEC };
 // A poll message / chat photo set holds up to 6 photos in one Firestore doc (1 MiB limit)
-export const POLL_PICK: PickOptions = { spec: POLL_SPEC, thumb: null };
+export const POLL_PICK: PickOptions = { spec: POLL_SPEC, thumb: null, bg: true };
 // Circle / birthday chat: one photo = near-original full photo (opened in the viewer) + a ~1080 px
 // clear copy shown in the chat bubble; several photos (an A-F vote) = poll-size photos as before
 export const CHAT_PICK: PickOptions = { spec: FULL_SPEC, thumb: null, clear: CLEAR_SPEC, ifSeveral: POLL_PICK };
@@ -49,7 +51,10 @@ const pickerOptions = (o: PickOptions): CameraOptions => {
     : { mediaType: 'photo', maxWidth: edge, maxHeight: edge, quality: 0.5, includeBase64: true, saveToPhotos: false };
 };
 
-const fromAsset = async (a: Asset, o: PickOptions): Promise<PickedImage | null> => {
+const fromAsset = async (a0: Asset, o: PickOptions): Promise<PickedImage | null> => {
+  // Clothing photos: background made plain (white / black) or blurred first; every size below is
+  // then made from that photo. Any failure keeps the original.
+  const a: Asset = o.bg && canResize() && a0.uri ? { ...a0, uri: await applyPhotoBg(a0.uri) } : a0;
   const maxChars = Math.min(o.maxChars ?? MAX_BASE64_CHARS, MAX_BASE64_CHARS);
   let dataUri = '';
   if (canResize() && a.uri) {

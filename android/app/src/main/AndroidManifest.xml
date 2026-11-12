@@ -75,6 +75,11 @@
         android:name="com.google.firebase.messaging.default_notification_icon"
         android:resource="@drawable/ic_stat_outfit" />
 
+      <!-- Download the ML Kit subject segmentation model with the app (photo background) -->
+      <meta-data
+        android:name="com.google.mlkit.vision.DEPENDENCIES"
+        android:value="subject_segment" />
+
       <!-- Camera capture (react-native-image-picker) and in-app update APKs (xml/file_paths) -->
       <provider
         android:name="androidx.core.content.FileProvider"

@@ -33,6 +33,7 @@ import {
 import { astroLanguage, birthChartRows } from '../../services/astrologyDaily';
 import SelectModal from '../../components/SelectModal';
 import { APP_LANGUAGES, setAppLanguage, useAppLanguage } from '../../i18n/appLanguage';
+import { getPhotoBg, isPhotoBgSupported, PHOTO_BG_LABEL, PHOTO_BG_MODES, PhotoBgMode, setPhotoBg } from '../../native/photoBackground';
 import CityPickerModal from '../../components/CityPickerModal';
 import FeedbackBoardModal from '../../components/FeedbackBoardModal';
 import ZoomableImage from '../../components/ZoomableImage';
@@ -100,6 +101,10 @@ export default function ProfileScreen() {
   const { user: authUser, logout, updateUserData } = useAuth();
   const { mode: themeMode, isDark, setMode: setThemeMode } = useTheme();
   const appLanguage = useAppLanguage();
+  const [photoBg, setPhotoBgState] = useState<PhotoBgMode>('plain');
+  useEffect(() => {
+    getPhotoBg().then(setPhotoBgState);
+  }, []);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
   const [editIsPublic, setEditIsPublic] = useState<boolean>(true);
@@ -342,6 +347,17 @@ const fetchProfile = async () => {
   const pickAppLanguage = () =>
     Alert.alert('App language', `Wardrobe labels show in: ${appLanguage}`, [
       ...APP_LANGUAGES.map(l => ({ text: l, onPress: () => setAppLanguage(l) })),
+    ]);
+
+  const pickPhotoBg = () =>
+    Alert.alert('Photo background', 'For clothing photos you add: plain white / black (opposite to the clothes) or a blurred background.', [
+      ...PHOTO_BG_MODES.map(m => ({
+        text: PHOTO_BG_LABEL[m],
+        onPress: () => {
+          setPhotoBgState(m);
+          setPhotoBg(m);
+        },
+      })),
     ]);
 
   // App lock, invite code, friends joined, ⭐ badge
@@ -948,6 +964,17 @@ const fetchProfile = async () => {
               value: appLanguage,
               onPress: pickAppLanguage,
             },
+            ...(isPhotoBgSupported()
+              ? [
+                  {
+                    id: 'photobg',
+                    icon: '🖼️',
+                    label: 'Photo background',
+                    value: PHOTO_BG_LABEL[photoBg],
+                    onPress: pickPhotoBg,
+                  },
+                ]
+              : []),
             ...(isUpdateSupported()
               ? [
                   {
