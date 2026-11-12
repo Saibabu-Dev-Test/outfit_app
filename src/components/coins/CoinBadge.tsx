@@ -1,10 +1,11 @@
-// Small "🪙 123 · Gold" badge for the profile header. Never throws.
+// Small "🪙 123 · Gold" badge for the profile header, with the like level under it. Never throws.
 import React, { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { tierFor, tierLabel } from '../../config/coins';
 import { onCoinTotal } from '../../services/coinBus';
 import { cachedCoinTotal, loadCoinTotal } from '../../services/coinsApi';
 import Coin from './Coin';
+import LikeLevelBadge from './LikeLevelBadge';
 
 export default function CoinBadge({ uid }: { uid?: string | null }) {
   const [total, setTotal] = useState<number | null>(() => cachedCoinTotal(uid));
@@ -21,14 +22,17 @@ export default function CoinBadge({ uid }: { uid?: string | null }) {
       off();
     };
   }, [uid]);
-  if (total === null) return null;
+  if (total === null) return <LikeLevelBadge uid={uid} showNext />;
   const tier = tierFor(total);
   return (
-    <View style={styles.badge} accessibilityLabel={`${total} coins, ${tierLabel(tier)} tier`}>
-      <Coin tier={tier} size={18} />
-      <Text style={styles.text}>
-        {total.toLocaleString()} · {tierLabel(tier)}
-      </Text>
+    <View>
+      <View style={styles.badge} accessibilityLabel={`${total} coins, ${tierLabel(tier)} tier`}>
+        <Coin tier={tier} size={18} />
+        <Text style={styles.text}>
+          {total.toLocaleString()} · {tierLabel(tier)}
+        </Text>
+      </View>
+      <LikeLevelBadge uid={uid} showNext />
     </View>
   );
 }

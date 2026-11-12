@@ -178,6 +178,24 @@ service cloud.firestore {
             && newS == oldS + getAfter(rewardClaimPath(cid)).data.cost
             && newS <= request.resource.data.get('coins', 0));
     }
+    // ── Like coin levels (src/config/likeLevels.ts): users/{owner}.likesReceived ──
+    // Another user adds exactly 1, only in the same write that creates their (create-only)
+    // coin event like_{post|wardrobe}_{id} for a photo this user owns (users.likeEvent names it),
+    // so each person's like on a photo counts once. The owner can never change it.
+    function likeEventOwnedBy(ev, uid) {
+      let parts = ev.split('_');
+      return (parts[1] == 'post' && get(/databases/$(db)/documents/posts/$(parts[2])).data.userId == uid)
+        || (parts[1] == 'wardrobe' && get(/databases/$(db)/documents/wardrobe/$(parts[2])).data.userId == uid);
+    }
+    function likesReceivedOk(uid) {
+      let ev = request.resource.data.get('likeEvent', '');
+      return ev is string
+        && ev.matches('^like_(post|wardrobe)_[A-Za-z0-9-]{1,128}$')
+        && request.resource.data.get('likesReceived', 0) == resource.data.get('likesReceived', 0) + 1
+        && !exists(coinEventPath(me(), ev))
+        && existsAfter(coinEventPath(me(), ev))
+        && likeEventOwnedBy(ev, uid);
+    }
     // users.referralCode is set once, together with referralCodes/{code} -> this user
     function referralCodeOk() {
       let oldC = resource.data.get('referralCode', null);
@@ -199,6 +217,7 @@ service cloud.firestore {
         && request.resource.data.get('points', 0) == 0
         && request.resource.data.get('coins', 0) == 0
         && request.resource.data.get('coinsSpent', 0) == 0
+        && request.resource.data.get('likesReceived', 0) == 0
         && !('referralCode' in request.resource.data);
       allow update: if signedIn() && me() == uid
         && request.resource.data.get('role', null) == resource.data.get('role', null)
@@ -206,7 +225,12 @@ service cloud.firestore {
         && pointsOk()
         && coinsOk()
         && coinsSpentOk()
+        && request.resource.data.get('likesReceived', 0) == resource.data.get('likesReceived', 0)
         && referralCodeOk();
+      // A like on this user's photo: +1 likesReceived (likesReceivedOk)
+      allow update: if signedIn() && me() != uid
+        && onlyChanged(['likesReceived', 'likeEvent'])
+        && likesReceivedOk(uid);
       // Admin rejects a reward claim: coins back (coinsSpent - cost), in the same write that
       // marks that pending claim rejected (users.refundClaim names it)
       allow update: if signedIn() && isAdmin() && me() != uid
@@ -460,6 +484,34 @@ service cloud.firestore {
       allow delete: if signedIn() && me() == uid
         && !existsAfter(followPath(target, uid));
       allow update: if false;
+    }
+
+    // ── "Wear today" votes on someone's wardrobe: users/{uid}/wearVotes/{date}_{voterId} ──
+    // {voterId, itemId, date, updatedAt}. Like a daily vote: one doc per voter per owner per day
+    // (voting for another item overwrites it). Only the voter writes their own doc; nobody votes on
+    // their own clothes; only public items of an open (public) profile; only around that date.
+    // Counts are readable by the owner and by anyone who can see the profile.
+    match /users/{uid}/wearVotes/{vid} {
+      function wearItem() {
+        return get(/databases/$(db)/documents/wardrobe/$(request.resource.data.itemId)).data;
+      }
+      allow read: if signedIn() && (me() == uid || profileOpen(uid));
+      allow create, update: if signedIn()
+        && me() != uid
+        && profileOpen(uid)
+        && request.resource.data.keys().hasOnly(['voterId', 'itemId', 'date', 'updatedAt'])
+        && request.resource.data.voterId == me()
+        && isDateKey(request.resource.data.date)
+        && vid == request.resource.data.date + '_' + me()
+        && request.time > dateTs(request.resource.data.date) - duration.value(14, 'h')
+        && request.time < dateTs(request.resource.data.date) + duration.value(38, 'h')
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.itemId is string
+        && request.resource.data.itemId.size() > 0
+        && request.resource.data.itemId.size() <= 128
+        && wearItem().userId == uid
+        && wearItem().isPublic == true;
+      allow delete: if signedIn() && resource.data.voterId == me();
     }
 
     // ── Week counter: users/{uid}/weeks/{mondayKey} {fullDays, lastDay, updatedAt} ──

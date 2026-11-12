@@ -2,15 +2,20 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import type { CoinTier } from '../../config/coins';
+import type { LikeLevel } from '../../config/likeLevels';
 
-export const COIN_COLORS: Record<CoinTier, { face: string; rim: string; inner: string; mark: string }> = {
+// Coin faces: the coin tiers (Silver / Gold / Diamond) plus Bronze for the lowest like level
+export type CoinFace = CoinTier | LikeLevel;
+
+export const COIN_COLORS: Record<CoinFace, { face: string; rim: string; inner: string; mark: string }> = {
+  bronze: { face: '#D99A5B', rim: '#9C5E26', inner: '#EBB582', mark: '#7A4515' },
   silver: { face: '#C9CED6', rim: '#8E959F', inner: '#DDE1E7', mark: '#6B727C' },
   gold: { face: '#F6C431', rim: '#C8901A', inner: '#FFD95A', mark: '#9A6A08' },
   diamond: { face: '#BFF4FF', rim: '#3BC9E6', inner: '#EAFDFF', mark: '#0E9DBD' },
 };
 
 interface Props {
-  tier: CoinTier;
+  tier: CoinFace;
   size?: number;
 }
 

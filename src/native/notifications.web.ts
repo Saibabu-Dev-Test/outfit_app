@@ -40,6 +40,11 @@ export const postNotification = async (title: string, body: string): Promise<boo
   }
 };
 
+// Web: a plain notification (no tap payload); the coin flips are Android only
+export const postNotificationWithPayload = (title: string, body: string, _payload: string): Promise<boolean> =>
+  postNotification(title, body);
+export const consumeLaunchPayload = async (): Promise<string | null> => null;
+
 // Android only (the 8 AM greeting's name); nothing to save in the browser
 export const firstNameOf = (displayName?: string | null): string =>
   String(displayName || '').trim().split(/\s+/)[0] || '';
