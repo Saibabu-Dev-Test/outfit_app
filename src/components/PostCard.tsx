@@ -29,6 +29,8 @@ import {
   castPostVote,
   deletePost,
   getDislikeState,
+  getClearPhotos,
+  getFullPhotos,
   getLikedPostIds,
   getPostVotes,
   getWardrobeStats,
@@ -41,6 +43,9 @@ import { follow, isFollowingCached, onFollowChange, unfollow } from '../services
 import { shareWithReferral } from '../utils/referralLink';
 import { logActivity } from '../services/activityApi';
 import { timeAgo } from '../utils/date';
+import NameWithAge from './NameWithAge';
+import TranslatedText from './TranslatedText';
+import InlineComments, { InlineCommentsHandle } from './InlineComments';
 
 interface Props {
   post: Post;
@@ -48,9 +53,26 @@ interface Props {
   myUid?: string;
   isAdmin?: boolean;
   onDeleted?: (post: Post) => void;
+  // Single tap on a photo (after the double-tap-to-like window) opens it full screen
+  onOpenPhoto?: (photos: string[], index: number) => void;
+  // Detail screen: loads the full-size photos. Lists / the feed show the clear ~720 px copies
+  // (older items: full photo, then thumbnail); a single tap on the photo opens the detail screen.
+  detail?: boolean;
+  // Feed: comments live on the card (latest 2, expand in place, replies, comment box) instead of
+  // opening the Comments screen
+  inlineComments?: boolean;
 }
 
-export default function PostCard({ post, width, myUid, isAdmin, onDeleted }: Props) {
+export default function PostCard({
+  post,
+  width,
+  myUid,
+  isAdmin,
+  onDeleted,
+  onOpenPhoto,
+  detail,
+  inlineComments,
+}: Props) {
   const navigation = useNavigation<any>();
   const { user: me } = useAuth();
   const [liked, setLiked] = useState(false);
@@ -66,12 +88,32 @@ export default function PostCard({ post, width, myUid, isAdmin, onDeleted }: Pro
   const [reportTarget, setReportTarget] = useState<ReportTarget | null>(null);
   const liking = useRef(false);
   const lastTap = useRef(0);
-  const tapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const openTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (openTimer.current) clearTimeout(openTimer.current);
+    },
+    [],
+  );
+  const [shownPhotos, setShownPhotos] = useState<string[]>(post.photos);
   const [viewIndex, setViewIndex] = useState<number | null>(null);
   const heart = useRef(new Animated.Value(0)).current;
   const multi = post.kind === 'post' && post.photos.length > 1;
   const isMine = !!myUid && post.userId === myUid;
   const canFollow = !!myUid && !!post.userId && !isMine;
+
+  // Detail screen: full-size photos (1 read; older posts already hold them).
+  // Feed card: the clear ~720 px photos (thumbnail shows first, then swaps to the sharp copy).
+  useEffect(() => {
+    setShownPhotos(post.photos);
+    if (!detail && !post.hasClear && !post.hasMedia) return; // oldest items: photos are already full size
+    if (detail && !post.hasMedia) return;
+    let alive = true;
+    (detail ? getFullPhotos(post) : getClearPhotos(post)).then(p => alive && setShownPhotos(p));
+    return () => {
+      alive = false;
+    };
+  }, [detail, post]);
 
   // My like + counts
   useEffect(() => {
@@ -255,25 +297,15 @@ export default function PostCard({ post, width, myUid, isAdmin, onDeleted }: Pro
     const what = post.kind === 'wardrobe' ? 'wardrobe pick' : multi ? 'outfit vote (help pick one!)' : 'look';
     const cap = post.caption.trim();
     const line = `Check out ${who} ${what} on Outfit${cap ? `: "${cap.length > 80 ? `${cap.slice(0, 77)}...` : cap}"` : ''}`;
-    shareWithReferral(myUid, line);
+    shareWithReferral(myUid, line, `${post.kind}_${post.id}`);
   };
 
-  useEffect(
-    () => () => {
-      if (tapTimer.current) clearTimeout(tapTimer.current);
-    },
-    [],
-  );
-
-  // Double tap = like; single tap (no second tap within 300 ms) = full screen
-  const onImagePress = (index: number) => {
+  const onImagePress = (index: number = 0) => {
     const now = Date.now();
     if (now - lastTap.current < 300) {
       lastTap.current = 0;
-      if (tapTimer.current) {
-        clearTimeout(tapTimer.current);
-        tapTimer.current = null;
-      }
+      if (openTimer.current) clearTimeout(openTimer.current);
+      openTimer.current = null;
       heart.setValue(0);
       Animated.sequence([
         Animated.spring(heart, { toValue: 1, useNativeDriver: true, friction: 4 }),
@@ -282,11 +314,14 @@ export default function PostCard({ post, width, myUid, isAdmin, onDeleted }: Pro
       if (!liked) like(true);
     } else {
       lastTap.current = now;
-      if (tapTimer.current) clearTimeout(tapTimer.current);
-      tapTimer.current = setTimeout(() => {
-        tapTimer.current = null;
-        setViewIndex(index);
-      }, 300);
+      if (openTimer.current) clearTimeout(openTimer.current);
+      openTimer.current = setTimeout(() => {
+        openTimer.current = null;
+        if (lastTap.current !== now) return;
+        lastTap.current = 0;
+        if (onOpenPhoto) onOpenPhoto(shownPhotos.length ? shownPhotos : [post.imageData], index);
+        else setViewIndex(index); // full-screen viewer (pinch-zoom, swipe, vote on A-F posts)
+      }, 310);
     }
   };
 
@@ -322,8 +357,11 @@ export default function PostCard({ post, width, myUid, isAdmin, onDeleted }: Pro
   const openProfile = () => {
     if (post.userId) navigation.navigate('UserProfile', { userId: post.userId });
   };
+  const commentsRef = useRef<InlineCommentsHandle>(null);
   const openComments = () =>
-    navigation.navigate('Comments', { target: { kind: post.kind, id: post.id } });
+    inlineComments
+      ? commentsRef.current?.focus()
+      : navigation.navigate('Comments', { target: { kind: post.kind, id: post.id } });
 
   const menu = () => {
     const buttons: any[] = [];
@@ -369,9 +407,7 @@ export default function PostCard({ post, width, myUid, isAdmin, onDeleted }: Pro
         <TouchableOpacity style={styles.postUser} onPress={openProfile}>
           <Avatar uri={post.userAvatar} name={post.userName} size={34} />
           <View style={styles.postUserText}>
-            <Text style={styles.postName} numberOfLines={1}>
-              {post.userName}
-            </Text>
+            <NameWithAge style={styles.postName} numberOfLines={1} uid={post.userId} name={post.userName} age={(post as any).userAge} />
             <Text style={styles.postTime}>
               {timeAgo(post.createdAt)}
               {post.kind === 'wardrobe' ? ' · wardrobe' : multi ? ` · vote ${OPTION_LABELS.slice(0, post.photos.length).join('/')}` : ''}
@@ -391,10 +427,10 @@ export default function PostCard({ post, width, myUid, isAdmin, onDeleted }: Pro
             showsHorizontalScrollIndicator={false}
             onMomentumScrollEnd={onScrollEnd}
             nestedScrollEnabled>
-            {post.photos.map(photo)}
+            {shownPhotos.map(photo)}
           </ScrollView>
         ) : (
-          photo(post.imageData, 0)
+          photo(shownPhotos[0] || post.imageData, 0)
         )}
         <Animated.Text
           pointerEvents="none"
@@ -512,24 +548,40 @@ export default function PostCard({ post, width, myUid, isAdmin, onDeleted }: Pro
         </TouchableOpacity>
       </View>
       {post.caption ? (
-        <Text style={styles.caption}>
-          <Text style={styles.captionName} onPress={openProfile}>
-            {post.userName}{' '}
-          </Text>
-          {post.caption}
-        </Text>
+        <TranslatedText
+          style={styles.caption}
+          chipsStyle={styles.captionChips}
+          authorId={post.userId}
+          text={post.caption}
+          prefix={
+            <>
+              <NameWithAge style={styles.captionName} onPress={openProfile} uid={post.userId} name={post.userName} age={(post as any).userAge} />{' '}
+            </>
+          }
+        />
       ) : null}
-      <TouchableOpacity onPress={openComments}>
-        <Text style={styles.viewComments}>
-          {commentCount > 0
-            ? `View all ${commentCount} ${commentCount === 1 ? 'comment' : 'comments'}`
-            : 'Add a comment...'}
-        </Text>
-      </TouchableOpacity>
+      {inlineComments ? (
+        <InlineComments
+          ref={commentsRef}
+          post={post}
+          commentCount={commentCount}
+          myUid={myUid}
+          isAdmin={isAdmin}
+          onReport={commentId => setReportTarget({ postId: post.id, commentId })}
+        />
+      ) : (
+        <TouchableOpacity onPress={openComments}>
+          <Text style={styles.viewComments}>
+            {commentCount > 0
+              ? `View all ${commentCount} ${commentCount === 1 ? 'comment' : 'comments'}`
+              : 'Add a comment...'}
+          </Text>
+        </TouchableOpacity>
+      )}
       <ReportModal target={reportTarget} reporterId={myUid} onClose={() => setReportTarget(null)} />
       <FullScreenImageViewer
         visible={viewIndex !== null}
-        photos={(multi ? post.photos : [post.imageData]).map((uri, i) => ({
+        photos={(multi ? (shownPhotos.length ? shownPhotos : post.photos) : [shownPhotos[0] || post.imageData]).map((uri, i) => ({
           uri,
           label: multi ? `${OPTION_LABELS[i]} · ${post.userName}` : post.userName,
         }))}
@@ -634,4 +686,5 @@ const styles = themedStyles(() => StyleSheet.create({
   viewComments: { fontSize: fontSize.sm, color: colors.textMuted, paddingHorizontal: spacing.md, paddingTop: 4 },
   caption: { fontSize: fontSize.sm, color: colors.textPrimary, paddingHorizontal: spacing.md, paddingTop: 4, lineHeight: 19 },
   captionName: { fontWeight: fontWeight.bold },
+  captionChips: { paddingHorizontal: spacing.md },
 }));

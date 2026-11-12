@@ -37,19 +37,46 @@ service cloud.firestore {
         || get(/databases/$(db)/documents/phones/$(request.resource.data.phone)).data.uid == me();
     }
 
-    // New comment {userId, userName, userAvatar, text, createdAt} by me, bad-word checked
+    // New comment {userId, userName, userAge?, userAvatar, text, createdAt} by me, bad-word checked
     function commentOk() {
-      return request.resource.data.keys().hasOnly(['userId', 'userName', 'userAvatar', 'text', 'createdAt'])
+      return request.resource.data.keys().hasOnly(['userId', 'userName', 'userAge', 'userAvatar', 'text', 'createdAt', 'parentId'])
+        && (request.resource.data.get('userAge', null) == null
+            || (request.resource.data.userAge is int
+                && request.resource.data.userAge >= 0
+                && request.resource.data.userAge < 130))
         && request.resource.data.userId == me()
         && request.resource.data.text is string
         && request.resource.data.text.size() >= 1
         && request.resource.data.text.size() <= 300
         && request.resource.data.createdAt == request.time
+        // Optional reply parent (one level; the post / wardrobe comment blocks check it exists)
+        && (request.resource.data.get('parentId', null) == null
+            || (request.resource.data.parentId is string
+                && request.resource.data.parentId.size() <= 64))
         && (request.resource.data.get('userAvatar', null) == null
             || (request.resource.data.userAvatar is string
                 && request.resource.data.userAvatar.size() <= 60000))
         // Worst abusive words (the app filters a longer list before sending)
         && !request.resource.data.text.lower().matches('(([a-z]|[^a-z])*[^a-z])?(fuck[a-z]*|motherfucker[a-z]*|bitch(es)?|cunts?|nigg(er|a)s?|faggots?|madarchod|behenchod|bhenchod|chutiy[ae]|bhosdike|lanja|lanjakodaka|dengu|puku|modda|randi|gandu|lavda)([^a-z]([a-z]|[^a-z])*)?');
+    }
+
+    // Same worst-words check as commentOk, for birthday wishes / birthday circle messages
+    function noAbuse(t) {
+      return !t.lower().matches('(([a-z]|[^a-z])*[^a-z])?(fuck[a-z]*|motherfucker[a-z]*|bitch(es)?|cunts?|nigg(er|a)s?|faggots?|madarchod|behenchod|bhenchod|chutiy[ae]|bhosdike|lanja|lanjakodaka|dengu|puku|modda|randi|gandu|lavda)([^a-z]([a-z]|[^a-z])*)?');
+    }
+    // 'YYYY-MM-DD' is the birthday 'MM-DD' (29 Feb birthdays also count on 28 Feb)
+    function isBirthdayOn(md, day) {
+      return day.matches('^[0-9]{4}-' + md + '$')
+        || (md == '02-29' && day.matches('^[0-9]{4}-02-28$'));
+    }
+    // My opted-in birthday (birthdays/{me}) is `day`, and it is that day now (any Indian / nearby timezone)
+    function myBirthdayNow(day) {
+      let p = /databases/$(db)/documents/birthdays/$(request.auth.uid);
+      return isDateKey(day)
+        && exists(p)
+        && isBirthdayOn(get(p).data.md, day)
+        && request.time > dateTs(day) - duration.value(14, 'h')
+        && request.time < dateTs(day) + duration.value(38, 'h');
     }
 
     // ── Rewards helpers (daily tasks, points, weekly celebrities) ─────────
@@ -100,6 +127,27 @@ service cloud.firestore {
             && newP > oldP
             && newP - oldP == scoreAfter(me(), day) - scoreBefore(me(), day));
     }
+    // ── Coins (src/config/coins.ts): users/{uid}/coinEvents/{type}_{targetId} {type, points, createdAt} ──
+    // Fixed points per action. If you change them, change COIN_POINTS in src/config/coins.ts too.
+    function coinPoints(t) {
+      return t == 'like' ? 1 : (t == 'upload' ? 10 : (t == 'share' ? 50 : -1));
+    }
+    function coinEventPath(uid, eid) {
+      return /databases/$(db)/documents/users/$(uid)/coinEvents/$(eid);
+    }
+    // users.coins may only grow by the points of the coin event (named in users.coinEvent)
+    // that this same write creates (event docs are create-only, so each counts once)
+    function coinsOk() {
+      let newC = request.resource.data.get('coins', 0);
+      let oldC = resource.data.get('coins', 0);
+      let ev = request.resource.data.get('coinEvent', '');
+      return newC == oldC
+        || (ev is string
+            && ev.matches('^(like|upload|share)_[A-Za-z0-9_-]{1,200}$')
+            && !exists(coinEventPath(me(), ev))
+            && existsAfter(coinEventPath(me(), ev))
+            && newC == oldC + getAfter(coinEventPath(me(), ev)).data.points);
+    }
     // users.referralCode is set once, together with referralCodes/{code} -> this user
     function referralCodeOk() {
       let oldC = resource.data.get('referralCode', null);
@@ -119,11 +167,13 @@ service cloud.firestore {
         && !('role' in request.resource.data)
         && phoneOk(null)
         && request.resource.data.get('points', 0) == 0
+        && request.resource.data.get('coins', 0) == 0
         && !('referralCode' in request.resource.data);
       allow update: if signedIn() && me() == uid
         && request.resource.data.get('role', null) == resource.data.get('role', null)
         && phoneOk(resource.data.get('phone', null))
         && pointsOk()
+        && coinsOk()
         && referralCodeOk();
       // Referral reward: a newly signed-up user adds exactly REFERRAL_POINTS (50) to the referrer's
       // points, only in the same write that creates referrals/{newUid} naming this referrer
@@ -162,6 +212,17 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // ── Coin events: once per action + target, never changed or removed ──
+    match /users/{uid}/coinEvents/{eid} {
+      allow read: if signedIn() && me() == uid;
+      allow create: if signedIn() && me() == uid
+        && request.resource.data.keys().hasOnly(['type', 'points', 'createdAt'])
+        && request.resource.data.type in ['like', 'upload', 'share']
+        && eid.matches('^' + request.resource.data.type + '_[A-Za-z0-9_-]{1,200}$')
+        && request.resource.data.points == coinPoints(request.resource.data.type);
+      allow update, delete: if false;
+    }
+
     // ── Likes list: users/{uid}/liked/{p_postId | w_wardrobeId} {kind, refId, createdAt} ──
     // Written by the owner in the same write as the like itself.
     match /users/{uid}/liked/{key} {
@@ -174,6 +235,110 @@ service cloud.firestore {
       allow delete: if signedIn() && me() == uid;
     }
 
+    // ── Birthdays (opt-in "Show my birthday"): birthdays/{uid} {name, avatar, md: 'MM-DD', updatedAt} ──
+    // Day + month only (never the year). Only the owner writes it, and md must match the owner's
+    // own users/{uid}.dob. Everyone signed in can read the list (Home card, one query).
+    match /birthdays/{uid} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && me() == uid
+        && request.resource.data.keys().hasOnly(['name', 'avatar', 'md', 'updatedAt'])
+        && request.resource.data.md is string
+        && request.resource.data.md.matches('^(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$')
+        && get(/databases/$(db)/documents/users/$(request.auth.uid)).data.get('dob', '') is string
+        && get(/databases/$(db)/documents/users/$(request.auth.uid)).data.get('dob', '').matches('^[0-9]{4}-' + request.resource.data.md + '$')
+        && request.resource.data.name is string
+        && request.resource.data.name.size() <= 60
+        && (request.resource.data.get('avatar', null) == null
+            || (request.resource.data.avatar is string && request.resource.data.avatar.size() <= 60000))
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if signedIn() && (me() == uid || isAdmin());
+    }
+
+    // ── Birthday wishes: birthdays/{uid}/wishes/{autoId} ──
+    // {userId, userName, userAvatar, text, day, replyToUid, replyToName, createdAt}
+    // day = that year's birthday; accepted from 7 days before until the day ends. Readable by
+    // everyone signed in; the author, the birthday person or an admin can delete. No updates.
+    match /birthdays/{uid}/wishes/{wid} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && exists(/databases/$(db)/documents/birthdays/$(uid))
+        && request.resource.data.keys().hasOnly(['userId', 'userName', 'userAge', 'userAvatar', 'text', 'day', 'replyToUid', 'replyToName', 'createdAt'])
+        && (request.resource.data.get('userAge', null) == null
+            || (request.resource.data.userAge is int
+                && request.resource.data.userAge >= 0
+                && request.resource.data.userAge < 130))
+        && request.resource.data.userId == me()
+        && request.resource.data.createdAt == request.time
+        && isDateKey(request.resource.data.day)
+        && isBirthdayOn(get(/databases/$(db)/documents/birthdays/$(uid)).data.md, request.resource.data.day)
+        && request.time > dateTs(request.resource.data.day) - duration.value(182, 'h')
+        && request.time < dateTs(request.resource.data.day) + duration.value(38, 'h')
+        && request.resource.data.text is string
+        && request.resource.data.text.size() >= 1
+        && request.resource.data.text.size() <= 300
+        && noAbuse(request.resource.data.text)
+        && request.resource.data.userName is string
+        && request.resource.data.userName.size() <= 60
+        && (request.resource.data.get('userAvatar', null) == null
+            || (request.resource.data.userAvatar is string && request.resource.data.userAvatar.size() <= 60000))
+        && (request.resource.data.get('replyToUid', null) == null
+            || (request.resource.data.replyToUid is string && request.resource.data.replyToUid.size() <= 128))
+        && (request.resource.data.get('replyToName', null) == null
+            || (request.resource.data.replyToName is string && request.resource.data.replyToName.size() <= 60));
+      allow delete: if signedIn()
+        && (resource.data.userId == me() || uid == me() || isAdmin());
+    }
+
+    // ── "Happy birthday to all": bdayCircles/{YYYY-MM-DD}/messages/{autoId} ──
+    // {userId, userName, userAvatar, type: 'text' | 'image', text, imageData, createdAt}
+    // Only people whose opted-in birthday is that day, and only on that day: the circle is gone
+    // (unreadable) the next day. Admins may read / delete for moderation.
+    match /bdayCircles/{day}/messages/{mid} {
+      allow read: if signedIn() && (myBirthdayNow(day) || isAdmin());
+      allow create: if signedIn()
+        && myBirthdayNow(day)
+        && request.resource.data.keys().hasOnly(['userId', 'userName', 'userAge', 'userAvatar', 'type', 'text', 'imageData', 'full', 'createdAt'])
+        && request.resource.data.get('full', 1) == 1
+        && (request.resource.data.get('userAge', null) == null
+            || (request.resource.data.userAge is int
+                && request.resource.data.userAge >= 0
+                && request.resource.data.userAge < 130))
+        && request.resource.data.userId == me()
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.userName is string
+        && request.resource.data.userName.size() <= 60
+        && (request.resource.data.get('userAvatar', null) == null
+            || (request.resource.data.userAvatar is string && request.resource.data.userAvatar.size() <= 60000))
+        && ((request.resource.data.type == 'text'
+              && request.resource.data.text is string
+              && request.resource.data.text.size() >= 1
+              && request.resource.data.text.size() <= 1000
+              && noAbuse(request.resource.data.text)
+              && !('imageData' in request.resource.data))
+            || (request.resource.data.type == 'image'
+              && request.resource.data.imageData is string
+              && request.resource.data.imageData.size() <= 240000
+              && !('text' in request.resource.data)));
+      allow delete: if signedIn() && (resource.data.userId == me() || isAdmin());
+
+      // ── Near-original photo (since build 115): .../messages/{mid}/media/full
+      //    {imageData (JPEG <= 690 KB, ~942K chars), userId, createdAt}; the message keeps a small
+      //    chat copy (+ full: 1). Written with the message in one batch, read when opened. ──
+      match /media/{x} {
+        allow read: if signedIn() && (myBirthdayNow(day) || isAdmin());
+        allow create: if signedIn()
+          && myBirthdayNow(day)
+          && x == 'full'
+          && getAfter(/databases/$(db)/documents/bdayCircles/$(day)/messages/$(mid)).data.userId == me()
+          && request.resource.data.keys().hasOnly(['imageData', 'userId', 'createdAt'])
+          && request.resource.data.userId == me()
+          && request.resource.data.imageData is string
+          && request.resource.data.imageData.size() <= 950000;
+        allow update: if false;
+        allow delete: if signedIn() && (resource.data.userId == me() || isAdmin());
+      }
+    }
+
     // ── Activity ("who liked my photos"): users/{uid}/activity/{autoId} ──
     // {type, actorId, actorName, actorAvatar, targetKind, targetId, thumbnail, text, createdAt}
     // Written by the person who liked / disliked / commented / followed (never by the owner);
@@ -184,14 +349,14 @@ service cloud.firestore {
         && request.resource.data.actorId == me()
         && uid != me()
         && request.resource.data.keys().hasOnly(['type', 'actorId', 'actorName', 'actorAvatar', 'targetKind', 'targetId', 'thumbnail', 'text', 'createdAt'])
-        && request.resource.data.type in ['like', 'dislike', 'comment', 'follow', 'feedback', 'referral']
+        && request.resource.data.type in ['like', 'dislike', 'comment', 'follow', 'feedback', 'referral', 'wish', 'mention']
         && request.resource.data.createdAt == request.time
         && (request.resource.data.get('actorName', null) == null
             || (request.resource.data.actorName is string && request.resource.data.actorName.size() <= 60))
         && (request.resource.data.get('actorAvatar', null) == null
             || (request.resource.data.actorAvatar is string && request.resource.data.actorAvatar.size() <= 60000))
         && (request.resource.data.get('targetKind', null) == null
-            || request.resource.data.targetKind in ['post', 'wardrobe'])
+            || request.resource.data.targetKind in ['post', 'wardrobe', 'birthday'])
         && (request.resource.data.get('targetId', null) == null
             || (request.resource.data.targetId is string && request.resource.data.targetId.size() <= 128))
         && (request.resource.data.get('thumbnail', null) == null
@@ -368,12 +533,61 @@ service cloud.firestore {
         allow delete: if signedIn() && dislikerId == me();
         allow update: if false;
       }
+      // ── Comments: wardrobe/{id}/comments/{cid} {userId, userName, userAvatar, text, createdAt,
+      //    parentId?} + replyCount/lastReplyId on top-level comments (one level of replies) ──
       match /comments/{cid} {
+        function wCommentPath(x) {
+          return /databases/$(db)/documents/wardrobe/$(itemId)/comments/$(x);
+        }
+        function replyOk() {
+          let p = request.resource.data.get('parentId', null);
+          return p == null
+            || (p is string && p != cid
+                && exists(wCommentPath(p))
+                && get(wCommentPath(p)).data.get('parentId', null) == null);
+        }
+        function replyCountUpdate() {
+          let rid = request.resource.data.lastReplyId;
+          let before = resource.data.get('replyCount', 0);
+          return onlyChanged(['replyCount', 'lastReplyId'])
+            && rid is string
+            && (
+              (request.resource.data.replyCount == before + 1
+                && !exists(wCommentPath(rid)) && existsAfter(wCommentPath(rid))
+                && getAfter(wCommentPath(rid)).data.get('parentId', null) == cid)
+              || (request.resource.data.replyCount == before - 1
+                && before > 0
+                && exists(wCommentPath(rid)) && !existsAfter(wCommentPath(rid))
+                && get(wCommentPath(rid)).data.get('parentId', null) == cid)
+            );
+        }
         allow read: if signedIn() && itemVisible();
-        allow create: if signedIn() && itemVisible() && commentOk();
-        allow update: if false;
+        allow create: if signedIn() && itemVisible() && commentOk() && replyOk();
+        allow update: if signedIn() && itemVisible() && replyCountUpdate();
         allow delete: if signedIn()
-          && (resource.data.userId == me() || itemData().userId == me() || isAdmin());
+          && (resource.data.userId == me() || itemData().userId == me() || isAdmin()
+              || (resource.data.get('parentId', null) is string
+                  && get(wCommentPath(resource.data.parentId)).data.userId == me()));
+      }
+
+      // ── Full-size photo: wardrobe/{id}/media/full {imageData, userId, updatedAt} ──
+      // The item itself keeps only a ~200 px thumbnail (media: 1). Written by the owner in the
+      // same batch as the item; read only by the detail / edit screen.
+      // ── Clear feed photo: wardrobe/{id}/media/clear {imageData (~720 px, ~45 KB), userId,
+      //    updatedAt} (+ clear: 1 on the item), shown full width on feed cards ──
+      match /media/{mid} {
+        allow read: if signedIn() && itemVisible();
+        allow create, update: if signedIn() && mid in ['full', 'clear']
+          && getAfter(/databases/$(db)/documents/wardrobe/$(itemId)).data.userId == me()
+          && request.resource.data.keys().hasOnly(['imageData', 'userId', 'updatedAt'])
+          && request.resource.data.userId == me()
+          && request.resource.data.imageData is string
+          // full: near-original JPEG <= 690 KB (~942K chars, build 115+); clear: ~1080 px feed copy
+          && ((mid == 'full' && request.resource.data.imageData.size() <= 950000)
+              || (mid == 'clear' && request.resource.data.imageData.size() <= 300000));
+        // In the same batch as the item delete (get() = before the batch), or a leftover of mine
+        allow delete: if signedIn()
+          && (itemData().userId == me() || isAdmin() || resource.data.userId == me());
       }
     }
 
@@ -387,6 +601,30 @@ service cloud.firestore {
         && getAfter(/databases/$(db)/documents/circles/$(request.resource.data.circleId)).data.inviteCode == code;
       allow update: if false;
       allow delete: if signedIn() && (resource.data.createdBy == me() || isAdmin());
+    }
+
+    // ── Circle names: circleNames/{nameId} -> {circleId, ownerId, createdAt} ──
+    // nameId = the circle's normalized name (lower case, trimmed, spaces collapsed; "/" etc.
+    // %-escaped), equal to circles/{circleId}.nameKey. Created in the same transaction as the
+    // circle (create / rename). A set on an existing doc is an update, which is never allowed, so
+    // a taken name can't be claimed. Anyone signed in can check one name; nobody can list them.
+    match /circleNames/{nameId} {
+      allow get: if signedIn();
+      allow list: if false;
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['circleId', 'ownerId', 'createdAt'])
+        && request.resource.data.ownerId == me()
+        && request.resource.data.circleId is string
+        && request.resource.data.createdAt == request.time
+        && existsAfter(/databases/$(db)/documents/circles/$(request.resource.data.circleId))
+        && getAfter(/databases/$(db)/documents/circles/$(request.resource.data.circleId)).data.ownerId == me()
+        && getAfter(/databases/$(db)/documents/circles/$(request.resource.data.circleId)).data.get('nameKey', '') == nameId;
+      allow update: if false;
+      // Owner, when the circle is gone or no longer uses this name (rename), or an admin
+      allow delete: if signedIn() && (isAdmin()
+        || (resource.data.ownerId == me()
+            && (!existsAfter(/databases/$(db)/documents/circles/$(resource.data.circleId))
+                || getAfter(/databases/$(db)/documents/circles/$(resource.data.circleId)).data.get('nameKey', '') != nameId)));
     }
 
     // ── Circles ─────────────────────────────────────────────────────────
@@ -403,21 +641,34 @@ service cloud.firestore {
         let j = request.resource.data.get('lastJoin', {});
         return j.get('uid', '') == me() && j.get('code', '') == resource.data.inviteCode;
       }
-      // Approximate distance (equirectangular, cosLat stored with the location) with ~0.5 km slack
-      // for the ~100 m rounding of both points. The location comes from the phone.
-      function joinedNearby() {
-        let j = request.resource.data.get('lastJoin', {});
-        let c = resource.data;
-        let r = c.get('radiusKm', 0) + 0.5;
-        return j.get('uid', '') == me()
-          && j.get('lat', null) is number && j.get('lng', null) is number
-          && c.get('location', null) != null
-          && math.pow((j.lat - c.location.lat) * 111.32, 2)
-             + math.pow((j.lng - c.location.lng) * 111.32 * c.get('cosLat', 1.0), 2) <= r * r;
+      // Unique name: nameKey points at a circleNames doc that (after this write) belongs to this circle
+      function nameDocOk(d) {
+        return d.get('nameKey', null) is string
+          && d.nameKey.size() > 0
+          && d.nameKey.size() <= 500
+          && d.get('nameLower', null) is string
+          && existsAfter(/databases/$(db)/documents/circleNames/$(d.nameKey))
+          && getAfter(/databases/$(db)/documents/circleNames/$(d.nameKey)).data.circleId == cid;
+      }
+      // Old APKs: no name-uniqueness fields at all (nameKey / nameLower absent)
+      function legacyCreate(d) {
+        return !d.keys().hasAny(['nameKey', 'nameLower']);
+      }
+      // District (Discover): optional strings; legacy docs have none
+      function validDistrict(d) {
+        return (d.get('district', null) == null || (d.district is string && d.district.size() <= 60))
+          && (d.get('districtKey', null) == null || (d.districtKey is string && d.districtKey.size() <= 60))
+          && (d.get('state', null) == null || (d.state is string && d.state.size() <= 60));
+      }
+      // isPublic (when present) must match isPrivate, so Discover never lists a private circle
+      function visibilityOk(d) {
+        return d.isPrivate is bool && d.get('isPublic', !d.isPrivate) == !d.isPrivate;
       }
 
+      // Discover queries isPublic == true (+ districtKey); Nearby isPrivate == false (+ geohash)
       allow read: if signedIn()
-        && (resource.data.isPrivate == false || me() in resource.data.memberIds || isAdmin());
+        && (resource.data.isPrivate == false || resource.data.get('isPublic', false) == true
+            || me() in resource.data.memberIds || isAdmin());
 
       allow create: if signedIn()
         && request.resource.data.ownerId == me()
@@ -434,27 +685,49 @@ service cloud.firestore {
             || (request.resource.data.geohash is string && request.resource.data.geohash.size() <= 12))
         && (request.resource.data.get('location', null) == null
             || (request.resource.data.location.lat is number && request.resource.data.location.lng is number))
-        && validRadius(request.resource.data);
+        && validRadius(request.resource.data)
+        && validDistrict(request.resource.data)
+        && (
+          // Current builds: unique name (circleNames doc written in the same transaction).
+          // Public circles carry a district (Discover); the location is optional (Nearby).
+          // Build 94-era public circles carry a location instead of a district: still allowed.
+          (nameDocOk(request.resource.data)
+            && (request.resource.data.isPrivate == true
+                || request.resource.data.get('districtKey', '') != ''
+                || (request.resource.data.get('location', null) != null
+                    && request.resource.data.get('geohash', null) is string)))
+          // Older builds (build 93 and earlier) send no nameKey / nameLower and may create a
+          // public circle without a location: still allowed so old APKs can create circles
+          || legacyCreate(request.resource.data));
 
       allow update: if signedIn() && (
-        // Owner: anything except ownership (incl. Public <-> Private and the Nearby location)
+        // Owner: anything except ownership (incl. name, Public <-> Private and the Nearby location).
+        // A changed name must come with its circleNames doc (same transaction).
         (resource.data.ownerId == me() && request.resource.data.ownerId == resource.data.ownerId
+            && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['name', 'nameLower', 'nameKey'])
+                || (request.resource.data.get('name', null) is string
+                    && request.resource.data.name.size() > 0
+                    && request.resource.data.name.size() <= 60
+                    && nameDocOk(request.resource.data)))
+            && visibilityOk(request.resource.data)
+            && validDistrict(request.resource.data)
             && validRadius(request.resource.data))
         // Admin: only Public <-> Private and the Nearby location (isPublic must match isPrivate)
         || (isAdmin()
-            && onlyChanged(['isPrivate', 'isPublic', 'location', 'geohash', 'cosLat', 'radiusKm'])
+            && onlyChanged(['isPrivate', 'isPublic', 'location', 'geohash', 'cosLat', 'radiusKm', 'district', 'districtKey', 'state'])
+            && validDistrict(request.resource.data)
             && request.resource.data.isPrivate is bool
             && request.resource.data.get('isPublic', !request.resource.data.isPrivate) == !request.resource.data.isPrivate
             && validRadius(request.resource.data))
         // Join: add only yourself.
-        //   Invite code (any circle, any distance): lastJoin = {uid: me, code: inviteCode}
-        //   Public, no distance limit: anyone
-        //   Public with radiusKm: lastJoin = {uid: me, lat, lng} within radiusKm of the circle
+        //   Private: only with the invite code: lastJoin = {uid: me, code: inviteCode}
+        //   Public: no code needed (district / 3 km checks are done in the app); lastJoin.uid == me
         || (onlyChanged(['memberIds', 'lastJoin'])
             && request.resource.data.memberIds.toSet() == resource.data.memberIds.toSet().union([me()].toSet())
-            && ((resource.data.isPrivate == false && resource.data.get('radiusKm', null) == null)
-                || joinedWithCode()
-                || (resource.data.isPrivate == false && joinedNearby())))
+            && (joinedWithCode()
+                || (resource.data.isPrivate == false
+                    && resource.data.get('isPublic', true) != false
+                    && request.resource.data.get('lastJoin', {}).get('uid', '') == me())))
         // Leave: remove only yourself (the owner deletes instead of leaving)
         || (onlyChanged(['memberIds'])
             && me() in resource.data.memberIds
@@ -472,12 +745,39 @@ service cloud.firestore {
         allow create: if isMember(cid)
           && request.resource.data.userId == me()
           && request.resource.data.type in ['text', 'image', 'poll']
+          // Photo polls (A-F picker, or up to 4 camera shots in a row): 2-6 options of
+          // {imageData, label}, kind 'buy' | 'wear'. Members vote in .../votes/{uid}.
           && (request.resource.data.type != 'poll'
-              || (request.resource.data.poll.options.size() >= 2
-                  && request.resource.data.poll.options.size() <= 6));
+              || (request.resource.data.poll is map
+                  && request.resource.data.poll.options is list
+                  && request.resource.data.poll.options.size() >= 2
+                  && request.resource.data.poll.options.size() <= 6
+                  && request.resource.data.poll.get('kind', 'buy') in ['buy', 'wear']
+                  && request.resource.data.poll.get('question', '') is string
+                  && request.resource.data.poll.get('question', '').size() <= 100
+                  && request.resource.data.poll.options[0].imageData is string
+                  && request.resource.data.poll.options[1].imageData is string));
         allow update: if false;
         allow delete: if signedIn()
           && (resource.data.userId == me() || isCircleOwner(cid) || isAdmin());
+
+        // ── Near-original photo of an image message (since build 115):
+        //    circles/{cid}/messages/{mid}/media/full {imageData (JPEG <= 690 KB, ~942K chars),
+        //    userId, createdAt}; the message keeps a small chat copy (+ full: 1). Written with the
+        //    message in one batch, read only when the photo is opened. ──
+        match /media/{x} {
+          allow read: if isMember(cid) || isAdmin();
+          allow create: if isMember(cid)
+            && x == 'full'
+            && getAfter(/databases/$(db)/documents/circles/$(cid)/messages/$(mid)).data.userId == me()
+            && request.resource.data.keys().hasOnly(['imageData', 'userId', 'createdAt'])
+            && request.resource.data.userId == me()
+            && request.resource.data.imageData is string
+            && request.resource.data.imageData.size() <= 950000;
+          allow update: if false;
+          allow delete: if signedIn()
+            && (resource.data.userId == me() || isCircleOwner(cid) || isAdmin());
+        }
 
         // ── Poll votes: one doc per voter, so a new vote replaces the old one ──
         match /votes/{voterId} {
@@ -609,18 +909,74 @@ service cloud.firestore {
         allow delete: if signedIn() && (voterId == me() || get(postPath()).data.userId == me() || isAdmin());
       }
 
-      // ── Comments: posts/{postId}/comments/{cid} {userId, userName, userAvatar, text, createdAt} ──
+      // ── Full-size photos: posts/{postId}/media/full {photos: [A, B...], userId, createdAt} ──
+      // The post keeps ~200 px thumbnails (media: 1); written by the author in the same batch
+      // as the post, read only on the detail screen. When the near-original photos (build 115+)
+      // don't fit one doc together, each is in media/full0..full5 {imageData, userId, createdAt}
+      // and the post has media: 2.
+      // ── Clear feed photos: posts/{postId}/media/clear {photos: [~720 px A, B...], userId,
+      //    createdAt} (+ clear: 1 on the post), shown full width on feed cards ──
+      match /media/{mid} {
+        allow read: if signedIn();
+        allow create: if signedIn()
+          && getAfter(postPath()).data.userId == me()
+          && request.resource.data.userId == me()
+          && ((mid in ['full', 'clear']
+                && request.resource.data.keys().hasOnly(['photos', 'userId', 'createdAt'])
+                && request.resource.data.photos is list
+                && request.resource.data.photos.size() >= 1
+                && request.resource.data.photos.size() <= 6)
+              // media: 2 posts (build 115+): one near-original photo per doc, full0..full5
+              || (mid in ['full0', 'full1', 'full2', 'full3', 'full4', 'full5']
+                && request.resource.data.keys().hasOnly(['imageData', 'userId', 'createdAt'])
+                && request.resource.data.imageData is string
+                && request.resource.data.imageData.size() <= 950000));
+        allow update: if false;
+        // With the post delete (get() = before the batch), or a leftover of mine
+        allow delete: if signedIn()
+          && (get(postPath()).data.userId == me() || isAdmin() || resource.data.userId == me());
+      }
+
+      // ── Comments: posts/{postId}/comments/{cid} {userId, userName, userAvatar, text, createdAt,
+      //    parentId?} + replyCount/lastReplyId on top-level comments (one level of replies) ──
       match /comments/{cid} {
+        // A reply points at an existing TOP-LEVEL comment of this post (no replyCount on create)
+        function replyOk() {
+          let p = request.resource.data.get('parentId', null);
+          return p == null
+            || (p is string && p != cid
+                && exists(commentPath(p))
+                && get(commentPath(p)).data.get('parentId', null) == null);
+        }
+        // replyCount changes by exactly 1, together with the reply named in lastReplyId
+        function replyCountUpdate() {
+          let rid = request.resource.data.lastReplyId;
+          let before = resource.data.get('replyCount', 0);
+          return onlyChanged(['replyCount', 'lastReplyId'])
+            && rid is string
+            && (
+              (request.resource.data.replyCount == before + 1
+                && !exists(commentPath(rid)) && existsAfter(commentPath(rid))
+                && getAfter(commentPath(rid)).data.get('parentId', null) == cid)
+              || (request.resource.data.replyCount == before - 1
+                && before > 0
+                && exists(commentPath(rid)) && !existsAfter(commentPath(rid))
+                && get(commentPath(rid)).data.get('parentId', null) == cid)
+            );
+        }
         allow read: if signedIn();
         allow create: if signedIn()
           && exists(postPath())
-          && commentOk();
-        allow update: if false;
-        // Comment author, post owner or admin
+          && commentOk()
+          && replyOk();
+        allow update: if signedIn() && replyCountUpdate();
+        // Comment author, post owner, admin, or (for a reply) the parent comment's author
         allow delete: if signedIn()
           && (resource.data.userId == me()
               || get(postPath()).data.userId == me()
-              || isAdmin());
+              || isAdmin()
+              || (resource.data.get('parentId', null) is string
+                  && get(commentPath(resource.data.parentId)).data.userId == me()));
       }
     }
 
@@ -692,21 +1048,88 @@ service cloud.firestore {
       allow update: if false;
     }
 
-    // ── Feedback & suggestions ──────────────────────────────────────────
-    // feedback/{autoId} {uid, name, type, text, image, appVersion, platform, createdAt, status}
-    // Anyone signed in with Google writes their own (status 'new'); only admins read them
-    // and change the status. Nobody else can read another user's feedback.
+    // ── Feedback & suggestions board ────────────────────────────────────
+    // feedback/{fid} {uid, name, type, text, image, appVersion, platform, createdAt, status,
+    //   isPublic, likeCount, replyCount, lastReplyId, quoteOf: {id, uid, name, text}, editedAt}
+    //   feedback/{fid}/likes/{uid}       one like per user, likeCount changes in the same write
+    //   feedback/{fid}/replies/{rid}     {uid, name, text, createdAt, editedAt}, replyCount likewise
+    // Signed-in users read public feedback (isPublic == true); authors read their own; admins
+    // (users.role 'admin' or listed in config/admins) read ALL and change status. Authors may only
+    // edit / delete their own feedback and replies. Feedback written before the board has no
+    // isPublic, so it stays admin + author only.
+    function listedAdmin() {
+      return signedIn()
+        && me() in get(/databases/$(db)/documents/config/admins).data.get('uids', []);
+    }
+    function feedbackAdmin() {
+      return isAdmin() || listedAdmin();
+    }
+    // Same worst-words check as comments (the app filters a longer list before sending)
+    function feedbackTextOk(t, max) {
+      return t is string && t.size() >= 1 && t.size() <= max
+        && !t.lower().matches('(([a-z]|[^a-z])*[^a-z])?(fuck[a-z]*|motherfucker[a-z]*|bitch(es)?|cunts?|nigg(er|a)s?|faggots?|madarchod|behenchod|bhenchod|chutiy[ae]|bhosdike|lanja|lanjakodaka|dengu|puku|modda|randi|gandu|lavda)([^a-z]([a-z]|[^a-z])*)?');
+    }
+    function feedbackPath(fid) {
+      return /databases/$(db)/documents/feedback/$(fid);
+    }
+    function canSeeFeedback(fid) {
+      return signedIn()
+        && (get(feedbackPath(fid)).data.get('isPublic', false) == true
+            || get(feedbackPath(fid)).data.uid == me()
+            || feedbackAdmin());
+    }
+    function quoteOk(d) {
+      return d.get('quoteOf', null) == null
+        || (d.quoteOf is map
+            && d.quoteOf.keys().hasOnly(['id', 'uid', 'name', 'text'])
+            && d.quoteOf.id is string
+            && d.quoteOf.text is string && d.quoteOf.text.size() <= 220
+            && d.quoteOf.get('name', '') is string && d.quoteOf.get('name', '').size() <= 80
+            && exists(feedbackPath(d.quoteOf.id))
+            && get(feedbackPath(d.quoteOf.id)).data.uid == d.quoteOf.get('uid', '')
+            && canSeeFeedback(d.quoteOf.id));
+    }
+
     match /feedback/{fid} {
+      function likePathF() {
+        return /databases/$(db)/documents/feedback/$(fid)/likes/$(request.auth.uid);
+      }
+      function replyPathF(rid) {
+        return /databases/$(db)/documents/feedback/$(fid)/replies/$(rid);
+      }
+      function visible() {
+        return resource.data.isPublic == true || resource.data.uid == me() || feedbackAdmin();
+      }
+      // likeCount changes by exactly 1, together with my own like doc
+      function feedbackLikeUpdate() {
+        let before = resource.data.get('likeCount', 0);
+        return onlyChanged(['likeCount'])
+          && ((request.resource.data.likeCount == before + 1 && !exists(likePathF()) && existsAfter(likePathF()))
+              || (request.resource.data.likeCount == before - 1 && before > 0
+                  && exists(likePathF()) && !existsAfter(likePathF())));
+      }
+      // replyCount changes by exactly 1, together with the reply named in lastReplyId
+      function feedbackReplyCountUpdate() {
+        let rid = request.resource.data.lastReplyId;
+        let before = resource.data.get('replyCount', 0);
+        return onlyChanged(['replyCount', 'lastReplyId'])
+          && rid is string
+          && ((request.resource.data.replyCount == before + 1 && !exists(replyPathF(rid)) && existsAfter(replyPathF(rid)))
+              || (request.resource.data.replyCount == before - 1 && before > 0
+                  && exists(replyPathF(rid)) && !existsAfter(replyPathF(rid))));
+      }
+
       allow create: if signedIn()
-        && request.resource.data.keys().hasOnly(['uid', 'name', 'type', 'text', 'image', 'appVersion', 'platform', 'createdAt', 'status'])
+        && request.resource.data.keys().hasOnly(['uid', 'name', 'type', 'text', 'image', 'appVersion', 'platform', 'createdAt', 'status', 'isPublic', 'likeCount', 'replyCount', 'quoteOf'])
         && request.resource.data.keys().hasAll(['uid', 'type', 'text', 'createdAt', 'status'])
         && request.resource.data.uid == me()
         && request.resource.data.type in ['Suggestion', 'Complaint', 'Bug', 'Other']
-        && request.resource.data.text is string
-        && request.resource.data.text.size() >= 1
-        && request.resource.data.text.size() <= 1000
+        && feedbackTextOk(request.resource.data.text, 1000)
         && request.resource.data.status == 'new'
         && request.resource.data.createdAt == request.time
+        && request.resource.data.get('isPublic', false) is bool
+        && request.resource.data.get('likeCount', 0) == 0
+        && request.resource.data.get('replyCount', 0) == 0
         && (request.resource.data.get('name', null) == null
             || (request.resource.data.name is string && request.resource.data.name.size() <= 80))
         && (request.resource.data.get('image', null) == null
@@ -715,13 +1138,69 @@ service cloud.firestore {
             || (request.resource.data.appVersion is string && request.resource.data.appVersion.size() <= 20))
         && (request.resource.data.get('platform', null) == null
             || (request.resource.data.platform is string && request.resource.data.platform.size() <= 20))
-        // Same worst-words check as comments (the app filters a longer list before sending)
-        && !request.resource.data.text.lower().matches('(([a-z]|[^a-z])*[^a-z])?(fuck[a-z]*|motherfucker[a-z]*|bitch(es)?|cunts?|nigg(er|a)s?|faggots?|madarchod|behenchod|bhenchod|chutiy[ae]|bhosdike|lanja|lanjakodaka|dengu|puku|modda|randi|gandu|lavda)([^a-z]([a-z]|[^a-z])*)?');
-      allow read: if isAdmin();
-      allow update: if isAdmin()
-        && onlyChanged(['status'])
-        && request.resource.data.status in ['new', 'read', 'done'];
-      allow delete: if isAdmin();
+        && quoteOk(request.resource.data);
+      // Queries: the board asks for isPublic == true, "Mine" for uid == me, admins for everything
+      allow read: if signedIn() && visible();
+      allow update: if signedIn() && (
+        // Author: text / type / board visibility only
+        (resource.data.uid == me()
+            && onlyChanged(['text', 'type', 'isPublic', 'editedAt'])
+            && feedbackTextOk(request.resource.data.text, 1000)
+            && request.resource.data.type in ['Suggestion', 'Complaint', 'Bug', 'Other']
+            && request.resource.data.get('isPublic', false) is bool
+            && request.resource.data.editedAt == request.time)
+        // Admin: status
+        || (feedbackAdmin()
+            && onlyChanged(['status'])
+            && request.resource.data.status in ['new', 'read', 'done'])
+        // Anyone who can see it: like counter / reply counter (checked against the sub-docs)
+        || (visible() && (feedbackLikeUpdate() || feedbackReplyCountUpdate()))
+      );
+      allow delete: if signedIn() && (resource.data.uid == me() || feedbackAdmin());
+
+      // ── Likes: doc id = liker, so one like per user ──
+      match /likes/{likerId} {
+        allow read: if canSeeFeedback(fid);
+        allow create: if canSeeFeedback(fid)
+          && likerId == me()
+          && request.resource.data.keys().hasOnly(['createdAt'])
+          && getAfter(feedbackPath(fid)).data.get('likeCount', 0)
+             == get(feedbackPath(fid)).data.get('likeCount', 0) + 1;
+        allow update: if false;
+        // Unlike (with the counter), or cleanup when the feedback is deleted by its author / an admin
+        allow delete: if signedIn() && (
+          (likerId == me()
+              && (!existsAfter(feedbackPath(fid))
+                  || getAfter(feedbackPath(fid)).data.get('likeCount', 0)
+                     == get(feedbackPath(fid)).data.get('likeCount', 0) - 1))
+          || get(feedbackPath(fid)).data.uid == me()
+          || feedbackAdmin());
+      }
+
+      // ── Replies ──
+      match /replies/{rid} {
+        allow read: if canSeeFeedback(fid);
+        allow create: if canSeeFeedback(fid)
+          && request.resource.data.keys().hasOnly(['uid', 'name', 'text', 'createdAt'])
+          && request.resource.data.uid == me()
+          && request.resource.data.createdAt == request.time
+          && request.resource.data.name is string && request.resource.data.name.size() <= 80
+          && feedbackTextOk(request.resource.data.text, 500)
+          && getAfter(feedbackPath(fid)).data.get('lastReplyId', '') == rid;
+        // Author edits the text only
+        allow update: if signedIn()
+          && resource.data.uid == me()
+          && onlyChanged(['text', 'editedAt'])
+          && feedbackTextOk(request.resource.data.text, 500)
+          && request.resource.data.editedAt == request.time;
+        // Reply author (with the counter), feedback author or admin
+        allow delete: if signedIn() && (
+          (resource.data.uid == me()
+              && (!existsAfter(feedbackPath(fid))
+                  || getAfter(feedbackPath(fid)).data.get('lastReplyId', '') == rid))
+          || get(feedbackPath(fid)).data.uid == me()
+          || feedbackAdmin());
+      }
     }
   }
 }

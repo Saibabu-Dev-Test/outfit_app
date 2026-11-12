@@ -1,4 +1,4 @@
-// Geohash (base32) + distance helpers for "Nearby circles". No SDK, no paid API.
+// Geohash (base32) + distance helpers (Circles > Nearby: public circles within 3 km). No SDK, no paid API.
 const BASE32 = '0123456789bcdefghjkmnpqrstuvwxyz';
 
 export const encodeGeohash = (lat: number, lng: number, precision = 6): string => {

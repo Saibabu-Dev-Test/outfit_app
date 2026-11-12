@@ -1,4 +1,8 @@
 {
   "name": "outfit",
-  "displayName": "outfit"
+  "displayName": "outfit",
+  "react-native-google-mobile-ads": {
+    "android_app_id": "ca-app-pub-6289221123241733~9168675820",
+    "delay_app_measurement_init": true
+  }
 }

@@ -15,6 +15,7 @@ import { db } from '../config/firebaseConfig';
 import { firestoreErrorMessage } from '../utils/firebaseErrors';
 import { localDateKey, yesterdayKey } from '../utils/date';
 import { MAX_BASE64_CHARS } from '../utils/imagePicker';
+import type { StoredAstroChart } from './birthProfile';
 
 export interface StoredProfile {
   name?: string;
@@ -22,9 +23,14 @@ export interface StoredProfile {
   phone?: string; // login key (digits), written only at sign up
   dob?: string;
   timeOfBirth?: string;
+  placeOfBirth?: string; // 'City, State' from constants/indianCities.ts
   rashi?: string;
   language?: string;
   gender?: string;
+  maritalStatus?: string; // 'Single' | 'Married' | 'Prefer not to say' (astrology relationship wording)
+  astroChart?: StoredAstroChart | null; // auto-filled birth chart (services/birthProfile.ts)
+  birthConfirmed?: boolean; // user ticked "Confirm birth details"
+  birthConfirmedKey?: string | null; // birthKey() of the details that were confirmed
   bio?: string;
   avatarUrl?: string | null;
   isPublic?: boolean; // public profile; default true
@@ -33,6 +39,12 @@ export interface StoredProfile {
   lastLoginDate?: string;
   streak?: number;
   stylePrefs?: string[]; // multi-select style preference
+  // Circles > Discover: my district (from location reverse-geocode, or picked by me)
+  district?: string;
+  districtKey?: string;
+  districtState?: string;
+  districtSource?: 'location' | 'picked';
+  showBirthday?: boolean; // "Show my birthday" (day + month on Home); default off (services/birthdayApi.ts)
 }
 
 // Style preference options (Profile > Style preference)
@@ -64,8 +76,9 @@ export const ageFromDob = (dob?: string | null, now: Date = new Date()): number 
 };
 
 const PROFILE_KEYS: (keyof StoredProfile)[] = [
-  'name', 'phoneNumber', 'phone', 'dob', 'timeOfBirth', 'rashi', 'language', 'gender',
-  'bio', 'avatarUrl', 'isPublic', 'nameLower', 'role', 'lastLoginDate', 'streak', 'stylePrefs',
+  'name', 'phoneNumber', 'phone', 'dob', 'timeOfBirth', 'placeOfBirth', 'rashi', 'language', 'gender', 'maritalStatus', 'astroChart', 'birthConfirmed', 'birthConfirmedKey',
+  'bio', 'avatarUrl', 'isPublic', 'nameLower', 'role', 'lastLoginDate', 'streak', 'stylePrefs', 'showBirthday',
+  'district', 'districtKey', 'districtState', 'districtSource',
 ];
 
 // Returns {} when missing or on error (never throws)
@@ -122,7 +135,8 @@ export const recordDailyLogin = async (
     const prevStreak: number = typeof data?.streak === 'number' ? data.streak : 0;
     if (last === today) return { streak: Math.max(prevStreak, 1), lastLoginDate: today };
     const streak = last === yesterdayKey() ? prevStreak + 1 : 1;
-    const update: any = { lastLoginDate: today, streak };
+    // lastActive: once a day (admin 👥 Users counts active-today with lastLoginDate, same value)
+    const update: any = { lastLoginDate: today, lastActive: today, streak };
     if (typeof data?.isPublic !== 'boolean') update.isPublic = true;
     // Backfill the search field for profiles saved before Phase 2
     if (typeof data?.name === 'string' && data.name.trim() && typeof data?.nameLower !== 'string') {

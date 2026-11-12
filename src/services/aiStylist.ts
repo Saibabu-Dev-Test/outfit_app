@@ -17,7 +17,7 @@ import { localDateKey } from '../utils/date';
 
 export type AiLanguage = 'English' | 'Telugu' | 'Hindi';
 export const AI_LANGUAGES: AiLanguage[] = ['English', 'Telugu', 'Hindi'];
-export const OCCASIONS = ['College', 'Date', 'Work', 'Party', 'Wedding / Function', 'Casual outing', 'Travel'];
+export { OCCASIONS } from './stylistChips';
 
 export interface AiTurn {
   role: 'user' | 'model';
@@ -33,6 +33,8 @@ export interface StylistContext {
   wardrobeCategories?: string[];
   luckyColours?: string[];
   luckyWhy?: string;
+  // Replaces the stylist instructions (Me > Astrology "More details": one call a day, cached)
+  system?: string;
 }
 
 export const REFUSAL: Record<AiLanguage, string> = {
@@ -49,7 +51,9 @@ export const defaultAiLanguage = (appLanguage?: string | null): AiLanguage => {
 };
 
 const systemPrompt = (c: StylistContext): string =>
-  [
+  c.system
+    ? c.system
+    : [
     'You are OUTFIT Stylist, a friendly personal fashion stylist inside the OUTFIT app (India).',
     'ONLY answer questions about clothing, outfits, colours, colour matching, accessories, footwear, grooming for an outfit, fabrics, and what to wear for an occasion or place.',
     `If the user asks about anything else (coding, maths, news, health, politics, homework, other apps, or anything not about clothes/style/colour), reply exactly: "${REFUSAL[c.language]}"`,
@@ -108,15 +112,32 @@ const bumpAiUsed = async (uid: string, used: number): Promise<void> => {
 // body { system_instruction, contents: [{role: 'user'|'model', parts: [{text}]}], generationConfig }.
 let workingModel: string | null = null;
 
-// Error shown in the chat. `detail` is the raw API status + message so a screenshot tells us what broke.
+// Error from the AI call. `message` is a short friendly line (never the raw API text); `detail`
+// keeps the API status + message for logs only. The Stylist screen never shows either one raw: on
+// any failure it shows the free offline wardrobe picks (services/luckyPairs.ts) instead.
 export class StylistError extends Error {
   detail: string;
-  constructor(message: string, detail = '') {
-    super(detail ? `${message}\n\n${detail}` : message);
+  unavailable: boolean; // AI is out of credits / quota / key problem: use the offline picker
+  constructor(message: string, detail = '', unavailable = false) {
+    super(message);
     this.name = 'StylistError';
     this.detail = detail;
+    this.unavailable = unavailable;
+    if (detail) console.warn('Stylist:', detail);
   }
 }
+
+// After a credits / quota / key failure the AI is skipped for a while (no slow failing calls);
+// the offline picker answers meanwhile.
+let aiPausedUntil = 0;
+const pauseAi = (ms: number) => {
+  aiPausedUntil = Date.now() + ms;
+};
+export const isAiPaused = (): boolean => Date.now() < aiPausedUntil;
+
+// 402 / RESOURCE_EXHAUSTED / billing: credits or quota used up
+const isCreditsProblem = (e: { code: number; status: string; message: string }) =>
+  e.code === 402 || /RESOURCE_EXHAUSTED|credit|billing|prepay|insufficient|quota/i.test(`${e.status} ${e.message}`);
 
 interface ApiError {
   code: number;
@@ -202,10 +223,11 @@ export const askStylist = async (
   history: AiTurn[],
   ctx: StylistContext,
 ): Promise<{ text: string; usedToday: number }> => {
-  if (!GEMINI_API_KEY) throw new StylistError('AI stylist is coming soon.');
+  if (!GEMINI_API_KEY) throw new StylistError('AI stylist is coming soon.', '', true);
+  if (isAiPaused()) throw new StylistError('AI stylist is resting.', '', true);
   const used = await getAiUsedToday(uid);
   if (used >= AI_DAILY_LIMIT) {
-    throw new StylistError(`You've used today's ${AI_DAILY_LIMIT} stylist messages. Come back tomorrow! 🌙`);
+    throw new StylistError(`You've used today's ${AI_DAILY_LIMIT} stylist messages. Come back tomorrow! 🌙`, '', true);
   }
   const contents = buildContents(history);
   if (!contents.length) throw new StylistError('Type a question about clothes, colours or style.');
@@ -273,7 +295,13 @@ export const askStylist = async (
       const detail = describe(model, err);
 
       if (isKeyProblem(err)) {
-        throw new StylistError('The AI key was rejected by Google.', detail);
+        pauseAi(60 * 60 * 1000);
+        throw new StylistError('AI stylist is resting.', detail, true);
+      }
+      // Credits / prepaid balance used up (402 RESOURCE_EXHAUSTED): no model will work
+      if (err.code === 402 || (isCreditsProblem(err) && err.code !== 429)) {
+        pauseAi(30 * 60 * 1000);
+        throw new StylistError('AI stylist is resting.', detail, true);
       }
       // A model that doesn't accept thinkingConfig: retry the same model once without it
       if (err.code === 400 && withThinking && thinkingFor(model) && /thinking/i.test(err.message)) {
@@ -294,9 +322,11 @@ export const askStylist = async (
         last = { msg: `The AI service had a problem (error ${err.code}). Please try again.`, detail };
         break;
       }
-      // Other 400/403: the request itself was refused. Show it as it is.
-      throw new StylistError('The AI service refused the request.', detail);
+      // Other 400/403: the request itself was refused
+      throw new StylistError('The stylist could not answer that one.', detail, true);
     }
   }
-  throw new StylistError(last.msg, `${last.detail}${tried.length ? `\nTried: ${tried.join(', ')}` : ''}`);
+  // Every model busy / out of quota: rest a few minutes
+  if (tried.length && /429|RESOURCE_EXHAUSTED/.test(last.detail)) pauseAi(3 * 60 * 1000);
+  throw new StylistError(last.msg, `${last.detail}${tried.length ? `\nTried: ${tried.join(', ')}` : ''}`, true);
 };

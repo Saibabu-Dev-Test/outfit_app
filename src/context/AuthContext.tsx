@@ -1,7 +1,9 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
+import { setMyDob } from '../utils/age';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '../config/firebaseConfig';
 import { logoutUser, restoreSession, UserProfile } from '../services/authApi';
+import { cancelVoteReminder, setNotificationName, syncVoteReminder } from '../native/notifications';
 
 interface AuthContextType {
   isAuthenticated: boolean;
@@ -30,6 +32,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [initializing, setInitializing] = useState<boolean>(true);
   const [user, setUser] = useState<UserProfile | null>(null);
+  // New posts / comments / messages carry the author's age (utils/age.myAgeFields)
+  useEffect(() => setMyDob(user?.dob), [user?.dob]);
   const [freshLogin, setFreshLogin] = useState<boolean>(false);
   const restoredRef = useRef(false);
 
@@ -60,6 +64,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
     return unsub;
   }, []);
+
+  // Keep the 8 AM notification's name in sync: login, session restore, profile name edits, and
+  // cleared on sign-out ("Good morning! ☀️")
+  const displayName = user?.name || '';
+  useEffect(() => {
+    setNotificationName(displayName);
+  }, [displayName]);
+
+  // Hourly colour-vote reminder (from 1 AM until today's vote) while signed in; off after sign-out
+  const signedInUid = isAuthenticated ? user?.id || '' : '';
+  useEffect(() => {
+    if (signedInUid) syncVoteReminder(signedInUid);
+    else if (!initializing) cancelVoteReminder();
+  }, [signedInUid, initializing]);
 
   const login = (userData?: UserProfile) => {
     if (userData) {

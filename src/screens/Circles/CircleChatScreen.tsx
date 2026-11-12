@@ -7,13 +7,13 @@ import {
   TouchableOpacity,
   FlatList,
   TextInput,
-  KeyboardAvoidingView,
   Platform,
   Image,
   Alert,
   ActivityIndicator,
   StatusBar,
 } from 'react-native';
+import KeyboardSafeView from '../../components/KeyboardSafeView';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles, statusBarStyle } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
@@ -23,10 +23,10 @@ import PollCard from '../../components/PollCard';
 import CreatePollModal from '../../components/CreatePollModal';
 import ActionSheet from '../../components/ActionSheet';
 import WardrobePickerModal from '../../components/WardrobePickerModal';
-import MultiShotModal from '../../components/MultiShotModal';
-import FullScreenImageViewer from '../../components/FullScreenImageViewer';
 import ReactionBar from '../../components/ReactionBar';
 import ReportModal, { ReportTarget } from '../../components/ReportModal';
+import ZoomableImage from '../../components/ZoomableImage';
+import CameraPollModal, { CAMERA_POLL_MAX } from '../../components/CameraPollModal';
 import {
   Circle,
   ChatMessage,
@@ -35,12 +35,17 @@ import {
   subscribeMessages,
   sendTextMessage,
   sendImageMessage,
+  getMessageFullPhoto,
   sendPollMessage,
   deleteMessage,
   joinCircle,
 } from '../../services/circlesApi';
-import { MAX_BASE64_CHARS, pickImages } from '../../utils/imagePicker';
+import { resolveMyPlace } from '../../services/districtApi';
+import { CHAT_PICK, MAX_BASE64_CHARS, pickImages } from '../../utils/imagePicker';
 import { clockTime } from '../../utils/date';
+import { isPhotoExpired, PHOTO_EXPIRED_TEXT } from '../../utils/photoExpiry';
+import NameWithAge from '../../components/NameWithAge';
+import TranslatedText from '../../components/TranslatedText';
 
 export default function CircleChatScreen({ navigation, route }: { navigation: any; route: any }) {
   const circleId: string = route?.params?.circleId || '';
@@ -57,7 +62,7 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
   const [sending, setSending] = useState(false);
   const [pollOpen, setPollOpen] = useState(false);
   const [pollImages, setPollImages] = useState<string[] | undefined>(undefined);
-  const [viewer, setViewer] = useState<string | null>(null);
+  const [viewer, setViewer] = useState<{ images: string[]; index: number; labels?: string[] } | null>(null);
   const [reportTarget, setReportTarget] = useState<ReportTarget | null>(null);
   const [joining, setJoining] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
@@ -135,12 +140,14 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
   // Several photos together: 1 = normal photo, 2-6 = A-F vote post
   const sendSeveral = async () => {
     try {
-      const r = await pickImages(6);
+      // One photo: near-original full photo + small chat copy; 2-6: poll-size photos (CHAT_PICK)
+      const r = await pickImages(6, CHAT_PICK);
       if (r.skipped) Alert.alert('Some photos skipped', `${r.skipped} photo(s) were too large.`);
       if (!r.images.length) return;
       if (r.images.length === 1) {
         setSending(true);
-        await sendImageMessage(circleId, me, r.images[0].dataUri);
+        const img = r.images[0];
+        await sendImageMessage(circleId, me, img.clearUri || img.dataUri, undefined, img.clearUri ? img.dataUri : null);
         return;
       }
       setPollImages(r.images.map(i => i.dataUri));
@@ -150,6 +157,18 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
     } finally {
       setSending(false);
     }
+  };
+
+  // Opens the chat copy at once, then swaps in the near-original photo when it has one
+  const openPhoto = (m: ChatMessage) => {
+    if (!m.imageData) return;
+    setViewer({ images: [m.imageData], index: 0 });
+    if (!m.hasFull) return;
+    getMessageFullPhoto(circleId, m).then(full => {
+      if (full && full !== m.imageData) {
+        setViewer(v => (v && v.images.length === 1 && v.images[0] === m.imageData ? { ...v, images: [full] } : v));
+      }
+    });
   };
 
   const openComments = (m: ChatMessage) =>
@@ -180,8 +199,9 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
     if (!uid || !circle) return;
     setJoining(true);
     try {
-      // Distance-limited circles check the user's location (see joinCircle)
-      await joinCircle(circle, uid);
+      // Public: my district or within 3 km (see joinCircle); private circles need the code
+      const place = await resolveMyPlace(uid);
+      await joinCircle(circle, uid, { districtKey: place.district?.districtKey, coords: place.coords });
     } catch (e: any) {
       Alert.alert('Could not join', e?.message || 'Please try again.');
     } finally {
@@ -230,6 +250,8 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
     // Inverted list: the next item in the array is the previous message on screen
     const prev = messages[index + 1];
     const showName = !mine && (!prev || prev.userId !== item.userId);
+    // Photos (and photo polls) older than 60 days are hidden; text stays
+    const expired = item.type !== 'text' && isPhotoExpired(item.createdAt);
     return (
       <View style={[styles.row, mine ? styles.rowMine : styles.rowOther]}>
         {!mine && (
@@ -241,31 +263,38 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
           activeOpacity={0.9}
           onLongPress={() => onMessageLongPress(item)}
           delayLongPress={350}
-          onPress={() => (item.type === 'image' && item.imageData ? setViewer(item.imageData) : undefined)}
+          onPress={() =>
+            !expired && item.type === 'image' && item.imageData ? openPhoto(item) : undefined
+          }
           style={[
             styles.bubble,
             mine ? styles.bubbleMine : styles.bubbleOther,
             item.type !== 'text' && styles.bubbleMedia,
           ]}>
           {showName && (
-            <Text style={styles.name} onPress={() => openProfile(item.userId)}>
-              {item.userName}
-            </Text>
+            <NameWithAge style={styles.name} onPress={() => openProfile(item.userId)} uid={item.userId} name={item.userName} age={(item as any).userAge} />
           )}
-          {item.type === 'image' && item.imageData ? (
+          {expired ? (
+            <View style={styles.expired}>
+              <Text style={styles.expiredText}>🖼️ {PHOTO_EXPIRED_TEXT}</Text>
+              {item.type === 'poll' && item.poll?.question ? <Text style={styles.expiredText}>{item.poll.question}</Text> : null}
+            </View>
+          ) : null}
+          {!expired && item.type === 'image' && item.imageData ? (
             <Image source={{ uri: item.imageData }} style={styles.photo} resizeMode="cover" />
           ) : null}
-          {item.type === 'poll' ? (
+          {!expired && item.type === 'poll' ? (
             <PollCard
               circleId={circleId}
               message={item}
               myUid={uid}
               canVote={isMember}
               onLongPress={() => onMessageLongPress(item)}
+              onOpenImages={(images, at, labels) => setViewer({ images, index: at, labels })}
             />
           ) : null}
-          {item.text ? <Text style={[styles.text, mine && styles.textMine]}>{item.text}</Text> : null}
-          {item.type !== 'text' ? (
+          {item.text ? <TranslatedText style={[styles.text, mine && styles.textMine]} authorId={item.userId} text={item.text} /> : null}
+          {item.type !== 'text' && !expired ? (
             <ReactionBar
               circleId={circleId}
               messageId={item.id}
@@ -390,12 +419,7 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
         {...(Platform.OS === 'android' ? { backgroundColor: colors.surface } : {})}
       />
       {header}
-      <KeyboardAvoidingView
-        style={styles.flex1}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={0}>
-        {body}
-      </KeyboardAvoidingView>
+      <KeyboardSafeView style={styles.flex1}>{body}</KeyboardSafeView>
 
       <CreatePollModal
         visible={pollOpen}
@@ -421,7 +445,7 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
           {
             icon: '📷',
             label: 'Take photo',
-            hint: 'Shoot one, or keep going for an A–F vote (up to 6)',
+            hint: `One photo, or up to ${CAMERA_POLL_MAX} in a row for a photo poll`,
             onPress: () => setCameraOpen(true),
           },
           {
@@ -432,6 +456,12 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
           },
         ]}
       />
+      <CameraPollModal
+        visible={cameraOpen}
+        onClose={() => setCameraOpen(false)}
+        onSendPhoto={img => sendImageMessage(circleId, me, img)}
+        onSendPoll={(kind, options) => sendPollMessage(circleId, me, kind, options)}
+      />
       <WardrobePickerModal
         visible={wardrobeOpen}
         userId={uid}
@@ -440,17 +470,13 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
         onClose={() => setWardrobeOpen(false)}
         onDone={sendFromWardrobe}
       />
-      <MultiShotModal
-        visible={cameraOpen}
-        max={6}
-        onClose={() => setCameraOpen(false)}
-        onDone={sendFromWardrobe}
-      />
       <ReportModal target={reportTarget} reporterId={uid} onClose={() => setReportTarget(null)} />
 
-      <FullScreenImageViewer
+      <ZoomableImage
         visible={!!viewer}
-        photos={viewer ? [{ uri: viewer }] : []}
+        images={viewer?.images || []}
+        initialIndex={viewer?.index || 0}
+        labels={viewer?.labels}
         onClose={() => setViewer(null)}
       />
     </SafeAreaView>
@@ -504,6 +530,8 @@ const styles = themedStyles(() => StyleSheet.create({
   bubbleMedia: { paddingHorizontal: spacing.sm, paddingTop: spacing.sm },
   name: { fontSize: fontSize.xs, fontWeight: fontWeight.bold, color: colors.accent, marginBottom: 2 },
   photo: { width: 220, height: 260, borderRadius: borderRadius.md, backgroundColor: colors.divider },
+  expired: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: borderRadius.md, backgroundColor: colors.divider },
+  expiredText: { fontSize: fontSize.xs, color: colors.textMuted, fontStyle: 'italic' },
   text: { fontSize: fontSize.base, color: colors.textPrimary, lineHeight: 21 },
   textMine: { color: colors.textInverse },
   time: { fontSize: 10, color: colors.textMuted, alignSelf: 'flex-end', marginTop: 2 },

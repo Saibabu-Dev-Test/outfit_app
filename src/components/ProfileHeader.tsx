@@ -20,6 +20,7 @@ interface Props {
   todayVotes?: number; // "Wear today" votes this person got today (replaces the old Posts count)
   onPressTodayVotes?: () => void;
   children?: React.ReactNode; // buttons row
+  badge?: React.ReactNode; // small line under the name (e.g. coins + tier)
 }
 
 export default function ProfileHeader({
@@ -34,6 +35,7 @@ export default function ProfileHeader({
   todayVotes,
   onPressTodayVotes,
   children,
+  badge,
 }: Props) {
   const navigation = useNavigation<any>();
   const [avatarOpen, setAvatarOpen] = useState(false);
@@ -68,6 +70,7 @@ export default function ProfileHeader({
         {isStar ? ' ⭐' : ''}
         {isPrivate ? ' 🔒' : ''}
       </Text>
+      {badge || null}
       {bio ? <Text style={styles.bio}>{bio}</Text> : null}
       {stylePrefs && stylePrefs.length ? (
         <View style={styles.chips}>

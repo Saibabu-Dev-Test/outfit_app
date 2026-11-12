@@ -41,7 +41,7 @@ export default function WardrobeScreen({ navigation }: { navigation: any }) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [activeMode, setActiveMode] = useState<string>('All');
 
-  const fetchItems = async (showLoading = true) => {
+  const fetchItems = async (showLoading = true, force = false) => {
     if (!user?.id) {
       setLoading(false);
       setRefreshing(false);
@@ -49,7 +49,7 @@ export default function WardrobeScreen({ navigation }: { navigation: any }) {
     }
     try {
       if (showLoading) setLoading(true);
-      const data = await getWardrobeItems(user.id);
+      const data = await getWardrobeItems(user.id, { force });
       setItems(data || []);
       setLoadError(null);
     } catch (err: any) {
@@ -70,7 +70,7 @@ export default function WardrobeScreen({ navigation }: { navigation: any }) {
 
   const onRefresh = () => {
     setRefreshing(true);
-    fetchItems(false);
+    fetchItems(false, true); // pull to refresh: full reload
   };
 
   const handleDeleteItem = (item: WardrobeItemResponse) => {

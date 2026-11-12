@@ -24,7 +24,10 @@ import { inlineAvatar } from './userApi';
 import { getUserLite } from './userCache';
 import type { FeedKind } from './feedApi';
 
-export type ActivityType = 'like' | 'dislike' | 'comment' | 'follow' | 'feedback' | 'referral';
+// 'wish' = a birthday wish to me, 'mention' = an @reply to me in someone's birthday wishes
+// (both: targetKind 'birthday', targetId = whose birthday page)
+export type ActivityType = 'like' | 'dislike' | 'comment' | 'follow' | 'feedback' | 'referral' | 'wish' | 'mention';
+export type ActivityTargetKind = FeedKind | 'birthday';
 
 export interface ActivityItem {
   id: string;
@@ -32,7 +35,7 @@ export interface ActivityItem {
   actorId: string;
   actorName: string;
   actorAvatar: string | null;
-  targetKind: FeedKind | null;
+  targetKind: ActivityTargetKind | null;
   targetId: string | null;
   thumbnail: string | null;
   text: string;
@@ -68,13 +71,13 @@ export const recordActivity = async (
   ownerUid: string | null | undefined,
   actor: Actor,
   type: ActivityType,
-  target?: { kind: FeedKind; id: string; thumbnail?: string | null } | null,
+  target?: { kind: ActivityTargetKind; id: string; thumbnail?: string | null } | null,
   text?: string,
 ): Promise<void> => {
   try {
     if (!actor?.uid) return;
     let owner = ownerUid || '';
-    if (!owner && target) owner = await ownerOf(target.kind, target.id);
+    if (!owner && target && target.kind !== 'birthday') owner = await ownerOf(target.kind, target.id);
     if (!owner || owner === actor.uid) return;
     const data: any = {
       type,
@@ -100,11 +103,11 @@ export const logActivity = (...args: Parameters<typeof recordActivity>): void =>
 
 const toItem = (id: string, d: any): ActivityItem => ({
   id,
-  type: ['like', 'dislike', 'comment', 'follow', 'feedback', 'referral'].includes(d?.type) ? d.type : 'like',
+  type: ['like', 'dislike', 'comment', 'follow', 'feedback', 'referral', 'wish', 'mention'].includes(d?.type) ? d.type : 'like',
   actorId: String(d?.actorId || ''),
   actorName: d?.actorName || 'Outfit user',
   actorAvatar: d?.actorAvatar || null,
-  targetKind: d?.targetKind === 'post' || d?.targetKind === 'wardrobe' ? d.targetKind : null,
+  targetKind: d?.targetKind === 'post' || d?.targetKind === 'wardrobe' || d?.targetKind === 'birthday' ? d.targetKind : null,
   targetId: typeof d?.targetId === 'string' && d.targetId ? d.targetId : null,
   thumbnail: d?.thumbnail || null,
   text: d?.text || '',
@@ -122,7 +125,7 @@ export const getMyActivity = async (uid: string, max = ACTIVITY_LIMIT): Promise<
     snap.docs.forEach(d => {
       const a = toItem(d.id, d.data({ serverTimestamps: 'estimate' }));
       // Comments are all different; likes / follows only count once
-      const key = a.type === 'comment' || a.type === 'feedback' || a.type === 'referral' ? a.id : `${a.type}:${a.actorId}:${a.targetKind}:${a.targetId}`;
+      const key = a.type === 'comment' || a.type === 'feedback' || a.type === 'referral' || a.type === 'wish' || a.type === 'mention' ? a.id : `${a.type}:${a.actorId}:${a.targetKind}:${a.targetId}`;
       if (seen.has(key)) return;
       seen.add(key);
       out.push(a);
@@ -153,6 +156,10 @@ export const activityLine = (a: ActivityItem): string => {
       return `${a.actorName} started following you`;
     case 'referral':
       return `${a.actorName} joined with your code${a.text ? `, ${a.text}` : ''}`;
+    case 'wish':
+      return `🎂 ${a.actorName} sent you a birthday wish${a.text ? `: "${a.text}"` : ''}`;
+    case 'mention':
+      return `${a.actorName} replied to you in birthday wishes${a.text ? `: "${a.text}"` : ''}`;
     case 'feedback':
       return `${a.actorName} sent feedback${a.text ? `: "${a.text}"` : ''}`;
     default:

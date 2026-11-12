@@ -1,8 +1,10 @@
-// Circles: My Circles / Discover / Nearby tabs, join with an invite code, create a public or private
-// circle. A public circle can have a distance limit (default 3 km): then only people within that
-// distance see it (in Nearby) and can join it from there; others join with a member's invite link/code.
-// No limit = listed in Discover for everyone.
-import React, { useCallback, useState } from 'react';
+// Circles: Mine / Discover / 📍 Nearby tabs, join with an invite code, create a public or private circle.
+//   Discover: public circles of my district (location on: reverse-geocoded and saved on my profile;
+//             off: my profile's district, or I pick one). Works with location on or off.
+//   Nearby:   public circles with a location within 3 km (needs location; otherwise a prompt).
+// Public circles are joined without a code; private circles are never listed (code / link only).
+// New public circles get my district automatically; my location is optional (also shows in Nearby).
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -16,38 +18,42 @@ import {
   Alert,
   RefreshControl,
   Modal,
-  KeyboardAvoidingView,
   ScrollView,
   Switch,
   Linking,
 } from 'react-native';
+import KeyboardSafeView from '../../components/KeyboardSafeView';
+import BannerAdSlot from '../../components/ads/BannerAdSlot';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
+import { useDayKey } from '../../hooks/useDayKey';
+import { getMyBirthday, isMyBirthdayToday } from '../../services/birthdayApi';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles, statusBarStyle } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
 import {
   Circle,
   createCircle,
-  getDiscoverCircles,
   getMyCircles,
   getNearbyCircles,
-  DEFAULT_RADIUS_KM,
-  RADIUS_OPTIONS,
+  getDistrictCircles,
   formatKm,
+  NEARBY_KM,
   joinCircle,
   joinWithCode,
   codeFromInvite,
 } from '../../services/circlesApi';
 import { timeAgo } from '../../utils/date';
-import { getApproxLocation } from '../../native/location';
-import { geoUri, mapsUrl } from '../../utils/geo';
+import { getApproxLocation, LocationFailReason } from '../../native/location';
+import { MyDistrict, pickMyDistrict, resolveMyPlace } from '../../services/districtApi';
+import CityPickerModal from '../../components/CityPickerModal';
 
-const EMOJIS = ['👗', '🔥', '🤍', '💼', '🌟', '🕰️', '👟', '💍', '🎉', '🌸', '🧥', '🪔', '👜', '🕶️', '🥻', '💄'];
+export const EMOJIS = ['👗', '🔥', '🤍', '💼', '🌟', '🕰️', '👟', '💍', '🎉', '🌸', '🧥', '🪔', '👜', '🕶️', '🥻', '💄'];
 
 export const PRIVATE_NOTICE =
   'Private circles may be reviewed by moderators if reported, to keep the community safe.';
 
 type TabKey = 'mine' | 'discover' | 'nearby';
+const TABS: TabKey[] = ['mine', 'discover', 'nearby'];
 
 export default function CirclesScreen() {
   const navigation = useNavigation<any>();
@@ -56,7 +62,6 @@ export default function CirclesScreen() {
 
   const [tab, setTab] = useState<TabKey>('mine');
   const [mine, setMine] = useState<Circle[]>([]);
-  const [discover, setDiscover] = useState<Circle[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -71,30 +76,74 @@ export default function CirclesScreen() {
   const [newDesc, setNewDesc] = useState('');
   const [newEmoji, setNewEmoji] = useState(EMOJIS[0]);
   const [newPrivate, setNewPrivate] = useState(false);
-  // Public circle: distance limit in km (null = no limit, visible to everyone)
-  const [newRadius, setNewRadius] = useState<number | null>(DEFAULT_RADIUS_KM);
+  const [newNearby, setNewNearby] = useState(true); // public: also save my location (Nearby)
   const [creating, setCreating] = useState(false);
 
-  // Nearby (public circles within their distance limit of me)
+  // Nearby: public circles within NEARBY_KM (3 km)
   const [nearby, setNearby] = useState<Circle[]>([]);
   const [nearbyLoaded, setNearbyLoaded] = useState(false);
   const [nearbyLoading, setNearbyLoading] = useState(false);
-  const [nearbyError, setNearbyError] = useState<string | null>(null);
+  const [nearbyError, setNearbyError] = useState<{ message: string; reason: LocationFailReason | 'load' } | null>(null);
+
+  // Discover: public circles of my district
+  const [myDistrict, setMyDistrict] = useState<MyDistrict | null>(null);
+  const myCoords = useRef<{ lat: number; lng: number } | null>(null);
+  const [discover, setDiscover] = useState<Circle[]>([]);
+  const [discoverLoaded, setDiscoverLoaded] = useState(false);
+  const [discoverLoading, setDiscoverLoading] = useState(false);
+  const [discoverError, setDiscoverError] = useState<string | null>(null);
+  const [districtPickerOpen, setDistrictPickerOpen] = useState(false);
+
+  const loadDiscoverFor = useCallback(async (d: MyDistrict | null) => {
+    setDiscoverError(null);
+    try {
+      setDiscover(d ? await getDistrictCircles(d.districtKey) : []);
+    } catch (e: any) {
+      setDiscoverError(e?.message || 'Could not load circles in your district.');
+    }
+  }, []);
+
+  const loadDiscover = useCallback(async () => {
+    if (!uid) return;
+    setDiscoverLoading(true);
+    const place = await resolveMyPlace(uid);
+    if (place.coords) myCoords.current = place.coords;
+    setMyDistrict(place.district);
+    await loadDiscoverFor(place.district);
+    setDiscoverLoading(false);
+    setDiscoverLoaded(true);
+  }, [uid, loadDiscoverFor]);
+
+  const onPickDistrict = async (label: string) => {
+    if (!uid || !label) return;
+    setDiscoverLoading(true);
+    try {
+      const d = await pickMyDistrict(uid, label);
+      setMyDistrict(d);
+      await loadDiscoverFor(d);
+    } catch (e: any) {
+      Alert.alert('Could not save district', e?.message || 'Please try again.');
+    }
+    setDiscoverLoading(false);
+    setDiscoverLoaded(true);
+  };
 
   const loadNearby = useCallback(async () => {
     setNearbyLoading(true);
     setNearbyError(null);
     const loc = await getApproxLocation();
     if (!loc.ok) {
-      setNearbyError(loc.message);
+      setNearby([]);
+      setNearbyError({ message: loc.message, reason: loc.reason });
       setNearbyLoading(false);
       setNearbyLoaded(true);
       return;
     }
     try {
+      myCoords.current = loc.coords;
       setNearby(await getNearbyCircles(loc.coords.lat, loc.coords.lng));
     } catch (e: any) {
-      setNearbyError(e?.message || 'Could not load nearby circles.');
+      setNearbyError({ message: e?.message || 'Could not load nearby circles.', reason: 'load' });
     }
     setNearbyLoading(false);
     setNearbyLoaded(true);
@@ -103,18 +152,20 @@ export default function CirclesScreen() {
   const openTab = (k: TabKey) => {
     setTab(k);
     if (k === 'nearby' && !nearbyLoaded && !nearbyLoading) loadNearby();
+    if (k === 'discover' && !discoverLoaded && !discoverLoading) loadDiscover();
   };
 
-  const openInMaps = (c: Circle) => {
-    if (!c.location) return;
-    const { lat, lng } = c.location;
-    const web = mapsUrl(lat, lng);
-    if (Platform.OS === 'android') {
-      Linking.openURL(geoUri(lat, lng, c.name)).catch(() => Linking.openURL(web).catch(() => {}));
-    } else {
-      Linking.openURL(web).catch(() => {});
-    }
-  };
+  // Opened with { tab }: switch to that tab, then clear the param
+  const route = useRoute<any>();
+  const wantTab: TabKey | undefined = route.params?.tab;
+  useEffect(() => {
+    if (!wantTab) return;
+    const k: TabKey = TABS.includes(wantTab) ? wantTab : 'mine';
+    setTab(k);
+    if (k === 'nearby') loadNearby();
+    if (k === 'discover') loadDiscover();
+    navigation.setParams({ tab: undefined });
+  }, [wantTab, navigation, loadNearby, loadDiscover]);
 
   const load = useCallback(
     async (showSpinner = true) => {
@@ -124,33 +175,41 @@ export default function CirclesScreen() {
         return;
       }
       if (showSpinner) setLoading(true);
-      const errors: string[] = [];
       try {
         setMine(await getMyCircles(uid));
+        setError(null);
       } catch (e: any) {
-        errors.push(e?.message || 'Could not load your circles.');
+        setError(e?.message || 'Could not load your circles.');
       }
-      try {
-        setDiscover(await getDiscoverCircles());
-      } catch (e: any) {
-        errors.push(e?.message || 'Could not load circles.');
-      }
-      setError(errors.length ? errors[0] : null);
       setLoading(false);
       setRefreshing(false);
     },
     [uid],
   );
 
-  // Back on this screen: reload; Nearby re-checks too (a circle may have gone private or moved)
-  const tabRef = React.useRef<TabKey>(tab);
+  // Back on this screen: reload; Nearby re-checks when it is the open tab (a circle may have gone
+  // private), otherwise it reloads the next time it is opened
+  const tabRef = useRef<TabKey>(tab);
   tabRef.current = tab;
+  // Birthday circle visibility (one cached read of birthdays/{me})
+  const [bdayToday, setBdayToday] = useState(false);
+  const bdayDay = useDayKey();
+  useEffect(() => {
+    if (!uid) return;
+    let alive = true;
+    getMyBirthday(uid).then(m => alive && setBdayToday(isMyBirthdayToday(m)));
+    return () => {
+      alive = false;
+    };
+  }, [uid, bdayDay]);
   useFocusEffect(
     useCallback(() => {
       load(false);
       if (tabRef.current === 'nearby') loadNearby();
       else setNearbyLoaded(false);
-    }, [load, loadNearby]),
+      if (tabRef.current === 'discover') loadDiscover();
+      else setDiscoverLoaded(false);
+    }, [load, loadNearby, loadDiscover]),
   );
 
   const openCircle = (c: Circle) => navigation.navigate('CircleChat', { circleId: c.id });
@@ -159,8 +218,10 @@ export default function CirclesScreen() {
     if (!uid) return;
     setJoiningId(c.id);
     try {
-      await joinCircle(c, uid);
-      setNearby(prev => prev.map(x => (x.id === c.id ? { ...x, memberIds: [...x.memberIds, uid] } : x)));
+      await joinCircle(c, uid, { districtKey: myDistrict?.districtKey, coords: myCoords.current });
+      const joined = (x: Circle) => (x.id === c.id ? { ...x, memberIds: [...x.memberIds, uid] } : x);
+      setNearby(prev => prev.map(joined));
+      setDiscover(prev => prev.map(joined));
       await load(false);
       openCircle(c);
     } catch (e: any) {
@@ -190,7 +251,7 @@ export default function CirclesScreen() {
     setNewDesc('');
     setNewEmoji(EMOJIS[0]);
     setNewPrivate(false);
-    setNewRadius(DEFAULT_RADIUS_KM);
+    setNewNearby(true);
   };
 
   const handleCreate = async () => {
@@ -204,26 +265,39 @@ export default function CirclesScreen() {
     }
     setCreating(true);
     try {
-      // Public + distance limit: approximate location (rounded to ~100 m in createCircle).
-      // Without the location the limit can't work, so nothing is created.
+      // Public circles: district set automatically (from my location, else my profile district);
+      // the approximate location (~100 m) is optional and also puts the circle in Nearby.
       let location: { lat: number; lng: number } | null = null;
-      const radiusKm = newPrivate ? null : newRadius;
-      if (radiusKm) {
-        const loc = await getApproxLocation();
-        if (!loc.ok) {
+      let district: MyDistrict | null = null;
+      if (!newPrivate) {
+        const place = await resolveMyPlace(uid, newNearby);
+        location = newNearby ? place.coords : null;
+        district = place.district;
+        if (!district) {
           Alert.alert(
-            'Location needed',
-            `${loc.message}\nA ${radiusKm} km limit needs your location. Turn on Location, or choose "No limit".`,
+            'District needed',
+            'Public circles show in Discover to people of your district. Turn on Location, or choose your district on the Discover tab, or make it private and invite people with the code.',
+            [
+              { text: 'OK', style: 'cancel' },
+              { text: 'Make it private', onPress: () => setNewPrivate(true) },
+            ],
           );
           return;
         }
-        location = loc.coords;
+        if (newNearby && !location) {
+          Alert.alert(
+            'No location',
+            `Location is off, so the circle shows in Discover (${district.district}) but not in Nearby. You can add its location later in circle info.`,
+          );
+        }
+        setMyDistrict(district);
       }
       const c = await createCircle(
-        { name: newName, description: newDesc, emoji: newEmoji, isPrivate: newPrivate, location, radiusKm },
+        { name: newName, description: newDesc, emoji: newEmoji, isPrivate: newPrivate, location, district, radiusKm: null },
         uid,
       );
-      if (location) setNearbyLoaded(false); // show it next time Nearby opens
+      if (location) setNearbyLoaded(false); // show it next time Nearby / Discover opens
+      setDiscoverLoaded(false);
       setCreateOpen(false);
       resetForm();
       setTab('mine');
@@ -237,6 +311,10 @@ export default function CirclesScreen() {
   };
 
   const data = tab === 'mine' ? mine : tab === 'discover' ? discover : nearby;
+  const busy =
+    loading ||
+    (tab === 'nearby' && (nearbyLoading || !nearbyLoaded)) ||
+    (tab === 'discover' && (discoverLoading || !discoverLoaded));
 
   const renderCircle = ({ item }: { item: Circle }) => {
     const isMember = !!uid && item.memberIds.includes(uid);
@@ -262,19 +340,10 @@ export default function CirclesScreen() {
             </Text>
           ) : null}
           <Text style={styles.cardMeta}>
+            {tab === 'nearby' && item.distanceKm != null ? `📍 ${formatKm(item.distanceKm)} away · ` : ''}
             {count} {count === 1 ? 'member' : 'members'}
             {item.lastMessageAt ? ` · active ${timeAgo(item.lastMessageAt)}` : ''}
           </Text>
-          {tab === 'nearby' && item.location ? (
-            <View style={styles.nearRow}>
-              <Text style={styles.nearDist}>
-                📍 {formatKm(item.distanceKm || 0)} away{item.radiusKm ? ` · within ${item.radiusKm} km only` : ''}
-              </Text>
-              <TouchableOpacity onPress={() => openInMaps(item)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                <Text style={styles.mapsLink}>Open in Maps</Text>
-              </TouchableOpacity>
-            </View>
-          ) : null}
         </View>
         {isMember ? (
           <Text style={styles.openText}>›</Text>
@@ -299,9 +368,6 @@ export default function CirclesScreen() {
           <Text style={styles.title}>Circles</Text>
         </View>
         <View style={styles.headerBtns}>
-          <TouchableOpacity style={styles.feedBtn} onPress={() => navigation.navigate('Feed')}>
-            <Text style={styles.feedBtnText}>Feed</Text>
-          </TouchableOpacity>
           <TouchableOpacity style={styles.createBtn} onPress={() => setCreateOpen(true)}>
             <Text style={styles.createBtnText}>+ Create</Text>
           </TouchableOpacity>
@@ -312,7 +378,7 @@ export default function CirclesScreen() {
       <View style={styles.codeRow}>
         <TextInput
           style={styles.codeInput}
-          placeholder="Join with code"
+          placeholder="Join with invite code"
           placeholderTextColor={colors.textMuted}
           value={code}
           // A pasted invite link / message (outfit://join/CODE) becomes just the code
@@ -332,29 +398,141 @@ export default function CirclesScreen() {
         </TouchableOpacity>
       </View>
 
+      <Text style={styles.codeHint}>Private circles are joined only with the invite code or link.</Text>
+
+      {/* 🎉 Today's "Happy birthday to all" circle: only on my own (opted-in) birthday */}
+      {bdayToday ? (
+        <TouchableOpacity
+          style={styles.bdayCircle}
+          activeOpacity={0.8}
+          onPress={() => navigation.navigate('BirthdayChat', { mode: 'circle' })}>
+          <Text style={styles.bdayEmoji}>🎉</Text>
+          <View style={styles.bdayMid}>
+            <Text style={styles.bdayTitle}>Happy birthday to all</Text>
+            <Text style={styles.bdaySub}>Everyone with a birthday today · chat and photos · gone tomorrow</Text>
+          </View>
+          <Text style={styles.bdayArrow}>›</Text>
+        </TouchableOpacity>
+      ) : null}
+
       {/* Tabs */}
       <View style={styles.tabs}>
-        {(['mine', 'discover', 'nearby'] as TabKey[]).map(k => (
+        {TABS.map(k => (
           <TouchableOpacity
             key={k}
             style={[styles.tab, tab === k && styles.tabActive]}
             onPress={() => openTab(k)}>
             <Text style={[styles.tabText, tab === k && styles.tabTextActive]} numberOfLines={1} adjustsFontSizeToFit>
-              {k === 'mine' ? `Mine (${mine.length})` : k === 'discover' ? 'Discover' : '📍 Nearby'}
+              {k === 'mine' ? `Mine (${mine.length})` : k === 'discover' ? '🏙️ Discover' : `📍 Nearby (${NEARBY_KM} km)`}
             </Text>
           </TouchableOpacity>
         ))}
       </View>
-      {error ? <Text style={styles.error}>{error}</Text> : null}
       {tab === 'nearby' ? (
-        <View style={styles.nearHead}>
-          <Text style={styles.nearHint}>Public circles near you (each within its distance limit)</Text>
+        <View style={styles.nearbyBar}>
+          <Text style={styles.nearbyHint}>Public circles within {NEARBY_KM} km of you, nearest first</Text>
           <TouchableOpacity onPress={loadNearby} disabled={nearbyLoading}>
-            <Text style={styles.mapsLink}>{nearbyLoading ? 'Finding…' : '↻ Refresh'}</Text>
+            <Text style={styles.nearbyLink}>{nearbyLoading ? 'Finding…' : '↻ Refresh'}</Text>
           </TouchableOpacity>
         </View>
       ) : null}
-      {tab === 'nearby' && nearbyError ? <Text style={styles.error}>{nearbyError}</Text> : null}
+      {tab === 'discover' ? (
+        <View style={styles.nearbyBar}>
+          <Text style={styles.nearbyHint}>
+            {myDistrict
+              ? `Public circles in ${myDistrict.district} district${
+                  myDistrict.source === 'location' ? ' (from your location)' : ''
+                }`
+              : 'Choose your district to see its public circles'}
+          </Text>
+          <TouchableOpacity onPress={() => setDistrictPickerOpen(true)} disabled={discoverLoading}>
+            <Text style={styles.nearbyLink}>{myDistrict ? 'Change' : 'Choose'}</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
+      {error && tab === 'mine' ? <Text style={styles.error}>{error}</Text> : null}
+    </View>
+  );
+
+  // Empty Nearby: location refused / off, load error, or no circles within 3 km
+  const nearbyEmpty = () => {
+    if (nearbyError && nearbyError.reason !== 'load') {
+      const settings = nearbyError.reason === 'blocked' || nearbyError.reason === 'denied';
+      return (
+        <View style={styles.empty}>
+          <Text style={styles.emptyEmoji}>📍</Text>
+          <Text style={styles.emptyText}>
+            Nearby needs your approximate location (about 100 m) to find public circles within {NEARBY_KM} km.
+            {'\n'}
+            {nearbyError.message}
+          </Text>
+          <View style={styles.emptyBtns}>
+            <TouchableOpacity style={styles.emptyBtn} onPress={loadNearby}>
+              <Text style={styles.emptyBtnText}>Try again</Text>
+            </TouchableOpacity>
+            {settings || nearbyError.reason === 'off' ? (
+              <TouchableOpacity
+                style={[styles.emptyBtn, styles.emptyBtnAlt]}
+                onPress={() =>
+                  nearbyError.reason === 'off' && Platform.OS === 'android'
+                    ? Linking.sendIntent('android.settings.LOCATION_SOURCE_SETTINGS').catch(() => Linking.openSettings())
+                    : Linking.openSettings()
+                }>
+                <Text style={[styles.emptyBtnText, styles.emptyBtnAltText]}>Open settings</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        </View>
+      );
+    }
+    return (
+      <View style={styles.empty}>
+        <Text style={styles.emptyEmoji}>📍</Text>
+        <Text style={styles.emptyText}>
+          {nearbyError
+            ? nearbyError.message
+            : `No public circles within ${NEARBY_KM} km yet. Create a public one and people around you can join! Circles further away are joined with their invite code.`}
+        </Text>
+        <View style={styles.emptyBtns}>
+          <TouchableOpacity
+            style={styles.emptyBtn}
+            onPress={() => {
+              setNewPrivate(false);
+              setCreateOpen(true);
+            }}>
+            <Text style={styles.emptyBtnText}>+ Create a circle</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  };
+
+  const discoverEmpty = () => (
+    <View style={styles.empty}>
+      <Text style={styles.emptyEmoji}>🏙️</Text>
+      <Text style={styles.emptyText}>
+        {discoverError
+          ? discoverError
+          : myDistrict
+            ? `No public circles in ${myDistrict.district} district yet. Create a public one and people of your district can join!`
+            : 'Turn on Location, or choose your district (pick your city), to see public circles of your district.'}
+      </Text>
+      <View style={styles.emptyBtns}>
+        {myDistrict ? (
+          <TouchableOpacity
+            style={styles.emptyBtn}
+            onPress={() => {
+              setNewPrivate(false);
+              setCreateOpen(true);
+            }}>
+            <Text style={styles.emptyBtnText}>+ Create a circle</Text>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity style={styles.emptyBtn} onPress={() => setDistrictPickerOpen(true)}>
+            <Text style={styles.emptyBtnText}>Choose district</Text>
+          </TouchableOpacity>
+        )}
+      </View>
     </View>
   );
 
@@ -365,7 +543,7 @@ export default function CirclesScreen() {
         {...(Platform.OS === 'android' ? { backgroundColor: colors.background } : {})}
       />
       <FlatList
-        data={loading || (tab === 'nearby' && nearbyLoading) ? [] : data}
+        data={busy ? [] : data}
         keyExtractor={c => c.id}
         renderItem={renderCircle}
         ListHeaderComponent={header}
@@ -377,29 +555,34 @@ export default function CirclesScreen() {
             onRefresh={() => {
               setRefreshing(true);
               load(false);
+              if (tab === 'nearby') loadNearby();
+              if (tab === 'discover') loadDiscover();
             }}
             tintColor={colors.primary}
           />
         }
         ListEmptyComponent={
-          loading || (tab === 'nearby' && nearbyLoading) ? (
-            <ActivityIndicator style={styles.spinner} color={colors.primary} />
+          busy ? (
+            <View>
+              <ActivityIndicator style={styles.spinner} color={colors.primary} />
+              {tab === 'nearby' ? <Text style={styles.emptyText}>Finding circles near you…</Text> : null}
+            </View>
+          ) : tab === 'nearby' ? (
+            nearbyEmpty()
+          ) : tab === 'discover' ? (
+            discoverEmpty()
           ) : (
             <View style={styles.empty}>
-              <Text style={styles.emptyEmoji}>{tab === 'mine' ? '◎' : tab === 'nearby' ? '📍' : '🔎'}</Text>
+              <Text style={styles.emptyEmoji}>◎</Text>
               <Text style={styles.emptyText}>
-                {tab === 'mine'
-                  ? 'You have not joined any circles yet. Create one, join with a code, or look in Discover.'
-                  : tab === 'nearby'
-                  ? nearbyError
-                    ? 'Turn on Location to see circles near you. Circles with a distance limit only show to people within that distance.'
-                    : `No circles near you yet. Create one with a distance limit (like ${DEFAULT_RADIUS_KM} km)!`
-                  : 'No public circles yet. Create the first one!'}
+                You have not joined any circles yet. Create one, join with an invite code, or look in Discover / 📍 Nearby.
               </Text>
             </View>
           )
         }
       />
+      {/* Banner under the circles list (nothing when there is no ad) */}
+      <BannerAdSlot slot="circlesBanner" />
 
       {/* Create circle */}
       <Modal
@@ -407,9 +590,8 @@ export default function CirclesScreen() {
         animationType="slide"
         transparent
         onRequestClose={() => setCreateOpen(false)}>
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.modalOverlay}>
+        {/* Sheet bottom sits right on the keyboard (KeyboardSafeView) */}
+        <KeyboardSafeView style={styles.modalOverlay}>
           <TouchableOpacity
             style={styles.flex1}
             activeOpacity={1}
@@ -431,7 +613,7 @@ export default function CirclesScreen() {
                 ))}
               </View>
 
-              <Text style={styles.label}>Name</Text>
+              <Text style={styles.label}>Name (must be unique)</Text>
               <TextInput
                 style={styles.input}
                 placeholder="e.g. Office Looks"
@@ -457,8 +639,8 @@ export default function CirclesScreen() {
                   <Text style={styles.visTitle}>{newPrivate ? '🔒 Private' : '🌍 Public'}</Text>
                   <Text style={styles.visHint}>
                     {newPrivate
-                      ? 'Hidden from Discover. People join with your invite code.'
-                      : 'Listed in Discover. Anyone can join.'}
+                      ? 'Never listed. People join only with your invite code or link.'
+                      : 'Shown in Discover to people of your district (set automatically). Anyone can join.'}
                   </Text>
                 </View>
                 <Switch
@@ -468,30 +650,23 @@ export default function CirclesScreen() {
                   thumbColor={colors.textInverse}
                 />
               </View>
-              {newPrivate && <Text style={styles.notice}>{PRIVATE_NOTICE}</Text>}
               {!newPrivate && (
-                <>
-                  <Text style={styles.label}>📍 Distance limit</Text>
-                  <View style={styles.radiusRow}>
-                    {[null, ...RADIUS_OPTIONS].map(r => (
-                      <TouchableOpacity
-                        key={String(r)}
-                        style={[styles.radiusChip, newRadius === r && styles.radiusChipActive]}
-                        onPress={() => setNewRadius(r)}>
-                        <Text style={[styles.radiusText, newRadius === r && styles.radiusTextActive]}>
-                          {r ? `${r} km` : 'No limit'}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
+                <View style={styles.visRow}>
+                  <View style={styles.flex1}>
+                    <Text style={styles.visTitle}>📍 Also show in Nearby</Text>
+                    <Text style={styles.visHint}>
+                      Optional: saves your approximate location (about 100 m) so people within {NEARBY_KM} km see it.
+                    </Text>
                   </View>
-                  <Text style={styles.visHint}>
-                    {newRadius
-                      ? `Only people within ${newRadius} km (Location on) see it in Nearby and can join. Others join with an invite link from a member. Saves your approximate location (about 100 m).`
-                      : 'Listed in Discover for everyone. Anyone can join.'}
-                  </Text>
-                </>
+                  <Switch
+                    value={newNearby}
+                    onValueChange={setNewNearby}
+                    trackColor={{ false: colors.border, true: colors.accent }}
+                    thumbColor={colors.textInverse}
+                  />
+                </View>
               )}
-
+              {newPrivate && <Text style={styles.notice}>{PRIVATE_NOTICE}</Text>}
               <View style={styles.modalActions}>
                 <TouchableOpacity
                   style={styles.cancelBtn}
@@ -512,36 +687,23 @@ export default function CirclesScreen() {
               </View>
             </ScrollView>
           </View>
-        </KeyboardAvoidingView>
+        </KeyboardSafeView>
       </Modal>
+
+      {/* Discover with location off: pick a city -> its district (saved on the profile) */}
+      <CityPickerModal
+        visible={districtPickerOpen}
+        title="Your district (pick your city)"
+        selected={null}
+        onSelect={onPickDistrict}
+        onClose={() => setDistrictPickerOpen(false)}
+      />
     </SafeAreaView>
   );
 }
 
 const styles = themedStyles(() => StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.background },
-  nearRow: { flexDirection: 'row', alignItems: 'center', marginTop: 4, gap: 12 },
-  nearDist: { fontSize: fontSize.xs, color: colors.textSecondary },
-  mapsLink: { fontSize: fontSize.xs, color: colors.primary, fontWeight: fontWeight.bold },
-  nearHead: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: spacing.base,
-    marginTop: spacing.sm,
-  },
-  nearHint: { fontSize: fontSize.sm, color: colors.textSecondary, flex: 1 },
-  radiusRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginBottom: spacing.sm },
-  radiusChip: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs + 2,
-    borderRadius: borderRadius.full,
-    borderWidth: 1.5,
-    borderColor: colors.border,
-  },
-  radiusChipActive: { borderColor: colors.accent, backgroundColor: colors.surfaceElevated },
-  radiusText: { fontSize: fontSize.sm, color: colors.textSecondary, fontWeight: fontWeight.semiBold },
-  radiusTextActive: { color: colors.primary, fontWeight: fontWeight.bold },
   flex1: { flex: 1 },
   listContent: { paddingBottom: spacing.xxxl },
   header: {
@@ -555,14 +717,6 @@ const styles = themedStyles(() => StyleSheet.create({
   subtitle: { fontSize: fontSize.sm, color: colors.textSecondary, fontWeight: fontWeight.medium },
   title: { fontSize: fontSize.xxl, fontWeight: fontWeight.extraBold, color: colors.textPrimary, letterSpacing: -0.5 },
   headerBtns: { flexDirection: 'row', gap: spacing.sm },
-  feedBtn: {
-    borderWidth: 1.5,
-    borderColor: colors.primary,
-    borderRadius: borderRadius.full,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-  },
-  feedBtnText: { color: colors.primary, fontWeight: fontWeight.bold, fontSize: fontSize.sm },
   createBtn: {
     backgroundColor: colors.primary,
     borderRadius: borderRadius.full,
@@ -594,6 +748,29 @@ const styles = themedStyles(() => StyleSheet.create({
   },
   codeBtnText: { color: colors.textInverse, fontWeight: fontWeight.bold },
   disabled: { opacity: 0.5 },
+  codeHint: {
+    fontSize: fontSize.xs,
+    color: colors.textSecondary,
+    paddingHorizontal: spacing.base,
+    marginTop: -spacing.sm,
+    marginBottom: spacing.md,
+  },
+  bdayCircle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: spacing.base,
+    marginTop: spacing.md,
+    padding: spacing.md,
+    borderRadius: borderRadius.lg,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.accent,
+  },
+  bdayEmoji: { fontSize: 30, marginRight: spacing.sm },
+  bdayMid: { flex: 1 },
+  bdayTitle: { fontSize: fontSize.base, fontWeight: fontWeight.bold, color: colors.textPrimary },
+  bdaySub: { fontSize: fontSize.xs, color: colors.textSecondary },
+  bdayArrow: { fontSize: 22, color: colors.textMuted },
   tabs: {
     flexDirection: 'row',
     marginHorizontal: spacing.base,
@@ -649,7 +826,26 @@ const styles = themedStyles(() => StyleSheet.create({
     marginLeft: spacing.sm,
   },
   joinBtnText: { color: colors.textInverse, fontWeight: fontWeight.bold, fontSize: fontSize.sm },
-  spinner: { marginTop: spacing.xxl },
+  spinner: { marginTop: spacing.xxl, marginBottom: spacing.sm },
+  nearbyBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.base,
+    marginBottom: spacing.sm,
+  },
+  nearbyHint: { fontSize: fontSize.xs, color: colors.textSecondary, flex: 1 },
+  nearbyLink: { fontSize: fontSize.sm, color: colors.primary, fontWeight: fontWeight.bold },
+  emptyBtns: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
+  emptyBtn: {
+    backgroundColor: colors.primary,
+    borderRadius: borderRadius.full,
+    paddingHorizontal: spacing.base,
+    paddingVertical: spacing.sm,
+  },
+  emptyBtnText: { color: colors.textInverse, fontWeight: fontWeight.bold, fontSize: fontSize.sm },
+  emptyBtnAlt: { backgroundColor: colors.surface, borderWidth: 1.5, borderColor: colors.primary },
+  emptyBtnAltText: { color: colors.primary },
   empty: { alignItems: 'center', padding: spacing.xxl },
   emptyEmoji: { fontSize: 40, color: colors.textMuted, marginBottom: spacing.sm },
   emptyText: { fontSize: fontSize.sm, color: colors.textSecondary, textAlign: 'center', lineHeight: 20 },

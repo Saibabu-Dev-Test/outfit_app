@@ -1,7 +1,8 @@
 name: Web (PWA) to GitHub Pages
 
-# DISABLED for now (app only, no website): it no longer runs on push to main. The public link
-# (Firebase Hosting, firebase.json) just downloads the APK that main.yml publishes.
+# DISABLED (app only, no website): it no longer runs on push to main. Firebase Hosting serves only
+# the /get/ Android download page (firebase.json, scripts/build-hosting.js); the web bundle itself
+# redirects to /get/ on any non-local host, so a run of this would not publish a usable app either.
 # To bring the web version back: restore the push trigger below, put back the web build in
 # firebase.json / scripts/deploy-hosting.sh, and run this once from the Actions tab.
 #

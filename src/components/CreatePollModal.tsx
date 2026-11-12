@@ -13,9 +13,8 @@ import {
   Alert,
   ActivityIndicator,
   ScrollView,
-  KeyboardAvoidingView,
-  Platform,
 } from 'react-native';
+import KeyboardSafeView from './KeyboardSafeView';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles } from '../theme';
 import { pickImages, POLL_PICK } from '../utils/imagePicker';
 import ActionSheet from './ActionSheet';
@@ -121,9 +120,8 @@ export default function CreatePollModal({ visible, onClose, onSubmit, initialIma
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={close}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.overlay}>
+      {/* Sheet bottom sits right on the keyboard (KeyboardSafeView) */}
+      <KeyboardSafeView style={styles.overlay}>
         <TouchableOpacity style={styles.flex1} activeOpacity={1} onPress={close} />
         <View style={styles.card}>
           <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
@@ -196,7 +194,7 @@ export default function CreatePollModal({ visible, onClose, onSubmit, initialIma
             </View>
           </ScrollView>
         </View>
-      </KeyboardAvoidingView>
+      </KeyboardSafeView>
       <ActionSheet
         visible={sheetOpen}
         title="Add photos to the poll"

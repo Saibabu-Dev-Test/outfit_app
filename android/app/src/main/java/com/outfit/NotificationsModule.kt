@@ -70,6 +70,52 @@ class NotificationsModule(private val ctx: ReactApplicationContext) : ReactConte
     }
   }
 
+  // Colour-vote reminder: hourly from 1:00 AM local time until today's colour is voted.
+  // Idempotent: call on every launch while signed in.
+  @ReactMethod
+  fun scheduleVoteReminder(promise: Promise) {
+    try {
+      OutfitNotifier.scheduleVoteReminder(ctx)
+      promise.resolve(true)
+    } catch (e: Exception) {
+      promise.resolve(false)
+    }
+  }
+
+  // The user voted today's colour (day = yyyy-MM-dd local, '' = today): clears the reminder and
+  // stays quiet until 1:00 AM the next day
+  @ReactMethod
+  fun markColourVoted(day: String, promise: Promise) {
+    try {
+      OutfitNotifier.markColourVoted(ctx, day)
+      promise.resolve(true)
+    } catch (e: Exception) {
+      promise.resolve(false)
+    }
+  }
+
+  @ReactMethod
+  fun cancelVoteReminder(promise: Promise) {
+    try {
+      OutfitNotifier.cancelVoteReminder(ctx)
+      promise.resolve(true)
+    } catch (e: Exception) {
+      promise.resolve(false)
+    }
+  }
+
+  // First name for the 8 AM "Good morning, {name}! ☀️" title, read by DailyNotificationReceiver.
+  // Empty clears it (sign-out), which falls back to "Good morning! ☀️".
+  @ReactMethod
+  fun setUserFirstName(name: String, promise: Promise) {
+    try {
+      OutfitNotifier.setFirstName(ctx, name)
+      promise.resolve(true)
+    } catch (e: Exception) {
+      promise.resolve(false)
+    }
+  }
+
   // Activity notification (likes, comments, follows, feedback) on the "activity" channel.
   // Resolves false when notifications are off.
   @ReactMethod

@@ -50,7 +50,7 @@ const itemFrom = (id: string, d: any): ActivityItem => ({
   actorId: String(d?.actorId || ''),
   actorName: d?.actorName || 'Outfit user',
   actorAvatar: null,
-  targetKind: d?.targetKind === 'post' || d?.targetKind === 'wardrobe' ? d.targetKind : null,
+  targetKind: d?.targetKind === 'post' || d?.targetKind === 'wardrobe' || d?.targetKind === 'birthday' ? d.targetKind : null,
   targetId: d?.targetId || null,
   thumbnail: null,
   text: d?.text || '',
@@ -98,7 +98,7 @@ export const startActivityWatcher = (uid: string): (() => void) => {
           notifiedMark = Math.max(...fresh.map(a => a.createdAt?.getTime() || 0));
           writeMs(notifiedKey(uid), notifiedMark);
           fresh.slice(0, MAX_EACH).forEach(a => {
-            postNotification(a.type === 'feedback' ? 'New feedback' : 'Outfit', activityLine(a));
+            postNotification(a.type === 'feedback' ? 'New feedback' : a.type === 'wish' || a.type === 'mention' ? '🎂 Birthday wishes' : 'Outfit', activityLine(a));
           });
           if (fresh.length > MAX_EACH) {
             postNotification('Outfit', `${fresh.length - MAX_EACH} more new likes, comments and follows`);

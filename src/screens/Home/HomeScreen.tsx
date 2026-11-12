@@ -1,5 +1,4 @@
-// Home. On app open it first shows ONLY today's colour vote; after voting (or Skip / Continue)
-// the rest shows: live results in one fixed-height box that scrolls inside itself (tap Boys / Girls
+// Home. App open lands straight here (no vote-first / "Continue to Home" screen): live results in one fixed-height box that scrolls inside itself (tap Boys / Girls
 // to see who voted), then today's lucky colour (Panchangam, IST date), the weekly celebrities and
 // the feed entry. Points / daily tasks live in Achievements (Me tab).
 import React, { useState, useEffect, useCallback, useRef } from 'react';
@@ -23,13 +22,18 @@ import { colors, spacing, borderRadius, fontSize, fontWeight, themedStyles, stat
 import { useAuth } from '../../context/AuthContext';
 import { doc, setDoc, serverTimestamp, collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../../config/firebaseConfig';
-import { ageFromDob, getUserProfile, recordDailyLogin } from '../../services/userApi';
-import { hasUploadedToday } from '../../services/wardrobeApi';
+import { getUserProfile, recordDailyLogin, saveUserProfile } from '../../services/userApi';
+import { compactMyClearCopies, hasUploadedToday } from '../../services/wardrobeApi';
 import { getTodayVaaraColour, getRashiLuckyColour, getTodayLuckyMessage } from '../../utils/panchangam';
 import { localDateKey, greetingForNow } from '../../utils/date';
 import { useDayKey } from '../../hooks/useDayKey';
+import { markColourVoted } from '../../native/notifications';
 import { firestoreErrorMessage, SERVER_SETUP_MESSAGE } from '../../utils/firebaseErrors';
 import Avatar from '../../components/Avatar';
+import { DobRequiredModal } from '../../components/DobPicker';
+import NameWithAge from '../../components/NameWithAge';
+import { ageFromDobIST, isValidDob } from '../../utils/age';
+import BirthdaysCard from '../../components/BirthdaysCard';
 import {
   checkWeeklyStars,
   getDay,
@@ -114,14 +118,72 @@ const tally = (map: VoteMap): ColourTally[] => {
 const emptyTally = (): ColourTally[] =>
   VOTE_COLOURS.map((c, i) => ({ rank: i + 1, ...c, votes: 0, boys: 0, girls: 0, men: '0%', women: '0%', percentage: '0%' }));
 
-// The vote-first screen shows once per app open
-let voteGateDone = false;
-
 export default function HomeScreen() {
   const navigation = useNavigation<any>();
   const { user, updateUserData } = useAuth();
+  // Once per user: drop the old duplicate 1080 px feed copies (free-tier space); runs in the background
+  useEffect(() => {
+    const id = user?.id ? String(user.id) : null;
+    if (!id) return;
+    const t = setTimeout(() => compactMyClearCopies(id), 8000);
+    return () => clearTimeout(t);
+  }, [user?.id]);
+  // Gender is mandatory: older accounts (signed up when it was optional) pick it once
+  const genderAsked = useRef(false);
+  useEffect(() => {
+    const id = user?.id ? String(user.id) : null;
+    if (!id || genderAsked.current) return;
+    let alive = true;
+    getUserProfile(id)
+      .then((p: any) => {
+        if (!alive || genderAsked.current || (p?.gender || '').trim()) return;
+        genderAsked.current = true;
+        const save = (g: string) =>
+          saveUserProfile(id, { gender: g } as any)
+            .then(() => updateUserData({ gender: g } as any))
+            .catch(() => {
+              genderAsked.current = false;
+            });
+        Alert.alert(
+          'Select your gender',
+          'Gender is required for outfit and astrology suggestions.',
+          [
+            { text: 'Male', onPress: () => save('Male') },
+            { text: 'Female', onPress: () => save('Female') },
+            { text: 'Other', onPress: () => save('Other') },
+          ],
+          { cancelable: false },
+        );
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
+  // Date of birth is mandatory too: older accounts without one get a blocking prompt once
+  const [needDob, setNeedDob] = useState(false);
+  useEffect(() => {
+    const id = user?.id ? String(user.id) : null;
+    if (!id) return;
+    let alive = true;
+    getUserProfile(id)
+      .then((p: any) => {
+        if (alive && !isValidDob(p?.dob)) setNeedDob(true);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [user?.id]);
+  const saveDob = async (dob: string) => {
+    const id = String(user?.id || '');
+    if (!id) return;
+    await saveUserProfile(id, { dob } as any);
+    updateUserData({ dob } as any);
+    setNeedDob(false);
+  };
   const uid = user?.id;
-  const [gateDone, setGateDone] = useState<boolean>(voteGateDone);
   const [topColours, setTopColours] = useState<ColourTally[]>(emptyTally());
   const [myVote, setMyVote] = useState<string | null>(null);
   const [voting, setVoting] = useState<string | null>(null);
@@ -133,7 +195,6 @@ export default function HomeScreen() {
   const votesRef = useRef<VoteMap>(new Map());
   const lastWriteRef = useRef<{ color: string; date: string; at: number } | null>(null);
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const gateTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [greeting, setGreeting] = useState<string>(greetingForNow());
 
   const displayName = (user?.name || '').trim() || 'there';
@@ -146,11 +207,6 @@ export default function HomeScreen() {
   // The results box never takes more than ~55% of the screen; it scrolls inside itself
   const { height: windowHeight } = useWindowDimensions();
   const voteBoxMaxHeight = Math.max(260, Math.round(windowHeight * 0.55));
-
-  const finishGate = useCallback(() => {
-    voteGateDone = true;
-    setGateDone(true);
-  }, []);
 
   const showVotes = useCallback(
     (map: VoteMap) => {
@@ -199,13 +255,16 @@ export default function HomeScreen() {
           color: lw.color,
           gender: String(user?.gender || '').toLowerCase(),
           name: displayName,
-          age: ageFromDob(user?.dob),
+          age: ageFromDobIST(user?.dob),
         });
       }
       votesRef.current = map;
       showVotes(map);
-      // Voted earlier (or on another device): tick the daily task
-      if (uid && map.has(uid)) recordTask(uid, 'voted').then(() => refreshPoints());
+      // Voted earlier (or on another device): tick the daily task and stop today's vote reminders
+      if (uid && map.has(uid)) {
+        recordTask(uid, 'voted').then(() => refreshPoints());
+        markColourVoted(uid, today);
+      }
     } catch (error: any) {
       console.warn('Error fetching votes:', error?.code, error?.message);
     } finally {
@@ -229,6 +288,7 @@ export default function HomeScreen() {
             dob: stored.dob,
             language: stored.language,
             timeOfBirth: stored.timeOfBirth,
+            placeOfBirth: stored.placeOfBirth,
             bio: stored.bio,
             stylePrefs: stored.stylePrefs,
             isPublic: stored.isPublic !== false,
@@ -260,7 +320,7 @@ export default function HomeScreen() {
   );
 
   // Midnight while Home is open (or the app comes back on a new day): clear yesterday's tallies and
-  // my vote, show the vote-first screen again, then load the new day's votes (none yet = all 0).
+  // my vote, then load the new day's votes (none yet = all 0).
   const dayKeyRef = useRef(dayKey);
   useEffect(() => {
     if (dayKeyRef.current === dayKey) return;
@@ -271,8 +331,6 @@ export default function HomeScreen() {
     setMyVote(null);
     setVoterList(null);
     setGreeting(greetingForNow());
-    voteGateDone = false;
-    setGateDone(false);
     fetchVotes();
     refreshPoints();
     if (uid) recordTask(uid, 'opened').then(() => refreshPoints());
@@ -285,7 +343,6 @@ export default function HomeScreen() {
   useEffect(
     () => () => {
       if (flashTimer.current) clearTimeout(flashTimer.current);
-      if (gateTimer.current) clearTimeout(gateTimer.current);
     },
     [],
   );
@@ -297,14 +354,11 @@ export default function HomeScreen() {
       Alert.alert('Please login to vote!');
       return;
     }
-    if (colorName === myVote || voting) {
-      if (!gateDone && colorName === myVote) finishGate();
-      return;
-    }
+    if (colorName === myVote || voting) return;
     const today = localDateKey();
     const voteId = `top_colors_${today}_${uid}`;
     const previous = myVote;
-    const age = ageFromDob(user?.dob);
+    const age = ageFromDobIST(user?.dob);
     setVoting(colorName);
     setMyVote(colorName); // optimistic
     try {
@@ -338,12 +392,9 @@ export default function HomeScreen() {
     flashTimer.current = setTimeout(() => setFlashName(null), 1500);
     setVoting(null);
     recordTask(uid, 'voted').then(() => refreshPoints());
+    // No more hourly vote reminders until 1 AM tomorrow (written locally + native alarm)
+    markColourVoted(uid, today);
     fetchVotes();
-    // First screen: show the rest of Home after a moment
-    if (!gateDone) {
-      if (gateTimer.current) clearTimeout(gateTimer.current);
-      gateTimer.current = setTimeout(finishGate, 900);
-    }
   };
 
   const openVoters = (colour: string, gender: 'male' | 'female') => {
@@ -354,8 +405,6 @@ export default function HomeScreen() {
     voters.sort((a, b) => a.name.localeCompare(b.name));
     setVoterList({ title: `${gender === 'male' ? '👦 Boys' : '👧 Girls'} who voted ${colour}`, voters });
   };
-
-  const totalVotes = topColours.reduce((n, c) => n + c.votes, 0);
 
   const voteList = (
     <View style={[styles.topColoursCard, { maxHeight: voteBoxMaxHeight }]}>
@@ -443,10 +492,7 @@ export default function HomeScreen() {
                   setVoterList(null);
                   navigation.navigate('UserProfile', { userId: item.uid });
                 }}>
-                <Text style={styles.voterName}>
-                  {item.name}
-                  {item.age !== null ? ` (${item.age})` : ''}
-                </Text>
+                <NameWithAge style={styles.voterName} uid={item.uid} name={item.name} age={item.age} />
                 <Text style={styles.voterArrow}>›</Text>
               </TouchableOpacity>
             )}
@@ -463,45 +509,6 @@ export default function HomeScreen() {
   const statusBar = (
     <StatusBar barStyle={statusBarStyle()} {...(Platform.OS === 'android' ? { backgroundColor: colors.background } : {})} />
   );
-
-  // ── First screen: only today's colour vote ──
-  if (!gateDone) {
-    return (
-      <SafeAreaView style={styles.safeArea} edges={['top']}>
-        {statusBar}
-        <View style={styles.gateHeader}>
-          <View style={styles.flex1}>
-            <Text style={styles.gateHello}>
-              {greeting}, {firstName} 👋
-            </Text>
-            <Text style={styles.gateTitle}>Vote today's colour</Text>
-          </View>
-          <TouchableOpacity onPress={finishGate} style={styles.skipBtn}>
-            <Text style={styles.skipText}>{myVote ? 'Continue ›' : 'Skip'}</Text>
-          </TouchableOpacity>
-        </View>
-        <View style={styles.gateLucky}>
-          {vaara.colours.map(c => (
-            <View key={c.name} style={[styles.luckyDot, { backgroundColor: c.hex }]} />
-          ))}
-          <Text style={styles.gateLuckyText}>Panchangam colour: {vaara.colours.map(c => c.name).join(' / ')}</Text>
-        </View>
-        <Text style={styles.voteHint}>
-          {myVote ? `Your vote: ${myVote}. Tap another colour to change it.` : 'Which colour will you wear today? Tap to vote.'}
-          {totalVotes ? `  ·  ${totalVotes} votes today` : ''}
-        </Text>
-        <ScrollView contentContainerStyle={styles.gateScroll} showsVerticalScrollIndicator={false}>
-          {voteList}
-          {myVote ? (
-            <TouchableOpacity style={styles.continueBtn} onPress={finishGate}>
-              <Text style={styles.continueText}>Continue to Home</Text>
-            </TouchableOpacity>
-          ) : null}
-        </ScrollView>
-        {voterModal}
-      </SafeAreaView>
-    );
-  }
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
@@ -563,6 +570,10 @@ export default function HomeScreen() {
           <Text style={styles.panchangNote}>Traditional Panchangam guidance (weekday ruling planet)</Text>
         </View>
 
+        {/* 🎂 Birthdays today + next 7 days (opt-in), wishes, and the birthday circle on my birthday */}
+        {user?.id ? <BirthdaysCard uid={String(user.id)} /> : null}
+        <DobRequiredModal visible={needDob} onSave={saveDob} />
+
         {/* Last week's celebrities */}
         <View style={styles.plainHeaderRow}>
           <Text style={styles.sectionTitle}>Congratulations! This week's celebrities ⭐</Text>
@@ -595,7 +606,7 @@ export default function HomeScreen() {
           <Text style={styles.feedEmoji}>📸</Text>
           <View style={styles.flex1}>
             <Text style={styles.feedTitle}>Style Feed</Text>
-            <Text style={styles.feedSub}>See today's looks from the community and vote A / B / C</Text>
+            <Text style={styles.feedSub}>See today's looks from your circles and vote A / B / C</Text>
           </View>
           <Text style={styles.feedArrow}>›</Text>
         </TouchableOpacity>
@@ -609,36 +620,6 @@ const styles = themedStyles(() => StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.background },
   flex1: { flex: 1 },
   scrollContent: { paddingBottom: spacing.xxxl + spacing.xl },
-  // Vote-first screen
-  gateHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.base, paddingTop: spacing.md },
-  gateHello: { fontSize: fontSize.sm, color: colors.textSecondary },
-  gateTitle: { fontSize: fontSize.xxl, fontWeight: fontWeight.extraBold, color: colors.textPrimary },
-  skipBtn: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
-  skipText: { color: colors.primary, fontWeight: fontWeight.bold, fontSize: fontSize.base },
-  gateLucky: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginHorizontal: spacing.base,
-    marginTop: spacing.md,
-    marginBottom: spacing.sm,
-    padding: spacing.sm,
-    borderRadius: borderRadius.md,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  luckyDot: { width: 18, height: 18, borderRadius: 9, marginRight: 4, borderWidth: 1, borderColor: colors.border },
-  gateLuckyText: { fontSize: fontSize.sm, color: colors.textPrimary, fontWeight: fontWeight.semiBold, marginLeft: 4, flex: 1 },
-  gateScroll: { paddingBottom: spacing.xxxl },
-  continueBtn: {
-    marginHorizontal: spacing.base,
-    marginTop: spacing.lg,
-    backgroundColor: colors.primary,
-    borderRadius: borderRadius.full,
-    paddingVertical: spacing.md,
-    alignItems: 'center',
-  },
-  continueText: { color: colors.onPrimary, fontWeight: fontWeight.bold, fontSize: fontSize.md },
   // Home
   header: {
     flexDirection: 'row',

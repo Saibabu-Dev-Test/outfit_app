@@ -1,22 +1,31 @@
-// Web build: photos come from <input type="file"> and are shrunk with a canvas to the same limits
-// as the Android picker (base64 data URI stored in Firestore; no Firebase Storage on Spark).
-export const MAX_BASE64_CHARS = 700000;
+// Web build: photos come from <input type="file"> and are shrunk with a canvas to the same sizes
+// as the Android picker (imageSpecs.ts): full photo + optional thumbnail, JPEG data URIs.
+import { loadImage, resizeLoaded } from './imageResize.web';
+import { AVATAR_SPEC, AVATAR_THUMB_SPEC, CLEAR_SPEC, FULL_MAX_CHARS, FULL_SPEC, ImageSpec, POLL_SPEC, THUMB_SPEC } from './imageSpecs';
+
+export const MAX_BASE64_CHARS = FULL_MAX_CHARS; // one full photo (~942K chars), see imagePicker.ts
 
 export interface PickedImage {
   dataUri: string;
+  thumbUri?: string;
+  clearUri?: string;
   uri?: string;
 }
 
 export interface PickOptions {
-  maxWidth?: number;
-  maxHeight?: number;
-  quality?: number;
+  spec?: ImageSpec;
+  thumb?: ImageSpec | null;
+  clear?: ImageSpec | null;
   maxChars?: number;
+  ifSeveral?: PickOptions;
 }
 
-export const AVATAR_PICK: PickOptions = { maxWidth: 256, maxHeight: 256, quality: 0.6, maxChars: 60000 };
-export const POLL_PICK: PickOptions = { maxWidth: 540, maxHeight: 540, quality: 0.4, maxChars: 145000 };
-const DEFAULTS = { maxWidth: 720, maxHeight: 720, quality: 0.5 };
+export const PHOTO_PICK: PickOptions = { spec: FULL_SPEC, thumb: THUMB_SPEC, clear: CLEAR_SPEC };
+export const AVATAR_PICK: PickOptions = { spec: AVATAR_SPEC, thumb: AVATAR_THUMB_SPEC };
+export const POLL_PICK: PickOptions = { spec: POLL_SPEC, thumb: null };
+// Circle / birthday chat: one photo = near-original full photo (opened in the viewer) + a ~1080 px
+// clear copy shown in the chat bubble; several photos (an A-F vote) = poll-size photos as before
+export const CHAT_PICK: PickOptions = { spec: FULL_SPEC, thumb: null, clear: CLEAR_SPEC, ifSeveral: POLL_PICK };
 
 export const isDataUri = (s?: string | null): boolean => !!s && s.startsWith('data:');
 
@@ -52,76 +61,40 @@ const chooseFiles = (camera: boolean, multiple: boolean): Promise<any[]> =>
     input.click();
   });
 
-const loadImage = (file: any): Promise<any> =>
-  new Promise((resolve, reject) => {
-    const url = g().URL.createObjectURL(file);
-    const img = new (g().Image)();
-    img.onload = () => {
-      g().URL.revokeObjectURL(url);
-      resolve(img);
-    };
-    img.onerror = () => {
-      g().URL.revokeObjectURL(url);
-      reject(new Error('Could not read the photo. Please try another one.'));
-    };
-    img.src = url;
-  });
-
-// Resize to fit maxWidth x maxHeight and encode as JPEG; lowers quality/size until it fits maxChars.
-// Returns null when it can't get small enough.
-const compress = async (file: any, opts: PickOptions, maxChars: number): Promise<string | null> => {
-  const img = await loadImage(file);
-  const maxW = opts.maxWidth ?? DEFAULTS.maxWidth;
-  const maxH = opts.maxHeight ?? DEFAULTS.maxHeight;
-  let quality = opts.quality ?? DEFAULTS.quality;
-  let scale = Math.min(1, maxW / img.naturalWidth, maxH / img.naturalHeight);
-  const canvas = g().document.createElement('canvas');
-  for (let i = 0; i < 6; i++) {
-    canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
-    canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
-    const ctx = canvas.getContext('2d');
-    ctx.fillStyle = '#FFFFFF'; // JPEG has no transparency
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-    const uri: string = canvas.toDataURL('image/jpeg', quality);
-    const b64 = uri.length - uri.indexOf(',') - 1;
-    if (b64 <= maxChars) return uri;
-    quality = Math.max(0.2, quality * 0.75);
-    scale *= 0.8;
-  }
-  return null;
-};
-
 const isImage = (f: any) => !f?.type || String(f.type).startsWith('image/');
 
+// Full photo (+ thumbnail). null when it can't get small enough.
+const processFile = async (file: any, o: PickOptions): Promise<PickedImage | null> => {
+  const img = await loadImage(file);
+  const dataUri = resizeLoaded(img, o.spec || FULL_SPEC);
+  const maxChars = Math.min(o.maxChars ?? MAX_BASE64_CHARS, MAX_BASE64_CHARS);
+  if (!dataUri || dataUri.length > maxChars) return null;
+  const thumbUri = o.thumb ? resizeLoaded(img, o.thumb) : undefined;
+  const clearUri = o.clear ? resizeLoaded(img, o.clear) || undefined : undefined;
+  return { dataUri, thumbUri, clearUri };
+};
+
 // Resolves null when cancelled; rejects with a readable Error
-export const pickImage = async (
-  source: 'camera' | 'library',
-  opts: PickOptions = {},
-): Promise<PickedImage | null> => {
+export const pickImage = async (source: 'camera' | 'library', opts: PickOptions = PHOTO_PICK): Promise<PickedImage | null> => {
   const files = await chooseFiles(source === 'camera', false);
   const file = files[0];
   if (!file) return null;
   if (!isImage(file)) throw new Error('Please pick a photo.');
-  const maxChars = Math.min(opts.maxChars ?? MAX_BASE64_CHARS, MAX_BASE64_CHARS);
-  const dataUri = await compress(file, opts, maxChars);
-  if (!dataUri) throw new Error('This photo is too large to save. Please pick a smaller photo or crop it.');
-  return { dataUri };
+  const p = await processFile(file, opts);
+  if (!p) throw new Error('This photo is too large to save. Please pick a smaller photo or crop it.');
+  return p;
 };
 
 // Several photos at once. Photos that can't be made small enough are counted in `skipped`.
-export const pickImages = async (
-  max: number,
-  opts: PickOptions = POLL_PICK,
-): Promise<{ images: PickedImage[]; skipped: number }> => {
+export const pickImages = async (max: number, opts: PickOptions = POLL_PICK): Promise<{ images: PickedImage[]; skipped: number }> => {
   const files = (await chooseFiles(false, max > 1)).slice(0, Math.max(1, max));
-  const maxChars = Math.min(opts.maxChars ?? MAX_BASE64_CHARS, MAX_BASE64_CHARS);
   const images: PickedImage[] = [];
   let skipped = 0;
+  const o = files.length > 1 && opts.ifSeveral ? opts.ifSeveral : opts;
   for (const f of files) {
     try {
-      const uri = isImage(f) ? await compress(f, opts, maxChars) : null;
-      if (uri) images.push({ dataUri: uri });
+      const p = isImage(f) ? await processFile(f, o) : null;
+      if (p) images.push(p);
       else skipped += 1;
     } catch {
       skipped += 1;

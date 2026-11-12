@@ -1,5 +1,8 @@
-// Circle info: members, invite code, report, leave, delete (owner or admin), and Public / Private +
-// "Show in Nearby" settings for the owner (admins too, once firestore.rules allows admin edits)
+// Circle info: members, invite code, report, leave, delete (owner or admin), and settings:
+//   Owner: ✏️ edit name (unique), description and emoji (circlesApi.updateCircleDetails).
+//   Owner / admin: Public <-> Private. Public saves the current approximate location (~100 m) so the
+//   circle shows in 📍 Nearby to people within 3 km; private removes the location (invite code only).
+// There is no global Discover list: far-away and private circles are joined with the invite code.
 import React, { useEffect, useState } from 'react';
 import {
   View,
@@ -12,6 +15,7 @@ import {
   StatusBar,
   Platform,
   Switch,
+  TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles, statusBarStyle } from '../../theme';
@@ -25,14 +29,17 @@ import {
   leaveCircle,
   deleteCircle,
   updateCircleVisibility,
-  removeCircleLocation,
-  RADIUS_OPTIONS,
+  updateCircleDetails,
+  setCircleLocationHere,
   circleInviteLink,
+  NEARBY_KM,
+  MAX_NAME_CHARS,
 } from '../../services/circlesApi';
-import { getApproxLocation } from '../../native/location';
+import { resolveMyPlace } from '../../services/districtApi';
 import { getPublicUser } from '../../services/userApi';
-import { PRIVATE_NOTICE } from './CirclesScreen';
+import { PRIVATE_NOTICE, EMOJIS } from './CirclesScreen';
 import { shareWithReferral } from '../../utils/referralLink';
+import NameWithAge from '../../components/NameWithAge';
 
 interface MemberRow {
   id: string;
@@ -53,6 +60,13 @@ export default function CircleInfoScreen({ navigation, route }: { navigation: an
   const [members, setMembers] = useState<MemberRow[]>([]);
   const [busy, setBusy] = useState(false);
   const [reportTarget, setReportTarget] = useState<ReportTarget | null>(null);
+
+  // Owner edit form (name / description / emoji)
+  const [editing, setEditing] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editDesc, setEditDesc] = useState('');
+  const [editEmoji, setEditEmoji] = useState(EMOJIS[0]);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     const unsub = subscribeCircle(
@@ -105,13 +119,39 @@ export default function CircleInfoScreen({ navigation, route }: { navigation: an
 
   const canEdit = isOwner || isAdmin;
 
-  // Public <-> Private. Going private drops the location (out of Discover and Nearby).
+  const startEdit = () => {
+    if (!circle) return;
+    setEditName(circle.name);
+    setEditDesc(circle.description);
+    setEditEmoji(circle.emoji);
+    setEditing(true);
+  };
+
+  const saveEdit = async () => {
+    if (!circle || !uid || saving) return;
+    if (!editName.trim()) {
+      Alert.alert('Name needed', 'Please give your circle a name.');
+      return;
+    }
+    setSaving(true);
+    try {
+      await updateCircleDetails(circle.id, { name: editName, description: editDesc, emoji: editEmoji }, uid);
+      setEditing(false);
+    } catch (e: any) {
+      // e.g. 'A circle called "X" already exists. Please choose a different name.'
+      Alert.alert('Could not save', e?.message || 'Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Public <-> Private. Public saves my approximate location (Nearby, 3 km); private removes it.
   const changeVisibility = (makePrivate: boolean) => {
     if (!circle || makePrivate === circle.isPrivate) return;
     const title = makePrivate ? 'Make circle private?' : 'Make circle public?';
     const body = makePrivate
-      ? 'It will be hidden from Discover and Nearby. Members stay, and new people join with the invite code.'
-      : 'Anyone can join. Pick a distance limit to show it only to people near you.';
+      ? 'It will be removed from Nearby and its location deleted. Members stay, and new people join with the invite code or link.'
+      : `It shows in Discover to people of your district (set from your location or profile), and anyone can join. With Location on, your approximate location (about 100 m) is also saved so people within ${NEARBY_KM} km see it in Nearby.`;
     Alert.alert(title, body, [
       { text: 'Cancel', style: 'cancel' },
       {
@@ -119,7 +159,20 @@ export default function CircleInfoScreen({ navigation, route }: { navigation: an
         onPress: async () => {
           setBusy(true);
           try {
-            await updateCircleVisibility(circle.id, makePrivate);
+            if (makePrivate) {
+              await updateCircleVisibility(circle.id, true);
+            } else {
+              // District always (Discover); location only when available (Nearby)
+              const place = await resolveMyPlace(uid || '', true);
+              if (!place.district) {
+                Alert.alert(
+                  'District needed',
+                  'Turn on Location, or choose your district on the Circles > Discover tab, then try again.',
+                );
+                return;
+              }
+              await updateCircleVisibility(circle.id, false, place.coords, null, place.district);
+            }
           } catch (e: any) {
             Alert.alert('Could not change', e?.message || 'Please try again.');
           } finally {
@@ -130,28 +183,30 @@ export default function CircleInfoScreen({ navigation, route }: { navigation: an
     ]);
   };
 
-  // Public circles: distance limit. A limit saves this phone's approximate location (~100 m) as
-  // the centre; "No limit" removes it (listed in Discover for everyone).
-  const changeRadius = async (radiusKm: number | null) => {
-    if (!circle || circle.isPrivate || busy) return;
-    if (radiusKm === circle.radiusKm && (radiusKm === null || circle.location)) return;
-    setBusy(true);
-    try {
-      if (radiusKm) {
-        const loc = await getApproxLocation();
-        if (!loc.ok) {
-          Alert.alert('Location needed', `${loc.message}\nA distance limit needs your location.`);
-          return;
-        }
-        await updateCircleVisibility(circle.id, false, loc.coords, radiusKm);
-      } else {
-        await removeCircleLocation(circle.id);
-      }
-    } catch (e: any) {
-      Alert.alert('Could not change', e?.message || 'Please try again.');
-    } finally {
-      setBusy(false);
-    }
+  // Public circle: move its Nearby location to where I am now (also fixes legacy public circles
+  // without a location, or with an old distance limit)
+  const moveLocationHere = () => {
+    if (!circle || busy) return;
+    Alert.alert(
+      'Use my location?',
+      `The circle's location becomes your current approximate location (about 100 m). People within ${NEARBY_KM} km of it see it in Nearby.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Use my location',
+          onPress: async () => {
+            setBusy(true);
+            try {
+              await setCircleLocationHere(circle.id);
+            } catch (e: any) {
+              Alert.alert('Could not update location', e?.message || 'Please try again.');
+            } finally {
+              setBusy(false);
+            }
+          },
+        },
+      ],
+    );
   };
 
   const shareCode = async () => {
@@ -233,7 +288,6 @@ export default function CircleInfoScreen({ navigation, route }: { navigation: an
             <Text style={styles.heroName}>{circle.name}</Text>
             <Text style={styles.heroVis}>
               {circle.isPrivate ? '🔒 Private circle' : '🌍 Public circle'}
-              {!circle.isPrivate && circle.radiusKm ? ` · 📍 within ${circle.radiusKm} km` : ''}
             </Text>
             {circle.description ? <Text style={styles.heroDesc}>{circle.description}</Text> : null}
           </View>
@@ -249,22 +303,85 @@ export default function CircleInfoScreen({ navigation, route }: { navigation: an
               </View>
               <Text style={styles.hint}>
                 Share the invite link, or friends enter the code in Circles › Join with code.
-                {circle.radiusKm ? ` The link and code work from any distance.` : ''}
               </Text>
               {circle.isPrivate && <Text style={styles.notice}>{PRIVATE_NOTICE}</Text>}
             </View>
           ) : null}
 
+          {isOwner ? (
+            <View style={styles.card}>
+              <View style={styles.cardHeadRow}>
+                <Text style={[styles.cardTitle, styles.flex1]}>Edit circle</Text>
+                {!editing ? (
+                  <TouchableOpacity onPress={startEdit} disabled={busy}>
+                    <Text style={styles.link}>✏️ Edit</Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+              {editing ? (
+                <View>
+                  <Text style={styles.label}>Emoji</Text>
+                  <View style={styles.emojiGrid}>
+                    {EMOJIS.map(e => (
+                      <TouchableOpacity
+                        key={e}
+                        style={[styles.emojiChoice, editEmoji === e && styles.emojiChoiceActive]}
+                        onPress={() => setEditEmoji(e)}>
+                        <Text style={styles.emojiChoiceText}>{e}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  <Text style={styles.label}>Name (must be unique)</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={editName}
+                    onChangeText={setEditName}
+                    maxLength={MAX_NAME_CHARS}
+                    placeholder="Circle name"
+                    placeholderTextColor={colors.textMuted}
+                  />
+                  <Text style={styles.label}>Description</Text>
+                  <TextInput
+                    style={[styles.input, styles.inputMulti]}
+                    value={editDesc}
+                    onChangeText={setEditDesc}
+                    maxLength={300}
+                    multiline
+                    placeholder="What is this circle about?"
+                    placeholderTextColor={colors.textMuted}
+                  />
+                  <View style={styles.editActions}>
+                    <TouchableOpacity style={styles.cancelBtn} onPress={() => setEditing(false)} disabled={saving}>
+                      <Text style={styles.cancelText}>Cancel</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.saveBtn, saving && styles.disabled]}
+                      onPress={saveEdit}
+                      disabled={saving}>
+                      {saving ? (
+                        <ActivityIndicator color={colors.textInverse} size="small" />
+                      ) : (
+                        <Text style={styles.saveText}>Save</Text>
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ) : (
+                <Text style={styles.hint}>Change the name, description or emoji. Names are unique across Outfit.</Text>
+              )}
+            </View>
+          ) : null}
+
           {canEdit ? (
             <View style={styles.card}>
-              <Text style={styles.cardTitle}>Circle settings{isOwner ? '' : ' (admin)'}</Text>
+              <Text style={styles.cardTitle}>Visibility{isOwner ? '' : ' (admin)'}</Text>
               <View style={styles.settingRow}>
                 <View style={styles.flex1}>
                   <Text style={styles.settingTitle}>{circle.isPrivate ? '🔒 Private' : '🌍 Public'}</Text>
                   <Text style={styles.hint}>
                     {circle.isPrivate
-                      ? 'Hidden from Discover and Nearby. People join with the invite code.'
-                      : 'Listed in Discover. Anyone can join.'}
+                      ? 'Not shown in Nearby. People join with the invite code or link.'
+                      : `Shown in 📍 Nearby to people within ${NEARBY_KM} km. Anyone further away joins with the invite code.`}
                   </Text>
                 </View>
                 <Switch
@@ -275,32 +392,23 @@ export default function CircleInfoScreen({ navigation, route }: { navigation: an
                   thumbColor={colors.textInverse}
                 />
               </View>
-              {!circle.isPrivate && (
+              <Text style={styles.hint}>Switch on for private.</Text>
+              {!circle.isPrivate ? (
                 <View>
-                  <Text style={styles.settingTitle}>📍 Distance limit</Text>
-                  <View style={styles.radiusRow}>
-                    {[null, ...RADIUS_OPTIONS].map(r => {
-                      const on = r === null ? !circle.radiusKm : circle.radiusKm === r;
-                      return (
-                        <TouchableOpacity
-                          key={String(r)}
-                          style={[styles.radiusChip, on && styles.radiusChipActive]}
-                          disabled={busy}
-                          onPress={() => changeRadius(r)}>
-                          <Text style={[styles.radiusText, on && styles.radiusTextActive]}>
-                            {r ? `${r} km` : 'No limit'}
-                          </Text>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </View>
-                  <Text style={styles.hint}>
-                    {circle.radiusKm
-                      ? `Only people within ${circle.radiusKm} km of where you set it (Location on) see it in Nearby and can join. Others join with the invite link or code.`
-                      : 'Listed in Discover for everyone. Anyone can join. Picking a limit saves your approximate location (about 100 m).'}
-                  </Text>
+                  {!circle.location ? (
+                    <Text style={styles.notice}>
+                      This circle has no location yet, so it does not show in Nearby (only the invite code works).
+                    </Text>
+                  ) : circle.radiusKm && circle.radiusKm < NEARBY_KM ? (
+                    <Text style={styles.hint}>Old distance limit: {circle.radiusKm} km. Updating the location clears it.</Text>
+                  ) : null}
+                  <TouchableOpacity style={styles.action} onPress={moveLocationHere} disabled={busy}>
+                    <Text style={styles.actionText}>
+                      📍 {circle.location ? 'Move location to where I am' : 'Show in Nearby (use my location)'}
+                    </Text>
+                  </TouchableOpacity>
                 </View>
-              )}
+              ) : null}
             </View>
           ) : null}
 
@@ -313,9 +421,7 @@ export default function CircleInfoScreen({ navigation, route }: { navigation: an
                 disabled={m.isPrivate}
                 onPress={() => navigation.navigate('UserProfile', { userId: m.id })}>
                 <Avatar uri={m.avatarUrl} name={m.name} size={36} />
-                <Text style={styles.memberName} numberOfLines={1}>
-                  {m.name}
-                </Text>
+                <NameWithAge style={styles.memberName} numberOfLines={1} uid={m.isPrivate || m.id === uid ? null : m.id} name={m.name} />
                 {m.id === circle.ownerId && <Text style={styles.ownerTag}>Owner</Text>}
               </TouchableOpacity>
             ))}
@@ -350,17 +456,6 @@ export default function CircleInfoScreen({ navigation, route }: { navigation: an
 }
 
 const styles = themedStyles(() => StyleSheet.create({
-  radiusRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginVertical: spacing.sm },
-  radiusChip: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs + 2,
-    borderRadius: borderRadius.full,
-    borderWidth: 1.5,
-    borderColor: colors.border,
-  },
-  radiusChipActive: { borderColor: colors.accent, backgroundColor: colors.surfaceElevated },
-  radiusText: { fontSize: fontSize.sm, color: colors.textSecondary, fontWeight: fontWeight.semiBold },
-  radiusTextActive: { color: colors.primary, fontWeight: fontWeight.bold },
   safeArea: { flex: 1, backgroundColor: colors.background },
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
   back: { fontSize: 34, color: colors.primary, marginRight: spacing.sm, lineHeight: 36 },
@@ -416,4 +511,60 @@ const styles = themedStyles(() => StyleSheet.create({
   action: { paddingVertical: spacing.md },
   actionText: { fontSize: fontSize.base, fontWeight: fontWeight.semiBold, color: colors.textPrimary },
   danger: { color: colors.error },
+  cardHeadRow: { flexDirection: 'row', alignItems: 'center' },
+  link: { fontSize: fontSize.sm, color: colors.primary, fontWeight: fontWeight.bold, marginBottom: spacing.sm },
+  label: {
+    fontSize: fontSize.xs,
+    fontWeight: fontWeight.bold,
+    color: colors.textSecondary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 6,
+    marginTop: spacing.sm,
+  },
+  emojiGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  emojiChoice: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.background,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  emojiChoiceActive: { borderColor: colors.accent, backgroundColor: colors.surfaceElevated },
+  emojiChoiceText: { fontSize: 20 },
+  input: {
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.background,
+    paddingHorizontal: spacing.md,
+    height: 46,
+    fontSize: fontSize.base,
+    color: colors.textPrimary,
+  },
+  inputMulti: { height: 80, textAlignVertical: 'top', paddingTop: spacing.sm },
+  editActions: { flexDirection: 'row', gap: spacing.md, marginTop: spacing.md },
+  cancelBtn: {
+    flex: 1,
+    height: 44,
+    borderRadius: borderRadius.md,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cancelText: { color: colors.textSecondary, fontWeight: fontWeight.bold },
+  saveBtn: {
+    flex: 1,
+    height: 44,
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  saveText: { color: colors.textInverse, fontWeight: fontWeight.bold },
+  disabled: { opacity: 0.5 },
 }));

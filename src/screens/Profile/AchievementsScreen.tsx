@@ -113,10 +113,10 @@ export default function AchievementsScreen({ navigation }: { navigation: any }) 
           id: 'uploaded',
           icon: '📸',
           title: 'Upload one item',
-          sub: 'Wardrobe photo or feed post',
+          sub: 'Add a wardrobe photo',
           points: `+${TASK_POINTS}`,
           done: day.uploaded,
-          action: { label: 'Upload', onPress: () => navigation.navigate('NewPost') },
+          action: { label: 'Upload', onPress: () => navigation.navigate('MainApp', { screen: 'Wardrobe' }) },
         },
         {
           id: 'bonus',

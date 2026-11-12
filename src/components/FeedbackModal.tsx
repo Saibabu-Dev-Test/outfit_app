@@ -1,12 +1,12 @@
-// Settings → Feedback & Suggestions: type, message (max 1000, bad-word checked), optional screenshot.
-// Writes feedback/{autoId}; admins read it on the Admin screen.
+// New feedback (or edit / quote) for the Feedback & Suggestions board: type, message (max 1000,
+// bad-word checked), optional screenshot, "Show on the board" switch. Writes feedback/{autoId};
+// admins see all of it, other users see the public ones on the board.
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
-  KeyboardAvoidingView,
   Modal,
-  Platform,
+  Switch,
   ScrollView,
   StyleSheet,
   Text,
@@ -14,15 +14,20 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import KeyboardSafeView from './KeyboardSafeView';
+import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { borderRadius, colors, fontSize, fontWeight, spacing, themedStyles } from '../theme';
 import { pickImage, POLL_PICK } from '../utils/imagePicker';
 import { containsProfanity } from '../utils/profanity';
 import {
+  Feedback,
   FEEDBACK_MAX_IMAGE,
   FEEDBACK_MAX_TEXT,
   FEEDBACK_TYPES,
+  FeedbackQuote,
   FeedbackType,
   submitFeedback,
+  updateFeedback,
 } from '../services/feedbackApi';
 
 interface Props {
@@ -30,11 +35,15 @@ interface Props {
   uid?: string | null;
   name?: string | null;
   onClose: () => void;
+  quote?: FeedbackQuote | null; // quoting someone's feedback
+  editing?: Feedback | null; // editing my own feedback
+  onDone?: () => void; // after a successful send / save
 }
 
 const TYPE_ICON: Record<FeedbackType, string> = { Suggestion: '💡', Complaint: '😕', Bug: '🐞', Other: '💬' };
 
-export default function FeedbackModal({ visible, uid, name, onClose }: Props) {
+export default function FeedbackModal({ visible, uid, name, onClose, quote, editing, onDone }: Props) {
+  const bottomInset = useSafeAreaInsets().bottom;
   const [type, setType] = useState<FeedbackType>('Suggestion');
   const [text, setText] = useState('');
   const [image, setImage] = useState<string | null>(null);
@@ -42,16 +51,19 @@ export default function FeedbackModal({ visible, uid, name, onClose }: Props) {
   const [picking, setPicking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
+  const [isPublic, setIsPublic] = useState(true);
 
   useEffect(() => {
     if (visible) {
-      setType('Suggestion');
-      setText('');
+      const t = editing?.type as FeedbackType | undefined;
+      setType(t && (FEEDBACK_TYPES as readonly string[]).includes(t) ? t : 'Suggestion');
+      setText(editing?.text || '');
       setImage(null);
       setError(null);
       setDone(false);
+      setIsPublic(editing ? editing.isPublic : true);
     }
-  }, [visible]);
+  }, [visible, editing]);
 
   const addScreenshot = async () => {
     setError(null);
@@ -84,7 +96,14 @@ export default function FeedbackModal({ visible, uid, name, onClose }: Props) {
     setError(null);
     setSending(true);
     try {
-      await submitFeedback({ uid, name, type, text: t, image });
+      if (editing) {
+        await updateFeedback(editing.id, { text: t, type, isPublic });
+        onDone?.();
+        onClose();
+        return;
+      }
+      await submitFeedback({ uid, name, type, text: t, image, isPublic, quoteOf: quote || null });
+      onDone?.();
       setDone(true);
     } catch (e: any) {
       setError(e?.message || 'Sending failed. Please try again.');
@@ -94,12 +113,25 @@ export default function FeedbackModal({ visible, uid, name, onClose }: Props) {
   };
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <KeyboardAvoidingView style={styles.overlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <Modal
+      visible={visible}
+      transparent
+      animationType="slide"
+      onRequestClose={onClose}
+      statusBarTranslucent
+      navigationBarTranslucent>
+      <SafeAreaProvider>
+      {/* Sheet sits right on the keyboard (KeyboardSafeView). The sheet already pads for the nav
+          bar, so the keyboard padding leaves that part out. */}
+      <KeyboardSafeView style={styles.overlay} extraOffset={-bottomInset}>
         <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={onClose} />
-        <View style={styles.sheet}>
+        {/* Sheet stays below the status bar and above the phone's navigation buttons */}
+        <SafeAreaView edges={['top']} style={styles.topGap} pointerEvents="box-none" />
+        <SafeAreaView style={styles.sheet} edges={['bottom', 'left', 'right']}>
           <View style={styles.headRow}>
-            <Text style={styles.title}>Feedback & Suggestions</Text>
+            <Text style={styles.title}>
+              {editing ? 'Edit feedback' : quote ? 'Quote feedback' : 'Feedback & Suggestions'}
+            </Text>
             <TouchableOpacity onPress={onClose} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
               <Text style={styles.close}>✕</Text>
             </TouchableOpacity>
@@ -109,12 +141,21 @@ export default function FeedbackModal({ visible, uid, name, onClose }: Props) {
             <View style={styles.doneBox}>
               <Text style={styles.doneEmoji}>💌</Text>
               <Text style={styles.doneTitle}>Thanks! We read every message.</Text>
+              {isPublic ? <Text style={styles.doneSub}>It's on the board now, so others can like and reply.</Text> : null}
               <TouchableOpacity style={styles.submit} onPress={onClose}>
                 <Text style={styles.submitText}>Close</Text>
               </TouchableOpacity>
             </View>
           ) : (
             <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.body}>
+              {quote ? (
+                <View style={styles.quoteBox}>
+                  <Text style={styles.quoteName}>❝ {quote.name || 'Outfit user'}</Text>
+                  <Text style={styles.quoteText} numberOfLines={4}>
+                    {quote.text}
+                  </Text>
+                </View>
+              ) : null}
               <Text style={styles.label}>Type</Text>
               <View style={styles.typeRow}>
                 {FEEDBACK_TYPES.map(t => {
@@ -149,8 +190,8 @@ export default function FeedbackModal({ visible, uid, name, onClose }: Props) {
                 {text.length}/{FEEDBACK_MAX_TEXT}
               </Text>
 
-              <Text style={styles.label}>Screenshot (optional)</Text>
-              {image ? (
+              {editing ? null : <Text style={styles.label}>Screenshot (optional)</Text>}
+              {editing ? null : image ? (
                 <View style={styles.shotRow}>
                   <Image source={{ uri: image }} style={styles.shot} resizeMode="cover" />
                   <TouchableOpacity onPress={() => setImage(null)} disabled={sending}>
@@ -167,6 +208,18 @@ export default function FeedbackModal({ visible, uid, name, onClose }: Props) {
                 </TouchableOpacity>
               )}
 
+              <View style={styles.publicRow}>
+                <View style={styles.flex1}>
+                  <Text style={styles.publicTitle}>Show on the board</Text>
+                  <Text style={styles.publicHint}>
+                    {isPublic
+                      ? 'Everyone can see, like, reply and quote it.'
+                      : 'Only the Outfit team (admins) can see it.'}
+                  </Text>
+                </View>
+                <Switch value={isPublic} onValueChange={setIsPublic} disabled={sending} />
+              </View>
+
               {error ? <Text style={styles.error}>{error}</Text> : null}
 
               <TouchableOpacity
@@ -176,13 +229,14 @@ export default function FeedbackModal({ visible, uid, name, onClose }: Props) {
                 {sending ? (
                   <ActivityIndicator color={colors.onPrimary} />
                 ) : (
-                  <Text style={styles.submitText}>Submit</Text>
+                  <Text style={styles.submitText}>{editing ? 'Save' : 'Submit'}</Text>
                 )}
               </TouchableOpacity>
             </ScrollView>
           )}
-        </View>
-      </KeyboardAvoidingView>
+        </SafeAreaView>
+      </KeyboardSafeView>
+      </SafeAreaProvider>
     </Modal>
   );
 }
@@ -195,8 +249,9 @@ const styles = themedStyles(() =>
       borderTopLeftRadius: 22,
       borderTopRightRadius: 22,
       maxHeight: '92%',
-      paddingBottom: spacing.lg,
+      paddingBottom: spacing.sm,
     },
+    topGap: { flexShrink: 0 },
     headRow: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -231,13 +286,13 @@ const styles = themedStyles(() =>
     typeText: { fontSize: fontSize.sm, fontWeight: fontWeight.semiBold, color: colors.textPrimary },
     typeTextOn: { color: colors.onPrimary },
     input: {
-      minHeight: 120,
-      maxHeight: 220,
+      minHeight: 140,
+      maxHeight: 260,
       backgroundColor: colors.inputBg,
       borderRadius: borderRadius.lg,
-      padding: spacing.md,
-      fontSize: fontSize.base,
-      lineHeight: 21,
+      padding: spacing.base,
+      fontSize: fontSize.md,
+      lineHeight: 23,
       color: colors.textPrimary,
     },
     counter: { alignSelf: 'flex-end', fontSize: fontSize.xs, color: colors.textMuted, marginTop: 4 },
@@ -264,6 +319,21 @@ const styles = themedStyles(() =>
     },
     submitText: { color: colors.onPrimary, fontWeight: fontWeight.bold, fontSize: fontSize.base },
     disabled: { opacity: 0.5 },
+    flex1: { flex: 1 },
+    publicRow: { flexDirection: 'row', alignItems: 'center', marginTop: spacing.lg },
+    publicTitle: { fontSize: fontSize.sm, fontWeight: fontWeight.bold, color: colors.textPrimary },
+    publicHint: { fontSize: fontSize.xs, color: colors.textMuted, marginTop: 2 },
+    quoteBox: {
+      borderLeftWidth: 3,
+      borderLeftColor: colors.accent,
+      backgroundColor: colors.surface,
+      borderRadius: borderRadius.md,
+      padding: spacing.sm,
+      marginTop: spacing.sm,
+    },
+    quoteName: { fontSize: fontSize.xs, fontWeight: fontWeight.bold, color: colors.accent },
+    quoteText: { fontSize: fontSize.sm, color: colors.textSecondary, marginTop: 2 },
+    doneSub: { fontSize: fontSize.sm, color: colors.textSecondary, marginTop: spacing.xs, textAlign: 'center' },
     doneBox: { alignItems: 'center', padding: spacing.xl },
     doneEmoji: { fontSize: 44 },
     doneTitle: {

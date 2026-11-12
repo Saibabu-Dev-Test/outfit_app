@@ -22,7 +22,7 @@ import { useAuth } from '../../context/AuthContext';
 import { markActivitySeen } from '../../services/activityWatcher';
 import PhotoGrid from '../../components/PhotoGrid';
 import Avatar from '../../components/Avatar';
-import { getLikedItems, Post } from '../../services/feedApi';
+import { getCachedLikedItems, getLikedItems, Post } from '../../services/feedApi';
 import { ActivityItem, activityLine, getMyActivity, getTargetThumbnail } from '../../services/activityApi';
 import { timeAgo } from '../../utils/date';
 
@@ -33,7 +33,7 @@ function RowThumb({ item }: { item: ActivityItem }) {
   const [uri, setUri] = useState<string | null>(item.thumbnail);
   useEffect(() => {
     let alive = true;
-    if (!item.thumbnail && item.targetKind && item.targetId) {
+    if (!item.thumbnail && item.targetKind && item.targetKind !== 'birthday' && item.targetId) {
       getTargetThumbnail(item.targetKind, item.targetId).then(u => alive && setUri(u));
     }
     return () => {
@@ -58,14 +58,19 @@ export default function LikesScreen({ navigation, route }: { navigation: any; ro
   const [refreshing, setRefreshing] = useState(false);
 
   const loadLikes = useCallback(async () => {
-    if (!user?.id) return;
+    if (!user?.id) {
+      setItems([]);
+      return;
+    }
+    // Cached list at once, then the fresh one; a failed read shows the empty state, not an error
+    const cached = await getCachedLikedItems(user.id);
+    setItems(prev => prev ?? cached ?? null);
     try {
       setItems(await getLikedItems(user.id));
-      setError(null);
-    } catch (e: any) {
-      setError(e?.message || 'Could not load likes.');
-      setItems([]);
+    } catch {
+      setItems(prev => prev ?? []);
     }
+    setError(null);
   }, [user?.id]);
 
   const loadActivity = useCallback(async () => {
@@ -107,6 +112,10 @@ export default function LikesScreen({ navigation, route }: { navigation: any; ro
   );
 
   const openActivity = (a: ActivityItem) => {
+    if (a.targetKind === 'birthday') {
+      navigation.navigate('BirthdayChat', { mode: 'wishes', uid: a.targetId || user?.id });
+      return;
+    }
     if (a.type === 'follow' || !a.targetKind || !a.targetId) {
       if (a.actorId) navigation.navigate('UserProfile', { userId: a.actorId });
       return;

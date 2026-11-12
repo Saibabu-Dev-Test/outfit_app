@@ -13,17 +13,19 @@ import AuthNavigator from './AuthNavigator';
 import { AuthProvider, useAuth } from '../context/AuthContext';
 import CircleChatScreen from '../screens/Circles/CircleChatScreen';
 import CircleInfoScreen from '../screens/Circles/CircleInfoScreen';
-import NewPostScreen from '../screens/Feed/NewPostScreen';
 import CommentsScreen from '../screens/Feed/CommentsScreen';
 import UserProfileScreen from '../screens/Profile/UserProfileScreen';
 import UserSearchScreen from '../screens/Profile/UserSearchScreen';
 import AdminScreen from '../screens/Admin/AdminScreen';
+import AdminUsersScreen from '../screens/Admin/AdminUsersScreen';
 import ProfileScreen from '../screens/Profile/ProfileScreen';
 import AchievementsScreen from '../screens/Profile/AchievementsScreen';
 import LikesScreen from '../screens/Profile/LikesScreen';
 import LikedByScreen from '../screens/Profile/LikedByScreen';
 import FollowListScreen from '../screens/Profile/FollowListScreen';
 import PostDetailScreen from '../screens/Feed/PostDetailScreen';
+import BirthdayChatScreen from '../screens/Home/BirthdayChatScreen';
+import PoruthamScreen from '../screens/Astrology/PoruthamScreen';
 import { colors, themedStyles, useTheme } from '../theme';
 import AppLockGate from '../components/AppLockGate';
 import ActivityWatcher from '../components/ActivityWatcher';
@@ -118,11 +120,13 @@ function NavigationContent() {
               <Stack.Screen name="LikedBy" component={LikedByScreen} />
               <Stack.Screen name="PostDetail" component={PostDetailScreen} />
               <Stack.Screen name="FollowList" component={FollowListScreen} />
-              <Stack.Screen name="NewPost" component={NewPostScreen} />
               <Stack.Screen name="Comments" component={CommentsScreen} />
+              <Stack.Screen name="BirthdayChat" component={BirthdayChatScreen} />
+              <Stack.Screen name="Porutham" component={PoruthamScreen} />
               <Stack.Screen name="UserProfile" component={UserProfileScreen} />
               <Stack.Screen name="UserSearch" component={UserSearchScreen} />
               <Stack.Screen name="Admin" component={AdminScreen} />
+              <Stack.Screen name="AdminUsers" component={AdminUsersScreen} />
             </Stack.Group>
           </>
         )}

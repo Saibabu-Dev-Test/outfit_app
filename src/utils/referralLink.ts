@@ -5,10 +5,11 @@
 // with the sharer's code; a share waits for the code and never goes out without it.
 // /get/ detects the platform: on Android the APK download starts as soon as the link opens (no
 // web app shown; a "Tap here if the download didn't start" button + install steps), with the code
-// copied first; iPhone / iPad / computers are sent straight to the web app (/?ref=CODE&web=1, code
-// prefilled at sign-up). The web root sends /?ref=CODE on to /get/ only on Android, never when web=1.
+// copied first. Outfit is Android only: iPhone / iPad / computers see "Outfit is available on
+// Android" (no web app). Every other Hosting path, including /?ref=CODE, redirects to /get/.
 import { Alert, Linking, Platform, Share } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { awardCoins, hashKey } from '../services/coinsApi';
 import { ensureReferralCode } from '../services/rewardsApi';
 import { readClipboardText, clearClipboardText, setClipboardText } from '../native/clipboard';
 import { APP_GET_URL, APP_WEB_URL } from '../config/links';
@@ -109,18 +110,22 @@ const copyText = async (text: string): Promise<boolean> => {
 };
 
 // Phone share sheet; on a desktop browser with no share sheet, runs onNoShareSheet instead.
-const shareText = async (message: string, onNoShareSheet: () => Promise<void>) => {
+// Coins once per shared thing (targetId), only when the share sheet reports it was shared.
+const shareText = async (message: string, onNoShareSheet: () => Promise<void>, targetId?: string) => {
+  const coinTarget = targetId || `t${hashKey(message)}`;
   try {
     if (Platform.OS === 'web') {
       const nav: any = typeof navigator !== 'undefined' ? navigator : null;
       if (nav?.share) {
         await nav.share({ title: 'Outfit', text: message });
+        awardCoins('share', coinTarget);
         return;
       }
       await onNoShareSheet();
       return;
     }
-    await Share.share({ message });
+    const r: any = await Share.share({ message });
+    if (!r || r.action !== Share.dismissedAction) awardCoins('share', coinTarget);
   } catch (e: any) {
     if (e?.name !== 'AbortError') console.warn('Share failed:', e?.message);
   }
@@ -128,7 +133,7 @@ const shareText = async (message: string, onNoShareSheet: () => Promise<void>) =
 
 // On a desktop browser with no share sheet, copies the link instead.
 export const shareReferral = async (code: string) =>
-  shareText(referralMessage(code), () => copyReferralLink(code));
+  shareText(referralMessage(code), () => copyReferralLink(code), 'invite');
 
 // My referral code, loaded once per session. null when it can't be loaded (never throws).
 let myCode: { uid: string; p: Promise<string | null> } | null = null;
@@ -169,7 +174,8 @@ export const shareMyReferral = async (uid: string | undefined) => {
 
 // "<line>" + app download link with my referral code. Used by Share on posts, "Share profile"
 // and circle invites. Never shares a link without the code.
-export const shareWithReferral = async (uid: string | undefined, line: string) => {
+// targetId: what is shared (e.g. post_<id>), for coins once per thing; default = the line.
+export const shareWithReferral = async (uid: string | undefined, line: string, targetId?: string) => {
   const code = await requireMyReferralCode(uid);
   if (!code) {
     notify('Share', NO_CODE_MESSAGE);
@@ -180,7 +186,7 @@ export const shareWithReferral = async (uid: string | undefined, line: string) =
   await shareText(message, async () => {
     const ok = await copyText(message);
     if (Platform.OS === 'web' && typeof window !== 'undefined') window.alert(ok ? 'Link copied' : link);
-  });
+  }, targetId);
 };
 
 export const shareReferralOnWhatsApp = async (code: string) => {

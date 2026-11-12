@@ -12,19 +12,30 @@ import {
   Alert,
   Modal,
   TextInput,
-  KeyboardAvoidingView,
   Image,
 } from 'react-native';
+import KeyboardSafeView from '../../components/KeyboardSafeView';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { pickImage, AVATAR_PICK } from '../../utils/imagePicker';
-import { getUserProfile, saveUserProfile, uploadAvatar, STYLE_OPTIONS } from '../../services/userApi';
+import { getUserProfile, saveUserProfile, uploadAvatar } from '../../services/userApi';
+import { isValidDob } from '../../utils/age';
+import { mdFromDob, mdLabel, setBirthdayListing } from '../../services/birthdayApi';
 import { checkNotifications, openNotificationSettings } from '../../native/notifications';
-import { RASHIS } from '../../utils/panchangam';
+import {
+  astroChartStale,
+  birthDetailsComplete,
+  birthKey,
+  birthProfileUpdate,
+  jathakamFor,
+  StoredAstroChart,
+} from '../../services/birthProfile';
+import { astroLanguage, birthChartRows } from '../../services/astrologyDaily';
 import SelectModal from '../../components/SelectModal';
-import FeedbackModal from '../../components/FeedbackModal';
+import CityPickerModal from '../../components/CityPickerModal';
+import FeedbackBoardModal from '../../components/FeedbackBoardModal';
+import ZoomableImage from '../../components/ZoomableImage';
 import TimePickerModal from '../../components/TimePickerModal';
-import FullScreenImageViewer from '../../components/FullScreenImageViewer';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles, statusBarStyle, useTheme, ThemeMode } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
 import { copyReferralLink, referralLink, shareMyReferral, shareReferral, shareReferralOnWhatsApp } from '../../utils/referralLink';
@@ -39,6 +50,7 @@ import { getLockCapability, isAppLockOn, turnOffAppLock, turnOnAppLock } from '.
 import { signOutKeepLock } from '../../services/authApi';
 import { auth } from '../../config/firebaseConfig';
 import { isAutoUpdateOn, isUpdateSupported, setAutoUpdate } from '../../native/appUpdate';
+import { isCoinSoundOn, isCoinSoundSupported, setCoinSound } from '../../native/coinSound';
 
 // "+91 98765 43210" from users/{uid}.phone (10 digits), else the saved phoneNumber
 const phoneLabel = (p?: { phone?: string; phoneNumber?: string } | null): string => {
@@ -54,13 +66,19 @@ interface UserProfile {
   name?: string;
   dob?: string;
   timeOfBirth?: string;
+  placeOfBirth?: string;
   rashi?: string;
   language?: string;
   gender?: string;
+  maritalStatus?: string;
+  astroChart?: StoredAstroChart | null; // auto: computed from the birth details (services/birthProfile)
+  birthConfirmed?: boolean;
+  birthConfirmedKey?: string | null;
   bio?: string;
   avatarUrl?: string | null;
   isPublic?: boolean;
   stylePrefs?: string[];
+  showBirthday?: boolean; // "Show my birthday" on Home (default off)
   createdAt?: any;
   updatedAt?: any;
 }
@@ -70,6 +88,9 @@ const LANGUAGES = [
   'Marathi', 'Bengali', 'Gujarati', 'Punjabi', 'Odia', 'Urdu',
 ];
 
+// Marital status: shapes the astrology relationship lines (married: spouse and family only)
+const MARITAL_OPTIONS = ['Single', 'Married', 'Prefer not to say'];
+
 const THEME_LABEL: Record<ThemeMode, string> = { system: 'System', light: 'Light', dark: 'Dark' };
 
 export default function ProfileScreen() {
@@ -77,10 +98,7 @@ export default function ProfileScreen() {
   const route = useRoute<any>();
   const { user: authUser, logout, updateUserData } = useAuth();
   const { mode: themeMode, isDark, setMode: setThemeMode } = useTheme();
-  const [stylePrefsOpen, setStylePrefsOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
-  const [editStylePrefs, setEditStylePrefs] = useState<string[]>([]);
-  const [savingStyles, setSavingStyles] = useState(false);
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
   const [editIsPublic, setEditIsPublic] = useState<boolean>(true);
   const [profileData, setProfileData] = useState<UserProfile | null>(authUser);
@@ -90,11 +108,21 @@ export default function ProfileScreen() {
   // App lock (fingerprint): hidden when the phone has no biometrics
   const [lockSupported, setLockSupported] = useState(false);
   const [lockOn, setLockOn] = useState(false);
+  const [bdayBusy, setBdayBusy] = useState(false);
   // Automatic updates: user's choice, OFF by default
   const [autoUpdate, setAutoUpdateState] = useState(false);
   useEffect(() => {
     isAutoUpdateOn().then(setAutoUpdateState);
   }, []);
+  // Coin sound: plays with each coin flip, ON by default
+  const [coinSound, setCoinSoundState] = useState(true);
+  useEffect(() => {
+    isCoinSoundOn().then(setCoinSoundState);
+  }, []);
+  const toggleCoinSound = (on: boolean) => {
+    setCoinSoundState(on);
+    setCoinSound(on);
+  };
   const toggleAutoUpdate = (on: boolean) => {
     setAutoUpdateState(on);
     setAutoUpdate(on);
@@ -110,17 +138,20 @@ export default function ProfileScreen() {
   const [editName, setEditName] = useState<string>('');
   const [editDob, setEditDob] = useState<string>('');
   const [editTimeOfBirth, setEditTimeOfBirth] = useState<string>('');
+  const [editPlaceOfBirth, setEditPlaceOfBirth] = useState<string>('');
+  const [isPlaceOpen, setIsPlaceOpen] = useState<boolean>(false);
   const [editRashi, setEditRashi] = useState<string>('');
   const [editLanguage, setEditLanguage] = useState<string>('');
   const [editGender, setEditGender] = useState<string>('');
+  const [editMarital, setEditMarital] = useState<string>('');
   const [editBio, setEditBio] = useState<string>('');
   const [savingProfile, setSavingProfile] = useState<boolean>(false);
   const [uploadingAvatar, setUploadingAvatar] = useState<boolean>(false);
-  const [avatarViewerOpen, setAvatarViewerOpen] = useState<boolean>(false);
+  const [avatarViewerOpen, setAvatarViewerOpen] = useState(false);
 
   // Picker modals
   const [isTimePickerOpen, setIsTimePickerOpen] = useState<boolean>(false);
-  const [isRashiOpen, setIsRashiOpen] = useState<boolean>(false);
+  const [confirmingBirth, setConfirmingBirth] = useState(false);
   const [isLanguageOpen, setIsLanguageOpen] = useState<boolean>(false);
 
   // Gender dropdown state
@@ -219,18 +250,7 @@ export default function ProfileScreen() {
     }
   };
 
-  // Tap the profile photo: see it full screen (pinch-zoom) or change it
-  const handleAvatarPress = () => {
-    if (!profileData?.avatarUrl) {
-      handleSelectAvatarSource();
-      return;
-    }
-    Alert.alert('Profile Photo', undefined, [
-      { text: 'View photo', onPress: () => setAvatarViewerOpen(true) },
-      { text: 'Change photo', onPress: handleSelectAvatarSource },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
-  };
+
 
   const handleSelectAvatarSource = () => {
     Alert.alert(
@@ -262,14 +282,26 @@ const fetchProfile = async () => {
       avatarUrl: stored.avatarUrl || authUser.avatarUrl || null,
       dob: stored.dob || '',
       timeOfBirth: stored.timeOfBirth || '',
+      placeOfBirth: stored.placeOfBirth || '',
       rashi: stored.rashi || '',
       language: stored.language || '',
       gender: stored.gender || '',
+      maritalStatus: stored.maritalStatus || '',
+      astroChart: stored.astroChart || null,
+      birthConfirmed: stored.birthConfirmed === true,
+      birthConfirmedKey: stored.birthConfirmedKey || null,
       bio: stored.bio || '',
       isPublic: stored.isPublic !== false,
       stylePrefs: Array.isArray(stored.stylePrefs) ? stored.stylePrefs : [],
+      showBirthday: stored.showBirthday === true,
     };
     setIsAdmin(stored.role === 'admin');
+    // Birth chart saved for other details (or before this screen computed it): recompute and save
+    if (astroChartStale(merged, merged.astroChart)) {
+      const upd = birthProfileUpdate(merged, { prevConfirmedKey: merged.birthConfirmedKey });
+      Object.assign(merged, upd);
+      saveUserProfile(authUser.id, upd).catch(e => console.warn('Birth chart save failed:', e?.message));
+    }
     setProfileData(merged);
     updateUserData(merged as any);
   } catch (err: any) {
@@ -305,30 +337,6 @@ const fetchProfile = async () => {
       { text: 'Dark', onPress: () => setThemeMode('dark') },
     ]);
 
-  const openStylePrefs = () => {
-    setEditStylePrefs(profileData?.stylePrefs || []);
-    setStylePrefsOpen(true);
-  };
-
-  const toggleStylePref = (opt: string) =>
-    setEditStylePrefs(prev => (prev.includes(opt) ? prev.filter(x => x !== opt) : [...prev, opt]));
-
-  const saveStylePrefs = async () => {
-    const uid = authUser?.id;
-    if (!uid) return;
-    setSavingStyles(true);
-    try {
-      await saveUserProfile(uid, { stylePrefs: editStylePrefs });
-      setProfileData(prev => (prev ? { ...prev, stylePrefs: editStylePrefs } : prev));
-      updateUserData({ stylePrefs: editStylePrefs });
-      setStylePrefsOpen(false);
-    } catch (e: any) {
-      Alert.alert('Not saved', e?.message || 'Please try again.');
-    } finally {
-      setSavingStyles(false);
-    }
-  };
-
   // App lock, invite code, friends joined, ⭐ badge
   useEffect(() => {
     const uid = authUser?.id;
@@ -360,6 +368,25 @@ const fetchProfile = async () => {
   // App lock switch. ON: fingerprint (session encrypted) or, without one, the phone's screen lock.
   // OFF: one fingerprint / screen-lock check, then the app opens straight in again.
   const [lockBusy, setLockBusy] = useState(false);
+  // "Show my birthday": day + month on friends' Home (never the year / age). Default off.
+  const handleToggleBirthday = async (value: boolean) => {
+    const uid = profileData?.id || authUser?.id;
+    if (!uid || bdayBusy) return;
+    if (value && !mdFromDob(profileData?.dob)) {
+      Alert.alert('Add your date of birth', 'Add your date of birth in Edit profile first, then turn this on.');
+      return;
+    }
+    setBdayBusy(true);
+    try {
+      await setBirthdayListing(uid, value, { dob: profileData?.dob, name: profileData?.name, avatar: profileData?.avatarUrl });
+      setProfileData(prev => (prev ? { ...prev, showBirthday: value } : prev));
+    } catch (e: any) {
+      Alert.alert('Could not save', e?.message || 'Please try again.');
+    } finally {
+      setBdayBusy(false);
+    }
+  };
+
   const handleToggleLock = async (value: boolean) => {
     if (lockBusy) return;
     setLockBusy(true);
@@ -386,9 +413,11 @@ const fetchProfile = async () => {
     setEditName(profileData?.name || '');
     setEditDob(profileData?.dob || '');
     setEditTimeOfBirth(profileData?.timeOfBirth || '');
+    setEditPlaceOfBirth(profileData?.placeOfBirth || '');
     setEditRashi(profileData?.rashi || '');
     setEditLanguage(profileData?.language || '');
     setEditGender(profileData?.gender || '');
+    setEditMarital(profileData?.maritalStatus || '');
     setEditBio(profileData?.bio || '');
     setEditIsPublic(profileData?.isPublic !== false);
     setIsGenderDropdownOpen(false);
@@ -402,6 +431,16 @@ const fetchProfile = async () => {
     return;
   }
 
+  if (!editGender.trim()) {
+    Alert.alert('Gender required', 'Please select your gender. It is needed for outfit and astrology suggestions.');
+    return;
+  }
+
+  if (!isValidDob(editDob)) {
+    Alert.alert('Date of birth required', 'Please select your date of birth. Your age is shown beside your name.');
+    return;
+  }
+
   const updatedProfile: UserProfile = {
     id: uid,
     name: editName.trim(),
@@ -409,28 +448,47 @@ const fetchProfile = async () => {
     phone: profileData?.phone,
     dob: editDob.trim(),
     timeOfBirth: editTimeOfBirth.trim(),
+    placeOfBirth: editPlaceOfBirth.trim(),
     rashi: editRashi.trim(),
     language: editLanguage.trim(),
     gender: editGender.trim(),
+    maritalStatus: editMarital,
     bio: editBio.trim(),
     avatarUrl: profileData?.avatarUrl || null,
     isPublic: editIsPublic,
     stylePrefs: profileData?.stylePrefs || [],
   };
 
+  // Rashi, nakshatra, Lagna, dasha... are worked out from the birth details (no manual entry).
+  // Changing the details clears the "confirmed" tick until the user confirms them again.
+  const birth = birthProfileUpdate(updatedProfile, { prevConfirmedKey: profileData?.birthConfirmedKey });
+  Object.assign(updatedProfile, birth);
+
   try {
     setSavingProfile(true);
     // Merge into Firestore users/{uid} (avatar is saved separately)
     await saveUserProfile(uid, {
+      ...birth,
       name: updatedProfile.name,
       dob: updatedProfile.dob,
       timeOfBirth: updatedProfile.timeOfBirth,
+      placeOfBirth: updatedProfile.placeOfBirth,
       rashi: updatedProfile.rashi,
       language: updatedProfile.language,
       gender: updatedProfile.gender,
+      maritalStatus: updatedProfile.maritalStatus,
       bio: updatedProfile.bio,
       isPublic: updatedProfile.isPublic,
     });
+    // Keep the birthday listing in step with the new name / date of birth (off if no date)
+    updatedProfile.showBirthday = profileData?.showBirthday === true;
+    if (updatedProfile.showBirthday) {
+      const keep = !!mdFromDob(updatedProfile.dob);
+      updatedProfile.showBirthday = keep;
+      setBirthdayListing(uid, keep, { dob: updatedProfile.dob, name: updatedProfile.name, avatar: updatedProfile.avatarUrl }).catch(e =>
+        console.warn('Birthday listing update failed:', e?.message),
+      );
+    }
     setProfileData(updatedProfile);
     updateUserData(updatedProfile as any);
     setIsEditModalVisible(false);
@@ -442,6 +500,36 @@ const fetchProfile = async () => {
     setSavingProfile(false);
   }
 };
+
+  // "Confirm birth details": the user checks name / date / time / place and ticks them
+  const handleConfirmBirth = async () => {
+    const uid = profileData?.id || authUser?.id;
+    if (!uid || !profileData || confirmingBirth) return;
+    if (!birthDetailsComplete(profileData)) {
+      Alert.alert('Add your birth details', 'Please add your name, date of birth and place of birth (time of birth is optional), then confirm.');
+      handleOpenEditModal();
+      return;
+    }
+    const upd = birthProfileUpdate(profileData, { confirm: true });
+    try {
+      setConfirmingBirth(true);
+      await saveUserProfile(uid, upd);
+      const next = { ...profileData, ...upd };
+      setProfileData(next);
+      updateUserData(next as any);
+    } catch (e: any) {
+      Alert.alert('Could not confirm', e?.message || 'Please try again.');
+    } finally {
+      setConfirmingBirth(false);
+    }
+  };
+
+  // Birth chart rows in the reading language (English under them), computed live on the phone
+  const chartLang = astroLanguage(profileData?.language);
+  const jathakam = profileData?.dob ? jathakamFor(profileData) : null;
+  const chartRows = jathakam ? birthChartRows(jathakam, chartLang) : [];
+  const chartRowsEn = jathakam && chartLang !== 'English' ? birthChartRows(jathakam, 'English') : null;
+  const birthOk = !!profileData?.birthConfirmed && profileData?.birthConfirmedKey === birthKey(profileData || {});
 
   const handleSignOut = async () => {
     try {
@@ -487,9 +575,11 @@ const fetchProfile = async () => {
         {/* Main Profile Card */}
         <View style={styles.profileCard}>
           <View style={styles.profileGradient}>
+            {/* Tap the photo to view it full screen (zoom); the 📷 badge changes it */}
             <TouchableOpacity
               style={styles.avatarContainer}
-              onPress={handleAvatarPress}
+              onPress={profileData?.avatarUrl ? () => setAvatarViewerOpen(true) : handleSelectAvatarSource}
+              onLongPress={handleSelectAvatarSource}
               disabled={uploadingAvatar}
               activeOpacity={0.8}>
               <View style={styles.avatar}>
@@ -508,10 +598,21 @@ const fetchProfile = async () => {
                   </View>
                 )}
               </View>
-              <View style={styles.cameraBadge}>
+              <TouchableOpacity
+                style={styles.cameraBadge}
+                onPress={handleSelectAvatarSource}
+                disabled={uploadingAvatar}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
                 <Text style={styles.cameraIconText}>📷</Text>
-              </View>
+              </TouchableOpacity>
             </TouchableOpacity>
+            {profileData?.avatarUrl ? (
+              <ZoomableImage
+                visible={avatarViewerOpen}
+                images={[profileData.avatarUrl]}
+                onClose={() => setAvatarViewerOpen(false)}
+              />
+            ) : null}
 
 
             {loading && !profileData ? (
@@ -558,22 +659,20 @@ const fetchProfile = async () => {
           </View>
         </View>
 
-        {/* Personal Details Section */}
+        {/* Birth details: shown and confirmable; the chart below is worked out from them */}
         <View style={styles.detailsCard}>
-          <Text style={styles.detailsTitle}>Personal Information</Text>
+          <Text style={styles.detailsTitle}>Birth details</Text>
 
           <View style={styles.infoGrid}>
             <View style={styles.infoRow}>
               <View style={styles.infoItem}>
+                <Text style={styles.infoLabel}>🙂 Name</Text>
+                <Text style={styles.infoValue}>{profileData?.name ? profileData.name : 'Not specified'}</Text>
+              </View>
+              <View style={styles.infoItem}>
                 <Text style={styles.infoLabel}>🎂 Date of Birth</Text>
                 <Text style={styles.infoValue}>
                   {profileData?.dob ? profileData.dob : 'Not specified'}
-                </Text>
-              </View>
-              <View style={styles.infoItem}>
-                <Text style={styles.infoLabel}>⏰ Time of Birth</Text>
-                <Text style={styles.infoValue}>
-                  {profileData?.timeOfBirth ? profileData.timeOfBirth : 'Not specified'}
                 </Text>
               </View>
             </View>
@@ -582,11 +681,78 @@ const fetchProfile = async () => {
 
             <View style={styles.infoRow}>
               <View style={styles.infoItem}>
-                <Text style={styles.infoLabel}>✨ Rashi</Text>
+                <Text style={styles.infoLabel}>⏰ Time of Birth</Text>
                 <Text style={styles.infoValue}>
-                  {profileData?.rashi ? profileData.rashi : 'Not specified'}
+                  {profileData?.timeOfBirth ? profileData.timeOfBirth : 'Not known (optional)'}
                 </Text>
               </View>
+              <View style={styles.infoItem}>
+                <Text style={styles.infoLabel}>📍 Place of Birth</Text>
+                <Text style={styles.infoValue}>
+                  {profileData?.placeOfBirth ? profileData.placeOfBirth : 'Not specified'}
+                </Text>
+              </View>
+            </View>
+          </View>
+
+          {birthOk ? (
+            <View style={styles.confirmedRow}>
+              <Text style={styles.confirmedTick}>✓</Text>
+              <Text style={styles.confirmedText}>Birth details confirmed</Text>
+              <TouchableOpacity onPress={handleOpenEditModal} activeOpacity={0.8}>
+                <Text style={styles.confirmEdit}>Edit</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <TouchableOpacity
+              style={[styles.confirmBtn, confirmingBirth && styles.confirmBtnBusy]}
+              onPress={handleConfirmBirth}
+              disabled={confirmingBirth}
+              activeOpacity={0.85}>
+              {confirmingBirth ? (
+                <ActivityIndicator size="small" color={colors.textInverse} />
+              ) : (
+                <Text style={styles.confirmBtnText}>Confirm birth details</Text>
+              )}
+            </TouchableOpacity>
+          )}
+        </View>
+
+        {/* Birth chart: auto-filled from the birth details (offline engine), no manual entry */}
+        <View style={styles.detailsCard}>
+          <Text style={styles.detailsTitle}>🪐 Birth chart (auto)</Text>
+          {chartRows.length ? (
+            <View style={styles.infoGrid}>
+              {chartRows.map((row, i) => (
+                <View key={row.key} style={styles.chartRow}>
+                  <Text style={styles.chartLabel}>
+                    {row.label}
+                    {chartRowsEn && chartRowsEn[i] && chartRowsEn[i].label !== row.label ? `\n${chartRowsEn[i].label}` : ''}
+                  </Text>
+                  <Text style={styles.chartValue}>
+                    {row.value}
+                    {chartRowsEn && chartRowsEn[i] && chartRowsEn[i].value !== row.value ? `\n${chartRowsEn[i].value}` : ''}
+                  </Text>
+                </View>
+              ))}
+              {!jathakam?.timeKnown ? (
+                <Text style={styles.chartHint}>Add your time of birth for your Lagna and an exact nakshatra pada.</Text>
+              ) : null}
+            </View>
+          ) : (
+            <Text style={styles.chartHint}>
+              Add your date of birth (and time and place, if you know them): your rashi, nakshatra, tithi, Lagna, gana,
+              yoni, nadi, Mahadasha and numbers fill in automatically.
+            </Text>
+          )}
+        </View>
+
+        {/* Personal Details Section */}
+        <View style={styles.detailsCard}>
+          <Text style={styles.detailsTitle}>Personal Information</Text>
+
+          <View style={styles.infoGrid}>
+            <View style={styles.infoRow}>
               <View style={styles.infoItem}>
                 <Text style={styles.infoLabel}>🗣️ Language</Text>
                 <Text style={styles.infoValue}>
@@ -602,6 +768,12 @@ const fetchProfile = async () => {
                 <Text style={styles.infoLabel}>👤 Gender</Text>
                 <Text style={styles.infoValue}>
                   {profileData?.gender ? profileData.gender : 'Not specified'}
+                </Text>
+              </View>
+              <View style={styles.infoItem}>
+                <Text style={styles.infoLabel}>💍 Marital status</Text>
+                <Text style={styles.infoValue}>
+                  {profileData?.maritalStatus ? profileData.maritalStatus : 'Not specified'}
                 </Text>
               </View>
             </View>
@@ -667,6 +839,32 @@ const fetchProfile = async () => {
           </View>
         </View>
 
+        {/* Show my birthday: opt-in, off by default (day + month only) */}
+        <View style={styles.menuSection}>
+          <View style={styles.menuItem}>
+            <View style={[styles.menuLeft, styles.flexTitle]}>
+              <View style={styles.menuIconBox}>
+                <Text style={styles.menuIcon}>🎂</Text>
+              </View>
+              <View style={styles.flexTitle}>
+                <Text style={styles.menuLabel}>Show my birthday</Text>
+                <Text style={styles.lockValue}>
+                  {profileData?.showBirthday
+                    ? `On: others see ${mdFromDob(profileData?.dob) ? mdLabel(mdFromDob(profileData?.dob) as string) : 'your birthday'} on Home and can send wishes (never the year)`
+                    : 'Off: your birthday stays private'}
+                </Text>
+              </View>
+            </View>
+            <Switch
+              value={profileData?.showBirthday === true}
+              onValueChange={handleToggleBirthday}
+              disabled={bdayBusy}
+              trackColor={{ false: colors.border, true: colors.accent }}
+              thumbColor={colors.textInverse}
+            />
+          </View>
+        </View>
+
         {/* App lock: optional, off by default */}
         {lockSupported && (
           <View style={styles.menuSection}>
@@ -693,18 +891,35 @@ const fetchProfile = async () => {
           </View>
         )}
 
+        {/* Coin sound: on by default */}
+        {isCoinSoundSupported() && (
+          <View style={styles.menuSection}>
+            <View style={styles.menuItem}>
+              <View style={[styles.menuLeft, styles.flexTitle]}>
+                <View style={styles.menuIconBox}>
+                  <Text style={styles.menuIcon}>🪙</Text>
+                </View>
+                <View style={styles.flexTitle}>
+                  <Text style={styles.menuLabel}>Coin sound</Text>
+                  <Text style={styles.lockValue}>
+                    {coinSound ? 'On: a short ding when you earn coins (follows media volume)' : 'Off: coin flips are silent'}
+                  </Text>
+                </View>
+              </View>
+              <Switch
+                value={coinSound}
+                onValueChange={toggleCoinSound}
+                trackColor={{ false: colors.border, true: colors.accent }}
+                thumbColor={colors.textInverse}
+              />
+            </View>
+          </View>
+        )}
+
         {/* Menu Section */}
         <View style={styles.menuSection}>
           {[
-            {
-              id: 'style',
-              icon: '🎨',
-              label: 'Style preference',
-              value: profileData?.stylePrefs?.length ? profileData.stylePrefs.join(', ') : 'Not set',
-              onPress: openStylePrefs,
-            },
             { id: 'ach', icon: '🏆', label: 'Achievements', onPress: () => navigation.navigate('Achievements') },
-            { id: 'likes', icon: '♥', label: 'Likes', onPress: () => navigation.navigate('Likes', { tab: 'likes' }) },
             {
               id: 'notif',
               icon: '🔔',
@@ -734,7 +949,7 @@ const fetchProfile = async () => {
               id: 'feedback',
               icon: '💌',
               label: 'Feedback & Suggestions',
-              value: 'Suggestion, complaint or bug',
+              value: 'Board: share ideas, like, reply and quote',
               onPress: () => setFeedbackOpen(true),
             },
             { id: 'help', icon: '❓', label: 'Help & Support' },
@@ -796,52 +1011,12 @@ const fetchProfile = async () => {
         <Text style={styles.version}>Outfit v1.0.0</Text>
       </ScrollView>
 
-      <FeedbackModal
+      <FeedbackBoardModal
         visible={feedbackOpen}
         uid={authUser?.id}
         name={profileData?.name || authUser?.name}
         onClose={() => setFeedbackOpen(false)}
       />
-
-      {/* Style preference (multi-select) */}
-      <Modal visible={stylePrefsOpen} transparent animationType="slide" onRequestClose={() => setStylePrefsOpen(false)}>
-        <View style={styles.modalOverlay}>
-          <TouchableOpacity style={styles.backdropPressable} activeOpacity={1} onPress={() => setStylePrefsOpen(false)} />
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Style preference</Text>
-              <TouchableOpacity onPress={() => setStylePrefsOpen(false)}>
-                <Text style={styles.modalCloseIcon}>✕</Text>
-              </TouchableOpacity>
-            </View>
-            <Text style={styles.stylePrefHint}>Pick all that suit you</Text>
-            <View style={styles.stylePrefWrap}>
-              {STYLE_OPTIONS.map(opt => {
-                const on = editStylePrefs.includes(opt);
-                return (
-                  <TouchableOpacity
-                    key={opt}
-                    style={[styles.stylePrefChip, on && styles.stylePrefChipOn]}
-                    onPress={() => toggleStylePref(opt)}
-                    activeOpacity={0.8}>
-                    <Text style={[styles.stylePrefText, on && styles.stylePrefTextOn]}>
-                      {on ? '✓ ' : ''}
-                      {opt}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-            <TouchableOpacity style={styles.stylePrefSave} onPress={saveStylePrefs} disabled={savingStyles}>
-              {savingStyles ? (
-                <ActivityIndicator color={colors.onPrimary} />
-              ) : (
-                <Text style={styles.stylePrefSaveText}>Save ({editStylePrefs.length})</Text>
-              )}
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
 
       {/* Edit Profile Modal */}
       <Modal
@@ -849,9 +1024,8 @@ const fetchProfile = async () => {
         animationType="slide"
         transparent={true}
         onRequestClose={() => setIsEditModalVisible(false)}>
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.modalOverlay}>
+        {/* Sheet bottom sits right on the keyboard (KeyboardSafeView) */}
+        <KeyboardSafeView style={styles.modalOverlay}>
           <TouchableOpacity
             style={styles.backdropPressable}
             activeOpacity={1}
@@ -952,23 +1126,27 @@ const fetchProfile = async () => {
                 </View>
               </View>
 
-              <View style={styles.formRow}>
-                <View style={[styles.inputGroup, { flex: 1 }]}>
-                  <Text style={styles.inputLabel}>Rashi</Text>
-                  <TouchableOpacity
-                    style={styles.modalInputTouchable}
-                    onPress={() => setIsRashiOpen(true)}
-                    activeOpacity={0.85}>
-                    <Text
-                      numberOfLines={1}
-                      style={[editRashi ? styles.modalInputValueText : styles.modalInputPlaceholderText, styles.flexShrink]}>
-                      {editRashi || 'Select Rashi'}
-                    </Text>
-                    <Text style={styles.dropdownArrowIcon}>▼</Text>
-                  </TouchableOpacity>
-                </View>
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Place of Birth</Text>
+                <TouchableOpacity
+                  style={styles.modalInputTouchable}
+                  onPress={() => setIsPlaceOpen(true)}
+                  activeOpacity={0.85}>
+                  <Text
+                    numberOfLines={1}
+                    style={[editPlaceOfBirth ? styles.modalInputValueText : styles.modalInputPlaceholderText, styles.flexShrink]}>
+                    {editPlaceOfBirth || 'Select city (for your birth chart)'}
+                  </Text>
+                  <Text style={styles.inputCalendarIcon}>📍</Text>
+                </TouchableOpacity>
+              </View>
 
-                <View style={[styles.inputGroup, { flex: 1 }]}>
+              <Text style={styles.autoNote}>
+                Rashi, nakshatra, Lagna and the rest of your birth chart are worked out from these details automatically.
+              </Text>
+
+              <View style={styles.formRow}>
+                <View style={[styles.inputGroup, styles.flexOne]}>
                   <Text style={styles.inputLabel}>Language</Text>
                   <TouchableOpacity
                     style={styles.modalInputTouchable}
@@ -985,7 +1163,7 @@ const fetchProfile = async () => {
               </View>
 
               <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Gender</Text>
+                <Text style={styles.inputLabel}>Gender *</Text>
                 <TouchableOpacity
                   style={styles.modalInputTouchable}
                   onPress={() => setIsGenderDropdownOpen(o => !o)}
@@ -1025,6 +1203,24 @@ const fetchProfile = async () => {
                     })}
                   </View>
                 )}
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Marital status</Text>
+                <View style={styles.chipRow}>
+                  {MARITAL_OPTIONS.map(m => {
+                    const on = editMarital === m;
+                    return (
+                      <TouchableOpacity
+                        key={m}
+                        style={[styles.chip, on && styles.chipOn]}
+                        onPress={() => setEditMarital(on ? '' : m)}
+                        activeOpacity={0.8}>
+                        <Text style={[styles.chipText, on && styles.chipTextOn]}>{m}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
               </View>
 
               <View style={styles.inputGroup}>
@@ -1078,7 +1274,7 @@ const fetchProfile = async () => {
               </TouchableOpacity>
             </View>
           </View>
-        </KeyboardAvoidingView>
+        </KeyboardSafeView>
       </Modal>
 
       {/* Calendar Picker Modal */}
@@ -1190,19 +1386,17 @@ const fetchProfile = async () => {
         </View>
       </Modal>
 
+      <CityPickerModal
+        visible={isPlaceOpen}
+        selected={editPlaceOfBirth}
+        onSelect={setEditPlaceOfBirth}
+        onClose={() => setIsPlaceOpen(false)}
+      />
       <TimePickerModal
         visible={isTimePickerOpen}
         value={editTimeOfBirth}
         onConfirm={setEditTimeOfBirth}
         onClose={() => setIsTimePickerOpen(false)}
-      />
-      <SelectModal
-        visible={isRashiOpen}
-        title="Select Rashi"
-        options={RASHIS}
-        selected={editRashi}
-        onSelect={setEditRashi}
-        onClose={() => setIsRashiOpen(false)}
       />
       <SelectModal
         visible={isLanguageOpen}
@@ -1212,11 +1406,6 @@ const fetchProfile = async () => {
         onSelect={setEditLanguage}
         onClose={() => setIsLanguageOpen(false)}
       />
-      <FullScreenImageViewer
-        visible={avatarViewerOpen && !!profileData?.avatarUrl}
-        photos={profileData?.avatarUrl ? [{ uri: profileData.avatarUrl, label: profileData?.name || 'Profile photo' }] : []}
-        onClose={() => setAvatarViewerOpen(false)}
-      />
     </SafeAreaView>
   );
 }
@@ -1225,30 +1414,50 @@ const styles = themedStyles(() => StyleSheet.create({
   backArrow: { fontSize: 34, color: colors.primary, marginRight: spacing.sm, lineHeight: 36 },
   flexTitle: { flex: 1 },
   menuValue: { fontSize: fontSize.xs, color: colors.textSecondary, marginTop: 1 },
-  stylePrefHint: { fontSize: fontSize.sm, color: colors.textSecondary, marginBottom: spacing.md },
-  stylePrefWrap: { flexDirection: 'row', flexWrap: 'wrap' },
-  stylePrefChip: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 18,
-    borderWidth: 1.5,
-    borderColor: colors.border,
-    marginRight: 8,
-    marginBottom: 8,
-    backgroundColor: colors.surface,
+  flexShrink: { flexShrink: 1 },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap' },
+  flexOne: { flex: 1 },
+  autoNote: { fontSize: fontSize.xs, color: colors.textMuted, marginBottom: spacing.sm, lineHeight: 16 },
+  confirmedRow: { flexDirection: 'row', alignItems: 'center', marginTop: spacing.md },
+  confirmedTick: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: colors.success,
+    color: '#FFFFFF',
+    textAlign: 'center',
+    lineHeight: 22,
+    fontWeight: fontWeight.extraBold,
+    marginRight: spacing.sm,
+    overflow: 'hidden',
   },
-  stylePrefChipOn: { backgroundColor: colors.primary, borderColor: colors.primary },
-  stylePrefText: { fontSize: fontSize.sm, fontWeight: fontWeight.semiBold, color: colors.textPrimary },
-  stylePrefTextOn: { color: colors.onPrimary },
-  stylePrefSave: {
-    marginTop: spacing.lg,
+  confirmedText: { flex: 1, fontSize: fontSize.sm, fontWeight: fontWeight.bold, color: colors.textPrimary },
+  confirmEdit: { fontSize: fontSize.sm, color: colors.primary, fontWeight: fontWeight.bold },
+  confirmBtn: {
+    marginTop: spacing.md,
     backgroundColor: colors.primary,
     borderRadius: borderRadius.full,
-    paddingVertical: spacing.md,
+    paddingVertical: spacing.sm,
     alignItems: 'center',
   },
-  stylePrefSaveText: { color: colors.onPrimary, fontWeight: fontWeight.bold, fontSize: fontSize.base },
-  flexShrink: { flexShrink: 1 },
+  confirmBtnBusy: { opacity: 0.7 },
+  confirmBtnText: { color: colors.textInverse, fontWeight: fontWeight.bold, fontSize: fontSize.sm },
+  chartRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4 },
+  chartLabel: { fontSize: fontSize.xs, color: colors.textSecondary, fontWeight: fontWeight.bold, marginRight: spacing.sm },
+  chartValue: { fontSize: fontSize.sm, color: colors.textPrimary, fontWeight: fontWeight.semiBold, flexShrink: 1, textAlign: 'right' },
+  chartHint: { fontSize: fontSize.xs, color: colors.textMuted, fontStyle: 'italic', marginTop: spacing.sm, lineHeight: 16 },
+  chip: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: 6,
+    borderRadius: borderRadius.full,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    marginRight: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  chipOn: { borderColor: colors.primary, backgroundColor: colors.surface },
+  chipText: { fontSize: fontSize.sm, color: colors.textSecondary, fontWeight: fontWeight.semiBold },
+  chipTextOn: { color: colors.primary, fontWeight: fontWeight.bold },
   publicRow: {
     flexDirection: 'row',
     alignItems: 'center',

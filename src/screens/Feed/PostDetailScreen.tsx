@@ -1,4 +1,5 @@
-// One post or public wardrobe photo, full size, with like / comment / A-F vote
+// One post or public wardrobe photo, full size, with like / comment / A-F vote.
+// Tap a photo to open it in the zoom viewer (double-tap still likes).
 import React, { useEffect, useState } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, ActivityIndicator, StatusBar, Platform, useWindowDimensions, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -6,7 +7,8 @@ import { colors, fontSize, fontWeight, spacing, themedStyles, statusBarStyle } f
 import { useAuth } from '../../context/AuthContext';
 import useIsAdmin from '../../hooks/useIsAdmin';
 import PostCard from '../../components/PostCard';
-import { getPost, getWardrobeAsPost, Post } from '../../services/feedApi';
+import ZoomableImage from '../../components/ZoomableImage';
+import { cachedPost, getPost, getWardrobeAsPost, Post } from '../../services/feedApi';
 
 export default function PostDetailScreen({ navigation, route }: { navigation: any; route: any }) {
   const kind: 'post' | 'wardrobe' = route?.params?.kind === 'wardrobe' ? 'wardrobe' : 'post';
@@ -14,9 +16,12 @@ export default function PostDetailScreen({ navigation, route }: { navigation: an
   const { user } = useAuth();
   const { isAdmin } = useIsAdmin(user?.id);
   const { width } = useWindowDimensions();
-  const [post, setPost] = useState<Post | null | undefined>(undefined);
+  // Opened from a list: the light doc is already in memory (no read)
+  const [post, setPost] = useState<Post | null | undefined>(() => cachedPost(kind, id) || undefined);
+  const [viewer, setViewer] = useState<{ photos: string[]; index: number } | null>(null);
 
   useEffect(() => {
+    if (cachedPost(kind, id)) return;
     let alive = true;
     const p = kind === 'post' ? getPost(id).catch(() => null) : getWardrobeAsPost(id);
     p.then(x => alive && setPost(x));
@@ -43,9 +48,23 @@ export default function PostDetailScreen({ navigation, route }: { navigation: an
         <Text style={styles.gone}>This post was deleted or is private.</Text>
       ) : (
         <ScrollView>
-          <PostCard post={post} width={width} myUid={user?.id} isAdmin={isAdmin} onDeleted={() => navigation.goBack()} />
+          <PostCard
+            post={post}
+            width={width}
+            myUid={user?.id}
+            isAdmin={isAdmin}
+            detail
+            onDeleted={() => navigation.goBack()}
+            onOpenPhoto={(photos, index) => setViewer({ photos, index })}
+          />
         </ScrollView>
       )}
+      <ZoomableImage
+        visible={!!viewer}
+        images={viewer?.photos || []}
+        initialIndex={viewer?.index || 0}
+        onClose={() => setViewer(null)}
+      />
     </SafeAreaView>
   );
 }

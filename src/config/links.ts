@@ -6,7 +6,8 @@
 export const SHARE_BASE = 'https://outfit-vote-9edca.web.app';
 
 export const APP_WEB_URL = `${SHARE_BASE}/`;
-// App download page (Android APK + "open in browser"); share links add ?ref=CODE
+// Android download page (the only page Hosting serves; every other path redirects here).
+// Share links add ?ref=CODE. APP_WEB_URL (the site root) also lands here.
 export const APP_GET_URL = `${SHARE_BASE}/get/`;
 
 // Release APK names (main.yml also keeps the old app-*-release.apk names for older installs)

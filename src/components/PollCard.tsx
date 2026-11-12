@@ -12,6 +12,10 @@ interface Props {
   myUid?: string;
   canVote: boolean; // false for admins reading a circle they are not in
   onLongPress?: () => void;
+  // Kept for callers; photos now open in the built-in full-screen viewer (vote there)
+  onOpenImage?: (uri: string) => void;
+  // Opens all option photos in the zoom viewer at `index` (preferred over onOpenImage)
+  onOpenImages?: (uris: string[], index: number, labels: string[]) => void;
 }
 
 export default function PollCard({ circleId, message, myUid, canVote, onLongPress }: Props) {
@@ -103,21 +107,26 @@ export default function PollCard({ circleId, message, myUid, canVote, onLongPres
                     <Text style={styles.checkText}>✓</Text>
                   </View>
                 )}
-                <View style={styles.zoomHint}>
-                  <Text style={styles.zoomHintText}>⤢</Text>
+                <View style={styles.zoomBadge}>
+                  <Text style={styles.zoomText}>⤢</Text>
                 </View>
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.optionFooter}
                 activeOpacity={0.7}
+                disabled={!canVote}
                 onPress={() => vote(i)}
                 onLongPress={onLongPress}
                 delayLongPress={350}
-                disabled={!canVote}
-                accessibilityLabel={`Vote ${POLL_LETTERS[i]}`}>
-                <Text style={styles.optionLabel} numberOfLines={1}>
-                  {optionName(i)}
-                </Text>
+                accessibilityLabel={`Vote for ${POLL_LETTERS[i]}`}>
+                <View style={styles.labelRow}>
+                  <Text style={styles.optionLabel} numberOfLines={1}>
+                    {optionName(i)}
+                  </Text>
+                  {canVote ? (
+                    <Text style={[styles.votePill, mine && styles.votePillMine]}>{mine ? 'Voted' : 'Vote'}</Text>
+                  ) : null}
+                </View>
                 <View style={styles.barTrack}>
                   <View
                     style={[
@@ -194,19 +203,33 @@ const styles = themedStyles(() => StyleSheet.create({
   },
   checkText: { color: colors.textInverse, fontWeight: fontWeight.extraBold, fontSize: 13 },
   optionFooter: { padding: 6 },
-  zoomHint: {
+  labelRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  votePill: {
+    fontSize: 10,
+    fontWeight: fontWeight.bold,
+    color: colors.accent,
+    borderWidth: 1,
+    borderColor: colors.accent,
+    borderRadius: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    marginLeft: 4,
+    overflow: 'hidden',
+  },
+  votePillMine: { color: colors.textInverse, backgroundColor: colors.accent },
+  zoomBadge: {
     position: 'absolute',
-    bottom: 5,
-    right: 5,
+    bottom: 6,
+    right: 6,
     width: 22,
     height: 22,
     borderRadius: 11,
-    backgroundColor: 'rgba(0,0,0,0.45)',
+    backgroundColor: 'rgba(0,0,0,0.5)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  zoomHintText: { color: '#FFFFFF', fontSize: 12, fontWeight: fontWeight.bold },
-  optionLabel: { fontSize: fontSize.xs, fontWeight: fontWeight.bold, color: colors.textPrimary },
+  zoomText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700' },
+  optionLabel: { flexShrink: 1, fontSize: fontSize.xs, fontWeight: fontWeight.bold, color: colors.textPrimary },
   barTrack: { height: 6, borderRadius: 3, backgroundColor: colors.divider, marginTop: 4, overflow: 'hidden' },
   barFill: { height: 6, borderRadius: 3, backgroundColor: colors.accentLight },
   barLeading: { backgroundColor: colors.primaryLight },
