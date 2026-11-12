@@ -14,14 +14,14 @@ import CoinRain from './CoinRain';
 import { isSafeMode } from '../../native/safeMode';
 
 // Matches res/raw/coin_flip.ogg (1.8 s small-coin clinks; settle ring at ~1.34 s, then it rings out)
-const FLIP_MS = 1400;
+const FLIP_MS = 2400; // slow flip, matches the 2.4 s sound
 const HOLD_MS = 1000;
 const FADE_MS = 150;
 const FAST_AFTER = 3; // more than this many waiting: play the rest faster
 const FAST_FACTOR = 0.45;
 const MAX_QUEUE = 30; // safety cap; oldest extra flips are dropped
-const COIN_SIZE = 64; // small coin (was 96)
-const TOSS = 44; // toss height, scaled with the smaller coin (was 60)
+const COIN_SIZE = 52; // small coin
+const TOSS = 36; // toss height for the small coin
 
 interface Shown {
   earned: number;
