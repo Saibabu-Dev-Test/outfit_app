@@ -52,3 +52,26 @@ export const onCoinTotal = (fn: TotalListener): (() => void) => {
     totalListeners.delete(fn);
   };
 };
+
+// Like coins flipping across the screen (tap on a like notification). CoinRain listens.
+export interface CoinRainBusEvent {
+  level: LikeLevel;
+  count: number;
+}
+type RainListener = (e: CoinRainBusEvent) => void;
+const rainListeners = new Set<RainListener>();
+
+export const showCoinRain = (e: CoinRainBusEvent) => {
+  rainListeners.forEach(fn => {
+    try {
+      fn(e);
+    } catch {}
+  });
+};
+
+export const onCoinRain = (fn: RainListener): (() => void) => {
+  rainListeners.add(fn);
+  return () => {
+    rainListeners.delete(fn);
+  };
+};

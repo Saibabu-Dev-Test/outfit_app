@@ -10,6 +10,7 @@ import { CoinTier, tierFor, tierLabel } from '../../config/coins';
 import { CoinFlipEvent, onCoinFlip } from '../../services/coinBus';
 import { playCoinSound } from '../../native/coinSound';
 import Coin, { CoinFace } from './Coin';
+import CoinRain from './CoinRain';
 import { isSafeMode } from '../../native/safeMode';
 
 const FLIP_MS = 700;
@@ -169,9 +170,12 @@ export default function CoinFlipProvider({ children }: { children: React.ReactNo
       {children}
       {/* Start-up safe mode: no animated overlay (coins are still awarded) */}
       {isSafeMode() ? null : (
-        <Boundary>
-          <CoinFlipOverlay />
-        </Boundary>
+        <>
+          <CoinRain />
+          <Boundary>
+            <CoinFlipOverlay />
+          </Boundary>
+        </>
       )}
     </View>
   );

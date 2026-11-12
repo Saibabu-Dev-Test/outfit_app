@@ -34,6 +34,8 @@ object OutfitNotifier {
   // Reminders run from this local hour until the vote (every hour)
   const val VOTE_START_HOUR = 1
   const val EXTRA_SLOT = "slot"
+  // Optional JSON the app reads when the notification is tapped (e.g. like coins to flip)
+  const val EXTRA_PAYLOAD = "outfit_payload"
   private const val PREFS = "outfit_notifications"
   private const val KEY_DAILY_ON = "daily_on"
   // First name of the signed-in user (saved by the app at login / profile update) for the 8 AM title
@@ -74,18 +76,19 @@ object OutfitNotifier {
     return NotificationManagerCompat.from(ctx).areNotificationsEnabled()
   }
 
-  private fun openAppIntent(ctx: Context, requestCode: Int): PendingIntent {
+  private fun openAppIntent(ctx: Context, requestCode: Int, payload: String? = null): PendingIntent {
     val i = Intent(ctx, MainActivity::class.java)
       .setAction(Intent.ACTION_MAIN)
       .addCategory(Intent.CATEGORY_LAUNCHER)
       .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+    if (!payload.isNullOrEmpty()) i.putExtra(EXTRA_PAYLOAD, payload)
     return PendingIntent.getActivity(
       ctx, requestCode, i, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
   }
 
   // Posts one notification. Returns false when notifications are off.
-  fun post(ctx: Context, channel: String, id: Int, title: String, body: String): Boolean {
+  fun post(ctx: Context, channel: String, id: Int, title: String, body: String, payload: String? = null): Boolean {
     ensureChannels(ctx)
     if (!canPost(ctx)) return false
     val n = NotificationCompat.Builder(ctx, channel)
@@ -98,7 +101,7 @@ object OutfitNotifier {
       .setPriority(
         if (channel == CHANNEL_ACTIVITY) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_DEFAULT,
       )
-      .setContentIntent(openAppIntent(ctx, id))
+      .setContentIntent(openAppIntent(ctx, id, payload))
       .build()
     return try {
       NotificationManagerCompat.from(ctx).notify(id, n)
@@ -106,6 +109,19 @@ object OutfitNotifier {
     } catch (e: SecurityException) {
       false
     }
+  }
+
+  // Payload of the notification the app was opened from; read once by the app (consumeLaunchPayload)
+  @Volatile var pendingPayload: String? = null
+
+  fun capturePayload(intent: Intent?) {
+    try {
+      val p = intent?.getStringExtra(EXTRA_PAYLOAD)
+      if (!p.isNullOrEmpty()) {
+        pendingPayload = p
+        intent?.removeExtra(EXTRA_PAYLOAD)
+      }
+    } catch (_: Throwable) {}
   }
 
   // ── Daily reminders ──
