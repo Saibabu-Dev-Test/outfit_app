@@ -240,37 +240,13 @@ export const CATEGORY_ICONS: Record<string, string> = {
   'Hair Accessories': '🎀',
 };
 
-// Labels for the accessory types in Telugu / Hindi (stored values stay English; anything
-// missing falls back to the English value)
-const ACCESSORY_LABELS: Record<string, { te: string; hi: string }> = {
-  'Earrings': { te: 'చెవి కమ్మలు', hi: 'झुमके / बालियाँ' },
-  'Bangles': { te: 'గాజులు', hi: 'चूड़ियाँ' },
-  'Bracelets': { te: 'బ్రేస్‌లెట్', hi: 'ब्रेसलेट' },
-  'Necklace / Chain': { te: 'హారం / గొలుసు', hi: 'हार / चेन' },
-  'Rings': { te: 'ఉంగరాలు', hi: 'अंगूठियाँ' },
-  'Anklets (Payal)': { te: 'పట్టీలు', hi: 'पायल' },
-  'Nose Pin': { te: 'ముక్కుపుడక', hi: 'नथ / नोज़ पिन' },
-  'Maang Tikka': { te: 'పాపిడి బిళ్ళ', hi: 'मांग टीका' },
-  'Watches': { te: 'గడియారం', hi: 'घड़ी' },
-  'Bags': { te: 'బ్యాగ్', hi: 'बैग' },
-  'Handbags': { te: 'హ్యాండ్‌బ్యాగ్', hi: 'हैंडबैग' },
-  'Clutch': { te: 'క్లచ్', hi: 'क्लच' },
-  'Belts': { te: 'బెల్ట్', hi: 'बेल्ट' },
-  'Sunglasses': { te: 'కళ్లజోడు (సన్‌గ్లాసెస్)', hi: 'धूप का चश्मा' },
-  'Hair Accessories': { te: 'జుట్టు అలంకరణలు', hi: 'बालों की एक्सेसरीज़' },
-  'Caps / Hats': { te: 'క్యాప్ / టోపీ', hi: 'कैप / टोपी' },
-  'Accessories': { te: 'యాక్సెసరీలు', hi: 'एक्सेसरीज़' },
-};
-
-/** Display label for a category / type in the user's language ('Telugu' / 'Hindi'); English fallback */
-export const typeLabel = (value: string, language?: string | null): string => {
-  const l = (language || '').trim().toLowerCase();
-  const row = ACCESSORY_LABELS[value];
-  if (!row) return value;
-  if (l === 'telugu' || l === 'te') return row.te || value;
-  if (l === 'hindi' || l === 'hi') return row.hi || value;
-  return value;
-};
+/**
+ * Display label for a category / type. Always English: the user asked for English labels by
+ * default everywhere (Telugu/Hindi labels must not appear just because the profile language is
+ * Telugu). The language argument is accepted for old call sites and ignored. Stored values are
+ * English too, so the value itself is the label.
+ */
+export const typeLabel = (value: string, _language?: string | null): string => value;
 
 export const categoryIcon = (c?: string | null): string =>
   (c && (CATEGORY_ICONS[c] || CATEGORY_ICONS[normalizeCategory(c)])) || '👕';

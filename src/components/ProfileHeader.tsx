@@ -1,5 +1,5 @@
 // Instagram-like profile header: avatar (tap to see it full screen), counts (wear votes today, wardrobe,
-// followers / following: tap to open lists), name, bio, style chips
+// followers / following: tap to open lists), name, bio (style preference chips removed on purpose; the field stays in user data only)
 import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
@@ -13,7 +13,6 @@ interface Props {
   name: string;
   avatarUrl?: string | null;
   bio?: string;
-  stylePrefs?: string[];
   counts: ProfileCounts | null;
   isStar?: boolean;
   isPrivate?: boolean;
@@ -28,7 +27,6 @@ export default function ProfileHeader({
   name,
   avatarUrl,
   bio,
-  stylePrefs,
   counts,
   isStar,
   isPrivate,
@@ -72,15 +70,6 @@ export default function ProfileHeader({
       </Text>
       {badge || null}
       {bio ? <Text style={styles.bio}>{bio}</Text> : null}
-      {stylePrefs && stylePrefs.length ? (
-        <View style={styles.chips}>
-          {stylePrefs.map(p => (
-            <View key={p} style={styles.chip}>
-              <Text style={styles.chipText}>{p}</Text>
-            </View>
-          ))}
-        </View>
-      ) : null}
       {children ? <View style={styles.buttons}>{children}</View> : null}
       <FullScreenImageViewer
         visible={avatarOpen && !!avatarUrl}
@@ -114,15 +103,5 @@ const styles = themedStyles(() => StyleSheet.create({
   statLabel: { fontSize: fontSize.xs, color: colors.textSecondary, marginTop: 2 },
   name: { fontSize: fontSize.base, fontWeight: fontWeight.bold, color: colors.textPrimary, marginTop: spacing.sm },
   bio: { fontSize: fontSize.sm, color: colors.textPrimary, marginTop: 2, lineHeight: 19 },
-  chips: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 6 },
-  chip: {
-    paddingHorizontal: 10,
-    paddingVertical: 3,
-    borderRadius: 12,
-    backgroundColor: colors.divider,
-    marginRight: 6,
-    marginBottom: 4,
-  },
-  chipText: { fontSize: fontSize.xs, color: colors.textSecondary, fontWeight: fontWeight.semiBold },
   buttons: { flexDirection: 'row', marginTop: spacing.md, marginHorizontal: -3 },
 }));

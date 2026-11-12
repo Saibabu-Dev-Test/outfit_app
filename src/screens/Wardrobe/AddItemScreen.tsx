@@ -46,7 +46,6 @@ import {
 // Labels the item name may be auto-filled with (replaced when the pick changes)
 const AUTO_NAMES = new Set([...ALL_CATEGORIES, ...SHOE_TYPES, ...ACCESSORY_TYPES]);
 
-const FABRIC_TYPES = [ 'Formal', 'Casual', 'Party', 'Ethnic', 'Sports'];
 
 interface AddItemScreenProps {
   navigation: any;
@@ -457,7 +456,7 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
                     onPress={() => pickType(t)}
                     activeOpacity={0.75}>
                     <Text style={styles.chipEmojiSmall}>{categoryIcon(t)}</Text>
-                    <Text style={[styles.pillText, isSelected && styles.itemChipTextSelected]}>{typeLabel(t, user?.language)}</Text>
+                    <Text style={[styles.pillText, isSelected && styles.itemChipTextSelected]}>{typeLabel(t)}</Text>
                   </TouchableOpacity>
                 );
               })}
@@ -530,23 +529,6 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
           </Text>
         ) : null}
 
-        {/* Fabric Type */}
-        <Text style={styles.mainSectionTitle}>FABRIC TYPE</Text>
-        <View style={styles.fabricWrap}>
-          {FABRIC_TYPES.map(fab => {
-            const active = selectedFabric === fab;
-            return (
-              <TouchableOpacity
-                key={fab}
-                style={[styles.fabricChip, active && styles.fabricChipActive]}
-                onPress={() => setSelectedFabric(active ? null : fab)}
-                activeOpacity={0.8}>
-                <Text style={[styles.fabricChipText, active && styles.fabricChipTextActive]}>{fab}</Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-
         {/* Public toggle (for a later public feed) */}
         <View style={styles.publicRow}>
           <Text style={styles.publicLabel}>Show in public feed</Text>
@@ -563,7 +545,6 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
               <Text style={styles.previewName}>{itemName.trim() || selectedCategory}</Text>
               <Text style={styles.previewMeta}>
                 {selectedSubType ? `${selectedCategory} › ${selectedSubType}` : selectedCategory} · {selectedWearType}{selectedColor ? ` · ${selectedColor}` : ''}
-                {selectedFabric ? ` · ${selectedFabric}` : ''}
               </Text>
             </View>
             {selectedColor ? (
@@ -956,18 +937,6 @@ const styles = themedStyles(() => StyleSheet.create({
   swatchActive: { borderWidth: 3, borderColor: colors.primary, transform: [{ scale: 1.2 }] },
   colorName: { fontSize: 11, color: colors.textSecondary, fontWeight: fontWeight.semiBold, marginBottom: spacing.sm },
 
-  fabricWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  fabricChip: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 20,
-    borderWidth: 1.5,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
-  },
-  fabricChipActive: { backgroundColor: '#E91E63', borderColor: '#E91E63' },
-  fabricChipText: { fontSize: 12, fontWeight: fontWeight.semiBold, color: colors.textSecondary },
-  fabricChipTextActive: { color: '#FFFFFF' },
 
   previewCard: {
     flexDirection: 'row',

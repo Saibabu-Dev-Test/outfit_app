@@ -206,7 +206,6 @@ export default function MeScreen({ navigation }: { navigation: any }) {
           name={user?.name || 'Set your name'}
           avatarUrl={user?.avatarUrl}
           bio={user?.bio}
-          stylePrefs={user?.stylePrefs}
           counts={counts}
           isStar={isStar}
           isPrivate={user?.isPublic === false}

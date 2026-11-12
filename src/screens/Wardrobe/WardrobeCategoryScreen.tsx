@@ -119,7 +119,7 @@ export default function WardrobeCategoryScreen({ navigation, route }: { navigati
                 onPress={() => setActiveType(t)}
                 activeOpacity={0.8}>
                 <Text style={[styles.typeText, active && styles.typeTextActive]}>
-                  {t === 'All' || t === 'Other' ? t : `${categoryIcon(t)} ${typeLabel(t, user?.language)}`}
+                  {t === 'All' || t === 'Other' ? t : `${categoryIcon(t)} ${typeLabel(t)}`}
                   {n ? ` ${n}` : ''}
                 </Text>
               </TouchableOpacity>
