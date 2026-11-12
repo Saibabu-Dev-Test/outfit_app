@@ -31,7 +31,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { db } from '../config/firebaseConfig';
 import { firestoreErrorMessage } from '../utils/firebaseErrors';
 import { recordTask } from './rewardsApi';
-import { awardCoins } from './coinsApi';
+import { awardCoins, awardLikeCoins } from './coinsApi';
 import { MAX_BASE64_CHARS } from '../utils/imagePicker';
 import { toDate } from '../utils/date';
 import { inlineAvatar } from './userApi';
@@ -377,6 +377,7 @@ export const toggleLike = async (
   const postRef = doc(db, POSTS, postId);
   const likeRef = doc(db, POSTS, postId, 'likes', uid);
   const dislikeRef = doc(db, POSTS, postId, 'dislikes', uid);
+  let owner = '';
   try {
     const res = await runTransaction(db, async tx => {
       const post = await tx.get(postRef);
@@ -391,6 +392,7 @@ export const toggleLike = async (
         tx.delete(mineRef);
         return { liked: false, likeCount: Math.max(0, current - 1) };
       }
+      owner = String((post.data() as any)?.userId || '');
       tx.set(likeRef, {
         createdAt: serverTimestamp(),
         name: ((me?.name || '').trim() || 'Outfit user').slice(0, 60),
@@ -401,7 +403,8 @@ export const toggleLike = async (
       if (clearDislike) tx.delete(dislikeRef);
       return { liked: true, likeCount: current + 1 };
     });
-    if (res.liked) awardCoins('like', `post_${postId}`); // coins once per post (fire-and-forget)
+    // Coin flip with the owner's like-level coin; coins once per post (fire-and-forget)
+    if (res.liked) awardLikeCoins('post', postId, owner);
     return res;
   } catch (e: any) {
     if (!e?.code && e instanceof Error) throw e;
@@ -668,7 +671,7 @@ export const toggleWardrobeLike = async (
   }
   try {
     await b.commit();
-    if (!likedNow) awardCoins('like', `wardrobe_${itemId}`); // coins once per photo (fire-and-forget)
+    if (!likedNow) awardLikeCoins('wardrobe', itemId); // coin flip + coins once per photo (fire-and-forget)
     return !likedNow;
   } catch (e: any) {
     return fail(e, 'Liking');
