@@ -5,7 +5,7 @@ export type CoinAction = 'like' | 'upload' | 'share';
 export const COIN_POINTS: Record<CoinAction, number> = {
   like: 1,
   upload: 10,
-  share: 5,
+  share: 50,
 };
 
 export type CoinTier = 'silver' | 'gold' | 'diamond';

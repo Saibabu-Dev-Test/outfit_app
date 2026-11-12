@@ -130,7 +130,7 @@ service cloud.firestore {
     // ── Coins (src/config/coins.ts): users/{uid}/coinEvents/{type}_{targetId} {type, points, createdAt} ──
     // Fixed points per action. If you change them, change COIN_POINTS in src/config/coins.ts too.
     function coinPoints(t) {
-      return t == 'like' ? 1 : (t == 'upload' ? 10 : (t == 'share' ? 5 : -1));
+      return t == 'like' ? 1 : (t == 'upload' ? 10 : (t == 'share' ? 50 : -1));
     }
     function coinEventPath(uid, eid) {
       return /databases/$(db)/documents/users/$(uid)/coinEvents/$(eid);

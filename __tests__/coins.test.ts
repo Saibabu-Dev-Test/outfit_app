@@ -18,6 +18,6 @@ describe('coin tiers', () => {
     expect(coinsToNextTier(2500)).toBeNull();
   });
   it('fixed points (must match firestore.rules coinPoints)', () => {
-    expect(COIN_POINTS).toEqual({ like: 1, upload: 10, share: 5 });
+    expect(COIN_POINTS).toEqual({ like: 1, upload: 10, share: 50 });
   });
 });

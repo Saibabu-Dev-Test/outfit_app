@@ -1,17 +1,22 @@
 // Global coin flip overlay, mounted once at the app root. Any award calls showCoinFlip()
-// (services/coinBus). Non-blocking (pointerEvents none), merges rapid awards into one flip,
-// the flip runs on the UI thread (Reanimated), and an error here never reaches the app.
+// (services/coinBus). Every award gets its own flip: awards are queued and played one after
+// another (~700 ms spin + ~1 s text). When more than 3 are waiting the rest play faster so a run
+// of likes never lags behind. Non-blocking (pointerEvents none), the flip runs on the UI thread
+// (Reanimated), the coin sound plays at flip start, and an error here never reaches the app.
 import React, { useEffect, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import Animated, { Easing, cancelAnimation, useAnimatedStyle, useSharedValue, withSequence, withTiming } from 'react-native-reanimated';
 import { CoinTier, tierFor, tierLabel } from '../../config/coins';
 import { CoinFlipEvent, onCoinFlip } from '../../services/coinBus';
+import { playCoinSound } from '../../native/coinSound';
 import Coin from './Coin';
 
-const FLIP_MS = 900;
-const HOLD_MS = 1500;
-const FADE_MS = 300;
-const MERGE_MS = 250; // awards this close together become one flip
+const FLIP_MS = 700;
+const HOLD_MS = 1000;
+const FADE_MS = 150;
+const FAST_AFTER = 3; // more than this many waiting: play the rest faster
+const FAST_FACTOR = 0.45;
+const MAX_QUEUE = 30; // safety cap; oldest extra flips are dropped
 
 interface Shown {
   earned: number;
@@ -35,11 +40,9 @@ class Boundary extends React.Component<{ children: React.ReactNode }, { failed: 
 
 function CoinFlipOverlay() {
   const [shown, setShown] = useState<Shown | null>(null);
-  const pending = useRef<Shown | null>(null);
-  const current = useRef<Shown | null>(null);
-  const phase = useRef<'idle' | 'show' | 'fade'>('idle');
+  const queue = useRef<Shown[]>([]);
+  const busy = useRef(false);
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
-  const mergeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const rotate = useSharedValue(0);
   const lift = useSharedValue(0);
@@ -54,46 +57,57 @@ function CoinFlipOverlay() {
 
   useEffect(() => {
     const later = (ms: number, fn: () => void) => {
-      timers.current.push(setTimeout(fn, ms));
+      const id = setTimeout(() => {
+        timers.current = timers.current.filter(t => t !== id);
+        fn();
+      }, ms);
+      timers.current.push(id);
     };
 
     const play = () => {
       try {
-        const next = pending.current;
-        pending.current = null;
+        const next = queue.current.shift();
         if (!next) {
-          phase.current = 'idle';
+          busy.current = false;
           setShown(null);
           return;
         }
-        current.current = next;
-        phase.current = 'show';
-        setShown({ ...next });
+        busy.current = true;
+        // Long queue: speed up this flip and the ones after it
+        const k = queue.current.length >= FAST_AFTER ? FAST_FACTOR : 1;
+        const flip = Math.round(FLIP_MS * k);
+        const hold = Math.round(HOLD_MS * k);
+        const fade = Math.round(FADE_MS * k);
+        setShown(next);
+        playCoinSound();
         cancelAnimation(rotate);
+        cancelAnimation(lift);
         rotate.value = 0;
         lift.value = 0;
         textOpacity.value = 0;
-        opacity.value = withTiming(1, { duration: 120 });
-        // 3 full turns, ending face on, with a small toss
-        rotate.value = withTiming(1080, { duration: FLIP_MS, easing: Easing.out(Easing.cubic) });
+        opacity.value = withTiming(1, { duration: 80 });
+        // 2 full turns, ending face on, with a small toss
+        rotate.value = withTiming(720, { duration: flip, easing: Easing.out(Easing.cubic) });
         lift.value = withSequence(
-          withTiming(-70, { duration: FLIP_MS / 2, easing: Easing.out(Easing.quad) }),
-          withTiming(0, { duration: FLIP_MS / 2, easing: Easing.in(Easing.quad) }),
+          withTiming(-60, { duration: flip / 2, easing: Easing.out(Easing.quad) }),
+          withTiming(0, { duration: flip / 2, easing: Easing.in(Easing.quad) }),
         );
-        later(FLIP_MS - 100, () => {
-          textOpacity.value = withTiming(1, { duration: 200 });
+        later(Math.max(0, flip - 80), () => {
+          textOpacity.value = withTiming(1, { duration: 120 });
         });
-        later(FLIP_MS + HOLD_MS, () => {
-          phase.current = 'fade';
-          opacity.value = withTiming(0, { duration: FADE_MS });
-        });
-        later(FLIP_MS + HOLD_MS + FADE_MS + 20, () => {
-          current.current = null;
-          play(); // next queued award, or hide
+        later(flip + hold, () => {
+          // Another flip waiting: go straight to it (no fade gap)
+          if (queue.current.length) {
+            play();
+            return;
+          }
+          opacity.value = withTiming(0, { duration: fade });
+          later(fade + 20, play);
         });
       } catch (e: any) {
         console.warn('coin flip failed:', e?.message);
-        phase.current = 'idle';
+        queue.current = [];
+        busy.current = false;
         setShown(null);
       }
     };
@@ -103,37 +117,19 @@ function CoinFlipOverlay() {
         const earned = Math.max(0, Number(e?.earned) || 0);
         const total = Math.max(0, Number(e?.total) || 0);
         if (!earned) return;
-        // Still showing: add to the coin on screen
-        if (phase.current === 'show' && current.current) {
-          const c = current.current;
-          c.earned += earned;
-          c.total = Math.max(c.total, total);
-          c.tier = tierFor(c.total);
-          setShown({ ...c });
-          return;
-        }
-        const p = pending.current;
-        if (p) {
-          p.earned += earned;
-          p.total = Math.max(p.total, total);
-          p.tier = tierFor(p.total);
-        } else {
-          pending.current = { earned, total, tier: tierFor(total), fromTier: tierFor(total - earned) };
-        }
-        if (phase.current === 'idle' && !mergeTimer.current) {
-          mergeTimer.current = setTimeout(() => {
-            mergeTimer.current = null;
-            play();
-          }, MERGE_MS);
+        queue.current.push({ earned, total, tier: tierFor(total), fromTier: tierFor(total - earned) });
+        if (queue.current.length > MAX_QUEUE) queue.current.splice(0, queue.current.length - MAX_QUEUE);
+        if (!busy.current) {
+          busy.current = true;
+          later(0, play);
         }
       } catch {}
     });
 
-    const pendingTimers = timers.current;
     return () => {
       off();
-      if (mergeTimer.current) clearTimeout(mergeTimer.current);
-      pendingTimers.forEach(clearTimeout);
+      timers.current.forEach(clearTimeout);
+      timers.current = [];
     };
   }, [rotate, lift, opacity, textOpacity]);
 
