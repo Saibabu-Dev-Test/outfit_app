@@ -4,7 +4,6 @@ import {
   Text,
   TouchableOpacity,
   StyleSheet,
-  LayoutChangeEvent,
 } from 'react-native';
 import { BottomTabBarHeightCallbackContext, BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -40,7 +39,7 @@ export default function CustomTabBar({ state, navigation }: BottomTabBarProps) {
   return (
     <Animated.View
       style={[styles.container, { paddingBottom: insets.bottom || spacing.sm }, hideStyle]}
-      onLayout={(e: LayoutChangeEvent) => onHeightChange?.(e.nativeEvent.layout.height)}>
+      onLayout={e => onHeightChange?.(e.nativeEvent.layout.height)}>
       {state.routes.map((route, index) => {
         const isFocused = state.index === index;
         // Look tabs up by route name so the bar stays right if the navigator order changes
