@@ -9,7 +9,8 @@ import Animated, { Easing, cancelAnimation, useAnimatedStyle, useSharedValue, wi
 import { CoinTier, tierFor, tierLabel } from '../../config/coins';
 import { CoinFlipEvent, onCoinFlip } from '../../services/coinBus';
 import { playCoinSound } from '../../native/coinSound';
-import Coin from './Coin';
+import Coin, { CoinFace } from './Coin';
+import CoinRain from './CoinRain';
 import { isSafeMode } from '../../native/safeMode';
 
 const FLIP_MS = 700;
@@ -24,6 +25,8 @@ interface Shown {
   total: number;
   tier: CoinTier;
   fromTier: CoinTier;
+  face: CoinFace;
+  caption?: string;
 }
 
 class Boundary extends React.Component<{ children: React.ReactNode }, { failed: boolean }> {
@@ -117,8 +120,10 @@ function CoinFlipOverlay() {
       try {
         const earned = Math.max(0, Number(e?.earned) || 0);
         const total = Math.max(0, Number(e?.total) || 0);
-        if (!earned) return;
-        queue.current.push({ earned, total, tier: tierFor(total), fromTier: tierFor(total - earned) });
+        const caption = typeof e?.caption === 'string' ? e.caption.slice(0, 60) : undefined;
+        if (!earned && !caption) return;
+        const tier = tierFor(total);
+        queue.current.push({ earned, total, tier, fromTier: tierFor(total - earned), face: e?.face || tier, caption });
         if (queue.current.length > MAX_QUEUE) queue.current.splice(0, queue.current.length - MAX_QUEUE);
         if (!busy.current) {
           busy.current = true;
@@ -140,14 +145,19 @@ function CoinFlipOverlay() {
     <Animated.View pointerEvents="none" style={[styles.fill, wrapStyle]}>
       <View style={styles.card}>
         <Animated.View style={coinStyle}>
-          <Coin tier={shown.tier} size={96} />
+          <Coin tier={shown.face} size={96} />
         </Animated.View>
         <Animated.View style={[styles.texts, textStyle]}>
-          <Text style={styles.earned}>+{shown.earned} {shown.earned === 1 ? 'coin' : 'coins'}</Text>
-          <Text style={styles.total}>
-            Total: {shown.total.toLocaleString()} · {tierLabel(shown.tier)}
-          </Text>
-          {levelUp ? <Text style={styles.level}>Level up! {tierLabel(shown.tier)}</Text> : null}
+          {shown.caption ? <Text style={styles.caption}>{shown.caption}</Text> : null}
+          {shown.earned ? (
+            <>
+              <Text style={styles.earned}>+{shown.earned} {shown.earned === 1 ? 'coin' : 'coins'}</Text>
+              <Text style={styles.total}>
+                Total: {shown.total.toLocaleString()} · {tierLabel(shown.tier)}
+              </Text>
+              {levelUp ? <Text style={styles.level}>Level up! {tierLabel(shown.tier)}</Text> : null}
+            </>
+          ) : null}
         </Animated.View>
       </View>
     </Animated.View>
@@ -160,9 +170,12 @@ export default function CoinFlipProvider({ children }: { children: React.ReactNo
       {children}
       {/* Start-up safe mode: no animated overlay (coins are still awarded) */}
       {isSafeMode() ? null : (
-        <Boundary>
-          <CoinFlipOverlay />
-        </Boundary>
+        <>
+          <CoinRain />
+          <Boundary>
+            <CoinFlipOverlay />
+          </Boundary>
+        </>
       )}
     </View>
   );
@@ -174,6 +187,7 @@ const styles = StyleSheet.create({
   card: { alignItems: 'center', paddingTop: 90, paddingBottom: 18, paddingHorizontal: 22 },
   texts: { alignItems: 'center', marginTop: 14, backgroundColor: 'rgba(0,0,0,0.72)', borderRadius: 16, paddingVertical: 10, paddingHorizontal: 18 },
   earned: { color: '#FFD95A', fontSize: 22, fontWeight: '800' },
+  caption: { color: '#FFFFFF', fontSize: 15, fontWeight: '800', marginBottom: 2 },
   total: { color: '#FFFFFF', fontSize: 14, fontWeight: '600', marginTop: 2 },
   level: { color: '#7FE7FF', fontSize: 14, fontWeight: '800', marginTop: 4 },
 });

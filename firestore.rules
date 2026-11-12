@@ -148,6 +148,24 @@ service cloud.firestore {
             && existsAfter(coinEventPath(me(), ev))
             && newC == oldC + getAfter(coinEventPath(me(), ev)).data.points);
     }
+    // ── Like coin levels (src/config/likeLevels.ts): users/{owner}.likesReceived ──
+    // Another user adds exactly 1, only in the same write that creates their (create-only)
+    // coin event like_{post|wardrobe}_{id} for a photo this user owns (users.likeEvent names it),
+    // so each person's like on a photo counts once. The owner can never change it.
+    function likeEventOwnedBy(ev, uid) {
+      let parts = ev.split('_');
+      return (parts[1] == 'post' && get(/databases/$(db)/documents/posts/$(parts[2])).data.userId == uid)
+        || (parts[1] == 'wardrobe' && get(/databases/$(db)/documents/wardrobe/$(parts[2])).data.userId == uid);
+    }
+    function likesReceivedOk(uid) {
+      let ev = request.resource.data.get('likeEvent', '');
+      return ev is string
+        && ev.matches('^like_(post|wardrobe)_[A-Za-z0-9-]{1,128}$')
+        && request.resource.data.get('likesReceived', 0) == resource.data.get('likesReceived', 0) + 1
+        && !exists(coinEventPath(me(), ev))
+        && existsAfter(coinEventPath(me(), ev))
+        && likeEventOwnedBy(ev, uid);
+    }
     // users.referralCode is set once, together with referralCodes/{code} -> this user
     function referralCodeOk() {
       let oldC = resource.data.get('referralCode', null);
@@ -168,13 +186,19 @@ service cloud.firestore {
         && phoneOk(null)
         && request.resource.data.get('points', 0) == 0
         && request.resource.data.get('coins', 0) == 0
+        && request.resource.data.get('likesReceived', 0) == 0
         && !('referralCode' in request.resource.data);
       allow update: if signedIn() && me() == uid
         && request.resource.data.get('role', null) == resource.data.get('role', null)
         && phoneOk(resource.data.get('phone', null))
         && pointsOk()
         && coinsOk()
+        && request.resource.data.get('likesReceived', 0) == resource.data.get('likesReceived', 0)
         && referralCodeOk();
+      // A like on this user's photo: +1 likesReceived (likesReceivedOk)
+      allow update: if signedIn() && me() != uid
+        && onlyChanged(['likesReceived', 'likeEvent'])
+        && likesReceivedOk(uid);
       // Referral reward: a newly signed-up user adds exactly REFERRAL_POINTS (50) to the referrer's
       // points, only in the same write that creates referrals/{newUid} naming this referrer
       // (that doc is create-only, so it happens once per new user; never to yourself)
