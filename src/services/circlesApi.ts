@@ -39,6 +39,7 @@ import {
   arrayRemove,
   Unsubscribe,
 } from 'firebase/firestore';
+import { awardCoins } from './coinsApi';
 import { db } from '../config/firebaseConfig';
 import { firestoreErrorMessage } from '../utils/firebaseErrors';
 import { MAX_BASE64_CHARS } from '../utils/imagePicker';
@@ -808,7 +809,8 @@ export const sendImageMessage = async (
   try {
     const data: any = { ...authorFields(me), type: 'image', imageData };
     if (caption && caption.trim()) data.text = caption.trim().slice(0, 500);
-    await addDoc(collection(db, CIRCLES, circleId, 'messages'), data);
+    const ref = await addDoc(collection(db, CIRCLES, circleId, 'messages'), data);
+    awardCoins('upload', `msg_${circleId}_${ref.id}`); // coins (fire-and-forget)
   } catch (e: any) {
     fail(e, 'Sending photo');
   }
@@ -831,7 +833,7 @@ export const sendPollMessage = async (
     throw new Error('These photos are too large together. Remove one or pick smaller photos.');
   }
   try {
-    await addDoc(collection(db, CIRCLES, circleId, 'messages'), {
+    const ref = await addDoc(collection(db, CIRCLES, circleId, 'messages'), {
       ...authorFields(me),
       type: 'poll',
       poll: {
@@ -844,6 +846,7 @@ export const sendPollMessage = async (
         })),
       },
     });
+    awardCoins('upload', `msg_${circleId}_${ref.id}`); // coins (fire-and-forget)
   } catch (e: any) {
     fail(e, 'Sending poll');
   }

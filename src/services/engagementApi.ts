@@ -22,6 +22,7 @@ import {
   setDoc,
   Unsubscribe,
 } from 'firebase/firestore';
+import { awardCoins } from './coinsApi';
 import { db } from '../config/firebaseConfig';
 import { firestoreErrorMessage } from '../utils/firebaseErrors';
 import { assertClean } from '../utils/profanity';
@@ -197,7 +198,10 @@ export const setReaction = async (
   const ref = doc(db, 'circles', circleId, 'messages', messageId, 'reactions', uid);
   try {
     if (current === type) await deleteDoc(ref);
-    else await setDoc(ref, { type, updatedAt: serverTimestamp() });
+    else {
+      await setDoc(ref, { type, updatedAt: serverTimestamp() });
+      if (type === 'like') awardCoins('like', `msg_${circleId}_${messageId}`); // coins (fire-and-forget)
+    }
   } catch (e: any) {
     throw new Error(firestoreErrorMessage(e, 'Reacting'));
   }

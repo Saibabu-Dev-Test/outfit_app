@@ -36,5 +36,17 @@ jest.mock('react-native-image-picker', () => ({
 jest.mock('react-native-reanimated', () => {
   const { View } = require('react-native');
   const Animated = { View, createAnimatedComponent: c => c };
-  return { __esModule: true, default: Animated, ...Animated, useAnimatedStyle: fn => fn(), useSharedValue: v => ({ value: v }) };
+  const ease = f => f || (t => t);
+  return {
+    __esModule: true,
+    default: Animated,
+    ...Animated,
+    useAnimatedStyle: fn => fn(),
+    useSharedValue: v => ({ value: v }),
+    withTiming: v => v,
+    withSequence: (...a) => a[a.length - 1],
+    withDelay: (_d, v) => v,
+    cancelAnimation: () => {},
+    Easing: { out: ease, in: ease, inOut: ease, cubic: t => t, quad: t => t, linear: t => t },
+  };
 });

@@ -20,6 +20,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { colors, fontSize, fontWeight, spacing, themedStyles, statusBarStyle } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
 import ProfileHeader, { headerButtonStyles as hb } from '../../components/ProfileHeader';
+import CoinBadge from '../../components/coins/CoinBadge';
 import PhotoGrid from '../../components/PhotoGrid';
 import { getProfileCounts, ProfileCounts } from '../../services/socialApi';
 import { getCachedLikedItems, getLikedItems, Post, rememberPosts } from '../../services/feedApi';
@@ -196,7 +197,8 @@ export default function MeScreen({ navigation }: { navigation: any }) {
           stylePrefs={user?.stylePrefs}
           counts={counts}
           isStar={isStar}
-          isPrivate={user?.isPublic === false}>
+          isPrivate={user?.isPublic === false}
+          badge={<CoinBadge uid={uid} />}>
           <TouchableOpacity style={hb.btn} onPress={editProfile}>
             <Text style={hb.btnText}>Edit profile</Text>
           </TouchableOpacity>

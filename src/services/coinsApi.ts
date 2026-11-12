@@ -23,6 +23,12 @@ export const hashKey = (s: string): string => {
 const tried = new Set<string>(); // per session: never write the same event twice
 let loadedFor: string | null = null;
 
+// Cached total for this user, or null when not loaded yet
+export const cachedCoinTotal = (uid?: string | null): number | null => {
+  const id = uid || auth?.currentUser?.uid;
+  return id && loadedFor === id ? getKnownCoinTotal() : null;
+};
+
 // The signed-in user's coin total (cached after the first read). Never throws.
 export const loadCoinTotal = async (uid?: string | null): Promise<number | null> => {
   const id = uid || auth?.currentUser?.uid;
