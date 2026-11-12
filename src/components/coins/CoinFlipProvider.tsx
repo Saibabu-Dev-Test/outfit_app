@@ -170,7 +170,7 @@ export default function CoinFlipProvider({ children }: { children: React.ReactNo
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  fill: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', zIndex: 9999, elevation: 9999 },
+  fill: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', zIndex: 9999, elevation: 9999 },
   card: { alignItems: 'center', paddingTop: 90, paddingBottom: 18, paddingHorizontal: 22 },
   texts: { alignItems: 'center', marginTop: 14, backgroundColor: 'rgba(0,0,0,0.72)', borderRadius: 16, paddingVertical: 10, paddingHorizontal: 18 },
   earned: { color: '#FFD95A', fontSize: 22, fontWeight: '800' },
