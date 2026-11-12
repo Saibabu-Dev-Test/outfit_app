@@ -235,7 +235,13 @@ export default function MeScreen({ navigation }: { navigation: any }) {
         </View>
         {error ? <Text style={styles.error}>{error}</Text> : null}
         {tab === 'astro' ? (
-          <AstrologyPanel uid={uid} profile={astroProfile} wardrobe={wardrobeItems} onEditProfile={editProfile} />
+          <AstrologyPanel
+            uid={uid}
+            profile={astroProfile}
+            wardrobe={wardrobeItems}
+            onEditProfile={editProfile}
+            onOpenPorutham={() => navigation.navigate('Porutham', { self: astroProfile })}
+          />
         ) : loading || (tab === 'likes' && likes === null) ? (
           <ActivityIndicator style={styles.spinner} color={colors.primary} />
         ) : (
