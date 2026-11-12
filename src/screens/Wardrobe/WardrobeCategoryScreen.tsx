@@ -19,6 +19,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles, statusBarStyle } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
+import { useAppLanguage } from '../../i18n/appLanguage';
 import { deleteWardrobeItem, getWardrobeItems, WardrobeItemResponse } from '../../services/wardrobeApi';
 import { categoryIcon, colorToHex, inCategory, isForGender, itemSubType, normalizeCategory, subTypesFor, typeLabel } from '../../constants/wardrobe';
 
@@ -27,6 +28,7 @@ export default function WardrobeCategoryScreen({ navigation, route }: { navigati
   const category: string = normalizeCategory(route?.params?.category || 'Others');
   // Shoes / Accessories: filter by type. Items without a type show under All and Other.
   const { user } = useAuth();
+  const appLanguage = useAppLanguage();
   const [items, setItems] = useState<WardrobeItemResponse[]>([]);
   // Only the user's gender's types (plus unisex), and any type that already holds items
   const types = subTypesFor(category).filter(
@@ -119,7 +121,7 @@ export default function WardrobeCategoryScreen({ navigation, route }: { navigati
                 onPress={() => setActiveType(t)}
                 activeOpacity={0.8}>
                 <Text style={[styles.typeText, active && styles.typeTextActive]}>
-                  {t === 'All' || t === 'Other' ? t : `${categoryIcon(t)} ${typeLabel(t)}`}
+                  {t === 'All' || t === 'Other' ? t : `${categoryIcon(t)} ${typeLabel(t, appLanguage)}`}
                   {n ? ` ${n}` : ''}
                 </Text>
               </TouchableOpacity>

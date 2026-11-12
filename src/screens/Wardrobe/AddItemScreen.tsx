@@ -19,6 +19,7 @@ import KeyboardSafeView from '../../components/KeyboardSafeView';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles, statusBarStyle } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
+import { useAppLanguage } from '../../i18n/appLanguage';
 import {
   addWardrobeItem as apiAddWardrobeItem,
   updateWardrobeItem as apiUpdateWardrobeItem,
@@ -63,6 +64,7 @@ interface AddItemScreenProps {
 
 export default function AddItemScreen({ navigation, route, onSave }: AddItemScreenProps) {
   const { user } = useAuth();
+  const appLanguage = useAppLanguage();
   const itemToEdit = route?.params?.itemToEdit;
   const isEditing = Boolean(itemToEdit?.id);
 
@@ -456,7 +458,7 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
                     onPress={() => pickType(t)}
                     activeOpacity={0.75}>
                     <Text style={styles.chipEmojiSmall}>{categoryIcon(t)}</Text>
-                    <Text style={[styles.pillText, isSelected && styles.itemChipTextSelected]}>{typeLabel(t)}</Text>
+                    <Text style={[styles.pillText, isSelected && styles.itemChipTextSelected]}>{typeLabel(t, appLanguage)}</Text>
                   </TouchableOpacity>
                 );
               })}
