@@ -178,6 +178,8 @@ dependencies {
     // Offline translation of other users' posts / comments / chat (on-device ML Kit, free, no server)
     implementation("com.google.mlkit:translate:17.0.3")
     implementation("com.google.mlkit:language-id:17.0.6")
+    // Clothing photo background (plain white/black or blur), on-device subject segmentation via Play services
+    implementation("com.google.android.gms:play-services-mlkit-subject-segmentation:16.0.0-beta1")
 
     if (hermesEnabled.toBoolean()) {
         implementation("com.facebook.react:hermes-android")
