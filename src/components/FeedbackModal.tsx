@@ -69,7 +69,7 @@ export default function FeedbackModal({ visible, uid, name, onClose, quote, edit
     setError(null);
     setPicking(true);
     try {
-      const picked = await pickImage('library', { ...POLL_PICK, bg: false, maxChars: FEEDBACK_MAX_IMAGE });
+      const picked = await pickImage('library', { ...POLL_PICK, maxChars: FEEDBACK_MAX_IMAGE });
       if (picked) setImage(picked.dataUri);
     } catch (e: any) {
       setError(e?.message || 'Could not add the screenshot.');

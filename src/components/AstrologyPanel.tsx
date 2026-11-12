@@ -238,13 +238,6 @@ export default function AstrologyPanel({ uid, profile, wardrobe, onEditProfile, 
         </View>
       ) : null}
 
-      {shownFest.map(festivalCard)}
-
-      {onOpenPorutham ? (
-        <TouchableOpacity style={styles.moreBtn} onPress={onOpenPorutham} accessibilityLabel="Pelli Porutham">
-          <Text style={styles.moreText}>💑 Pelli Porutham · పెళ్లి పొరుత్తం</Text>
-        </TouchableOpacity>
-      ) : null}
 
       {reading.needsDob ? (
         <View style={[styles.card, styles.askCard]}>
@@ -460,6 +453,15 @@ export default function AstrologyPanel({ uid, profile, wardrobe, onEditProfile, 
           </View>
         </>
       )}
+
+      {/* Festivals come after today's astrology reading */}
+      {shownFest.map(festivalCard)}
+
+      {onOpenPorutham ? (
+        <TouchableOpacity style={styles.moreBtn} onPress={onOpenPorutham} accessibilityLabel="Pelli Porutham">
+          <Text style={styles.moreText}>💑 Pelli Porutham · పెళ్లి పొరుత్తం</Text>
+        </TouchableOpacity>
+      ) : null}
 
       <Bi style={styles.disclaimer} text={t.disclaimer} enText={proseFor('English').t.disclaimer} />
     </View>

@@ -18,7 +18,7 @@ import KeyboardSafeView from '../../components/KeyboardSafeView';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { pickImage, AVATAR_PICK } from '../../utils/imagePicker';
-import { getUserProfile, saveUserProfile, uploadAvatar } from '../../services/userApi';
+import { getMyRole, getUserProfile, saveUserProfile, uploadAvatar } from '../../services/userApi';
 import { isValidDob } from '../../utils/age';
 import { mdFromDob, mdLabel, setBirthdayListing } from '../../services/birthdayApi';
 import { checkNotifications, openNotificationSettings } from '../../native/notifications';
@@ -33,7 +33,6 @@ import {
 import { astroLanguage, birthChartRows } from '../../services/astrologyDaily';
 import SelectModal from '../../components/SelectModal';
 import { APP_LANGUAGES, setAppLanguage, useAppLanguage } from '../../i18n/appLanguage';
-import { getPhotoBg, isPhotoBgSupported, PHOTO_BG_LABEL, PHOTO_BG_MODES, PhotoBgMode, setPhotoBg } from '../../native/photoBackground';
 import CityPickerModal from '../../components/CityPickerModal';
 import FeedbackBoardModal from '../../components/FeedbackBoardModal';
 import ZoomableImage from '../../components/ZoomableImage';
@@ -101,10 +100,6 @@ export default function ProfileScreen() {
   const { user: authUser, logout, updateUserData } = useAuth();
   const { mode: themeMode, isDark, setMode: setThemeMode } = useTheme();
   const appLanguage = useAppLanguage();
-  const [photoBg, setPhotoBgState] = useState<PhotoBgMode>('plain');
-  useEffect(() => {
-    getPhotoBg().then(setPhotoBgState);
-  }, []);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
   const [editIsPublic, setEditIsPublic] = useState<boolean>(true);
@@ -303,6 +298,7 @@ const fetchProfile = async () => {
       showBirthday: stored.showBirthday === true,
     };
     setIsAdmin(stored.role === 'admin');
+    getMyRole(authUser.id).then(r => r === 'admin' && setIsAdmin(true));
     // Birth chart saved for other details (or before this screen computed it): recompute and save
     if (astroChartStale(merged, merged.astroChart)) {
       const upd = birthProfileUpdate(merged, { prevConfirmedKey: merged.birthConfirmedKey });
@@ -347,17 +343,6 @@ const fetchProfile = async () => {
   const pickAppLanguage = () =>
     Alert.alert('App language', `Wardrobe labels show in: ${appLanguage}`, [
       ...APP_LANGUAGES.map(l => ({ text: l, onPress: () => setAppLanguage(l) })),
-    ]);
-
-  const pickPhotoBg = () =>
-    Alert.alert('Photo background', 'For clothing photos you add: plain white / black (opposite to the clothes) or a blurred background.', [
-      ...PHOTO_BG_MODES.map(m => ({
-        text: PHOTO_BG_LABEL[m],
-        onPress: () => {
-          setPhotoBgState(m);
-          setPhotoBg(m);
-        },
-      })),
     ]);
 
   // App lock, invite code, friends joined, ⭐ badge
@@ -964,17 +949,6 @@ const fetchProfile = async () => {
               value: appLanguage,
               onPress: pickAppLanguage,
             },
-            ...(isPhotoBgSupported()
-              ? [
-                  {
-                    id: 'photobg',
-                    icon: '🖼️',
-                    label: 'Photo background',
-                    value: PHOTO_BG_LABEL[photoBg],
-                    onPress: pickPhotoBg,
-                  },
-                ]
-              : []),
             ...(isUpdateSupported()
               ? [
                   {
@@ -994,7 +968,7 @@ const fetchProfile = async () => {
               onPress: () => setFeedbackOpen(true),
             },
             { id: 'help', icon: '❓', label: 'Help & Support' },
-            { id: 'terms', icon: '📋', label: 'Terms & Conditions' },
+            { id: 'terms', icon: '📋', label: 'Terms & Conditions', value: 'About Outfit, features, coins and rules', onPress: () => navigation.navigate('Terms') },
           ].map(item => (
             <TouchableOpacity
               key={item.id}

@@ -46,7 +46,7 @@ class CoinSoundModule(ctx: ReactApplicationContext) : ReactContextBaseJavaModule
   fun play() {
     try {
       val p = ensurePool() ?: return
-      if (loaded) p.play(soundId, 1f, 1f, 1, 0, 1f)
+      if (loaded) p.play(soundId, 0.5f, 0.5f, 1, 0, 1f)
     } catch (_: Throwable) {}
   }
 

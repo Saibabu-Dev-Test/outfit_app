@@ -18,6 +18,7 @@ import UserProfileScreen from '../screens/Profile/UserProfileScreen';
 import UserSearchScreen from '../screens/Profile/UserSearchScreen';
 import AdminScreen from '../screens/Admin/AdminScreen';
 import AdminUsersScreen from '../screens/Admin/AdminUsersScreen';
+import TermsScreen from '../screens/Profile/TermsScreen';
 import ProfileScreen from '../screens/Profile/ProfileScreen';
 import AchievementsScreen from '../screens/Profile/AchievementsScreen';
 import MonthlyTasksScreen from '../screens/Profile/MonthlyTasksScreen';
@@ -133,6 +134,7 @@ function NavigationContent() {
               <Stack.Screen name="UserSearch" component={UserSearchScreen} />
               <Stack.Screen name="Admin" component={AdminScreen} />
               <Stack.Screen name="AdminUsers" component={AdminUsersScreen} />
+              <Stack.Screen name="Terms" component={TermsScreen} />
             </Stack.Group>
           </>
         )}

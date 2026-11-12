@@ -3,12 +3,12 @@
 import React, { useEffect, useState } from 'react';
 import { StyleSheet, View, ViewStyle } from 'react-native';
 import AdErrorBoundary from './AdErrorBoundary';
-import { adsModule, initAds } from '../../native/ads';
+import { adsModule, initAds, noteAd } from '../../native/ads';
 import { adUnitId } from '../../config/ads';
 import useAdsAllowed from './useAdsAllowed';
 
 interface Props {
-  slot: 'circlesBanner' | 'searchBanner';
+  slot: 'circlesBanner' | 'searchBanner' | 'pollBanner';
   style?: ViewStyle;
   // Called once an ad is actually showing (e.g. to show a "Sponsored" label around it)
   onLoaded?: () => void;
@@ -32,9 +32,13 @@ function Banner({ slot, style, onLoaded }: Props) {
         unitId={adUnitId(slot)}
         size={adSize}
         onAdLoaded={() => {
+          noteAd(slot, true, 'Loaded');
           onLoaded?.();
         }}
-        onAdFailedToLoad={() => setFailed(true)}
+        onAdFailedToLoad={(e: any) => {
+          noteAd(slot, false, `${e?.code || ''} ${e?.message || 'No fill'}`.trim());
+          setFailed(true);
+        }}
       />
     </View>
   );

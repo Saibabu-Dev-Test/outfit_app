@@ -238,6 +238,12 @@ export const CATEGORY_ICONS: Record<string, string> = {
   'Maang Tikka': '🪔',
   'Clutch': '👛',
   'Hair Accessories': '🎀',
+  // Ring kinds
+  'Finger Ring': '💍',
+  'Ear Rings': '💎',
+  'Nose Ring': '✨',
+  'Toe Ring': '💫',
+  'Couple Rings': '💞',
 };
 
 // Labels for the accessory types in Telugu / Hindi (stored values stay English; anything
@@ -260,7 +266,18 @@ const ACCESSORY_LABELS: Record<string, { te: string; hi: string }> = {
   'Hair Accessories': { te: 'జుట్టు అలంకరణలు', hi: 'बालों की एक्सेसरीज़' },
   'Caps / Hats': { te: 'క్యాప్ / టోపీ', hi: 'कैप / टोपी' },
   'Accessories': { te: 'యాక్సెసరీలు', hi: 'एक्सेसरीज़' },
+  'Finger Ring': { te: 'ఉంగరం', hi: 'अंगूठी' },
+  'Ear Rings': { te: 'చెవి రింగులు', hi: 'कान की बालियाँ' },
+  'Nose Ring': { te: 'ముక్కు రింగ్', hi: 'नथ' },
+  'Toe Ring': { te: 'మెట్టెలు', hi: 'बिछिया' },
+  'Couple Rings': { te: 'జంట ఉంగరాలు', hi: 'कपल रिंग' },
 };
+
+// Kinds inside an accessory type (Rings: which ring). Saved as the item's subCategory.
+export const ACCESSORY_KINDS: Record<string, string[]> = {
+  'Rings': ['Finger Ring', 'Ear Rings', 'Nose Ring', 'Toe Ring', 'Couple Rings'],
+};
+export const ALL_ACCESSORY_KINDS: string[] = Object.values(ACCESSORY_KINDS).flat();
 
 /** Display label for a category / type in the user's language ('Telugu' / 'Hindi'); English fallback */
 export const typeLabel = (value: string, language?: string | null): string => {

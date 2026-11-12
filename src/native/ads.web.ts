@@ -15,3 +15,8 @@ export const adsAllowed = (): boolean => false;
 export const allowAds = (): void => {};
 export const onAdsAllowed = (_fn: () => void): (() => void) => () => {};
 export const whenAdsAllowed = (): Promise<void> => new Promise<void>(() => {});
+
+// Admin "Ads status" (no ads on the web)
+export interface AdStatus { slot: string; ok: boolean; message: string; at: number }
+export const noteAd = (_slot: string, _ok: boolean, _message: string): void => {};
+export const adStatuses = (): AdStatus[] => [];

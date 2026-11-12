@@ -13,8 +13,8 @@ import { consumeLaunchPayload } from '../../native/notifications';
 import { playCoinSound } from '../../native/coinSound';
 import Coin from './Coin';
 
-const FALL_MS = 2200;
-const STAGGER_MS = 170;
+const FALL_MS = 3000;
+const STAGGER_MS = 260;
 const COIN = 36;
 
 function RainCoin({ e, index, width, height }: { e: CoinRainBusEvent; index: number; width: number; height: number }) {
@@ -29,7 +29,7 @@ function RainCoin({ e, index, width, height }: { e: CoinRainBusEvent; index: num
   useEffect(() => {
     const delay = index * STAGGER_MS;
     y.value = withDelay(delay, withTiming(height + COIN, { duration: FALL_MS, easing: Easing.in(Easing.quad) }));
-    spin.value = withDelay(delay, withRepeat(withTiming(360, { duration: 420, easing: Easing.linear }), -1, false));
+    spin.value = withDelay(delay, withRepeat(withTiming(360, { duration: 800, easing: Easing.linear }), -1, false));
   }, [index, height, y, spin]);
   const style = useAnimatedStyle(() => ({
     transform: [{ translateY: y.value }, { perspective: 600 }, { rotateY: `${spin.value}deg` }],

@@ -1,6 +1,6 @@
 // Global coin flip overlay, mounted once at the app root. Any award calls showCoinFlip()
 // (services/coinBus). Every award gets its own flip: awards are queued and played one after
-// another (~700 ms spin + ~1 s text). When more than 3 are waiting the rest play faster so a run
+// another (~1.4 s slow spin + ~1.2 s text). When more than 3 are waiting the rest play faster so a run
 // of likes never lags behind. Non-blocking (pointerEvents none), the flip runs on the UI thread
 // (Reanimated), the coin sound plays at flip start, and an error here never reaches the app.
 import React, { useEffect, useRef, useState } from 'react';
@@ -13,9 +13,9 @@ import Coin, { CoinFace } from './Coin';
 import CoinRain from './CoinRain';
 import { isSafeMode } from '../../native/safeMode';
 
-const FLIP_MS = 700;
-const HOLD_MS = 1000;
-const FADE_MS = 150;
+const FLIP_MS = 1400;
+const HOLD_MS = 1200;
+const FADE_MS = 300;
 const FAST_AFTER = 3; // more than this many waiting: play the rest faster
 const FAST_FACTOR = 0.45;
 const MAX_QUEUE = 30; // safety cap; oldest extra flips are dropped
@@ -91,7 +91,7 @@ function CoinFlipOverlay() {
         textOpacity.value = 0;
         opacity.value = withTiming(1, { duration: 80 });
         // 2 full turns, ending face on, with a small toss
-        rotate.value = withTiming(720, { duration: flip, easing: Easing.out(Easing.cubic) });
+        rotate.value = withTiming(720, { duration: flip, easing: Easing.inOut(Easing.sin) });
         lift.value = withSequence(
           withTiming(-60, { duration: flip / 2, easing: Easing.out(Easing.quad) }),
           withTiming(0, { duration: flip / 2, easing: Easing.in(Easing.quad) }),

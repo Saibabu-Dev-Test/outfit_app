@@ -35,7 +35,7 @@ import kotlin.math.roundToInt
  *                 light clothes, white behind dark / colourful ones (by the subject's average
  *                 brightness).
  *   mode "blur":  the background is strongly blurred, the clothes stay sharp.
- * Resolves {uri: "file://...jpg", changed: true} with a new JPEG (long edge <= 1600, EXIF rotation
+ * Resolves {uri: "file://...jpg", changed: true} with a new JPEG (long edge <= 2048, EXIF rotation
  * applied), or {uri: <same uri>, changed: false} when no subject was found or segmentation is not
  * available (model still downloading, old Play services). Never rejects for those cases, so a photo
  * is always saved. Runs on its own thread.
@@ -101,12 +101,13 @@ class PhotoBackgroundModule(private val ctx: ReactApplicationContext) : ReactCon
     return bmp
   }
 
-  // Strong, cheap blur: shrink to ~1/20, then scale back up in two filtered steps
-  private fun blurred(src: Bitmap): Bitmap {
+  // Cheap blur: shrink by f (level 1 = light ... 5 = strong), then scale back up in two filtered steps
+  private fun blurred(src: Bitmap, level: Int): Bitmap {
     val w = src.width
     val h = src.height
-    val small = Bitmap.createScaledBitmap(src, max(1, w / 20), max(1, h / 20), true)
-    val mid = Bitmap.createScaledBitmap(small, max(1, w / 5), max(1, h / 5), true)
+    val f = when (level) { 1 -> 6; 2 -> 10; 3 -> 16; 4 -> 24; else -> 36 }
+    val small = Bitmap.createScaledBitmap(src, max(1, w / f), max(1, h / f), true)
+    val mid = Bitmap.createScaledBitmap(small, max(1, w / max(2, f / 4)), max(1, h / max(2, f / 4)), true)
     small.recycle()
     val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
     Canvas(out).drawBitmap(Bitmap.createScaledBitmap(mid, w, h, true), 0f, 0f, Paint(Paint.FILTER_BITMAP_FLAG))
@@ -115,11 +116,18 @@ class PhotoBackgroundModule(private val ctx: ReactApplicationContext) : ReactCon
   }
 
   @ReactMethod
-  fun process(uri: String, mode: String, promise: Promise) {
+  fun process(uri: String, mode: String, promise: Promise) = runJob(uri, mode, 3, promise)
+
+  // Blur strength 1..5 (ignored for "plain")
+  @ReactMethod
+  fun processLevel(uri: String, mode: String, level: Int, promise: Promise) = runJob(uri, mode, level.coerceIn(1, 5), promise)
+
+  private fun runJob(uri: String, mode: String, level: Int, promise: Promise) {
     Thread {
       val unchanged = Arguments.createMap().apply { putString("uri", uri); putBoolean("changed", false) }
       try {
-        val bmp = load(uri, 1600)
+        // Full quality first; a phone short on memory gets a smaller (still clear) copy
+        val bmp = try { load(uri, 2048) } catch (e: OutOfMemoryError) { System.gc(); load(uri, 1280) }
         val w = bmp.width
         val h = bmp.height
         val segmenter = SubjectSegmentation.getClient(
@@ -161,7 +169,7 @@ class PhotoBackgroundModule(private val ctx: ReactApplicationContext) : ReactCon
         }
         val bg = IntArray(n)
         if (mode == "blur") {
-          val b = blurred(bmp)
+          val b = blurred(bmp, level)
           b.getPixels(bg, 0, w, 0, 0, w, h)
           b.recycle()
         } else {

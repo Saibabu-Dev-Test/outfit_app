@@ -1,5 +1,5 @@
 // "Me" tab, Instagram-like: avatar (tap for full screen), counts (wear votes today, wardrobe, followers,
-// following), bio, Edit profile, and 🔮 Astrology / Wardrobe / Today's pick / Likes tabs.
+// following), bio, Edit profile, and 🔮 Astrology / Wardrobe / Likes tabs.
 // Astrology (components/AstrologyPanel.tsx) is computed on the phone from the saved profile.
 // The old Posts tab was replaced by the wardrobe "Wear today" votes (old posts still open from the
 // Feed / Likes). Settings live behind the ⚙️ button.
@@ -23,7 +23,6 @@ import ProfileHeader, { headerButtonStyles as hb } from '../../components/Profil
 import CoinBadge from '../../components/coins/CoinBadge';
 import PhotoGrid from '../../components/PhotoGrid';
 import WardrobeVoteGrid from '../../components/WardrobeVoteGrid';
-import TodaysPick from '../../components/TodaysPick';
 import useWearVotes from '../../hooks/useWearVotes';
 import { getProfileCounts, ProfileCounts } from '../../services/socialApi';
 import { getCachedLikedItems, getLikedItems, Post, rememberPosts } from '../../services/feedApi';
@@ -35,7 +34,7 @@ import { countFriendsJoined, isWeeklyStar, joinedWithLinkText } from '../../serv
 import { shareMyReferral } from '../../utils/referralLink';
 import useIsAdmin from '../../hooks/useIsAdmin';
 
-type Tab = 'astro' | 'wardrobe' | 'pick' | 'likes';
+type Tab = 'astro' | 'wardrobe' | 'likes';
 
 export default function MeScreen({ navigation }: { navigation: any }) {
   const { user, updateUserData } = useAuth();
@@ -211,7 +210,7 @@ export default function MeScreen({ navigation }: { navigation: any }) {
           isStar={isStar}
           isPrivate={user?.isPublic === false}
           todayVotes={wear.loading ? undefined : wear.tally.total}
-          onPressTodayVotes={() => openTab('pick')}
+          onPressTodayVotes={() => openTab('wardrobe')}
           badge={<CoinBadge uid={uid} />}>
           <TouchableOpacity style={hb.btn} onPress={editProfile}>
             <Text style={hb.btnText}>Edit profile</Text>
@@ -232,17 +231,17 @@ export default function MeScreen({ navigation }: { navigation: any }) {
         {isAdmin ? (
           <TouchableOpacity style={styles.invite} onPress={() => navigation.navigate('AdminUsers')} activeOpacity={0.8}>
             <Text style={styles.inviteText} numberOfLines={1}>
-              👥 Users
+              📊 Admin tracking: users, content, ads, features
             </Text>
             <Text style={styles.inviteCta}>Admin ›</Text>
           </TouchableOpacity>
         ) : null}
 
         <View style={styles.tabs}>
-          {(['astro', 'wardrobe', 'pick', 'likes'] as Tab[]).map(t => (
+          {(['astro', 'wardrobe', 'likes'] as Tab[]).map(t => (
             <TouchableOpacity key={t} style={[styles.tab, tab === t && styles.tabOn]} onPress={() => openTab(t)}>
               <Text style={[styles.tabText, tab === t && styles.tabTextOn]}>
-                {t === 'astro' ? '🔮 Astro' : t === 'wardrobe' ? '👗 Wardrobe' : t === 'pick' ? "⭐ Today's pick" : '♡ Likes'}
+                {t === 'astro' ? '🔮 Astro' : t === 'wardrobe' ? '👗 Wardrobe' : '♡ Likes'}
               </Text>
             </TouchableOpacity>
           ))}
@@ -267,14 +266,6 @@ export default function MeScreen({ navigation }: { navigation: any }) {
             wear={wear}
             privateIds={privateIds}
             empty="No wardrobe photos yet. Tap ＋👗 to add clothes."
-          />
-        ) : tab === 'pick' ? (
-          <TodaysPick
-            items={wardrobe}
-            ownerName={user?.name}
-            isOwner
-            wear={wear}
-            onOpenWardrobe={() => openTab('wardrobe')}
           />
         ) : (
           <PhotoGrid
