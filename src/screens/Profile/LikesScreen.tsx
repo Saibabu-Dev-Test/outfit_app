@@ -25,6 +25,7 @@ import Avatar from '../../components/Avatar';
 import { getCachedLikedItems, getLikedItems, Post } from '../../services/feedApi';
 import { ActivityItem, activityLine, getMyActivity, getTargetThumbnail } from '../../services/activityApi';
 import { timeAgo } from '../../utils/date';
+import { useBottomSpace } from '../../hooks/useBottomSpace';
 
 type Tab = 'activity' | 'likes';
 
@@ -49,6 +50,7 @@ function RowThumb({ item }: { item: ActivityItem }) {
 }
 
 export default function LikesScreen({ navigation, route }: { navigation: any; route: any }) {
+  const bottomPad = useBottomSpace();
   const { user } = useAuth();
   const [tab, setTab] = useState<Tab>(route?.params?.tab === 'likes' ? 'likes' : 'activity');
   const [items, setItems] = useState<Post[] | null>(null);
@@ -153,6 +155,7 @@ export default function LikesScreen({ navigation, route }: { navigation: any; ro
           <ActivityIndicator style={styles.spinner} color={colors.primary} />
         ) : (
           <FlatList
+            contentContainerStyle={{ paddingBottom: bottomPad }}
             data={activity}
             keyExtractor={a => a.id}
             refreshControl={refresh}
@@ -184,7 +187,7 @@ export default function LikesScreen({ navigation, route }: { navigation: any; ro
           />
         )
       ) : (
-        <ScrollView refreshControl={refresh}>
+        <ScrollView refreshControl={refresh} contentContainerStyle={{ paddingBottom: bottomPad }}>
           {error ? <Text style={styles.error}>{error}</Text> : null}
           {items === null ? (
             <ActivityIndicator style={styles.spinner} color={colors.primary} />

@@ -35,6 +35,7 @@ import {
 } from '../../services/rewardsApi';
 import { getUserProfile } from '../../services/userApi';
 import { localDateKey } from '../../utils/date';
+import { useBottomSpace } from '../../hooks/useBottomSpace';
 
 interface Item {
   id: string;
@@ -49,6 +50,7 @@ interface Item {
 const DAY_LETTERS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 
 export default function AchievementsScreen({ navigation }: { navigation: any }) {
+  const bottomPad = useBottomSpace();
   const { user } = useAuth();
   const uid = user?.id || '';
   const [day, setDay] = useState<DayState | null>(null);
@@ -182,7 +184,7 @@ export default function AchievementsScreen({ navigation }: { navigation: any }) 
         <Text style={styles.title}>Achievements 🏆</Text>
       </View>
       <ScrollView
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, { paddingBottom: bottomPad }]}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}

@@ -11,6 +11,7 @@ import { logActivity } from '../services/activityApi';
 import { topWearItem } from '../services/wearVotesApi';
 import { WearVotes } from '../hooks/useWearVotes';
 import FullScreenImageViewer, { ViewerVoteBar } from './FullScreenImageViewer';
+import LikersSheet from './LikersSheet';
 
 interface Props {
   items: Post[]; // kind 'wardrobe'
@@ -34,6 +35,7 @@ export default function WardrobeVoteGrid({ items, ownerId, ownerName, isOwner, w
   const [likes, setLikes] = useState<Record<string, LikeState>>({});
   const [liking, setLiking] = useState<string | null>(null);
   const [viewIndex, setViewIndex] = useState<number | null>(null);
+  const [likersFor, setLikersFor] = useState<string | null>(null);
 
   const ids = useMemo(() => items.map(i => i.id), [items]);
   const idsKey = ids.join(',');
@@ -167,15 +169,23 @@ export default function WardrobeVoteGrid({ items, ownerId, ownerName, isOwner, w
                     {isPrivate ? 'Only you' : `👕 ${n} today`}
                   </Text>
                 )}
-                <TouchableOpacity
-                  style={styles.iconBtn}
-                  onPress={() => like(p)}
-                  disabled={liking === p.id}
-                  accessibilityLabel={`Like, ${l?.count ?? 0}`}>
-                  <Text style={[styles.likeText, l?.liked && styles.likeTextOn]}>
-                    {l?.liked ? '♥' : '♡'} {l?.count ?? 0}
-                  </Text>
-                </TouchableOpacity>
+                <View style={styles.likeWrap}>
+                  <TouchableOpacity
+                    style={styles.heartBtn}
+                    onPress={() => like(p)}
+                    onLongPress={() => setLikersFor(p.id)}
+                    disabled={liking === p.id}
+                    accessibilityLabel={l?.liked ? 'Unlike' : 'Like'}
+                    accessibilityHint="Long-press to see who liked">
+                    <Text style={[styles.likeText, l?.liked && styles.likeTextOn]}>{l?.liked ? '♥' : '♡'}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.countBtn}
+                    onPress={() => setLikersFor(p.id)}
+                    accessibilityLabel={`Liked by ${l?.count ?? 0}. See who liked`}>
+                    <Text style={[styles.likeText, l?.liked && styles.likeTextOn]}>{l?.count ?? 0}</Text>
+                  </TouchableOpacity>
+                </View>
                 <TouchableOpacity style={styles.iconBtn} onPress={() => openComments(p)} accessibilityLabel="Comments">
                   <Text style={styles.likeText}>💬</Text>
                 </TouchableOpacity>
@@ -190,6 +200,13 @@ export default function WardrobeVoteGrid({ items, ownerId, ownerName, isOwner, w
         index={viewIndex ?? 0}
         onClose={() => setViewIndex(null)}
         renderFooter={viewerFooter}
+      />
+      <LikersSheet
+        visible={!!likersFor}
+        kind="wardrobe"
+        id={likersFor}
+        count={likersFor ? likes[likersFor]?.count : undefined}
+        onClose={() => setLikersFor(null)}
       />
     </View>
   );
@@ -239,6 +256,9 @@ const styles = themedStyles(() => StyleSheet.create({
   wearTextOn: { color: colors.onPrimary },
   tallyText: { flex: 1, fontSize: fontSize.xs, color: colors.textSecondary, fontWeight: fontWeight.semiBold, paddingLeft: 2 },
   iconBtn: { paddingHorizontal: 6, paddingVertical: 4 },
+  likeWrap: { flexDirection: 'row', alignItems: 'center' },
+  heartBtn: { paddingLeft: 6, paddingRight: 2, paddingVertical: 4 },
+  countBtn: { paddingLeft: 2, paddingRight: 6, paddingVertical: 4 },
   likeText: { fontSize: fontSize.sm, color: colors.textSecondary, fontWeight: fontWeight.bold },
   likeTextOn: { color: colors.pink },
   empty: { textAlign: 'center', color: colors.textMuted, padding: spacing.xxl, fontSize: fontSize.sm },

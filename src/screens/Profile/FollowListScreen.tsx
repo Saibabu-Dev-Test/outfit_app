@@ -5,8 +5,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, fontSize, fontWeight, spacing, themedStyles, statusBarStyle } from '../../theme';
 import Avatar from '../../components/Avatar';
 import { FollowEntry, getFollowList } from '../../services/socialApi';
+import { useBottomSpace } from '../../hooks/useBottomSpace';
 
 export default function FollowListScreen({ navigation, route }: { navigation: any; route: any }) {
+  const bottomPad = useBottomSpace();
   const userId: string = route?.params?.userId || '';
   const mode: 'followers' | 'following' = route?.params?.mode === 'following' ? 'following' : 'followers';
   const [list, setList] = useState<FollowEntry[] | null>(null);
@@ -45,6 +47,7 @@ export default function FollowListScreen({ navigation, route }: { navigation: an
         <ActivityIndicator style={styles.spinner} color={colors.primary} />
       ) : (
         <FlatList
+          contentContainerStyle={{ paddingBottom: bottomPad }}
           data={list}
           keyExtractor={x => x.uid}
           renderItem={({ item }) => (

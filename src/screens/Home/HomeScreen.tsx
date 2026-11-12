@@ -43,6 +43,7 @@ import {
   setStarProfile,
   WeeklyStar,
 } from '../../services/rewardsApi';
+import { useBottomSpace } from '../../hooks/useBottomSpace';
 
 // Colours shown in the daily vote: exactly 10, ranked 1..10
 const VOTE_COLOURS = [
@@ -120,6 +121,7 @@ const emptyTally = (): ColourTally[] =>
   VOTE_COLOURS.map((c, i) => ({ rank: i + 1, ...c, votes: 0, boys: 0, girls: 0, men: '0%', women: '0%', percentage: '0%' }));
 
 export default function HomeScreen() {
+  const modalPad = useBottomSpace(24);
   const navigation = useNavigation<any>();
   const { user, updateUserData } = useAuth();
   // Once per user: drop the old duplicate 1080 px feed copies (free-tier space); runs in the background
@@ -479,7 +481,7 @@ export default function HomeScreen() {
 
   const voterModal = (
     <Modal visible={!!voterList} transparent animationType="fade" onRequestClose={() => setVoterList(null)}>
-      <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setVoterList(null)}>
+      <TouchableOpacity style={[styles.modalOverlay, { paddingBottom: modalPad }]} activeOpacity={1} onPress={() => setVoterList(null)}>
         <View style={styles.modalCard}>
           <Text style={styles.modalTitle}>{voterList?.title}</Text>
           <FlatList

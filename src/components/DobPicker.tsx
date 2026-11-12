@@ -6,13 +6,12 @@ import { Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import SelectModal from './SelectModal';
 import { themedStyles, colors } from '../theme';
 import { isValidDob } from '../utils/age';
+import { formatDate } from '../utils/formatDate';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
-export const formatDob = (dob?: string | null): string => {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dob || '');
-  return m ? `${Number(m[3])} ${MONTHS[Number(m[2]) - 1] || ''} ${m[1]}` : '';
-};
+// Stored 'YYYY-MM-DD' -> shown 'DD-MM-YYYY'
+export const formatDob = (dob?: string | null): string => (/^\d{4}-\d{2}-\d{2}$/.test(dob || '') ? formatDate(dob) : '');
 
 interface FieldProps {
   value: string;

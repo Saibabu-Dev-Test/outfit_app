@@ -10,10 +10,12 @@ import { useAuth } from '../../context/AuthContext';
 import useIsAdmin from '../../hooks/useIsAdmin';
 import { getUserCounts, UserCounts } from '../../services/adminStats';
 import { timeAgo } from '../../utils/date';
+import { useBottomSpace } from '../../hooks/useBottomSpace';
 
 const show = (n: number | null) => (n === null ? '—' : n.toLocaleString());
 
 export default function AdminUsersScreen({ navigation }: { navigation: any }) {
+  const bottomPad = useBottomSpace();
   const { user } = useAuth();
   const { isAdmin, checked } = useIsAdmin(user?.id);
   const [counts, setCounts] = useState<UserCounts | null>(null);
@@ -62,7 +64,7 @@ export default function AdminUsersScreen({ navigation }: { navigation: any }) {
         <Text style={styles.empty}>Admins only.</Text>
       ) : (
         <ScrollView
-          contentContainerStyle={styles.body}
+          contentContainerStyle={[styles.body, { paddingBottom: bottomPad }]}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}

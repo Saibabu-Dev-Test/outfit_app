@@ -33,6 +33,7 @@ import {
   PollKind,
   PollOption,
 } from '../services/circlesApi';
+import { useBottomSpace } from '../hooks/useBottomSpace';
 
 export const CAMERA_POLL_MAX = 4;
 
@@ -49,6 +50,7 @@ export default function CameraPollModal({
   onSendPhoto,
   onSendPoll,
 }: Props) {
+  const bottomPad = useBottomSpace(16);
   const [photos, setPhotos] = useState<string[]>([]);
   const [kind, setKind] = useState<PollKind>('wear');
   const [busy, setBusy] = useState(false);
@@ -178,7 +180,7 @@ export default function CameraPollModal({
           activeOpacity={1}
           onPress={close}
         />
-        <View style={styles.card}>
+        <View style={[styles.card, { paddingBottom: bottomPad }]}>
           <ScrollView showsVerticalScrollIndicator={false}>
             <Text style={styles.title}>
               {photos.length > 1

@@ -16,8 +16,10 @@ import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles, stat
 import Avatar from '../../components/Avatar';
 import BannerAdSlot from '../../components/ads/BannerAdSlot';
 import { PublicUser, searchUsers } from '../../services/userApi';
+import { useBottomSpace } from '../../hooks/useBottomSpace';
 
 export default function UserSearchScreen({ navigation }: { navigation: any }) {
+  const bottomPad = useBottomSpace();
   const [text, setText] = useState('');
   const [results, setResults] = useState<PublicUser[]>([]);
   const [loading, setLoading] = useState(false);
@@ -75,6 +77,7 @@ export default function UserSearchScreen({ navigation }: { navigation: any }) {
       {loading ? <ActivityIndicator style={styles.spinner} color={colors.primary} /> : null}
       {error ? <Text style={styles.error}>{error}</Text> : null}
       <FlatList
+        contentContainerStyle={{ paddingBottom: bottomPad }}
         data={results}
         keyExtractor={u => u.id}
         keyboardShouldPersistTaps="handled"

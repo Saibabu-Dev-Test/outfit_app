@@ -21,6 +21,7 @@ import {
   rashiLabel,
   rashisOfNakshatra,
 } from '../../utils/porutham';
+import { useBottomSpace } from '../../hooks/useBottomSpace';
 
 interface SelfParams {
   name?: string | null;
@@ -61,6 +62,7 @@ const resolve = (p: PersonInput): Resolved => {
 };
 
 export default function PoruthamScreen({ navigation, route }: { navigation: any; route: any }) {
+  const bottomPad = useBottomSpace();
   const { user } = useAuth();
   const self: SelfParams = route?.params?.self || {
     name: user?.name,
@@ -172,7 +174,7 @@ export default function PoruthamScreen({ navigation, route }: { navigation: any;
         </TouchableOpacity>
         <Text style={styles.title}>💑 Pelli Porutham · పెళ్లి పొరుత్తం</Text>
       </View>
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      <ScrollView contentContainerStyle={[styles.content, { paddingBottom: bottomPad }]} keyboardShouldPersistTaps="handled">
         <View style={styles.roleRow}>
           <Text style={styles.roleLabel}>I am the</Text>
           <View style={styles.segment}>

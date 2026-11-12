@@ -17,6 +17,7 @@ import { getWardrobeFullImage, getWardrobeItems, WardrobeItemResponse } from '..
 import { canResize, resizeImage } from '../utils/imageResize';
 import { POLL_SPEC, specChars } from '../utils/imageSpecs';
 import { POLL_LETTERS } from '../services/circlesApi';
+import { useBottomSpace } from '../hooks/useBottomSpace';
 
 interface Props {
   visible: boolean;
@@ -37,6 +38,7 @@ export default function WardrobePickerModal({
   onClose,
   onDone,
 }: Props) {
+  const bottomPad = useBottomSpace(16);
   const [items, setItems] = useState<WardrobeItemResponse[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -104,7 +106,7 @@ export default function WardrobePickerModal({
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={styles.overlay}>
-        <View style={styles.card}>
+        <View style={[styles.card, { paddingBottom: bottomPad }]}>
           <View style={styles.head}>
             <Text style={styles.title}>From Wardrobe</Text>
             <Text style={styles.count}>

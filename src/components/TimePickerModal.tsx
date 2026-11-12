@@ -2,6 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import { Modal, View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
 import { themedStyles, colors } from '../theme';
+import { useBottomSpace } from '../hooks/useBottomSpace';
 
 interface Props {
   visible: boolean;
@@ -33,6 +34,7 @@ export const formatTime = (h: number, m: number, p: string) =>
   `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')} ${p}`;
 
 export default function TimePickerModal({ visible, value, onConfirm, onClose }: Props) {
+  const bottomPad = useBottomSpace();
   const [h, setH] = useState(6);
   const [m, setM] = useState(0);
   const [p, setP] = useState('AM');
@@ -65,7 +67,7 @@ export default function TimePickerModal({ visible, value, onConfirm, onClose }: 
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <View style={styles.overlay}>
+      <View style={[styles.overlay, { paddingBottom: bottomPad }]}>
         <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={onClose} />
         <View style={styles.card}>
           <Text style={styles.sub}>SELECT TIME OF BIRTH</Text>

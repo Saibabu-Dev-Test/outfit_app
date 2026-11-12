@@ -3,6 +3,7 @@
 import React from 'react';
 import { Modal, View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles } from '../theme';
+import { useBottomSpace } from '../hooks/useBottomSpace';
 
 export interface SheetAction {
   label: string;
@@ -20,11 +21,12 @@ interface Props {
 }
 
 export default function ActionSheet({ visible, title, actions, onClose, cancelLabel = 'Cancel' }: Props) {
+  const bottomPad = useBottomSpace(16);
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={styles.overlay}>
         <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={onClose} />
-        <View style={styles.card}>
+        <View style={[styles.card, { paddingBottom: bottomPad }]}>
           {title ? <Text style={styles.title}>{title}</Text> : null}
           {actions.map(a => (
             <TouchableOpacity

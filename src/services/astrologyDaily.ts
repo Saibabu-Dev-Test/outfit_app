@@ -63,6 +63,7 @@ import {
   yamagandam,
 } from '../utils/astroVerdict';
 import { hasOwnProse, proseFor } from '../i18n/astroProse';
+import { formatDate } from '../utils/formatDate';
 
 export type { AstroLang };
 export { astroLanguage };
@@ -139,11 +140,8 @@ export interface DayVerdict {
 }
 
 const fill = (t: string, v: Record<string, string>) => t.replace(/\{(\w+)\}/g, (_, k) => v[k] ?? '');
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-const ymd = (ms: number) => {
-  const d = new Date(ms + 330 * 60000);
-  return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
-};
+// IST calendar day of an instant, shown DD-MM-YYYY
+const ymd = (ms: number) => formatDate(new Date(ms + 330 * 60000).toISOString().slice(0, 10));
 const degText = (x: number) => {
   const d = Math.floor(x % 30);
   const m = Math.floor(((x % 30) - d) * 60);
@@ -441,8 +439,7 @@ export const dailyReading = (
       }
     }
     if (bestDay) {
-      const [, mo, dd] = bestDay.day.key.split('-').map(Number);
-      outing = fill(t.outing, { date: `${WEEKDAY_NAMES[pn][bestDay.day.weekday]} ${dd} ${MONTHS[mo - 1]}` });
+      outing = fill(t.outing, { date: `${WEEKDAY_NAMES[pn][bestDay.day.weekday]} ${formatDate(bestDay.day.key)}` });
     }
   }
 

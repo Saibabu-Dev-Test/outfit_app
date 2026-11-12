@@ -16,6 +16,7 @@ import { astroAiAvailable, fetchAstroDetails, getCachedAstroDetails } from '../s
 import { loadAstroUnlock, saveAstroUnlock, shortText } from '../services/astroUnlock';
 import { watchAdToUnlock } from '../native/ads';
 import type { WardrobeItemResponse } from '../services/wardrobeApi';
+import { formatDate } from '../utils/formatDate';
 
 interface Props {
   uid: string;
@@ -49,11 +50,7 @@ const LOCK_TEXT: Record<string, { summary: string; title: string; body: string; 
   },
 };
 const fill = (t: string, v: Record<string, string | number>) => t.replace(/\{(\w+)\}/g, (_, k) => String(v[k] ?? ''));
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-const shortDate = (k: string) => {
-  const [, m, d] = k.split('-').map(Number);
-  return `${d} ${MONTHS[m - 1]}`;
-};
+const shortDate = (k: string) => formatDate(k); // DD-MM-YYYY
 
 export default function AstrologyPanel({ uid, profile, wardrobe, onEditProfile, onOpenPorutham }: Props) {
   const dayKey = useDayKey();

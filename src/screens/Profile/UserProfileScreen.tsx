@@ -27,10 +27,12 @@ import { getUserPublicWardrobePosts, Post } from '../../services/feedApi';
 import { isWeeklyStar } from '../../services/rewardsApi';
 import { follow, getProfileCounts, isFollowing, ProfileCounts, unfollow } from '../../services/socialApi';
 import { shareWithReferral } from '../../utils/referralLink';
+import { useBottomSpace } from '../../hooks/useBottomSpace';
 
 type TabKey = 'wardrobe' | 'pick';
 
 export default function UserProfileScreen({ navigation, route }: { navigation: any; route: any }) {
+  const bottomPad = useBottomSpace();
   const userId: string = route?.params?.userId || '';
   const { user: me } = useAuth();
   const isMe = !!me?.id && me.id === userId;
@@ -173,6 +175,7 @@ export default function UserProfileScreen({ navigation, route }: { navigation: a
       />
       {header}
       <ScrollView
+        contentContainerStyle={{ paddingBottom: bottomPad }}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}

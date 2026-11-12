@@ -44,6 +44,7 @@ import { shareWithReferral } from '../utils/referralLink';
 import { logActivity } from '../services/activityApi';
 import { timeAgo } from '../utils/date';
 import NameWithAge from './NameWithAge';
+import LikersSheet from './LikersSheet';
 import TranslatedText from './TranslatedText';
 import InlineComments, { InlineCommentsHandle } from './InlineComments';
 
@@ -193,8 +194,9 @@ export default function PostCard({
     });
   };
 
-  // My own photo: who liked it
-  const openLikedBy = () => navigation.navigate('LikedBy', { kind: post.kind, id: post.id });
+  // Who liked it: a bottom sheet open to everyone (tap the count / long-press 👍)
+  const [likersOpen, setLikersOpen] = useState(false);
+  const openLikedBy = () => setLikersOpen(true);
 
   const like = async (force = false) => {
     if (!myUid) {
@@ -490,6 +492,7 @@ export default function PostCard({
           <View style={[styles.pill, liked && styles.pillOn]}>
             <TouchableOpacity
               onPress={() => like()}
+              onLongPress={openLikedBy}
               accessibilityLabel="Like"
               hitSlop={{ top: 6, bottom: 6, left: 4, right: 2 }}>
               <Text style={[styles.pillIcon, liked && styles.pillIconOn]}>👍</Text>
@@ -502,14 +505,22 @@ export default function PostCard({
             </TouchableOpacity>
           </View>
         ) : (
-          <TouchableOpacity
-            style={[styles.pill, liked && styles.pillOn]}
-            onPress={() => like()}
-            accessibilityLabel={`Like, ${likeCount}`}
-            hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}>
-            <Text style={[styles.pillIcon, liked && styles.pillIconOn]}>👍</Text>
-            <Text style={[styles.pillCount, liked && styles.pillCountOn]}>{likeCount}</Text>
-          </TouchableOpacity>
+          <View style={[styles.pill, liked && styles.pillOn]}>
+            <TouchableOpacity
+              onPress={() => like()}
+              onLongPress={openLikedBy}
+              accessibilityLabel="Like"
+              accessibilityHint="Long-press to see who liked"
+              hitSlop={{ top: 6, bottom: 6, left: 4, right: 2 }}>
+              <Text style={[styles.pillIcon, liked && styles.pillIconOn]}>👍</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={openLikedBy}
+              accessibilityLabel={`Liked by ${likeCount}. See who liked`}
+              hitSlop={{ top: 6, bottom: 6, left: 2, right: 4 }}>
+              <Text style={[styles.pillCount, liked && styles.pillCountOn]}>{likeCount}</Text>
+            </TouchableOpacity>
+          </View>
         )}
         <TouchableOpacity
           style={[styles.pill, disliked && styles.pillOn]}
@@ -589,6 +600,7 @@ export default function PostCard({
         onClose={() => setViewIndex(null)}
         renderFooter={multi ? viewerFooter : undefined}
       />
+      <LikersSheet visible={likersOpen} kind={post.kind} id={post.id} count={likeCount} onClose={() => setLikersOpen(false)} />
     </View>
   );
 }

@@ -7,8 +7,10 @@ import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 
 // Short coin "ding" (res/raw/coin_flip.ogg, generated in-house, no license) played at the start of
-// each coin flip. SoundPool loads it once; play() is fire-and-forget on the media stream, so it
-// follows the phone's media volume (silent when media volume is 0). Never throws to JS.
+// each coin flip. The file is compressed + normalised to about -1.2 dBFS peak (no clipping) so it is
+// clearly audible. SoundPool loads it once; play() is fire-and-forget on the MEDIA stream
+// (USAGE_MEDIA -> STREAM_MUSIC), so the phone's volume buttons / media volume control it.
+// playAt(volume) takes the in-app volume (0..1, Settings > Coin sound). Never throws to JS.
 class CoinSoundModule(ctx: ReactApplicationContext) : ReactContextBaseJavaModule(ctx) {
   override fun getName(): String = "OutfitCoinSound"
 
@@ -23,8 +25,8 @@ class CoinSoundModule(ctx: ReactApplicationContext) : ReactContextBaseJavaModule
     if (CrashModule.safeMode) return null
     try {
       val attrs = AudioAttributes.Builder()
-        .setUsage(AudioAttributes.USAGE_GAME)
-        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+        .setUsage(AudioAttributes.USAGE_MEDIA)
+        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
         .build()
       val p = SoundPool.Builder().setMaxStreams(4).setAudioAttributes(attrs).build()
       p.setOnLoadCompleteListener { _, _, status -> loaded = status == 0 }
@@ -44,9 +46,16 @@ class CoinSoundModule(ctx: ReactApplicationContext) : ReactContextBaseJavaModule
 
   @ReactMethod
   fun play() {
+    playAt(1.0)
+  }
+
+  // volume 0..1 (in-app setting, default 1.0 = full); the phone's media volume still applies on top
+  @ReactMethod
+  fun playAt(volume: Double) {
     try {
       val p = ensurePool() ?: return
-      if (loaded) p.play(soundId, 1f, 1f, 1, 0, 1f)
+      val v = volume.toFloat().coerceIn(0f, 1f)
+      if (loaded && v > 0f) p.play(soundId, v, v, 1, 0, 1f)
     } catch (_: Throwable) {}
   }
 

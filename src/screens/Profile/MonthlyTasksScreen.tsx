@@ -20,10 +20,13 @@ import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles, stat
 import { useAuth } from '../../context/AuthContext';
 import { MONTHLY_TASKS, REWARDS, TASK_COINS, Reward, MonthlyTask, canRedeem, coinBalance, monthKey, taskProgress } from '../../config/monthlyTasks';
 import { MonthState, RewardClaim, claimTaskCoins, getMonthState, getMyClaims, redeemReward } from '../../services/monthlyTasksApi';
+import { formatMonth } from '../../utils/formatDate';
+import { useBottomSpace } from '../../hooks/useBottomSpace';
 
 const STATUS_TEXT: Record<string, string> = { pending: '⏳ Waiting for approval', approved: '✅ Approved', rejected: '↩️ Rejected · coins returned' };
 
 export default function MonthlyTasksScreen({ navigation }: { navigation: any }) {
+  const bottomPad = useBottomSpace();
   const { user } = useAuth();
   const uid = user?.id || '';
   const [state, setState] = useState<MonthState | null>(null);
@@ -92,7 +95,7 @@ export default function MonthlyTasksScreen({ navigation }: { navigation: any }) 
         <Text style={styles.title}>Monthly tasks 🎯</Text>
       </View>
       <ScrollView
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, { paddingBottom: bottomPad }]}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -184,7 +187,7 @@ export default function MonthlyTasksScreen({ navigation }: { navigation: any }) 
                       <View style={styles.rowBody}>
                         <Text style={styles.rowTitle}>{c.title}</Text>
                         <Text style={styles.rowSub}>
-                          {c.month} · 🪙 {c.cost.toLocaleString()} · {STATUS_TEXT[c.status]}
+                          {formatMonth(c.month)} · 🪙 {c.cost.toLocaleString()} · {STATUS_TEXT[c.status]}
                         </Text>
                       </View>
                     </View>
