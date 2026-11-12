@@ -1,5 +1,6 @@
 package com.outfit
 
+import android.os.Bundle
 import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate
 import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint.fabricEnabled
@@ -19,6 +20,13 @@ class MainActivity : ReactActivity() {
    */
   override fun createReactActivityDelegate(): ReactActivityDelegate =
       DefaultReactActivityDelegate(this, mainComponentName, fabricEnabled)
+
+  // react-native-screens: never let Android restore old screen fragments after the process was
+  // killed in the background. Restoring them crashes with "Unable to instantiate fragment ...:
+  // calling Fragment constructor caused an exception". React Navigation rebuilds the screens itself.
+  override fun onCreate(savedInstanceState: Bundle?) {
+    super.onCreate(null)
+  }
 
   // App lock privacy: FLAG_SECURE on the lock screen, and no recents preview while the lock is on
   override fun onPause() {
