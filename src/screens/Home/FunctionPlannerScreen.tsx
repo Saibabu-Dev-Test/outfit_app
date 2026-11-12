@@ -27,6 +27,8 @@ import {
   whenText,
 } from '../../services/functionPlanner';
 import { DayWeather, weatherFor, weatherText, weatherTip } from '../../services/weatherApi';
+import { formatDate, parseDisplayDate } from '../../utils/formatDate';
+import { useBottomSpace } from '../../hooks/useBottomSpace';
 
 interface Draft {
   id: string | null;
@@ -41,6 +43,7 @@ interface Draft {
 const EMPTY: Draft = { id: null, title: '', type: 'wedding', date: '', time: '', city: '', note: '' };
 
 export default function FunctionPlannerScreen({ navigation }: { navigation: any }) {
+  const bottomPad = useBottomSpace();
   const { user } = useAuth();
   const uid = user?.id ? String(user.id) : '';
   const [list, setList] = useState<PlannedFunction[]>([]);
@@ -70,8 +73,9 @@ export default function FunctionPlannerScreen({ navigation }: { navigation: any 
     if (!draft) return;
     const title = draft.title.trim();
     if (!title) return Alert.alert('Name it', 'e.g. "Priya\'s wedding" or "Office Diwali party"');
-    if (!isValidDate(draft.date)) return Alert.alert('Date', 'Use YYYY-MM-DD, e.g. 2026-12-05');
-    if (daysUntil(draft.date) < 0) return Alert.alert('Date', 'That date has already passed.');
+    const isoDate = parseDisplayDate(draft.date); // typed as DD-MM-YYYY, stored as YYYY-MM-DD
+    if (!isoDate || !isValidDate(isoDate)) return Alert.alert('Date', 'Use DD-MM-YYYY, e.g. 05-12-2026');
+    if (daysUntil(isoDate) < 0) return Alert.alert('Date', 'That date has already passed.');
     if (draft.time && !isValidTime(draft.time)) return Alert.alert('Time', 'Use 24-hour HH:MM, e.g. 18:30');
     const old = list.find(f => f.id === draft.id);
     if (old) await cancelPlanReminders(old);
@@ -79,7 +83,7 @@ export default function FunctionPlannerScreen({ navigation }: { navigation: any 
       id: draft.id || newFunctionId(),
       title: title.slice(0, 60),
       type: draft.type,
-      date: draft.date,
+      date: isoDate,
       time: draft.time || null,
       city: draft.city.trim().slice(0, 60),
       note: draft.note.trim().slice(0, 300),
@@ -121,7 +125,7 @@ export default function FunctionPlannerScreen({ navigation }: { navigation: any 
           <Text style={styles.addText}>＋ Add</Text>
         </TouchableOpacity>
       </View>
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView contentContainerStyle={[styles.content, { paddingBottom: bottomPad }]}>
         {!list.length ? (
           <Text style={styles.empty}>No functions planned. Tap ＋ Add for reminders, weather and outfit ideas.</Text>
         ) : null}
@@ -137,7 +141,7 @@ export default function FunctionPlannerScreen({ navigation }: { navigation: any 
                 <View style={styles.body}>
                   <Text style={styles.cardTitle}>{f.title}</Text>
                   <Text style={[styles.sub, n <= 1 && styles.soon]}>
-                    {whenText(n)} · {f.date}
+                    {whenText(n)} · {formatDate(f.date)}
                     {f.time ? ` · ${f.time}` : ''}
                     {f.city ? ` · ${f.city}` : ''}
                   </Text>
@@ -153,7 +157,7 @@ export default function FunctionPlannerScreen({ navigation }: { navigation: any 
               {f.note ? <Text style={styles.note}>📝 {f.note}</Text> : null}
               <View style={styles.actions}>
                 <TouchableOpacity
-                  onPress={() => setDraft({ id: f.id, title: f.title, type: f.type, date: f.date, time: f.time || '', city: f.city, note: f.note })}>
+                  onPress={() => setDraft({ id: f.id, title: f.title, type: f.type, date: formatDate(f.date), time: f.time || '', city: f.city, note: f.note })}>
                   <Text style={styles.link}>Edit</Text>
                 </TouchableOpacity>
                 <TouchableOpacity onPress={() => remove(f)}>
@@ -167,7 +171,7 @@ export default function FunctionPlannerScreen({ navigation }: { navigation: any 
 
       <Modal visible={!!draft} animationType="slide" transparent onRequestClose={() => setDraft(null)}>
         <View style={styles.sheetWrap}>
-          <ScrollView style={styles.sheet} keyboardShouldPersistTaps="handled">
+          <ScrollView style={styles.sheet} contentContainerStyle={{ paddingBottom: bottomPad }} keyboardShouldPersistTaps="handled">
             <Text style={styles.sheetTitle}>{draft?.id ? 'Edit function' : 'New function'}</Text>
             <TextInput
               style={styles.input}
@@ -191,7 +195,7 @@ export default function FunctionPlannerScreen({ navigation }: { navigation: any 
             </View>
             <TextInput
               style={styles.input}
-              placeholder="Date YYYY-MM-DD"
+              placeholder="Date DD-MM-YYYY"
               placeholderTextColor={colors.textMuted}
               value={draft?.date}
               maxLength={10}
@@ -200,7 +204,7 @@ export default function FunctionPlannerScreen({ navigation }: { navigation: any 
             />
             <View style={styles.chips}>
               {quickDates.map(q => (
-                <TouchableOpacity key={q.key} style={styles.chip} onPress={() => setDraft(d => (d ? { ...d, date: q.key } : d))}>
+                <TouchableOpacity key={q.key} style={styles.chip} onPress={() => setDraft(d => (d ? { ...d, date: formatDate(q.key) } : d))}>
                   <Text style={styles.chipText}>{q.label}</Text>
                 </TouchableOpacity>
               ))}

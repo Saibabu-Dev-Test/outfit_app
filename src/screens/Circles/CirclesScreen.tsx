@@ -46,6 +46,7 @@ import { timeAgo } from '../../utils/date';
 import { getApproxLocation, LocationFailReason } from '../../native/location';
 import { MyDistrict, pickMyDistrict, resolveMyPlace } from '../../services/districtApi';
 import CityPickerModal from '../../components/CityPickerModal';
+import { useBottomSpace } from '../../hooks/useBottomSpace';
 
 export const EMOJIS = ['👗', '🔥', '🤍', '💼', '🌟', '🕰️', '👟', '💍', '🎉', '🌸', '🧥', '🪔', '👜', '🕶️', '🥻', '💄'];
 
@@ -56,6 +57,7 @@ type TabKey = 'mine' | 'discover' | 'nearby';
 const TABS: TabKey[] = ['mine', 'discover', 'nearby'];
 
 export default function CirclesScreen() {
+  const sheetPad = useBottomSpace(16);
   const navigation = useNavigation<any>();
   const { user } = useAuth();
   const uid = user?.id;
@@ -597,7 +599,7 @@ export default function CirclesScreen() {
             activeOpacity={1}
             onPress={() => setCreateOpen(false)}
           />
-          <View style={styles.modalCard}>
+          <View style={[styles.modalCard, { paddingBottom: sheetPad }]}>
             <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
               <Text style={styles.modalTitle}>Create a circle</Text>
 

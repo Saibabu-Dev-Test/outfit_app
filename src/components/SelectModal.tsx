@@ -2,6 +2,7 @@
 import React from 'react';
 import { Modal, View, Text, TouchableOpacity, FlatList, StyleSheet } from 'react-native';
 import { themedStyles, colors } from '../theme';
+import { useBottomSpace } from '../hooks/useBottomSpace';
 
 interface Props {
   visible: boolean;
@@ -13,9 +14,10 @@ interface Props {
 }
 
 export default function SelectModal({ visible, title, options, selected, onSelect, onClose }: Props) {
+  const bottomPad = useBottomSpace();
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <View style={styles.overlay}>
+      <View style={[styles.overlay, { paddingBottom: bottomPad }]}>
         <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={onClose} />
         <View style={styles.card}>
           <Text style={styles.title}>{title}</Text>

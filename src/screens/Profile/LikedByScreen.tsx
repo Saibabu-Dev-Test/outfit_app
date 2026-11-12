@@ -7,8 +7,10 @@ import { useAuth } from '../../context/AuthContext';
 import Avatar from '../../components/Avatar';
 import { getLikers, Liker } from '../../services/activityApi';
 import { timeAgo } from '../../utils/date';
+import { useBottomSpace } from '../../hooks/useBottomSpace';
 
 export default function LikedByScreen({ navigation, route }: { navigation: any; route: any }) {
+  const bottomPad = useBottomSpace();
   const kind: 'post' | 'wardrobe' = route?.params?.kind === 'wardrobe' ? 'wardrobe' : 'post';
   const id: string = route?.params?.id || '';
   const { user } = useAuth();
@@ -47,6 +49,7 @@ export default function LikedByScreen({ navigation, route }: { navigation: any; 
         <ActivityIndicator style={styles.spinner} color={colors.primary} />
       ) : (
         <FlatList
+          contentContainerStyle={{ paddingBottom: bottomPad }}
           data={list}
           keyExtractor={x => x.uid}
           renderItem={({ item }) => (

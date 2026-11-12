@@ -589,8 +589,9 @@ service cloud.firestore {
 
     // ── Wardrobe (Phase 1) ──────────────────────────────────────────────
     match /wardrobe/{itemId} {
+      // Admin may read (not write) every item: Admin › Storage counts all items and per-user photos
       allow read: if signedIn()
-        && (resource.data.userId == me() || resource.data.isPublic == true);
+        && (resource.data.userId == me() || resource.data.isPublic == true || isAdmin());
       allow create: if signedIn() && request.resource.data.userId == me();
       allow update: if signedIn() && resource.data.userId == me()
         && request.resource.data.userId == resource.data.userId;

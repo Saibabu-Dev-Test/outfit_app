@@ -17,6 +17,7 @@ import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles } fro
 import { pickImage, POLL_PICK } from '../utils/imagePicker';
 import { POLL_LETTERS } from '../services/circlesApi';
 import FullScreenImageViewer from './FullScreenImageViewer';
+import { useBottomSpace } from '../hooks/useBottomSpace';
 
 interface Props {
   visible: boolean;
@@ -27,6 +28,7 @@ interface Props {
 }
 
 export default function MultiShotModal({ visible, max, startIndex = 0, onClose, onDone }: Props) {
+  const bottomPad = useBottomSpace(16);
   const [shots, setShots] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [viewIndex, setViewIndex] = useState<number | null>(null);
@@ -81,7 +83,7 @@ export default function MultiShotModal({ visible, max, startIndex = 0, onClose, 
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={styles.overlay}>
         <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={busy ? undefined : onClose} />
-        <View style={styles.card}>
+        <View style={[styles.card, { paddingBottom: bottomPad }]}>
           <Text style={styles.title}>
             📷 Take photos ({shots.length}/{room})
           </Text>

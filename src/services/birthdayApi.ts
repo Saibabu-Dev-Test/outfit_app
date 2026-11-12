@@ -39,6 +39,7 @@ import { inlineAvatar, saveUserProfile } from './userApi';
 import { logActivity } from './activityApi';
 import { cleanAge, myAgeFields } from '../utils/age';
 import { INLINE_MAX_CHARS, splitChatPhoto } from './photoSplit';
+import { formatDayMonth } from '../utils/formatDate';
 
 export const BIRTHDAYS = 'birthdays';
 export const BDAY_CIRCLES = 'bdayCircles';
@@ -49,7 +50,6 @@ export const BDAY_PHOTO_MAX_CHARS = 150000; // inline photo before build 115 (PO
 // Since build 115 the inline (chat) copy is a CLEAR_SPEC photo (<= 56 KB) and the near-original
 // photo is in bdayCircles/{day}/messages/{id}/media/full {imageData, userId, createdAt}
 
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const pad = (n: number) => String(n).padStart(2, '0');
 const isLeap = (y: number) => (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
 
@@ -63,10 +63,10 @@ export const mdFromDob = (dob?: string | null): string | null => {
   return `${m[2]}-${m[3]}`;
 };
 
-// '11-14' -> '14 Nov' (day and month only)
+// '11-14' -> '14-11' (day and month only, DD-MM; the year is never shown)
 export const mdLabel = (md: string): string => {
-  const [m, d] = md.split('-').map(Number);
-  return m >= 1 && m <= 12 ? `${d} ${MONTHS[m - 1]}` : md;
+  const [m] = md.split('-').map(Number);
+  return m >= 1 && m <= 12 ? formatDayMonth(md) : md;
 };
 
 // The 'MM-DD' keys that have their birthday on this calendar date. 29 Feb birthdays are

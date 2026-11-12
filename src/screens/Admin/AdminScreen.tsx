@@ -1,5 +1,5 @@
 // Moderation for users/{uid}.role == 'admin': reports, every circle (private ones too), user feedback
-// and Stats (users by gender and age group, read once when the tab opens)
+// Stats (users by gender and age group, read once when the tab opens) and Storage (AdminStoragePanel)
 import React, { useCallback, useState } from 'react';
 import {
   View,
@@ -35,12 +35,15 @@ import {
   getUserStats,
   UserStats,
 } from '../../services/adminStats';
+import { useBottomSpace } from '../../hooks/useBottomSpace';
+import AdminStoragePanel from './AdminStoragePanel';
 
-type TabKey = 'reports' | 'circles' | 'feedback' | 'stats';
-const TAB_KEYS: TabKey[] = ['reports', 'circles', 'feedback', 'stats'];
+type TabKey = 'reports' | 'circles' | 'feedback' | 'stats' | 'storage';
+const TAB_KEYS: TabKey[] = ['reports', 'circles', 'feedback', 'stats', 'storage'];
 const FEEDBACK_ICON: Record<string, string> = { Suggestion: '💡', Complaint: '😕', Bug: '🐞', Other: '💬' };
 
 export default function AdminScreen({ navigation }: { navigation: any }) {
+  const bottomPad = useBottomSpace();
   const { user } = useAuth();
   const uid = user?.id;
   const [role, setRole] = useState<string | null | undefined>(undefined);
@@ -57,6 +60,8 @@ export default function AdminScreen({ navigation }: { navigation: any }) {
   const [stats, setStats] = useState<UserStats | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
   const [statsError, setStatsError] = useState<string | null>(null);
+  // Storage tab: mounted on first open, pull-to-refresh bumps the key
+  const [storageKey, setStorageKey] = useState(0);
 
   const loadStats = useCallback(async () => {
     setStatsLoading(true);
@@ -414,15 +419,29 @@ export default function AdminScreen({ navigation }: { navigation: any }) {
                 ? `Circles (${circles.length})`
                 : k === 'feedback'
                 ? `Feedback (${feedback.filter(f => f.status === 'new').length})`
-                : '📊 Stats'}
+                : k === 'stats'
+                ? '📊 Stats'
+                : '💾 Storage'}
             </Text>
           </TouchableOpacity>
         ))}
       </View>
-      {error && tab !== 'stats' ? <Text style={styles.error}>{error}</Text> : null}
-      {tab === 'stats' ? (
+      {error && tab !== 'stats' && tab !== 'storage' ? <Text style={styles.error}>{error}</Text> : null}
+      {tab === 'storage' ? (
         <ScrollView
-          contentContainerStyle={styles.list}
+          contentContainerStyle={[styles.list, { paddingBottom: bottomPad }]}
+          refreshControl={
+            <RefreshControl
+              refreshing={false}
+              onRefresh={() => setStorageKey(k => k + 1)}
+              tintColor={colors.primary}
+            />
+          }>
+          <AdminStoragePanel refreshKey={storageKey} onNavigateUser={id => navigation.navigate('UserProfile', { userId: id })} />
+        </ScrollView>
+      ) : tab === 'stats' ? (
+        <ScrollView
+          contentContainerStyle={[styles.list, { paddingBottom: bottomPad }]}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -440,7 +459,7 @@ export default function AdminScreen({ navigation }: { navigation: any }) {
         data={tab === 'reports' ? reports : tab === 'circles' ? circles : feedback}
         keyExtractor={x => x.id}
         renderItem={tab === 'reports' ? renderReport : tab === 'circles' ? renderCircle : renderFeedback}
-        contentContainerStyle={styles.list}
+        contentContainerStyle={[styles.list, { paddingBottom: bottomPad }]}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}

@@ -9,8 +9,10 @@ import useIsAdmin from '../../hooks/useIsAdmin';
 import PostCard from '../../components/PostCard';
 import ZoomableImage from '../../components/ZoomableImage';
 import { cachedPost, getPost, getWardrobeAsPost, Post } from '../../services/feedApi';
+import { useBottomSpace } from '../../hooks/useBottomSpace';
 
 export default function PostDetailScreen({ navigation, route }: { navigation: any; route: any }) {
+  const bottomPad = useBottomSpace();
   const kind: 'post' | 'wardrobe' = route?.params?.kind === 'wardrobe' ? 'wardrobe' : 'post';
   const id: string = route?.params?.id || '';
   const { user } = useAuth();
@@ -47,7 +49,7 @@ export default function PostDetailScreen({ navigation, route }: { navigation: an
       ) : post === null ? (
         <Text style={styles.gone}>This post was deleted or is private.</Text>
       ) : (
-        <ScrollView>
+        <ScrollView contentContainerStyle={{ paddingBottom: bottomPad }}>
           <PostCard
             post={post}
             width={width}

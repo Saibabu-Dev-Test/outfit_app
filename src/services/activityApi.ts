@@ -15,7 +15,9 @@ import {
   orderBy,
   query,
   serverTimestamp,
+  startAfter,
   where,
+  QueryDocumentSnapshot,
 } from 'firebase/firestore';
 import { db } from '../config/firebaseConfig';
 import { firestoreErrorMessage } from '../utils/firebaseErrors';
@@ -238,4 +240,52 @@ export const getLikers = async (kind: FeedKind, id: string, myUid?: string, max 
     }),
   );
   return out.sort((a, b) => (b.createdAt?.getTime() || 0) - (a.createdAt?.getTime() || 0));
+};
+
+// ── Likers sheet (everyone can see who liked a photo, TikTok style) ──
+// Likes live in {posts|wardrobe}/{id}/likes/{uid} {createdAt[, name, avatar]}. Read in pages of
+// LIKERS_PAGE (newest first): 1 read per like doc, plus 1 cached users/{uid} read for likers whose
+// like doc has no name (wardrobe likes). Private profiles show 'Outfit user'.
+export const LIKERS_PAGE = 30;
+export interface LikersPage {
+  likers: Liker[];
+  cursor: QueryDocumentSnapshot | null;
+  done: boolean;
+}
+export const getLikersPage = async (
+  kind: FeedKind,
+  id: string,
+  cursor: QueryDocumentSnapshot | null = null,
+  pageSize: number = LIKERS_PAGE,
+): Promise<LikersPage> => {
+  const base = collection(db, kind === 'post' ? 'posts' : 'wardrobe', id, 'likes');
+  let snap;
+  try {
+    snap = await getDocs(
+      cursor
+        ? query(base, orderBy('createdAt', 'desc'), startAfter(cursor), limit(pageSize))
+        : query(base, orderBy('createdAt', 'desc'), limit(pageSize)),
+    );
+  } catch (e: any) {
+    console.warn('getLikersPage failed:', e?.code, e?.message);
+    throw new Error(firestoreErrorMessage(e, 'Loading likes'));
+  }
+  const likers = await Promise.all(
+    snap.docs.map(async (s): Promise<Liker> => {
+      const d: any = s.data({ serverTimestamps: 'estimate' });
+      let name: string = (d?.name || '').trim();
+      let avatar: string | null = d?.avatar || null;
+      if (!name || !avatar) {
+        const u = await getUserLite(s.id);
+        name = name || u?.name || 'Outfit user';
+        avatar = avatar || u?.avatarUrl || null;
+      }
+      return { uid: s.id, name, avatar, createdAt: toDate(d?.createdAt) };
+    }),
+  );
+  return {
+    likers,
+    cursor: snap.docs.length ? snap.docs[snap.docs.length - 1] : cursor,
+    done: snap.docs.length < pageSize,
+  };
 };

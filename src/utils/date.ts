@@ -1,3 +1,5 @@
+import { formatDate } from './formatDate';
+
 // Local calendar date as YYYY-MM-DD (toISOString is UTC and gives the wrong day in IST before 5:30 AM)
 export const localDateKey = (d: Date = new Date()): string => {
   const y = d.getFullYear();
@@ -37,7 +39,7 @@ export const timeAgo = (v: any): string => {
   if (secs < 3600) return `${Math.floor(secs / 60)}m`;
   if (secs < 86400) return `${Math.floor(secs / 3600)}h`;
   if (secs < 7 * 86400) return `${Math.floor(secs / 86400)}d`;
-  return d.toLocaleDateString();
+  return formatDate(d);
 };
 
 // "14:05" for chat bubbles

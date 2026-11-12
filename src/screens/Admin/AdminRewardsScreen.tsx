@@ -7,8 +7,11 @@ import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles } fro
 import { useAuth } from '../../context/AuthContext';
 import useIsAdmin from '../../hooks/useIsAdmin';
 import { RewardClaim, decideClaim, getPendingClaims } from '../../services/monthlyTasksApi';
+import { formatDate, formatMonth } from '../../utils/formatDate';
+import { useBottomSpace } from '../../hooks/useBottomSpace';
 
 export default function AdminRewardsScreen({ navigation }: { navigation: any }) {
+  const bottomPad = useBottomSpace();
   const { user } = useAuth();
   const uid = user?.id || '';
   const { isAdmin, checked } = useIsAdmin(uid);
@@ -62,8 +65,8 @@ export default function AdminRewardsScreen({ navigation }: { navigation: any }) 
         <Text style={styles.name}>{c.name}</Text>
       </TouchableOpacity>
       <Text style={styles.sub}>
-        {c.title} · 🪙 {c.cost.toLocaleString()} · {c.month}
-        {c.createdAt ? ` · ${c.createdAt.toLocaleDateString()}` : ''}
+        {c.title} · 🪙 {c.cost.toLocaleString()} · {formatMonth(c.month)}
+        {c.createdAt ? ` · ${formatDate(c.createdAt)}` : ''}
       </Text>
       <View style={styles.btns}>
         {busy === c.id ? (
@@ -99,7 +102,7 @@ export default function AdminRewardsScreen({ navigation }: { navigation: any }) 
           data={claims || []}
           keyExtractor={c => c.id}
           renderItem={renderItem}
-          contentContainerStyle={styles.list}
+          contentContainerStyle={[styles.list, { paddingBottom: bottomPad }]}
           ListHeaderComponent={error ? <Text style={styles.error}>{error}</Text> : undefined}
           ListEmptyComponent={<Text style={styles.empty}>No claims waiting. 🎉</Text>}
           refreshControl={

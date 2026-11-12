@@ -50,7 +50,10 @@ import { getLockCapability, isAppLockOn, turnOffAppLock, turnOnAppLock } from '.
 import { signOutKeepLock } from '../../services/authApi';
 import { auth } from '../../config/firebaseConfig';
 import { isAutoUpdateOn, isUpdateSupported, setAutoUpdate } from '../../native/appUpdate';
-import { isCoinSoundOn, isCoinSoundSupported, setCoinSound } from '../../native/coinSound';
+import { getCoinVolume, isCoinSoundOn, isCoinSoundSupported, playCoinSound, setCoinSound, setCoinVolume } from '../../native/coinSound';
+import VolumeSlider from '../../components/VolumeSlider';
+import { formatDate } from '../../utils/formatDate';
+import { useBottomSpace } from '../../hooks/useBottomSpace';
 
 // "+91 98765 43210" from users/{uid}.phone (10 digits), else the saved phoneNumber
 const phoneLabel = (p?: { phone?: string; phoneNumber?: string } | null): string => {
@@ -94,6 +97,7 @@ const MARITAL_OPTIONS = ['Single', 'Married', 'Prefer not to say'];
 const THEME_LABEL: Record<ThemeMode, string> = { system: 'System', light: 'Light', dark: 'Dark' };
 
 export default function ProfileScreen() {
+  const bottomPad = useBottomSpace();
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const { user: authUser, logout, updateUserData } = useAuth();
@@ -116,8 +120,10 @@ export default function ProfileScreen() {
   }, []);
   // Coin sound: plays with each coin flip, ON by default
   const [coinSound, setCoinSoundState] = useState(true);
+  const [coinVolume, setCoinVolumeState] = useState(1);
   useEffect(() => {
     isCoinSoundOn().then(setCoinSoundState);
+    getCoinVolume().then(setCoinVolumeState);
   }, []);
   const toggleCoinSound = (on: boolean) => {
     setCoinSoundState(on);
@@ -550,7 +556,7 @@ const fetchProfile = async () => {
       />
       <ScrollView
         style={styles.scroll}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: bottomPad }]}
         showsVerticalScrollIndicator={false}>
 
         {/* Header */}
@@ -672,7 +678,7 @@ const fetchProfile = async () => {
               <View style={styles.infoItem}>
                 <Text style={styles.infoLabel}>🎂 Date of Birth</Text>
                 <Text style={styles.infoValue}>
-                  {profileData?.dob ? profileData.dob : 'Not specified'}
+                  {profileData?.dob ? formatDate(profileData.dob) : 'Not specified'}
                 </Text>
               </View>
             </View>
@@ -902,7 +908,7 @@ const fetchProfile = async () => {
                 <View style={styles.flexTitle}>
                   <Text style={styles.menuLabel}>Coin sound</Text>
                   <Text style={styles.lockValue}>
-                    {coinSound ? 'On: a short ding when you earn coins (follows media volume)' : 'Off: coin flips are silent'}
+                    {coinSound ? 'On: a ding when you earn coins (phone media volume × this slider)' : 'Off: coin flips are silent'}
                   </Text>
                 </View>
               </View>
@@ -913,6 +919,18 @@ const fetchProfile = async () => {
                 thumbColor={colors.textInverse}
               />
             </View>
+            {coinSound ? (
+              <View style={styles.volumeRow}>
+                <VolumeSlider
+                  label="Coin sound volume"
+                  value={coinVolume}
+                  onChange={setCoinVolumeState}
+                  onCommit={v => {
+                    setCoinVolume(v).then(playCoinSound); // save, then a test ding at the new level
+                  }}
+                />
+              </View>
+            ) : null}
           </View>
         )}
 
@@ -1031,7 +1049,7 @@ const fetchProfile = async () => {
             activeOpacity={1}
             onPress={() => setIsEditModalVisible(false)}
           />
-          <View style={styles.modalContent}>
+          <View style={[styles.modalContent, { paddingBottom: bottomPad }]}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Edit Profile Details</Text>
               <TouchableOpacity
@@ -1106,7 +1124,7 @@ const fetchProfile = async () => {
                     onPress={handleOpenCalendar}
                     activeOpacity={0.85}>
                     <Text style={editDob ? styles.modalInputValueText : styles.modalInputPlaceholderText}>
-                      {editDob || 'Select DOB'}
+                      {editDob ? formatDate(editDob) : 'Select DOB'}
                     </Text>
                     <Text style={styles.inputCalendarIcon}>📅</Text>
                   </TouchableOpacity>
@@ -1294,7 +1312,7 @@ const fetchProfile = async () => {
             <View style={styles.calendarCardHeader}>
               <Text style={styles.calendarCardSub}>SELECT DATE OF BIRTH</Text>
               <Text style={styles.calendarCardTitle}>
-                {MONTH_NAMES[calMonth]} {selectedDay}, {calYear}
+                {`${String(selectedDay).padStart(2, '0')}-${String(calMonth + 1).padStart(2, '0')}-${calYear}`}
               </Text>
             </View>
 
@@ -2094,4 +2112,5 @@ const styles = themedStyles(() => StyleSheet.create({
     fontWeight: fontWeight.bold,
     fontSize: fontSize.sm,
   },
+  volumeRow: { paddingHorizontal: 16, paddingBottom: 12 },
 }));

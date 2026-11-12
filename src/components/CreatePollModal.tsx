@@ -29,6 +29,7 @@ import {
   PollKind,
   PollOption,
 } from '../services/circlesApi';
+import { useBottomSpace } from '../hooks/useBottomSpace';
 
 interface Props {
   visible: boolean;
@@ -42,6 +43,7 @@ interface Props {
 export const POLL_PHOTO_MAX_CHARS = POLL_PICK.maxChars ?? 145000;
 
 export default function CreatePollModal({ visible, onClose, onSubmit, initialImages, userId }: Props) {
+  const bottomPad = useBottomSpace(16);
   const [kind, setKind] = useState<PollKind>('wear');
   const [options, setOptions] = useState<PollOption[]>([]);
   const [sending, setSending] = useState(false);
@@ -123,7 +125,7 @@ export default function CreatePollModal({ visible, onClose, onSubmit, initialIma
       {/* Sheet bottom sits right on the keyboard (KeyboardSafeView) */}
       <KeyboardSafeView style={styles.overlay}>
         <TouchableOpacity style={styles.flex1} activeOpacity={1} onPress={close} />
-        <View style={styles.card}>
+        <View style={[styles.card, { paddingBottom: bottomPad }]}>
           <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
             <Text style={styles.title}>Photo poll</Text>
             <View style={styles.kindRow}>
