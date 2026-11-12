@@ -20,6 +20,7 @@ import { useAuth } from '../../context/AuthContext';
 import useIsAdmin from '../../hooks/useIsAdmin';
 import Avatar from '../../components/Avatar';
 import PollCard from '../../components/PollCard';
+import BannerAdSlot from '../../components/ads/BannerAdSlot';
 import CreatePollModal from '../../components/CreatePollModal';
 import ActionSheet from '../../components/ActionSheet';
 import WardrobePickerModal from '../../components/WardrobePickerModal';
@@ -419,6 +420,8 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
         {...(Platform.OS === 'android' ? { backgroundColor: colors.surface } : {})}
       />
       {header}
+      {/* Ad under the header (polls and photos are voted on here) */}
+      <BannerAdSlot slot="pollBanner" />
       <KeyboardSafeView style={styles.flex1}>{body}</KeyboardSafeView>
 
       <CreatePollModal

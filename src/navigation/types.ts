@@ -10,6 +10,7 @@ export type RootStackParamList = {
   Comments: { postId?: string; highlightId?: string; target?: any };
   Admin: undefined;
   AdminUsers: undefined;
+  Terms: undefined;
   Settings: { edit?: boolean } | undefined;
   Achievements: undefined;
   FunctionPlanner: undefined;

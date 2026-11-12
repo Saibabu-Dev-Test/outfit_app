@@ -26,7 +26,8 @@ import {
   analyzeClothingPhoto,
   getWardrobeFullImage,
 } from '../../services/wardrobeApi';
-import { pickImage } from '../../utils/imagePicker';
+import { pickImage, remakeImage } from '../../utils/imagePicker';
+import { isPhotoBgSupported, PHOTO_BG_LABEL, PHOTO_BG_MODES, PhotoBgMode } from '../../native/photoBackground';
 import {
   CATEGORY_GROUPS,
   categoryGroupsForGender,
@@ -42,10 +43,12 @@ import {
   COLOR_SWATCHES,
   WEAR_TYPES,
   colorNameFromHex,
+  ACCESSORY_KINDS,
+  ALL_ACCESSORY_KINDS,
 } from '../../constants/wardrobe';
 
 // Labels the item name may be auto-filled with (replaced when the pick changes)
-const AUTO_NAMES = new Set([...ALL_CATEGORIES, ...SHOE_TYPES, ...ACCESSORY_TYPES]);
+const AUTO_NAMES = new Set([...ALL_CATEGORIES, ...SHOE_TYPES, ...ACCESSORY_TYPES, ...ALL_ACCESSORY_KINDS]);
 
 
 interface AddItemScreenProps {
@@ -93,6 +96,11 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
   const [imageUri, setImageUri]               = useState<string | null>(itemToEdit?.imageUrl || null);
   const [imageThumb, setImageThumb]           = useState<string | null>(null);
   const [imageClear, setImageClear]           = useState<string | null>(null);
+  // Background choice for a newly picked photo: made again from the original file each time
+  const [sourceUri, setSourceUri]             = useState<string | null>(null);
+  const [bgMode, setBgMode]                   = useState<PhotoBgMode>('off');
+  const [blurLevel, setBlurLevel]             = useState<number>(3);
+  const [bgBusy, setBgBusy]                   = useState(false);
   const [imageChanged, setImageChanged]       = useState(false);
   // Editing: the list holds the thumbnail; show the full photo (1 read) once it loads
   useEffect(() => {
@@ -117,7 +125,7 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
   );
   const [selectedCategory, setSelectedCategory]   = useState<string | null>(initialCategory);
   const [selectedSubType, setSelectedSubType]     = useState<string | null>(initialSubType);
-  const [selectedSubCategory] = useState<string | null>(itemToEdit?.subCategory || null);
+  const [selectedSubCategory, setSelectedSubCategory] = useState<string | null>(itemToEdit?.subCategory || null);
   const [selectedWearType, setSelectedWearType]   = useState<string>(itemToEdit?.wearType || 'Daily Wear');
   const [selectedColor, setSelectedColor]       = useState<string | null>(initialColor);
   const [selectedFabric, setSelectedFabric]     = useState<string | null>(itemToEdit?.fabric || null);
@@ -159,6 +167,8 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
       const next = selectedSubType === label ? null : label; // tap again = no type (All / Other)
       setSelectedCategory(selectedGroup.categories[0]);
       setSelectedSubType(next);
+      // A new type clears its kind (Rings › Nose Ring...)
+      if (next !== selectedSubType && selectedSubCategory && ALL_ACCESSORY_KINDS.includes(selectedSubCategory)) setSelectedSubCategory(null);
       autoName(next || selectedGroup.categories[0]);
     } else {
       setSelectedCategory(label);
@@ -222,11 +232,35 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
       setImageThumb(picked.thumbUri || null);
       setImageClear(picked.clearUri || null);
       setImageChanged(true);
+      setSourceUri(picked.uri || null);
+      setBgMode('off');
+      setBlurLevel(3);
       if (picked.uri) triggerAIAnalysis(picked.uri);
     } catch (e: any) {
       Alert.alert('Photo Error', e?.message || 'Could not use this photo.');
     }
   };
+  // Original / Blur (level 1-5) / Remove BG (plain white or black, opposite to the clothes)
+  const applyBg = async (mode: PhotoBgMode, level: number) => {
+    if (!sourceUri || bgBusy) return;
+    setBgMode(mode);
+    setBlurLevel(level);
+    setBgBusy(true);
+    try {
+      const p = await remakeImage(sourceUri, { mode, level });
+      if (p) {
+        setImageUri(p.dataUri);
+        setImageThumb(p.thumbUri || null);
+        setImageClear(p.clearUri || null);
+        setImageChanged(true);
+      }
+    } catch (e: any) {
+      Alert.alert('Photo Error', e?.message || 'Could not change the background.');
+    } finally {
+      setBgBusy(false);
+    }
+  };
+
   const openCamera = () => { pickFrom('camera'); };
   const openGallery = () => { pickFrom('library'); };
 
@@ -398,6 +432,48 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
           )}
         </View>
 
+        {/* Photo background: Original / Blur (with strength) / Remove BG */}
+        {imageUri && sourceUri && isPhotoBgSupported() ? (
+          <View style={styles.bgWrap}>
+            <View style={styles.bgRow}>
+              {PHOTO_BG_MODES.slice().reverse().map(m => {
+                const on = bgMode === m;
+                return (
+                  <TouchableOpacity
+                    key={m}
+                    style={[styles.bgChip, on && styles.bgChipOn]}
+                    disabled={bgBusy}
+                    onPress={() => applyBg(m, blurLevel)}
+                    activeOpacity={0.8}>
+                    <Text style={[styles.bgChipText, on && styles.bgChipTextOn]}>{PHOTO_BG_LABEL[m]}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+              {bgBusy ? <ActivityIndicator size="small" color={colors.primary} /> : null}
+            </View>
+            {bgMode === 'blur' ? (
+              <View style={styles.bgRow}>
+                <Text style={styles.bgLabel}>Blur</Text>
+                <TouchableOpacity
+                  style={styles.bgStep}
+                  disabled={bgBusy || blurLevel <= 1}
+                  onPress={() => applyBg('blur', blurLevel - 1)}
+                  accessibilityLabel="Less blur">
+                  <Text style={styles.bgStepText}>−</Text>
+                </TouchableOpacity>
+                <Text style={styles.bgLabel}>{'●'.repeat(blurLevel)}{'○'.repeat(5 - blurLevel)}</Text>
+                <TouchableOpacity
+                  style={styles.bgStep}
+                  disabled={bgBusy || blurLevel >= 5}
+                  onPress={() => applyBg('blur', blurLevel + 1)}
+                  accessibilityLabel="More blur">
+                  <Text style={styles.bgStepText}>＋</Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
+          </View>
+        ) : null}
+
         {/* AI Status Badge */}
         {aiStatusMsg ? (
           <View style={styles.aiBadgeContainer}>
@@ -465,9 +541,36 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
             </ScrollView>
           </>
         ) : null}
+        {selectedSubType && ACCESSORY_KINDS[selectedSubType] ? (
+          <>
+            <Text style={styles.swipeHint}>{typeLabel(selectedSubType, appLanguage)} kind (optional) · swipe ›</Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.chipSlider}
+              contentContainerStyle={styles.chipSliderContent}>
+              {ACCESSORY_KINDS[selectedSubType].map(k => {
+                const on = selectedSubCategory === k;
+                return (
+                  <TouchableOpacity
+                    key={k}
+                    style={[styles.pill, styles.pillSmall, on && styles.itemChipSelected]}
+                    onPress={() => {
+                      setSelectedSubCategory(on ? null : k);
+                      autoName(on ? selectedSubType : k);
+                    }}
+                    activeOpacity={0.75}>
+                    <Text style={styles.chipEmojiSmall}>{categoryIcon(k)}</Text>
+                    <Text style={[styles.pillText, on && styles.itemChipTextSelected]}>{typeLabel(k, appLanguage)}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </>
+        ) : null}
         {selectedLabel ? (
           <Text style={styles.pickedText}>
-            Selected: {categoryIcon(selectedLabel)} {selectedSubType ? `${selectedCategory} › ${selectedSubType}` : selectedCategory}
+            Selected: {categoryIcon(selectedLabel)} {selectedSubType ? `${selectedCategory} › ${selectedSubType}${selectedSubCategory && ALL_ACCESSORY_KINDS.includes(selectedSubCategory) ? ` › ${selectedSubCategory}` : ''}` : selectedCategory}
           </Text>
         ) : null}
 
@@ -938,6 +1041,16 @@ const styles = themedStyles(() => StyleSheet.create({
   swatch: { width: 32, height: 32, borderRadius: 16, borderWidth: 2 },
   swatchActive: { borderWidth: 3, borderColor: colors.primary, transform: [{ scale: 1.2 }] },
   colorName: { fontSize: 11, color: colors.textSecondary, fontWeight: fontWeight.semiBold, marginBottom: spacing.sm },
+
+  bgWrap: { marginTop: 8, gap: 6 },
+  bgRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+  bgChip: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 18, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface },
+  bgChipOn: { backgroundColor: colors.primary, borderColor: colors.primary },
+  bgChipText: { fontSize: 13, fontWeight: fontWeight.semiBold, color: colors.textSecondary },
+  bgChipTextOn: { color: '#FFFFFF' },
+  bgLabel: { fontSize: 13, color: colors.textSecondary },
+  bgStep: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.border },
+  bgStepText: { fontSize: 18, color: colors.textPrimary, fontWeight: fontWeight.bold },
 
 
   previewCard: {

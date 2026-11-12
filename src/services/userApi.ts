@@ -11,7 +11,8 @@ import {
   limit,
   getDocs,
 } from 'firebase/firestore';
-import { db } from '../config/firebaseConfig';
+import { auth, db } from '../config/firebaseConfig';
+import { isOwnerEmail } from '../config/owner';
 import { firestoreErrorMessage } from '../utils/firebaseErrors';
 import { localDateKey, yesterdayKey } from '../utils/date';
 import { MAX_BASE64_CHARS } from '../utils/imagePicker';
@@ -158,6 +159,11 @@ export const inlineAvatar = (uri?: string | null): string | null =>
 // Role from users/{uid}.role. Never throws.
 export const getMyRole = async (uid?: string | null): Promise<string | null> => {
   if (!uid) return null;
+  // The owner (verified Google email) always has every admin right
+  try {
+    const u: any = (auth as any)?.currentUser;
+    if (u && u.uid === uid && u.emailVerified && isOwnerEmail(u.email)) return 'admin';
+  } catch {}
   try {
     const snap = await getDoc(doc(db, 'users', uid));
     const role = snap.exists() ? (snap.data() as any)?.role : null;

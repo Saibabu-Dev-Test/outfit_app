@@ -1,20 +1,23 @@
 // Clothing photo background (Android: PhotoBackgroundModule.kt, ML Kit subject segmentation on the
-// phone). Settings > "Photo background": 'plain' (default: white behind dark clothes, black behind
-// light ones), 'blur' (background blurred) or 'off'. Applied to wardrobe, post, poll and multi-shot
-// photos when they are picked. Never throws: any failure keeps the original photo.
+// phone). Chosen per photo under the photo when adding clothes: Original (default), Blur (level
+// 1-5) or Remove BG ('plain': white behind dark clothes, black behind light ones). Never throws:
+// any failure keeps the original photo.
 import { NativeModules, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export type PhotoBgMode = 'plain' | 'blur' | 'off';
 export const PHOTO_BG_MODES: PhotoBgMode[] = ['plain', 'blur', 'off'];
 export const PHOTO_BG_LABEL: Record<PhotoBgMode, string> = {
-  plain: 'Plain (white / black)',
-  blur: 'Blur background',
-  off: 'Off (original)',
+  plain: 'Remove BG',
+  blur: 'Blur',
+  off: 'Original',
 };
 export const PHOTO_BG_KEY = 'outfitpref:photoBg';
 
-type NativeBg = { process?: (uri: string, mode: string) => Promise<{ uri: string; changed: boolean }> };
+type NativeBg = {
+  process?: (uri: string, mode: string) => Promise<{ uri: string; changed: boolean }>;
+  processLevel?: (uri: string, mode: string, level: number) => Promise<{ uri: string; changed: boolean }>;
+};
 const native = (): NativeBg | null => {
   try {
     return Platform.OS === 'android' ? (NativeModules.OutfitPhotoBackground as NativeBg) || null : null;
@@ -23,7 +26,7 @@ const native = (): NativeBg | null => {
   }
 };
 
-let mode: PhotoBgMode = 'plain';
+let mode: PhotoBgMode = 'off';
 let loaded = false;
 const load = async () => {
   try {
@@ -49,13 +52,14 @@ export const setPhotoBg = async (m: PhotoBgMode): Promise<void> => {
   } catch {}
 };
 
-/** The picked file with its background changed per the setting, or the same uri. */
-export const applyPhotoBg = async (uri: string): Promise<string> => {
+/** The file with its background changed (mode, else the saved default; blur level 1-5), or the same uri. */
+export const applyPhotoBg = async (uri: string, mode?: PhotoBgMode, level = 3): Promise<string> => {
   try {
-    const m = await getPhotoBg();
+    const m = mode || (await getPhotoBg());
     const n = native();
     if (m === 'off' || !n?.process || !uri) return uri;
-    const r = await n.process(uri, m);
+    const lv = Math.max(1, Math.min(5, Math.round(level)));
+    const r = n.processLevel ? await n.processLevel(uri, m, lv) : await n.process(uri, m);
     return r?.changed && r.uri ? r.uri : uri;
   } catch {
     return uri;
