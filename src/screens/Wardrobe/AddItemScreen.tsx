@@ -19,6 +19,7 @@ import KeyboardSafeView from '../../components/KeyboardSafeView';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles, statusBarStyle } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
+import { useAppLanguage } from '../../i18n/appLanguage';
 import {
   addWardrobeItem as apiAddWardrobeItem,
   updateWardrobeItem as apiUpdateWardrobeItem,
@@ -46,7 +47,6 @@ import {
 // Labels the item name may be auto-filled with (replaced when the pick changes)
 const AUTO_NAMES = new Set([...ALL_CATEGORIES, ...SHOE_TYPES, ...ACCESSORY_TYPES]);
 
-const FABRIC_TYPES = [ 'Formal', 'Casual', 'Party', 'Ethnic', 'Sports'];
 
 interface AddItemScreenProps {
   navigation: any;
@@ -64,6 +64,7 @@ interface AddItemScreenProps {
 
 export default function AddItemScreen({ navigation, route, onSave }: AddItemScreenProps) {
   const { user } = useAuth();
+  const appLanguage = useAppLanguage();
   const itemToEdit = route?.params?.itemToEdit;
   const isEditing = Boolean(itemToEdit?.id);
 
@@ -457,7 +458,7 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
                     onPress={() => pickType(t)}
                     activeOpacity={0.75}>
                     <Text style={styles.chipEmojiSmall}>{categoryIcon(t)}</Text>
-                    <Text style={[styles.pillText, isSelected && styles.itemChipTextSelected]}>{typeLabel(t, user?.language)}</Text>
+                    <Text style={[styles.pillText, isSelected && styles.itemChipTextSelected]}>{typeLabel(t, appLanguage)}</Text>
                   </TouchableOpacity>
                 );
               })}
@@ -530,23 +531,6 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
           </Text>
         ) : null}
 
-        {/* Fabric Type */}
-        <Text style={styles.mainSectionTitle}>FABRIC TYPE</Text>
-        <View style={styles.fabricWrap}>
-          {FABRIC_TYPES.map(fab => {
-            const active = selectedFabric === fab;
-            return (
-              <TouchableOpacity
-                key={fab}
-                style={[styles.fabricChip, active && styles.fabricChipActive]}
-                onPress={() => setSelectedFabric(active ? null : fab)}
-                activeOpacity={0.8}>
-                <Text style={[styles.fabricChipText, active && styles.fabricChipTextActive]}>{fab}</Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-
         {/* Public toggle (for a later public feed) */}
         <View style={styles.publicRow}>
           <Text style={styles.publicLabel}>Show in public feed</Text>
@@ -563,7 +547,6 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
               <Text style={styles.previewName}>{itemName.trim() || selectedCategory}</Text>
               <Text style={styles.previewMeta}>
                 {selectedSubType ? `${selectedCategory} › ${selectedSubType}` : selectedCategory} · {selectedWearType}{selectedColor ? ` · ${selectedColor}` : ''}
-                {selectedFabric ? ` · ${selectedFabric}` : ''}
               </Text>
             </View>
             {selectedColor ? (

@@ -19,7 +19,7 @@ export default function LikeLevelBadge({ uid, showNext }: { uid?: string | null;
   const next = showNext ? likesToNextLevel(likes) : null;
   return (
     <View style={styles.badge} accessibilityLabel={`${likes} likes received, ${likeLevelLabel(level)} level`}>
-      <Coin tier={level} size={18} />
+      <Coin tier={level} size={14} />
       <Text style={styles.text}>
         ❤️ {likes.toLocaleString()} {likes === 1 ? 'like' : 'likes'} · {likeLevelLabel(level)}
         {next !== null ? ` · ${next.toLocaleString()} to next` : ''}

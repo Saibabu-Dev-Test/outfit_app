@@ -27,7 +27,7 @@ export default function CoinBadge({ uid }: { uid?: string | null }) {
   return (
     <View>
       <View style={styles.badge} accessibilityLabel={`${total} coins, ${tierLabel(tier)} tier`}>
-        <Coin tier={tier} size={18} />
+        <Coin tier={tier} size={14} />
         <Text style={styles.text}>
           {total.toLocaleString()} · {tierLabel(tier)}
         </Text>

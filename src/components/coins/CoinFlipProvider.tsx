@@ -145,7 +145,7 @@ function CoinFlipOverlay() {
     <Animated.View pointerEvents="none" style={[styles.fill, wrapStyle]}>
       <View style={styles.card}>
         <Animated.View style={coinStyle}>
-          <Coin tier={shown.face} size={96} />
+          <Coin tier={shown.face} size={60} />
         </Animated.View>
         <Animated.View style={[styles.texts, textStyle]}>
           {shown.caption ? <Text style={styles.caption}>{shown.caption}</Text> : null}

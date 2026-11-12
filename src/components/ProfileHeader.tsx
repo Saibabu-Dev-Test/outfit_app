@@ -28,7 +28,6 @@ export default function ProfileHeader({
   name,
   avatarUrl,
   bio,
-  stylePrefs,
   counts,
   isStar,
   isPrivate,
@@ -72,15 +71,7 @@ export default function ProfileHeader({
       </Text>
       {badge || null}
       {bio ? <Text style={styles.bio}>{bio}</Text> : null}
-      {stylePrefs && stylePrefs.length ? (
-        <View style={styles.chips}>
-          {stylePrefs.map(p => (
-            <View key={p} style={styles.chip}>
-              <Text style={styles.chipText}>{p}</Text>
-            </View>
-          ))}
-        </View>
-      ) : null}
+      {/* Style preference chips removed from the profile header (kept in data only) */}
       {children ? <View style={styles.buttons}>{children}</View> : null}
       <FullScreenImageViewer
         visible={avatarOpen && !!avatarUrl}

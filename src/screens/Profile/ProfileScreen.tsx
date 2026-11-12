@@ -32,6 +32,7 @@ import {
 } from '../../services/birthProfile';
 import { astroLanguage, birthChartRows } from '../../services/astrologyDaily';
 import SelectModal from '../../components/SelectModal';
+import { APP_LANGUAGES, setAppLanguage, useAppLanguage } from '../../i18n/appLanguage';
 import CityPickerModal from '../../components/CityPickerModal';
 import FeedbackBoardModal from '../../components/FeedbackBoardModal';
 import ZoomableImage from '../../components/ZoomableImage';
@@ -98,6 +99,7 @@ export default function ProfileScreen() {
   const route = useRoute<any>();
   const { user: authUser, logout, updateUserData } = useAuth();
   const { mode: themeMode, isDark, setMode: setThemeMode } = useTheme();
+  const appLanguage = useAppLanguage();
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
   const [editIsPublic, setEditIsPublic] = useState<boolean>(true);
@@ -335,6 +337,11 @@ const fetchProfile = async () => {
       { text: 'Follow system', onPress: () => setThemeMode('system') },
       { text: 'Light', onPress: () => setThemeMode('light') },
       { text: 'Dark', onPress: () => setThemeMode('dark') },
+    ]);
+
+  const pickAppLanguage = () =>
+    Alert.alert('App language', `Wardrobe labels show in: ${appLanguage}`, [
+      ...APP_LANGUAGES.map(l => ({ text: l, onPress: () => setAppLanguage(l) })),
     ]);
 
   // App lock, invite code, friends joined, ⭐ badge
@@ -933,6 +940,13 @@ const fetchProfile = async () => {
               label: 'Dark mode',
               value: THEME_LABEL[themeMode],
               onPress: pickTheme,
+            },
+            {
+              id: 'applang',
+              icon: '🌐',
+              label: 'App language',
+              value: appLanguage,
+              onPress: pickAppLanguage,
             },
             ...(isUpdateSupported()
               ? [
