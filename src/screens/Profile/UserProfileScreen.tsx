@@ -1,35 +1,36 @@
 // Another user's profile (Instagram style): avatar (tap for full screen), counts, Follow / Unfollow,
-// Share profile, their public wardrobe (vote "Wear today" once a day, like, comment) and "Today's pick"
-// (the item with the most wear votes today). The old Posts tab was replaced; posts stay in the Feed.
-// Private profiles show "This account is private".
+// Share profile, their public wardrobe (vote "Wear today" once a day, like, comment) and Likes (the
+// posts and public wardrobe photos they liked, 20 per page, loaded when the tab opens). The old Posts
+// and Today's pick tabs were removed; posts stay in the Feed. Private profiles show "This account is private".
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
   TouchableOpacity,
-  ScrollView,
+  FlatList,
+  Image,
   ActivityIndicator,
   RefreshControl,
   StatusBar,
   Platform,
   Alert,
   StyleSheet,
+  useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, fontSize, fontWeight, spacing, themedStyles, statusBarStyle } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
 import ProfileHeader, { headerButtonStyles as hb } from '../../components/ProfileHeader';
 import WardrobeVoteGrid from '../../components/WardrobeVoteGrid';
-import TodaysPick from '../../components/TodaysPick';
 import useWearVotes from '../../hooks/useWearVotes';
 import { getPublicUser, PublicUser } from '../../services/userApi';
-import { getUserPublicWardrobePosts, Post } from '../../services/feedApi';
+import { FeedCursor, getUserLikesPage, getUserPublicWardrobePosts, Post } from '../../services/feedApi';
 import { isWeeklyStar } from '../../services/rewardsApi';
 import { follow, getProfileCounts, isFollowing, ProfileCounts, unfollow } from '../../services/socialApi';
 import { shareWithReferral } from '../../utils/referralLink';
 import { useBottomSpace } from '../../hooks/useBottomSpace';
 
-type TabKey = 'wardrobe' | 'pick';
+type TabKey = 'wardrobe' | 'likes';
 
 export default function UserProfileScreen({ navigation, route }: { navigation: any; route: any }) {
   const bottomPad = useBottomSpace();
@@ -48,6 +49,14 @@ export default function UserProfileScreen({ navigation, route }: { navigation: a
   const [refreshing, setRefreshing] = useState(false);
   const [sectionError, setSectionError] = useState<string | null>(null);
   const [isStar, setIsStar] = useState(false);
+  // Likes tab: null = not loaded yet (first page loads when the tab opens)
+  const [likes, setLikes] = useState<Post[] | null>(null);
+  const [likesCursor, setLikesCursor] = useState<FeedCursor>(null);
+  const [likesMore, setLikesMore] = useState(false);
+  const [likesBusy, setLikesBusy] = useState(false);
+  const [likesError, setLikesError] = useState<string | null>(null);
+  const { width } = useWindowDimensions();
+  const tile = Math.floor((width - 4) / 3);
   // Only when the profile is visible (private profiles can't be voted on)
   const wear = useWearVotes(status === 'ok' ? userId : undefined, me?.id);
 
@@ -91,6 +100,40 @@ export default function UserProfileScreen({ navigation, route }: { navigation: a
   useEffect(() => {
     load();
   }, [load]);
+
+  // One page of this user's likes; reset = first page (tab opened / pull to refresh)
+  const loadLikes = useCallback(
+    async (reset: boolean) => {
+      if (!userId) return;
+      setLikesBusy(true);
+      try {
+        const r = await getUserLikesPage(userId, reset ? null : likesCursor);
+        setLikes(prev => {
+          const base = reset || !prev ? [] : prev;
+          const seen = new Set(base.map(p => `${p.kind}_${p.id}`));
+          return base.concat(r.items.filter(p => !seen.has(`${p.kind}_${p.id}`)));
+        });
+        setLikesCursor(r.cursor);
+        setLikesMore(r.hasMore);
+        setLikesError(null);
+      } catch (e: any) {
+        setLikes(prev => prev ?? []);
+        setLikesMore(false);
+        setLikesError(e?.message || 'Could not load likes.');
+      } finally {
+        setLikesBusy(false);
+        setRefreshing(false);
+      }
+    },
+    [userId, likesCursor],
+  );
+
+  useEffect(() => {
+    if (tab !== 'likes' || status !== 'ok' || likesBusy) return;
+    if (likes === null) loadLikes(true);
+    // A page of only hidden items (private photos, deleted posts): fetch the next one
+    else if (!likes.length && likesMore && !likesError) loadLikes(false);
+  }, [tab, status, likes, likesBusy, likesMore, likesError, loadLikes]);
 
   useEffect(() => {
     let alive = true;
@@ -174,82 +217,115 @@ export default function UserProfileScreen({ navigation, route }: { navigation: a
         {...(Platform.OS === 'android' ? { backgroundColor: colors.surface } : {})}
       />
       {header}
-      <ScrollView
+      <FlatList
+        data={tab === 'likes' ? likes || [] : []}
+        keyExtractor={p => `${p.kind}_${p.id}`}
+        numColumns={3}
         contentContainerStyle={{ paddingBottom: bottomPad }}
+        ListHeaderComponent={
+          <>
+            <ProfileHeader
+              userId={userId}
+              name={profile.name}
+              avatarUrl={profile.avatarUrl}
+              bio={profile.bio}
+              counts={counts}
+              isStar={isStar}
+              isPrivate={!profile.isPublic}
+              todayVotes={wear.loading ? undefined : wear.tally.total}
+              onPressTodayVotes={() => setTab('wardrobe')}>
+              {isMe ? (
+                <TouchableOpacity style={hb.btn} onPress={() => navigation.navigate('Settings', { edit: true })}>
+                  <Text style={hb.btnText}>Edit profile</Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity
+                  style={[hb.btn, !following && hb.btnPrimary]}
+                  onPress={toggleFollow}
+                  disabled={followBusy}
+                  accessibilityLabel={following ? 'Unfollow' : 'Follow'}>
+                  {followBusy ? (
+                    <ActivityIndicator size="small" color={following ? colors.primary : colors.onPrimary} />
+                  ) : (
+                    <Text style={[hb.btnText, !following && hb.btnTextPrimary]}>{following ? 'Unfollow' : 'Follow'}</Text>
+                  )}
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity style={hb.btn} onPress={shareProfile}>
+                <Text style={hb.btnText}>↗ Share profile</Text>
+              </TouchableOpacity>
+            </ProfileHeader>
+            {profile.rashi ? <Text style={styles.rashi}>✨ {profile.rashi}</Text> : null}
+
+            <View style={styles.tabs}>
+              {(['wardrobe', 'likes'] as TabKey[]).map(t => (
+                <TouchableOpacity key={t} style={[styles.tab, tab === t && styles.tabOn]} onPress={() => setTab(t)}>
+                  <Text style={[styles.tabText, tab === t && styles.tabTextOn]}>
+                    {t === 'wardrobe' ? `👗 Wardrobe (${items.length})` : '♥ Likes'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            {sectionError ? <Text style={styles.error}>{sectionError}</Text> : null}
+            {tab === 'wardrobe' ? (
+              <WardrobeVoteGrid
+                items={items}
+                ownerId={userId}
+                ownerName={profile.name}
+                isOwner={isMe}
+                wear={wear}
+                empty="No public wardrobe items."
+              />
+            ) : likesError ? (
+              <Text style={styles.error}>{likesError}</Text>
+            ) : null}
+          </>
+        }
+        renderItem={({ item: p }) => (
+          <TouchableOpacity
+            style={[styles.likeTile, { width: tile, height: tile }]}
+            activeOpacity={0.85}
+            onPress={() => navigation.navigate('PostDetail', { kind: p.kind, id: p.id })}
+            accessibilityLabel="Open liked photo">
+            <Image source={{ uri: p.imageData }} style={{ width: tile, height: tile }} resizeMode="cover" />
+            {p.photos.length > 1 ? (
+              <View style={styles.likeBadge}>
+                <Text style={styles.likeBadgeText}>A-{String.fromCharCode(64 + p.photos.length)}</Text>
+              </View>
+            ) : null}
+          </TouchableOpacity>
+        )}
+        ListEmptyComponent={
+          tab === 'likes' ? (
+            likes === null || likesBusy ? (
+              <ActivityIndicator style={styles.spinner} color={colors.primary} />
+            ) : likesError ? undefined : (
+              <Text style={styles.empty}>{`${profile.name} hasn't liked any public photos yet.`}</Text>
+            )
+          ) : undefined
+        }
+        ListFooterComponent={
+          tab === 'likes' && likesBusy && !!likes?.length ? (
+            <ActivityIndicator style={styles.spinner} color={colors.primary} />
+          ) : undefined
+        }
+        onEndReachedThreshold={0.5}
+        onEndReached={() => {
+          if (tab === 'likes' && likesMore && !likesBusy) loadLikes(false);
+        }}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
             onRefresh={() => {
               setRefreshing(true);
               load();
+              if (tab === 'likes') loadLikes(true);
             }}
             tintColor={colors.primary}
             colors={[colors.primary]}
           />
-        }>
-        <ProfileHeader
-          userId={userId}
-          name={profile.name}
-          avatarUrl={profile.avatarUrl}
-          bio={profile.bio}
-          counts={counts}
-          isStar={isStar}
-          isPrivate={!profile.isPublic}
-          todayVotes={wear.loading ? undefined : wear.tally.total}
-          onPressTodayVotes={() => setTab('pick')}>
-          {isMe ? (
-            <TouchableOpacity style={hb.btn} onPress={() => navigation.navigate('Settings', { edit: true })}>
-              <Text style={hb.btnText}>Edit profile</Text>
-            </TouchableOpacity>
-          ) : (
-            <TouchableOpacity
-              style={[hb.btn, !following && hb.btnPrimary]}
-              onPress={toggleFollow}
-              disabled={followBusy}
-              accessibilityLabel={following ? 'Unfollow' : 'Follow'}>
-              {followBusy ? (
-                <ActivityIndicator size="small" color={following ? colors.primary : colors.onPrimary} />
-              ) : (
-                <Text style={[hb.btnText, !following && hb.btnTextPrimary]}>{following ? 'Unfollow' : 'Follow'}</Text>
-              )}
-            </TouchableOpacity>
-          )}
-          <TouchableOpacity style={hb.btn} onPress={shareProfile}>
-            <Text style={hb.btnText}>↗ Share profile</Text>
-          </TouchableOpacity>
-        </ProfileHeader>
-        {profile.rashi ? <Text style={styles.rashi}>✨ {profile.rashi}</Text> : null}
-
-        <View style={styles.tabs}>
-          {(['wardrobe', 'pick'] as TabKey[]).map(t => (
-            <TouchableOpacity key={t} style={[styles.tab, tab === t && styles.tabOn]} onPress={() => setTab(t)}>
-              <Text style={[styles.tabText, tab === t && styles.tabTextOn]}>
-                {t === 'wardrobe' ? `👗 Wardrobe (${items.length})` : "⭐ Today's pick"}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-        {sectionError ? <Text style={styles.error}>{sectionError}</Text> : null}
-
-        {tab === 'wardrobe' ? (
-          <WardrobeVoteGrid
-            items={items}
-            ownerId={userId}
-            ownerName={profile.name}
-            isOwner={isMe}
-            wear={wear}
-            empty="No public wardrobe items."
-          />
-        ) : (
-          <TodaysPick
-            items={items}
-            ownerName={profile.name}
-            isOwner={isMe}
-            wear={wear}
-            onOpenWardrobe={() => setTab('wardrobe')}
-          />
-        )}
-      </ScrollView>
+        }
+      />
     </SafeAreaView>
   );
 }
@@ -277,4 +353,17 @@ const styles = themedStyles(() => StyleSheet.create({
   tabText: { fontSize: fontSize.sm, color: colors.textMuted, fontWeight: fontWeight.semiBold },
   tabTextOn: { color: colors.textPrimary, fontWeight: fontWeight.bold },
   error: { color: colors.error, textAlign: 'center', padding: spacing.sm },
+  spinner: { marginTop: spacing.xl },
+  empty: { textAlign: 'center', color: colors.textMuted, padding: spacing.xxl, fontSize: fontSize.sm },
+  likeTile: { margin: 0.66, backgroundColor: colors.divider },
+  likeBadge: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 6,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+  },
+  likeBadgeText: { color: '#FFFFFF', fontSize: 10, fontWeight: '800' },
 }));

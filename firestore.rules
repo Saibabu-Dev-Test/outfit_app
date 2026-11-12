@@ -298,8 +298,12 @@ service cloud.firestore {
 
     // ── Likes list: users/{uid}/liked/{p_postId | w_wardrobeId} {kind, refId, createdAt} ──
     // Written by the owner in the same write as the like itself.
+    // Read-only for others: any signed-in user may read the list of a public profile (profile › Likes
+    // tab), the same people who can read users/{uid}. Writes stay owner-only.
     match /users/{uid}/liked/{key} {
-      allow read: if signedIn() && me() == uid;
+      allow read: if signedIn()
+        && (me() == uid
+            || get(/databases/$(db)/documents/users/$(uid)).data.get('isPublic', true) == true);
       allow create, update: if signedIn() && me() == uid
         && request.resource.data.keys().hasOnly(['kind', 'refId', 'createdAt'])
         && request.resource.data.kind in ['post', 'wardrobe']
