@@ -843,6 +843,47 @@ export const getLikedItems = async (uid: string, max = 60): Promise<Post[]> => {
   }
 };
 
+// ── Another user's public Likes (profile › Likes tab), one page at a time ──
+// One query on users/{uid}/liked (createdAt desc, single-field index, no composite index) + one read
+// per liked item not already cached. Private wardrobe photos, deleted posts and items the reader may
+// not see are skipped. Rules: a signed-in user may read the list of a public profile (read-only).
+export const USER_LIKES_PAGE = 20;
+export const getUserLikesPage = async (
+  uid: string,
+  cursor: FeedCursor = null,
+  pageSize = USER_LIKES_PAGE,
+): Promise<{ items: Post[]; cursor: FeedCursor; hasMore: boolean }> => {
+  let snap;
+  try {
+    const base = collection(db, 'users', uid, 'liked');
+    snap = await getDocs(
+      cursor
+        ? query(base, orderBy('createdAt', 'desc'), startAfter(cursor), limit(pageSize))
+        : query(base, orderBy('createdAt', 'desc'), limit(pageSize)),
+    );
+  } catch (e: any) {
+    return fail(e, 'Loading likes');
+  }
+  const refs = snap.docs
+    .map(d => d.data() as any)
+    .filter(x => (x?.kind === 'post' || x?.kind === 'wardrobe') && typeof x?.refId === 'string')
+    .map(x => ({ kind: x.kind as FeedKind, refId: x.refId as string }));
+  const items = await Promise.all(
+    refs.map(r => {
+      const known = cachedPost(r.kind, r.refId);
+      if (known) return Promise.resolve(known);
+      return r.kind === 'post' ? getPost(r.refId).catch(() => null) : getWardrobeAsPost(r.refId);
+    }),
+  );
+  const visible = items.filter((x): x is Post => !!x && !!x.imageData);
+  rememberPosts(visible);
+  return {
+    items: visible,
+    cursor: snap.docs.length ? snap.docs[snap.docs.length - 1] : cursor,
+    hasMore: snap.docs.length === pageSize,
+  };
+};
+
 // ── Circle feed: posts + public wardrobe photos from people who share a circle with me ──
 // (and my own), newest first. Queries use userId in [<= 30 circle mates] per chunk, so they read
 // only circle items (indexes: posts userId ASC + createdAt DESC; wardrobe isPublic ASC + userId ASC
