@@ -7,16 +7,18 @@
 //   app.json                                   "react-native-google-mobile-ads".android_app_id
 // A missing or malformed app id there crashes the app at launch, so never leave it empty.
 
-export type AdSlot = 'feedNative' | 'circlesBanner' | 'searchBanner' | 'astroRewarded' | 'poruthamRewarded';
+export type AdSlot = 'feedNative' | 'circlesBanner' | 'searchBanner' | 'pollBanner' | 'astroRewarded' | 'poruthamRewarded';
 
 // Real ids (AdMob > Apps > Outfit). Unit names as in the AdMob console.
 export const REAL_ADS = {
-  appId: 'ca-app-pub-6289221123241733~9168675820',
-  feedNative: 'ca-app-pub-6289221123241733/4435223895', // feed_native (Native advanced): Feed, after every 5 posts
-  circlesBanner: 'ca-app-pub-6289221123241733/6542512483', // circles_banner (Banner): under the Circles list
-  searchBanner: 'ca-app-pub-6289221123241733/8214686801', // search_banner (Banner): people search
-  astroRewarded: 'ca-app-pub-6289221123241733/3122142221', // astro_rewarded (Rewarded): "See full reading"
-  poruthamRewarded: 'ca-app-pub-6289221123241733/4303361956', // porutham_rewarded (Rewarded): full Pelli Porutham
+  appId: 'ca-app-pub-8006246175093661~4589468267',
+  feedNative: 'ca-app-pub-8006246175093661/9650223257', // feed_native (Native advanced): Feed, after every 5 posts
+  circlesBanner: 'ca-app-pub-8006246175093661/4345035031', // circles_banner (Banner): under the Circles list
+  searchBanner: 'ca-app-pub-8006246175093661/1718871690', // search_banner (Banner): people search
+  // Polls in circle chats: uses the circles banner unit until a poll_banner unit is made in AdMob
+  pollBanner: 'ca-app-pub-8006246175093661/9905142618',
+  astroRewarded: 'ca-app-pub-8006246175093661/8348090730', // astro_rewarded (Rewarded): "See full reading"
+  poruthamRewarded: 'ca-app-pub-8006246175093661/4708656255', // porutham_rewarded (Rewarded): full Pelli Porutham
 } as const;
 
 // Google's official test ids (Android): https://developers.google.com/admob/android/test-ads
@@ -25,6 +27,7 @@ export const TEST_ADS = {
   feedNative: 'ca-app-pub-3940256099942544/2247696110',
   circlesBanner: 'ca-app-pub-3940256099942544/9214589741',
   searchBanner: 'ca-app-pub-3940256099942544/9214589741',
+  pollBanner: 'ca-app-pub-3940256099942544/9214589741',
   astroRewarded: 'ca-app-pub-3940256099942544/5224354917',
   poruthamRewarded: 'ca-app-pub-3940256099942544/5224354917',
 } as const;
@@ -39,7 +42,7 @@ export const ADS_ENABLED = true;
 export const FEED_AD_EVERY = 5;
 
 // Rewarded ads: give up loading after this long and unlock anyway (never punish users for no fill)
-export const REWARDED_LOAD_TIMEOUT_MS = 8000;
+export const REWARDED_LOAD_TIMEOUT_MS = 15000;
 // Short wait shown before unlocking when no ad could be shown
 export const REWARDED_FALLBACK_WAIT_MS = 2500;
 

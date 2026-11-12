@@ -14,10 +14,17 @@ service cloud.firestore {
       return request.auth.uid;
     }
     // users/{uid}.role == 'admin' is set by hand in the Firebase console
-    function isAdmin() {
+    // The app owner (verified Google email) is always an admin; keep OWNER_EMAILS in
+    // src/config/owner.ts equal to this list
+    function isOwner() {
       return signedIn()
+        && request.auth.token.get('email_verified', false) == true
+        && request.auth.token.get('email', '') in ['2saibabug@gmail.com'];
+    }
+    function isAdmin() {
+      return isOwner() || (signedIn()
         && exists(/databases/$(db)/documents/users/$(request.auth.uid))
-        && get(/databases/$(db)/documents/users/$(request.auth.uid)).data.get('role', '') == 'admin';
+        && get(/databases/$(db)/documents/users/$(request.auth.uid)).data.get('role', '') == 'admin');
     }
     function onlyChanged(keys) {
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys);
@@ -589,13 +596,13 @@ service cloud.firestore {
 
     // ── Wardrobe (Phase 1) ──────────────────────────────────────────────
     match /wardrobe/{itemId} {
-      // Admin may read (not write) every item: Admin › Storage counts all items and per-user photos
+      // Admins read every item (Admin › Storage counts and the Admin tracking screen); admins can remove any item
       allow read: if signedIn()
         && (resource.data.userId == me() || resource.data.isPublic == true || isAdmin());
       allow create: if signedIn() && request.resource.data.userId == me();
       allow update: if signedIn() && resource.data.userId == me()
         && request.resource.data.userId == resource.data.userId;
-      allow delete: if signedIn() && resource.data.userId == me();
+      allow delete: if signedIn() && (resource.data.userId == me() || isAdmin());
 
       // ── Likes and comments on public wardrobe photos in the feed ──
       function itemData() {

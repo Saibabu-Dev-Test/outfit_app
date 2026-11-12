@@ -30,4 +30,34 @@ describe('removed UI stays removed', () => {
       expect(typeLabel(t, 'Hindi')).toBe(t);
     });
   });
+
+  it('wardrobe labels follow only Settings > App language (English by default), never the profile language', () => {
+    ['src/screens/Wardrobe/AddItemScreen.tsx', 'src/screens/Wardrobe/WardrobeCategoryScreen.tsx'].forEach(f => {
+      const src = read(f);
+      expect(src).not.toMatch(/ypeLabel\([^)]*user\?*\.language/);
+      expect(src).not.toMatch(/ypeLabel\([^)]*profile\?*\.language/);
+    });
+    expect(read('src/i18n/appLanguage.ts')).toMatch(/let current: AppLanguage = 'English'/);
+  });
+
+  it("Me profile has no Today's pick tab", () => {
+    const src = read('src/screens/Profile/MeScreen.tsx');
+    expect(src).not.toMatch(/Today's pick/);
+    expect(src).not.toMatch(/TodaysPick/);
+    expect(src).not.toMatch(/'pick'/);
+  });
+
+  it('astrology festivals and Porutham sit behind the daily ad unlock', () => {
+    const src = read('src/components/AstrologyPanel.tsx');
+    const lockedAt = src.indexOf('{unlocked ? (');
+    const elseAt = src.indexOf(') : (', src.indexOf('moreFail'));
+    expect(lockedAt).toBeGreaterThan(-1);
+    const fest = src.indexOf('shownFest.map(festivalCard)');
+    const por = src.indexOf('onOpenPorutham ? (');
+    expect(fest).toBeGreaterThan(lockedAt);
+    expect(fest).toBeLessThan(elseAt);
+    expect(por).toBeGreaterThan(lockedAt);
+    expect(por).toBeLessThan(elseAt);
+    expect(src).toMatch(/Watch 1 ad to see full astrology/);
+  });
 });

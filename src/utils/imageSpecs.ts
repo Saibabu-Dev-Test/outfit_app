@@ -32,9 +32,11 @@ export interface ImageSpec {
 export const FULL_SPEC: ImageSpec = { maxEdge: 2048, maxBytes: 690 * 1024, jpeg: true, enhance: false, minQ: 70, maxQ: 92 };
 // The previous full photo size (still used where a document holds several photos)
 export const SHARP_SPEC: ImageSpec = { maxEdge: 1440, maxBytes: 170 * 1024, sharpen: 0.6 };
-export const THUMB_SPEC: ImageSpec = { maxEdge: 360, maxBytes: 16 * 1024 };
+// Sharper grids (Nov 2026): 540 px <= 28 KB (~38K chars, under the 40K thumb cap); was 360 px / 16 KB
+export const THUMB_SPEC: ImageSpec = { maxEdge: 540, maxBytes: 28 * 1024 };
 // Feed card / chat bubble photo (full width): sharp and still small (~40-60 KB)
-export const CLEAR_SPEC: ImageSpec = { maxEdge: 1080, maxBytes: 56 * 1024, sharpen: 0.5 };
+// Clearer feed cards (Nov 2026): 1440 px <= 100 KB (~137K chars, under the 160K clear cap; 6 fit one doc)
+export const CLEAR_SPEC: ImageSpec = { maxEdge: 1440, maxBytes: 100 * 1024, sharpen: 0.4, minQ: 70 };
 // Largest base64 length (characters, with the data: prefix) of one full photo
 export const FULL_MAX_CHARS = Math.ceil((690 * 1024 * 4) / 3) + 64;
 // Circle poll / chat photos (up to 6 in one message doc: 6 x ~109K chars < 1 MiB)

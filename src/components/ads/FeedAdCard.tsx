@@ -5,7 +5,7 @@ import React, { useEffect, useState } from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
 import { borderRadius, colors, fontSize, fontWeight, spacing, themedStyles } from '../../theme';
 import AdErrorBoundary from './AdErrorBoundary';
-import { adsModule, initAds } from '../../native/ads';
+import { adsModule, initAds, noteAd } from '../../native/ads';
 import { adUnitId } from '../../config/ads';
 import useAdsAllowed from './useAdsAllowed';
 
@@ -22,9 +22,11 @@ function NativeCard() {
       try {
         await initAds();
         loaded = await m.NativeAd.createForAdRequest(adUnitId('feedNative'), { startVideoMuted: true });
+        noteAd('feedNative', true, 'Loaded');
         if (alive) setAd(loaded);
         else loaded?.destroy?.();
-      } catch {
+      } catch (e: any) {
+        noteAd('feedNative', false, `${e?.code || ''} ${e?.message || 'No fill'}`.trim());
         // No fill / offline: show nothing
       }
     })();

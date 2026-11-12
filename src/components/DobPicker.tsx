@@ -1,4 +1,4 @@
-// Date of birth picker with no native deps: year -> month -> day in three SelectModal steps.
+// Date of birth picker with no native deps: date -> month -> year in three SelectModal steps.
 // Value is 'YYYY-MM-DD'. Also exports DobRequiredModal: the one-time blocking prompt on Home
 // for older accounts that have no date of birth (mirrors the mandatory gender prompt).
 import React, { useState } from 'react';
@@ -23,18 +23,20 @@ interface FieldProps {
 }
 
 export function DobField({ value, onChange, disabled, boxStyle, valueStyle, placeholderStyle }: FieldProps) {
-  const [step, setStep] = useState<'none' | 'year' | 'month' | 'day'>('none');
-  const [year, setYear] = useState('');
+  // Order: Date -> Month -> Year (Indian style DD-MM-YYYY).
+  const [step, setStep] = useState<'none' | 'day' | 'month' | 'year'>('none');
+  const [day, setDay] = useState(0);
   const [month, setMonth] = useState(0);
   const thisYear = new Date().getFullYear();
   const years = Array.from({ length: 116 }, (_, i) => String(thisYear - 5 - i));
-  const daysIn = year && month ? new Date(Number(year), month, 0).getDate() : 31;
-  const days = Array.from({ length: daysIn }, (_, i) => String(i + 1));
+  const days = Array.from({ length: 31 }, (_, i) => String(i + 1));
+  const monthDays = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  const months = day ? MONTHS.filter((_, i) => monthDays[i] >= day) : MONTHS;
   return (
     <>
       <TouchableOpacity
         style={boxStyle || styles.box}
-        onPress={() => setStep('year')}
+        onPress={() => setStep('day')}
         disabled={disabled}
         activeOpacity={0.7}
         accessibilityLabel="Date of birth">
@@ -44,36 +46,39 @@ export function DobField({ value, onChange, disabled, boxStyle, valueStyle, plac
         <Text style={styles.chev}>▾</Text>
       </TouchableOpacity>
       <SelectModal
+        visible={step === 'day'}
+        title="Date"
+        options={days}
+        selected={value ? String(Number(value.slice(8, 10))) : null}
+        onSelect={d => {
+          setDay(Number(d));
+          setTimeout(() => setStep('month'), 250);
+        }}
+        onClose={() => setStep(s => (s === 'day' ? 'none' : s))}
+      />
+      <SelectModal
+        visible={step === 'month'}
+        title="Month"
+        options={months}
+        onSelect={m => {
+          setMonth(MONTHS.indexOf(m) + 1);
+          setTimeout(() => setStep('year'), 250);
+        }}
+        onClose={() => setStep(s => (s === 'month' ? 'none' : s))}
+      />
+      <SelectModal
         visible={step === 'year'}
         title="Year of birth"
         options={years}
         selected={value ? value.slice(0, 4) : null}
         onSelect={y => {
-          setYear(y);
-          setTimeout(() => setStep('month'), 250);
-        }}
-        onClose={() => setStep(s => (s === 'year' ? 'none' : s))}
-      />
-      <SelectModal
-        visible={step === 'month'}
-        title="Month"
-        options={MONTHS}
-        onSelect={m => {
-          setMonth(MONTHS.indexOf(m) + 1);
-          setTimeout(() => setStep('day'), 250);
-        }}
-        onClose={() => setStep(s => (s === 'month' ? 'none' : s))}
-      />
-      <SelectModal
-        visible={step === 'day'}
-        title="Day"
-        options={days}
-        onSelect={d => {
-          const dob = `${year}-${String(month).padStart(2, '0')}-${d.padStart(2, '0')}`;
+          const max = new Date(Number(y), month, 0).getDate(); // 29 Feb in a non-leap year -> 28
+          const d = Math.min(day, max);
+          const dob = `${y}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
           if (isValidDob(dob)) onChange(dob);
           setStep('none');
         }}
-        onClose={() => setStep(s => (s === 'day' ? 'none' : s))}
+        onClose={() => setStep(s => (s === 'year' ? 'none' : s))}
       />
     </>
   );

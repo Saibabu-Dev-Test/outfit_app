@@ -102,3 +102,10 @@ export const pickImages = async (max: number, opts: PickOptions = POLL_PICK): Pr
   }
   return { images, skipped };
 };
+
+// Background choices are Android only: the web keeps the original photo
+export const remakeImage = async (
+  _uri: string,
+  _bg: { mode: 'plain' | 'blur' | 'off'; level?: number },
+  _opts: PickOptions = PHOTO_PICK,
+): Promise<PickedImage | null> => null;

@@ -4,6 +4,7 @@
 // The picker hands over the original file (no pre-shrink), so every size is made from the original.
 import { launchCamera, launchImageLibrary, Asset, ImagePickerResponse, CameraOptions } from 'react-native-image-picker';
 import { canResize, resizeImage } from './imageResize';
+import { applyPhotoBg, PhotoBgMode } from '../native/photoBackground';
 import { AVATAR_SPEC, AVATAR_THUMB_SPEC, CLEAR_SPEC, FULL_MAX_CHARS, FULL_SPEC, ImageSpec, POLL_SPEC, THUMB_SPEC } from './imageSpecs';
 
 // Largest photo data URI accepted anywhere (one full photo: JPEG <= 690 KB = ~942K base64 chars,
@@ -73,6 +74,18 @@ const fromAsset = async (a: Asset, o: PickOptions): Promise<PickedImage | null> 
     }
   }
   return { dataUri, thumbUri, clearUri, uri: a.uri };
+};
+
+// Same photo again with a background choice (Original / Blur level 1-5 / plain white-black), made
+// from the ORIGINAL picked file (uri) so switching back and forth never loses quality.
+export const remakeImage = async (
+  uri: string,
+  bg: { mode: PhotoBgMode; level?: number },
+  opts: PickOptions = PHOTO_PICK,
+): Promise<PickedImage | null> => {
+  const src = bg.mode === 'off' ? uri : await applyPhotoBg(uri, bg.mode, bg.level);
+  const p = await fromAsset({ uri: src }, opts);
+  return p ? { ...p, uri } : null;
 };
 
 const TOO_BIG = 'This photo is too large to save. Please pick a smaller photo or crop it.';

@@ -156,3 +156,19 @@ export const getUserCounts = async (): Promise<UserCounts> => {
   }
   return { total, newToday, newThisWeek, activeToday, at: new Date() };
 };
+
+// Admin tracking: how much is in the app. Each count is one server aggregate (null when refused).
+export interface AppCounts {
+  wardrobe: number | null;
+  posts: number | null;
+  circles: number | null;
+  at: Date;
+}
+export const getAppCounts = async (): Promise<AppCounts> => {
+  const [wardrobe, posts, circles] = await Promise.all([
+    countOf(collection(db, 'wardrobe')),
+    countOf(collection(db, 'posts')),
+    countOf(collection(db, 'circles')),
+  ]);
+  return { wardrobe, posts, circles, at: new Date() };
+};

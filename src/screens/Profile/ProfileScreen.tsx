@@ -18,7 +18,7 @@ import KeyboardSafeView from '../../components/KeyboardSafeView';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { pickImage, AVATAR_PICK } from '../../utils/imagePicker';
-import { getUserProfile, saveUserProfile, uploadAvatar } from '../../services/userApi';
+import { getMyRole, getUserProfile, saveUserProfile, uploadAvatar } from '../../services/userApi';
 import { isValidDob } from '../../utils/age';
 import { mdFromDob, mdLabel, setBirthdayListing } from '../../services/birthdayApi';
 import { checkNotifications, openNotificationSettings } from '../../native/notifications';
@@ -32,6 +32,7 @@ import {
 } from '../../services/birthProfile';
 import { astroLanguage, birthChartRows } from '../../services/astrologyDaily';
 import SelectModal from '../../components/SelectModal';
+import { APP_LANGUAGES, setAppLanguage, useAppLanguage } from '../../i18n/appLanguage';
 import CityPickerModal from '../../components/CityPickerModal';
 import FeedbackBoardModal from '../../components/FeedbackBoardModal';
 import ZoomableImage from '../../components/ZoomableImage';
@@ -102,6 +103,7 @@ export default function ProfileScreen() {
   const route = useRoute<any>();
   const { user: authUser, logout, updateUserData } = useAuth();
   const { mode: themeMode, isDark, setMode: setThemeMode } = useTheme();
+  const appLanguage = useAppLanguage();
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
   const [editIsPublic, setEditIsPublic] = useState<boolean>(true);
@@ -302,6 +304,7 @@ const fetchProfile = async () => {
       showBirthday: stored.showBirthday === true,
     };
     setIsAdmin(stored.role === 'admin');
+    getMyRole(authUser.id).then(r => r === 'admin' && setIsAdmin(true));
     // Birth chart saved for other details (or before this screen computed it): recompute and save
     if (astroChartStale(merged, merged.astroChart)) {
       const upd = birthProfileUpdate(merged, { prevConfirmedKey: merged.birthConfirmedKey });
@@ -341,6 +344,11 @@ const fetchProfile = async () => {
       { text: 'Follow system', onPress: () => setThemeMode('system') },
       { text: 'Light', onPress: () => setThemeMode('light') },
       { text: 'Dark', onPress: () => setThemeMode('dark') },
+    ]);
+
+  const pickAppLanguage = () =>
+    Alert.alert('App language', `Wardrobe labels show in: ${appLanguage}`, [
+      ...APP_LANGUAGES.map(l => ({ text: l, onPress: () => setAppLanguage(l) })),
     ]);
 
   // App lock, invite code, friends joined, ⭐ badge
@@ -952,6 +960,13 @@ const fetchProfile = async () => {
               value: THEME_LABEL[themeMode],
               onPress: pickTheme,
             },
+            {
+              id: 'applang',
+              icon: '🌐',
+              label: 'App language',
+              value: appLanguage,
+              onPress: pickAppLanguage,
+            },
             ...(isUpdateSupported()
               ? [
                   {
@@ -971,7 +986,7 @@ const fetchProfile = async () => {
               onPress: () => setFeedbackOpen(true),
             },
             { id: 'help', icon: '❓', label: 'Help & Support' },
-            { id: 'terms', icon: '📋', label: 'Terms & Conditions' },
+            { id: 'terms', icon: '📋', label: 'Terms & Conditions', value: 'About Outfit, features, coins and rules', onPress: () => navigation.navigate('Terms') },
           ].map(item => (
             <TouchableOpacity
               key={item.id}

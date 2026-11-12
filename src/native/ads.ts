@@ -12,6 +12,14 @@ import {
 
 export type RewardedSlot = 'astroRewarded' | 'poruthamRewarded';
 
+// Last ad outcome per slot, for the Admin screen ("Ads status"): why ads are not showing
+export interface AdStatus { slot: string; ok: boolean; message: string; at: number }
+const adStatus: Record<string, AdStatus> = {};
+export const noteAd = (slot: string, ok: boolean, message: string): void => {
+  adStatus[slot] = { slot, ok, message, at: Date.now() };
+};
+export const adStatuses = (): AdStatus[] => Object.values(adStatus).sort((a, b) => b.at - a.at);
+
 let mod: any = null;
 let tried = false;
 
@@ -101,7 +109,10 @@ export const showRewardedAd = (slot: RewardedSlot): Promise<RewardedResult> => {
   // The user asked for it (the app is up by then): fine to start the SDK now
   if (!allowed) allowAds();
   const m = adsModule();
-  if (!m) return Promise.resolve('no_ad');
+  if (!m) {
+    noteAd(slot, false, 'Ads module not available on this build');
+    return Promise.resolve('no_ad');
+  }
   return new Promise<RewardedResult>(resolve => {
     let done = false;
     let earned = false;
@@ -119,6 +130,7 @@ export const showRewardedAd = (slot: RewardedSlot): Promise<RewardedResult> => {
       resolve(r);
     };
     const timer = setTimeout(() => {
+      if (!shown) noteAd(slot, false, 'Timed out: no ad loaded (no fill)');
       if (!shown) finish('no_ad');
     }, REWARDED_LOAD_TIMEOUT_MS);
     try {
@@ -129,6 +141,7 @@ export const showRewardedAd = (slot: RewardedSlot): Promise<RewardedResult> => {
         if (typeof u === 'function') unsubs.push(u);
       };
       on(m.RewardedAdEventType.LOADED, () => {
+        noteAd(slot, true, 'Loaded');
         if (done) return;
         shown = true;
         Promise.resolve(ad.show()).catch(() => finish('no_ad'));
@@ -137,7 +150,10 @@ export const showRewardedAd = (slot: RewardedSlot): Promise<RewardedResult> => {
         earned = true;
       });
       on(m.AdEventType.CLOSED, () => finish(earned ? 'earned' : 'closed'));
-      on(m.AdEventType.ERROR, () => finish(shown && earned ? 'earned' : 'no_ad'));
+      on(m.AdEventType.ERROR, (err?: any) => {
+        noteAd(slot, false, `${err?.code || ''} ${err?.message || 'Ad error'}`.trim());
+        finish(shown && earned ? 'earned' : 'no_ad');
+      });
       ad.load();
     } catch (e: any) {
       console.warn('Rewarded ad failed:', e?.message);
