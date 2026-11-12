@@ -34,6 +34,7 @@ import { DobRequiredModal } from '../../components/DobPicker';
 import NameWithAge from '../../components/NameWithAge';
 import { ageFromDobIST, isValidDob } from '../../utils/age';
 import BirthdaysCard from '../../components/BirthdaysCard';
+import FunctionPlanCard from '../../components/FunctionPlanCard';
 import {
   checkWeeklyStars,
   getDay,
@@ -571,6 +572,7 @@ export default function HomeScreen() {
         </View>
 
         {/* 🎂 Birthdays today + next 7 days (opt-in), wishes, and the birthday circle on my birthday */}
+        {user?.id ? <FunctionPlanCard uid={String(user.id)} /> : null}
         {user?.id ? <BirthdaysCard uid={String(user.id)} /> : null}
         <DobRequiredModal visible={needDob} onSave={saveDob} />
 

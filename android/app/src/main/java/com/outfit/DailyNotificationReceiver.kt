@@ -19,6 +19,12 @@ class DailyNotificationReceiver : BroadcastReceiver() {
         OutfitNotifier.scheduleSlot(ctx, slot)
       }
       OutfitNotifier.ACTION_VOTE -> OutfitNotifier.onVoteAlarm(ctx)
+      OutfitNotifier.ACTION_REMINDER -> {
+        val id = intent.getIntExtra(OutfitNotifier.EXTRA_ID, 0)
+        val title = intent.getStringExtra(OutfitNotifier.EXTRA_TITLE) ?: return
+        val body = intent.getStringExtra(OutfitNotifier.EXTRA_BODY) ?: ""
+        OutfitNotifier.post(ctx, OutfitNotifier.CHANNEL_DAILY, id, title, body)
+      }
       Intent.ACTION_BOOT_COMPLETED,
       Intent.ACTION_MY_PACKAGE_REPLACED,
       Intent.ACTION_TIME_CHANGED,
