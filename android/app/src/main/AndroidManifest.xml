@@ -19,12 +19,12 @@
       android:theme="@style/AppTheme"
       android:networkSecurityConfig="@xml/network_security_config"
       android:supportsRtl="true">
-      <!-- AdMob App ID. TODO(AdMob): this is Google's official TEST app id. Replace it (here AND in
-           app.json "react-native-google-mobile-ads".android_app_id AND src/config/ads.ts) with the real
-           id from your AdMob account (Apps > App settings), or ads will never earn money. -->
+      <!-- AdMob App ID (real). Keep equal to app.json "react-native-google-mobile-ads".android_app_id
+           and REAL_ADS.appId in src/config/ads.ts. Debug builds still use Google's TEST ad UNIT ids
+           (src/config/ads.ts), which is the recommended setup. Never remove: the SDK crashes at start. -->
       <meta-data
         android:name="com.google.android.gms.ads.APPLICATION_ID"
-        android:value="ca-app-pub-3940256099942544~3347511713"
+        android:value="ca-app-pub-6289221123241733~9168675820"
         tools:replace="android:value" />
       <activity
         android:name=".MainActivity"

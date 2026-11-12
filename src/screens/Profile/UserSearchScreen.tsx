@@ -14,6 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles, statusBarStyle } from '../../theme';
 import Avatar from '../../components/Avatar';
+import BannerAdSlot from '../../components/ads/BannerAdSlot';
 import { PublicUser, searchUsers } from '../../services/userApi';
 
 export default function UserSearchScreen({ navigation }: { navigation: any }) {
@@ -98,6 +99,8 @@ export default function UserSearchScreen({ navigation }: { navigation: any }) {
           ) : undefined
         }
       />
+      {/* Banner under the results (nothing when there is no ad) */}
+      <BannerAdSlot slot="searchBanner" />
     </SafeAreaView>
   );
 }

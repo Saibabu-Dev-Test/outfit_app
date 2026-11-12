@@ -23,6 +23,7 @@ import {
   Linking,
 } from 'react-native';
 import KeyboardSafeView from '../../components/KeyboardSafeView';
+import BannerAdSlot from '../../components/ads/BannerAdSlot';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { useDayKey } from '../../hooks/useDayKey';
@@ -580,6 +581,8 @@ export default function CirclesScreen() {
           )
         }
       />
+      {/* Banner under the circles list (nothing when there is no ad) */}
+      <BannerAdSlot slot="circlesBanner" />
 
       {/* Create circle */}
       <Modal

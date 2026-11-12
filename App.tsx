@@ -5,6 +5,7 @@ import { KeyboardProvider } from './src/components/keyboard';
 import RootNavigator from './src/navigation/RootNavigator';
 import NotificationGate from './src/components/NotificationGate';
 import { captureClipboardReferral } from './src/utils/referralLink';
+import { initAds } from './src/native/ads';
 import { ThemeProvider, useTheme } from './src/theme';
 
 function Themed() {
@@ -13,6 +14,11 @@ function Themed() {
   // download page copied (OUTFITREF:CODE) for the sign-up screen
   useEffect(() => {
     captureClipboardReferral();
+    // Mobile Ads SDK, a few seconds after start so it never slows the first screen (never throws)
+    const t = setTimeout(() => {
+      initAds().catch(() => undefined);
+    }, 3000);
+    return () => clearTimeout(t);
   }, []);
   return (
     <>

@@ -25,6 +25,8 @@ import KeyboardSafeView, { useKeyboardShown } from '../../components/KeyboardSaf
 import { CommentInputFocusContext, FocusBox } from '../../components/InlineComments';
 import { FeedLoader, FeedScope, Post } from '../../services/feedApi';
 import { subscribeUnreadActivity } from '../../services/activityWatcher';
+import FeedAdCard from '../../components/ads/FeedAdCard';
+import { FEED_AD_EVERY } from '../../config/ads';
 
 export default function FeedScreen({ navigation, route }: { navigation: any; route: any }) {
   const { user } = useAuth();
@@ -174,15 +176,19 @@ export default function FeedScreen({ navigation, route }: { navigation: any; rou
         }}
         scrollEventThrottle={32}
         keyExtractor={p => `${p.kind}_${p.id}`}
-        renderItem={({ item }) => (
-          <PostCard
-            post={item}
-            width={width}
-            myUid={uid}
-            isAdmin={isAdmin}
-            inlineComments
-            onDeleted={p => setPosts(prev => prev.filter(x => !(x.id === p.id && x.kind === p.kind)))}
-          />
+        renderItem={({ item, index }) => (
+          <>
+            <PostCard
+              post={item}
+              width={width}
+              myUid={uid}
+              isAdmin={isAdmin}
+              inlineComments
+              onDeleted={p => setPosts(prev => prev.filter(x => !(x.id === p.id && x.kind === p.kind)))}
+            />
+            {/* Sponsored card after every FEED_AD_EVERY posts (nothing when there is no ad) */}
+            {(index + 1) % FEED_AD_EVERY === 0 ? <FeedAdCard /> : null}
+          </>
         )}
         onEndReached={loadMore}
         onEndReachedThreshold={0.6}
