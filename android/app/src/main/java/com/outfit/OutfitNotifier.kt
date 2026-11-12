@@ -34,6 +34,11 @@ object OutfitNotifier {
   // Reminders run from this local hour until the vote (every hour)
   const val VOTE_START_HOUR = 1
   const val EXTRA_SLOT = "slot"
+  // One-off reminders set by the app (function planner): id = request code + notification id
+  const val ACTION_REMINDER = "com.outfit.PLAN_REMINDER"
+  const val EXTRA_ID = "rid"
+  const val EXTRA_TITLE = "title"
+  const val EXTRA_BODY = "body"
   private const val PREFS = "outfit_notifications"
   private const val KEY_DAILY_ON = "daily_on"
   // First name of the signed-in user (saved by the app at login / profile update) for the 8 AM title
@@ -106,6 +111,27 @@ object OutfitNotifier {
     } catch (e: SecurityException) {
       false
     }
+  }
+
+  // ── One-off reminders (function planner) ──
+  private fun reminderIntent(ctx: Context, id: Int, title: String?, body: String?): PendingIntent {
+    val i = Intent(ctx, DailyNotificationReceiver::class.java).setAction(ACTION_REMINDER).putExtra(EXTRA_ID, id)
+    if (title != null) i.putExtra(EXTRA_TITLE, title)
+    if (body != null) i.putExtra(EXTRA_BODY, body)
+    return PendingIntent.getBroadcast(ctx, id, i, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+  }
+
+  // Same id replaces the earlier alarm (idempotent). Inexact (no exact-alarm permission).
+  fun scheduleReminder(ctx: Context, id: Int, at: Long, title: String, body: String) {
+    if (at <= System.currentTimeMillis()) return
+    ensureChannels(ctx)
+    val am = ctx.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
+    am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, reminderIntent(ctx, id, title, body))
+  }
+
+  fun cancelReminder(ctx: Context, id: Int) {
+    val am = ctx.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
+    am.cancel(reminderIntent(ctx, id, null, null))
   }
 
   // ── Daily reminders ──
