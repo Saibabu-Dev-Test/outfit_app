@@ -118,6 +118,7 @@ jobs:
       # 5.8. Release signing key from secrets (nothing secret in the repo).
       # Preferred: RELEASE_KEYSTORE_BASE64 (+ RELEASE_KEYSTORE_PASSWORD, RELEASE_KEY_ALIAS,
       # RELEASE_KEY_PASSWORD), decoded to a temp file outside the repo.
+      # RELEASE_KEYSTORE_PASSWORD may be omitted when the keystore still uses OUTFIT_KEYSTORE_PASSWORD.
       # Legacy fallback until those exist: android/app/outfit-release.p12 + OUTFIT_KEYSTORE_PASSWORD.
       - name: Release signing key
         env:
@@ -125,7 +126,7 @@ jobs:
           RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
           OUTFIT_KEYSTORE_PASSWORD: ${{ secrets.OUTFIT_KEYSTORE_PASSWORD }}
         run: |
-          if [ -n "$RELEASE_KEYSTORE_BASE64" ] && [ -n "$RELEASE_KEYSTORE_PASSWORD" ]; then
+          if [ -n "$RELEASE_KEYSTORE_BASE64" ] && [ -n "${RELEASE_KEYSTORE_PASSWORD:-$OUTFIT_KEYSTORE_PASSWORD}" ]; then
             umask 077
             printf '%s' "$RELEASE_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.p12"
             echo "RELEASE_KEYSTORE_FILE=$RUNNER_TEMP/release.p12" >> "$GITHUB_ENV"
