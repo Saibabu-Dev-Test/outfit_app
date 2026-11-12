@@ -1,11 +1,12 @@
 // Coin rewards: points per action and the tiers. One place for every number.
 // If you change COIN_POINTS, change coinPoints() in firestore.rules too.
-export type CoinAction = 'like' | 'upload' | 'share';
+export type CoinAction = 'like' | 'upload' | 'share' | 'task';
 
 export const COIN_POINTS: Record<CoinAction, number> = {
   like: 1,
   upload: 10,
   share: 50,
+  task: 100, // a finished monthly task (config/monthlyTasks.ts TASK_COINS)
 };
 
 export type CoinTier = 'silver' | 'gold' | 'diamond';

@@ -373,6 +373,9 @@ export default function AdminScreen({ navigation }: { navigation: any }) {
         <Text style={styles.back}>‹</Text>
       </TouchableOpacity>
       <Text style={styles.title}>🛡️ Admin</Text>
+      <TouchableOpacity onPress={() => navigation.navigate('AdminRewards')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+        <Text style={styles.rewardsLink}>🎁 Rewards</Text>
+      </TouchableOpacity>
     </View>
   );
 
@@ -460,6 +463,7 @@ export default function AdminScreen({ navigation }: { navigation: any }) {
 }
 
 const styles = themedStyles(() => StyleSheet.create({
+  rewardsLink: { marginLeft: spacing.md, fontSize: fontSize.sm, fontWeight: fontWeight.bold, color: colors.primary },
   safeArea: { flex: 1, backgroundColor: colors.background },
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
   back: { fontSize: 34, color: colors.primary, marginRight: spacing.sm, lineHeight: 36 },
