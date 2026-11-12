@@ -14,19 +14,38 @@ const crash = () => {
   }
 };
 
+// "Name: message" + the top 15 stack lines (the stack's own first line repeats the message)
+export const formatJsError = (error, isFatal) => {
+  const name = error?.name || error?.constructor?.name || 'Error';
+  const message = error?.message || String(error);
+  const lines = String(error?.stack || '')
+    .split('\n')
+    .map(l => l.trim())
+    .filter(l => l && !l.startsWith(`${name}:`) && l !== message);
+  const top = lines.slice(0, 15);
+  const more = lines.length > top.length ? `\n  ... ${lines.length - top.length} more` : '';
+  const stack = top.length ? top.map(l => `  ${l}`).join('\n') + more : '  (no stack)';
+  return `${isFatal ? 'Fatal' : 'Error'} at ${new Date().toISOString()}\n${name}: ${message}\n${stack}`;
+};
+
 const g = global;
 if (g.ErrorUtils?.setGlobalHandler) {
   const defaultHandler = g.ErrorUtils.getGlobalHandler?.();
   g.ErrorUtils.setGlobalHandler((error, isFatal) => {
-    const msg = `${error?.name || 'Error'}: ${error?.message || String(error)}`;
-    const stack = String(error?.stack || '').slice(0, 2500);
-    console.warn('Global JS error:', msg, error?.stack);
+    let text = '';
+    try {
+      text = formatJsError(error, isFatal);
+    } catch (e) {
+      text = String(error);
+    }
+    console.warn('Global JS error:', text);
     if (isFatal) {
+      // Saved natively first: shown with Copy in the native dialog on the next launch
       try {
-        crash()?.saveJsCrash?.(`${msg}\n\n${stack}`);
+        crash()?.saveJsCrash?.(text.slice(0, 3500));
       } catch (e) {}
       try {
-        Alert.alert('App error (send this screenshot)', `${msg}\n\n${stack.slice(0, 600)}`);
+        Alert.alert('App error (send this screenshot)', text.slice(0, 900));
       } catch (e) {}
     } else if (defaultHandler) {
       defaultHandler(error, isFatal);
