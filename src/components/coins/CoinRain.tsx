@@ -15,7 +15,7 @@ import Coin from './Coin';
 
 const FALL_MS = 2200;
 const STAGGER_MS = 170;
-const COIN = 56;
+const COIN = 36; // small coins (was 56)
 
 function RainCoin({ e, index, width, height }: { e: CoinRainBusEvent; index: number; width: number; height: number }) {
   const y = useSharedValue(-COIN * 2);
@@ -56,8 +56,10 @@ function CoinRainOverlay() {
         clear();
         const n = rainCoinCount(e.count);
         setShown({ e: { level: e.level, count: e.count }, key: Date.now() });
-        // A flip sound as each coin starts (every other coin when many, so it never gets noisy)
-        for (let i = 0; i < n; i += n > 6 ? 2 : 1) {
+        // The coin sound is a 1.8 s small-coin jingle: start at most 4 (SoundPool plays 4 at once),
+        // spread across the rain so it never turns into noise
+        const step = Math.max(1, Math.ceil(n / 4));
+        for (let i = 0; i < n; i += step) {
           timers.current.push(setTimeout(playCoinSound, i * STAGGER_MS));
         }
         timers.current.push(setTimeout(() => setShown(null), n * STAGGER_MS + FALL_MS + 300));
