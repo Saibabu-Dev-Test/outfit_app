@@ -15,7 +15,7 @@ import Coin from './Coin';
 
 const FALL_MS = 2200;
 const STAGGER_MS = 170;
-const COIN = 36; // small coins (was 56)
+const COIN = 30; // small coins
 
 function RainCoin({ e, index, width, height }: { e: CoinRainBusEvent; index: number; width: number; height: number }) {
   const y = useSharedValue(-COIN * 2);
