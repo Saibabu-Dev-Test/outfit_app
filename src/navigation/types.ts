@@ -17,5 +17,7 @@ export type RootStackParamList = {
   PostDetail: { kind: 'post' | 'wardrobe'; id: string };
   FollowList: { userId: string; mode: 'followers' | 'following'; name?: string };
   // Birthday wishes for one person, or today's "Happy birthday to all" circle
+  // 💑 Pelli Porutham: self = the signed-in user's birth details (from Me)
+  Porutham: { self?: { name?: string | null; dob?: string | null; timeOfBirth?: string | null; placeOfBirth?: string | null; rashi?: string | null; gender?: string | null } } | undefined;
   BirthdayChat: { mode: 'wishes'; uid?: string } | { mode: 'circle' };
 };

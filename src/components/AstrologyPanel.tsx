@@ -20,6 +20,7 @@ interface Props {
   profile: AstroProfile;
   wardrobe?: WardrobeItemResponse[] | null;
   onEditProfile: () => void;
+  onOpenPorutham?: () => void; // 💑 Pelli Porutham screen
 }
 
 const SHOW_EN_KEY = 'outfit.astro.showEnglish';
@@ -30,7 +31,7 @@ const shortDate = (k: string) => {
   return `${d} ${MONTHS[m - 1]}`;
 };
 
-export default function AstrologyPanel({ uid, profile, wardrobe, onEditProfile }: Props) {
+export default function AstrologyPanel({ uid, profile, wardrobe, onEditProfile, onOpenPorutham }: Props) {
   const dayKey = useDayKey();
   const appLang = astroLanguage(profile.language);
   const [lang, setLang] = useState<AstroLang>(appLang);
@@ -182,6 +183,12 @@ export default function AstrologyPanel({ uid, profile, wardrobe, onEditProfile }
       ) : null}
 
       {shownFest.map(festivalCard)}
+
+      {onOpenPorutham ? (
+        <TouchableOpacity style={styles.moreBtn} onPress={onOpenPorutham} accessibilityLabel="Pelli Porutham">
+          <Text style={styles.moreText}>💑 Pelli Porutham · పెళ్లి పొరుత్తం</Text>
+        </TouchableOpacity>
+      ) : null}
 
       {reading.needsDob ? (
         <View style={[styles.card, styles.askCard]}>

@@ -42,6 +42,7 @@ import {
 import { resolveMyPlace } from '../../services/districtApi';
 import { MAX_BASE64_CHARS, pickImages } from '../../utils/imagePicker';
 import { clockTime } from '../../utils/date';
+import { isPhotoExpired, PHOTO_EXPIRED_TEXT } from '../../utils/photoExpiry';
 import NameWithAge from '../../components/NameWithAge';
 import TranslatedText from '../../components/TranslatedText';
 
@@ -234,6 +235,8 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
     // Inverted list: the next item in the array is the previous message on screen
     const prev = messages[index + 1];
     const showName = !mine && (!prev || prev.userId !== item.userId);
+    // Photos (and photo polls) older than 60 days are hidden; text stays
+    const expired = item.type !== 'text' && isPhotoExpired(item.createdAt);
     return (
       <View style={[styles.row, mine ? styles.rowMine : styles.rowOther]}>
         {!mine && (
@@ -246,7 +249,7 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
           onLongPress={() => onMessageLongPress(item)}
           delayLongPress={350}
           onPress={() =>
-            item.type === 'image' && item.imageData ? setViewer({ images: [item.imageData], index: 0 }) : undefined
+            !expired && item.type === 'image' && item.imageData ? setViewer({ images: [item.imageData], index: 0 }) : undefined
           }
           style={[
             styles.bubble,
@@ -256,10 +259,16 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
           {showName && (
             <NameWithAge style={styles.name} onPress={() => openProfile(item.userId)} uid={item.userId} name={item.userName} age={(item as any).userAge} />
           )}
-          {item.type === 'image' && item.imageData ? (
+          {expired ? (
+            <View style={styles.expired}>
+              <Text style={styles.expiredText}>🖼️ {PHOTO_EXPIRED_TEXT}</Text>
+              {item.type === 'poll' && item.poll?.question ? <Text style={styles.expiredText}>{item.poll.question}</Text> : null}
+            </View>
+          ) : null}
+          {!expired && item.type === 'image' && item.imageData ? (
             <Image source={{ uri: item.imageData }} style={styles.photo} resizeMode="cover" />
           ) : null}
-          {item.type === 'poll' ? (
+          {!expired && item.type === 'poll' ? (
             <PollCard
               circleId={circleId}
               message={item}
@@ -270,7 +279,7 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
             />
           ) : null}
           {item.text ? <TranslatedText style={[styles.text, mine && styles.textMine]} authorId={item.userId} text={item.text} /> : null}
-          {item.type !== 'text' ? (
+          {item.type !== 'text' && !expired ? (
             <ReactionBar
               circleId={circleId}
               messageId={item.id}
@@ -506,6 +515,8 @@ const styles = themedStyles(() => StyleSheet.create({
   bubbleMedia: { paddingHorizontal: spacing.sm, paddingTop: spacing.sm },
   name: { fontSize: fontSize.xs, fontWeight: fontWeight.bold, color: colors.accent, marginBottom: 2 },
   photo: { width: 220, height: 260, borderRadius: borderRadius.md, backgroundColor: colors.divider },
+  expired: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: borderRadius.md, backgroundColor: colors.divider },
+  expiredText: { fontSize: fontSize.xs, color: colors.textMuted, fontStyle: 'italic' },
   text: { fontSize: fontSize.base, color: colors.textPrimary, lineHeight: 21 },
   textMine: { color: colors.textInverse },
   time: { fontSize: 10, color: colors.textMuted, alignSelf: 'flex-end', marginTop: 2 },
