@@ -1,4 +1,4 @@
-import { FESTIVALS, festivalText } from '../src/services/festivals';
+import { FESTIVALS, festivalText, wearText } from '../src/services/festivals';
 import { ASTRO_LANGS, colourName, COLOUR_KEYS } from '../src/i18n/astroNames';
 
 const on = (id: string) => FESTIVALS.find(f => f.id === id)!.dates;
@@ -33,5 +33,20 @@ describe('festivals 2026-27', () => {
     expect(colourName('Yellow', 'Odia')).toBe('ହଳଦିଆ');
     expect(festivalText(FESTIVALS[0], 'Odia').name).toBe('ନୂଆ ବର୍ଷ');
     expect(festivalText(FESTIVALS[0], 'Odia').about).toBe(FESTIVALS[0].about.English);
+  });
+
+  it('has every festival name and dress-colour line in all 12 languages', () => {
+    FESTIVALS.forEach(f =>
+      ASTRO_LANGS.forEach(l => {
+        const t = festivalText(f, l);
+        expect(t.name.trim().length).toBeGreaterThan(0);
+        expect(t.wear.trim().length).toBeGreaterThan(0);
+        if (l !== 'English' && l !== 'Telugu') {
+          f.colours.forEach(c => expect(t.wear).toContain(colourName(c.name, l)));
+        }
+      }),
+    );
+    expect(wearText(FESTIVALS.find(f => f.id === 'holi')!, 'Hindi')).toBe('पहनने के रंग: सफ़ेद');
+    expect(festivalText(FESTIVALS[0], 'Telugu').wear).toBe(FESTIVALS[0].wear.Telugu);
   });
 });

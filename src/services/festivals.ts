@@ -1,7 +1,7 @@
 // Offline list of Indian / Telugu festivals and national days for 2026 and 2027 (IST dates, 56
 // entries), with a short explanation, how to celebrate and what to wear (colours + why).
-// Names: all 12 app languages. About / celebrate / wear: English and Telugu (other languages show
-// the English text, with their own festival and colour names).
+// Names and the dress-colour line (wear): all 12 app languages. About / celebrate: English and
+// Telugu (other languages show the English text).
 // Dates checked (Nov 2026): Telangana G.O.Rt.No.1715 (general / optional holidays 2026), DoPT
 // central-government holiday list 2027 (O.M. 12/2/2023-JCA, 16 Jul 2026), and the Hyderabad
 // (Lahiri, Amanta) festival tables of thetelugucalendar.com for 2026 / 2027; Bathukamma 2026 = 10 Oct,
@@ -11,6 +11,7 @@
 // 2027 list not yet out). Bonalu: Golconda start + the Telangana holiday (2026); 2027 start only.
 // Vaikunta Ekadashi has no date in 2027 (it falls in Jan 2028). Add the 2028 dates before 2028.
 import { daysBetween, istDay } from '../utils/astro';
+import { colourName } from '../i18n/astroNames';
 import type { AstroLang } from '../i18n/astroNames';
 
 type ByLang = Partial<Record<AstroLang, string>> & { English: string };
@@ -497,9 +498,24 @@ export const festivalsAround = (d: Date = new Date(), withinDays = 7): { today: 
 };
 
 const tx = (r: ByLang, lang: AstroLang): string => r[lang] || r.English;
+
+// Short "colours to wear" line for languages without a written wear text (built from the
+// festival's colours, so every festival has its dress plan in all 12 languages).
+const WEAR_LEAD: Record<AstroLang, string> = {
+  English: 'Colours to wear', Telugu: 'ధరించవలసిన రంగులు', Hindi: 'पहनने के रंग', Tamil: 'அணிய வேண்டிய நிறங்கள்',
+  Kannada: 'ಧರಿಸಬೇಕಾದ ಬಣ್ಣಗಳು', Malayalam: 'ധരിക്കേണ്ട നിറങ്ങൾ', Marathi: 'परिधानाचे रंग', Bengali: 'পরার রং',
+  Gujarati: 'પહેરવાના રંગો', Punjabi: 'ਪਹਿਨਣ ਦੇ ਰੰਗ', Odia: 'ପିନ୍ଧିବା ରଙ୍ଗ', Urdu: 'پہننے کے رنگ',
+};
+export const wearText = (f: Festival, lang: AstroLang): string => {
+  if (f.wear[lang]) return f.wear[lang]!;
+  if (!f.colours.length) return f.wear.English;
+  const sep = lang === 'Urdu' ? '، ' : ', ';
+  return `${WEAR_LEAD[lang]}: ${f.colours.map(c => colourName(c.name, lang)).join(sep)}`;
+};
+
 export const festivalText = (f: Festival, lang: AstroLang) => ({
   name: tx(f.name, lang),
   about: tx(f.about, lang),
   celebrate: tx(f.celebrate, lang),
-  wear: tx(f.wear, lang),
+  wear: wearText(f, lang),
 });
