@@ -13,6 +13,8 @@ export type RootStackParamList = {
   Settings: { edit?: boolean } | undefined;
   Achievements: undefined;
   FunctionPlanner: undefined;
+  MonthlyTasks: undefined;
+  AdminRewards: undefined;
   Likes: { tab?: 'activity' | 'likes' } | undefined;
   LikedBy: { kind: 'post' | 'wardrobe'; id: string };
   PostDetail: { kind: 'post' | 'wardrobe'; id: string };

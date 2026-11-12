@@ -204,6 +204,15 @@ export default function AchievementsScreen({ navigation }: { navigation: any }) 
           </View>
         </View>
 
+        <TouchableOpacity style={[styles.card, styles.monthly]} onPress={() => navigation.navigate('MonthlyTasks')} activeOpacity={0.8}>
+          <Text style={styles.rowIcon}>🎯</Text>
+          <View style={styles.rowBody}>
+            <Text style={styles.rowTitle}>Monthly tasks & rewards</Text>
+            <Text style={styles.rowSub}>7 tasks · earn coins · redeem 4 rewards</Text>
+          </View>
+          <Text style={styles.monthlyGo}>›</Text>
+        </TouchableOpacity>
+
         {!day ? (
           <ActivityIndicator style={styles.spinner} color={colors.primary} />
         ) : (
@@ -274,6 +283,8 @@ const styles = themedStyles(() => StyleSheet.create({
     overflow: 'hidden',
   },
   spinner: { marginTop: spacing.xl },
+  monthly: { flexDirection: 'row', alignItems: 'center', marginTop: spacing.md },
+  monthlyGo: { fontSize: 26, color: colors.primary, marginLeft: spacing.sm },
   section: {
     fontSize: fontSize.md,
     fontWeight: fontWeight.extraBold,
