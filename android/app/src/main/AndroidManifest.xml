@@ -11,6 +11,7 @@
          capture goes to the app's cache via FileProvider (react-native-image-picker, saveToPhotos off) -->
 
     <application
+      android:largeHeap="true"
       android:name=".MainApplication"
       android:label="@string/app_name"
       android:icon="@mipmap/ic_launcher"
