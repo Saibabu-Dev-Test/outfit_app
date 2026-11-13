@@ -32,7 +32,7 @@ export const TRACKED_FEATURES: TrackedFeature[] = [
   { title: 'Photo background: Original / Blur (level) / Remove BG', status: 'in_review', pr: 27 },
   { title: 'Clearer photos (sharper grid and feed copies)', status: 'in_review', pr: 27 },
   { title: 'Rings: finger, ear, nose, toe, couple rings', status: 'in_review', pr: 27 },
-  { title: "Today's pick removed from Me", status: 'in_review', pr: 27 },
+  { title: "Today's pick removed everywhere", status: 'live', pr: 27 },
   { title: 'Astro tab: astrology first, festivals after', status: 'in_review', pr: 27 },
   { title: 'Poll ads in circle chats + ads status for admin', status: 'in_review', pr: 27 },
   { title: 'Admin tracking screen + admin can remove any wardrobe item', status: 'in_review', pr: 27 },

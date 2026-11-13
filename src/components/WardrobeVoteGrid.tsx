@@ -8,7 +8,6 @@ import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles } fro
 import { useAuth } from '../context/AuthContext';
 import { getWardrobeStats, Post, toggleWardrobeLike } from '../services/feedApi';
 import { logActivity } from '../services/activityApi';
-import { topWearItem } from '../services/wearVotesApi';
 import { WearVotes } from '../hooks/useWearVotes';
 import FullScreenImageViewer, { ViewerVoteBar } from './FullScreenImageViewer';
 import LikersSheet from './LikersSheet';
@@ -88,7 +87,6 @@ export default function WardrobeVoteGrid({ items, ownerId, ownerName, isOwner, w
 
   if (!items.length) return <Text style={styles.empty}>{empty || 'No wardrobe items yet.'}</Text>;
 
-  const top = wear.tally.total ? topWearItem(wear.tally, ids) : null;
   const name = (p: Post) => p.caption.replace(/^👗\s*/, '') || 'Item';
   const votesText = (n: number) => `${n} ${n === 1 ? 'vote' : 'votes'} today`;
 
@@ -135,11 +133,6 @@ export default function WardrobeVoteGrid({ items, ownerId, ownerName, isOwner, w
             <View key={p.id} style={[styles.tile, mine && styles.tileMine]}>
               <TouchableOpacity activeOpacity={0.85} onPress={() => setViewIndex(i)} accessibilityLabel={`Open ${name(p)} full screen`}>
                 <Image source={{ uri: p.imageData }} style={styles.image} resizeMode="cover" />
-                {top === p.id ? (
-                  <View style={styles.topBadge}>
-                    <Text style={styles.topBadgeText}>⭐ Today's pick</Text>
-                  </View>
-                ) : null}
                 {isPrivate ? (
                   <View style={styles.lock}>
                     <Text style={styles.lockText}>🔒</Text>
@@ -227,16 +220,6 @@ const styles = themedStyles(() => StyleSheet.create({
   },
   tileMine: { borderColor: colors.accent },
   image: { width: '100%', aspectRatio: 0.85, backgroundColor: colors.divider },
-  topBadge: {
-    position: 'absolute',
-    top: 6,
-    left: 6,
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-    borderRadius: 10,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-  },
-  topBadgeText: { color: '#FFFFFF', fontSize: 10, fontWeight: fontWeight.extraBold },
   lock: { position: 'absolute', top: 6, right: 6 },
   lockText: { fontSize: 14 },
   name: { fontSize: fontSize.sm, fontWeight: fontWeight.semiBold, color: colors.textPrimary, paddingHorizontal: 8, paddingTop: 6 },
