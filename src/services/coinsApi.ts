@@ -87,7 +87,13 @@ interface LikeInfo {
   owner?: string | null;
 }
 
-const doAward = async (type: CoinAction, targetId: string, like?: LikeInfo) => {
+interface AwardOpts {
+  // Show the flip (with this line under the coin) even when no coins are added
+  // (already awarded today / earlier): the Home colour vote flips on every vote.
+  flipCaption?: string;
+}
+
+const doAward = async (type: CoinAction, targetId: string, like?: LikeInfo, opts?: AwardOpts) => {
   const uid = auth?.currentUser?.uid;
   if (!uid || !targetId) return;
   const eventId = coinEventId(type, targetId);
@@ -101,9 +107,12 @@ const doAward = async (type: CoinAction, targetId: string, like?: LikeInfo) => {
     const level = likeLevelFor(received ?? 0);
     showCoinFlip({ earned, total, tier: tierFor(total), face: level, caption: likeCaption(level) });
   };
+  const plainFlip = (earned: number, total: number) =>
+    showCoinFlip({ earned, total, tier: tierFor(total), caption: opts?.flipCaption });
   if (tried.has(key)) {
-    // Already rewarded (this session): a like still gets its flip, with no new coins
+    // Already rewarded (this session): a like (or a flipCaption award) still gets its flip, with no new coins
     if (like) await likeFlip(0, (await loadCoinTotal(uid)) ?? 0);
+    else if (opts?.flipCaption) plainFlip(0, (await loadCoinTotal(uid)) ?? 0);
     return;
   }
   tried.add(key);
@@ -128,12 +137,13 @@ const doAward = async (type: CoinAction, targetId: string, like?: LikeInfo) => {
     // permission-denied here usually means this event was already awarded (create-only)
     if (e?.code !== 'permission-denied') console.warn('awardCoins failed:', e?.code, e?.message);
     if (like) await likeFlip(0, before);
+    else if (opts?.flipCaption) plainFlip(0, before);
     return;
   }
   const total = before + points;
   setKnownCoinTotal(total);
   if (like) await likeFlip(points, total);
-  else showCoinFlip({ earned: points, total, tier: tierFor(total) });
+  else plainFlip(points, total);
 };
 
 // A like on a post / wardrobe photo: +1 coin for me (once per photo), +1 likesReceived for the
@@ -152,5 +162,22 @@ export const awardCoins = (type: CoinAction, targetId: string | null | undefined
     if (!targetId) return;
     const t = String(targetId);
     chain = chain.then(() => doAward(type, t)).catch(() => undefined);
+  } catch {}
+};
+
+// Home "today's colour" vote: coin flip + sound on EVERY vote; +1 coin only on the first vote of the
+// local day (users/{uid}/coinEvents/vote_colour_{YYYY-MM-DD} is create-only, so it is once per day
+// even across devices / reinstalls). Later votes that day (changing the colour) flip with no coin.
+// Fire-and-forget, never throws.
+export const colourVoteCoinTarget = (day: string) => `colour_${day}`;
+export const COLOUR_VOTE_CAPTION = "🎨 Today's colour voted";
+
+export const awardColourVoteCoin = (day: string | null | undefined): void => {
+  try {
+    if (!day) return;
+    const t = colourVoteCoinTarget(String(day));
+    chain = chain
+      .then(() => doAward('vote', t, undefined, { flipCaption: COLOUR_VOTE_CAPTION }))
+      .catch(() => undefined);
   } catch {}
 };
