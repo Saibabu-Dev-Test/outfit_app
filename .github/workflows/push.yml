@@ -50,23 +50,12 @@ jobs:
           fi
           echo "project=$PROJECT" >> "$GITHUB_OUTPUT"
 
-      - name: Google auth (Workload Identity Federation)
-        id: wif
-        continue-on-error: true
-        uses: google-github-actions/auth@v2
-        with:
-          workload_identity_provider: projects/791853722614/locations/global/workloadIdentityPools/github-pool/providers/github-provider
-          service_account: github-deployer@outfit-vote-9edca.iam.gserviceaccount.com
-          create_credentials_file: true
-
-      - name: Google auth (FIREBASE_SERVICE_ACCOUNT fallback)
+      - name: Firebase service account key (preferred)
         id: sa
-        if: steps.wif.outcome != 'success'
         env:
           SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
         run: |
           if [ -z "$SA" ]; then
-            echo "::warning::No Google credentials (Workload Identity failed and FIREBASE_SERVICE_ACCOUNT is not set): pushes were NOT sent."
             echo "ready=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -74,6 +63,16 @@ jobs:
           printf '%s' "$SA" > "$RUNNER_TEMP/sa.json"
           echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/sa.json" >> "$GITHUB_ENV"
           echo "ready=true" >> "$GITHUB_OUTPUT"
+
+      - name: Google auth (Workload Identity Federation fallback)
+        id: wif
+        if: steps.sa.outputs.ready != 'true'
+        continue-on-error: true
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/791853722614/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+          service_account: github-deployer@outfit-vote-9edca.iam.gserviceaccount.com
+          create_credentials_file: true
 
       - name: Install sender
         if: steps.wif.outcome == 'success' || steps.sa.outputs.ready == 'true'

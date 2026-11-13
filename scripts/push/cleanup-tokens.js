@@ -41,6 +41,11 @@ async function main() {
 }
 
 main().catch(e => {
-  console.error('token cleanup failed:', e && e.message);
+  const msg = (e && e.message) || String(e);
+  if (/PERMISSION_DENIED|insufficient permissions/i.test(msg)) {
+    console.log('::warning::token cleanup failed: ' + msg + ' -> add the FIREBASE_SERVICE_ACCOUNT secret (Firebase console > Project settings > Service accounts > Generate new private key). Skipping this run.');
+    process.exit(0);
+  }
+  console.error('token cleanup failed:', msg);
   process.exit(1);
 });
