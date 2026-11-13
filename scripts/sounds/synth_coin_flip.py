@@ -1,10 +1,11 @@
-"""Synthesize a 4 s metallic coin spin ("Euler's disk") for the Outfit Vote coin flip.
+"""Synthesize a 1.5 s metallic coin spin ("Euler's disk") for the Outfit Vote coin flip.
 
 A flicked coin rings (disc modes, inharmonic partials), then spins on its edge: the ring is
-amplitude-modulated by a rolling wobble whose rate speeds up (6 Hz -> 40 Hz) as it settles,
-with tiny contact clicks at each wobble; it ends with a clear settle "ting" at ~3.6 s.
+amplitude-modulated by a rolling wobble whose rate speeds up (8 Hz -> 40 Hz) as it settles,
+with tiny contact clicks at each wobble; a clear settle "ting" at ~1.05 s (lands with the 1.5 s
+flip) rings out under a smooth raised-cosine fade over the last 0.45 s, reaching silence at 1.5 s.
 Writes mono 44.1 kHz 16-bit WAV; loudness is finished by an AGC + tanh soft limiter.
-Usage (needs numpy + ffmpeg); gives about -5 LUFS, true peak about -1.3 dBTP:
+Usage (needs numpy + ffmpeg); gives about -3 LUFS, peak about -1.1 dBFS:
   python3 scripts/sounds/synth_coin_flip.py /tmp/c.wav 10 0.67
   ffmpeg -y -i /tmp/c.wav -af lowpass=f=11000 -c:a libvorbis -q:a 6 -ar 44100 -ac 1 \
     android/app/src/main/res/raw/coin_flip.ogg
@@ -13,7 +14,7 @@ import sys, wave
 import numpy as np
 
 SR = 44100
-DUR = 4.0
+DUR = 1.5
 n = int(SR * DUR)
 t = np.arange(n) / SR
 rng = np.random.default_rng(7)
@@ -45,12 +46,12 @@ sig = np.zeros(n)
 sig += ring(0.0, 1.0, 1.4)
 
 # 2) spinning: sustained ring modulated by an accelerating wobble
-spin_start, spin_end = 0.25, 3.55
+spin_start, spin_end = 0.10, 1.02
 mask = (t >= spin_start) & (t < spin_end)
 ts = np.clip(t - spin_start, 0, None)
 L = spin_end - spin_start
 # wobble frequency rises 6 -> 40 Hz (exponential sweep), phase = integral
-f0, f1 = 6.0, 40.0
+f0, f1 = 8.0, 40.0
 k = np.log(f1 / f0) / L
 phase = 2 * np.pi * f0 * (np.exp(k * np.minimum(ts, L)) - 1) / k
 wob = 0.5 + 0.5 * np.cos(phase)
@@ -72,12 +73,12 @@ for p in peaks:
         sig[p:p + cl] += 0.35 * rng.standard_normal(cl) * np.exp(-np.linspace(0, 5, cl))
 
 # 3) settle: final clear ting that lands with the flip, ringing out
-sig += ring(3.58, 1.1, 2.2, base=BASE * 1.06)
-sig += ring(3.70, 0.45, 3.0, base=BASE * 1.06)
+sig += ring(1.04, 1.1, 2.6, base=BASE * 1.06)
+sig += ring(1.12, 0.45, 3.4, base=BASE * 1.06)
 
 # gentle fades
 sig[:int(0.002 * SR)] *= np.linspace(0, 1, int(0.002 * SR))
-tail = int(0.12 * SR)
+tail = int(0.45 * SR)
 
 sig /= np.max(np.abs(sig))
 # slow AGC (compressor) so the whole spin sits loud without hard clipping the tone
@@ -87,7 +88,8 @@ rms = np.convolve(rms, np.ones(win) / win, mode='same')
 g = 1.0 / np.maximum(rms, 0.02) ** 0.85
 sig = sig * g
 sig /= np.max(np.abs(sig))
-sig[-tail:] *= np.linspace(1, 0, tail) ** 2
+# smooth fade-out: raised cosine over the last 0.45 s, exactly 0 at the end (no click)
+sig[-tail:] *= 0.5 * (1 + np.cos(np.linspace(0, np.pi, tail)))
 drive = float(sys.argv[2]) if len(sys.argv) > 2 else 6.0
 ceil = float(sys.argv[3]) if len(sys.argv) > 3 else 0.86
 y = np.tanh(drive * sig) / np.tanh(drive)

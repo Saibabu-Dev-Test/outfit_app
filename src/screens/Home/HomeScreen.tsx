@@ -28,6 +28,7 @@ import { getTodayVaaraColour, getRashiLuckyColour, getTodayLuckyMessage } from '
 import { localDateKey, greetingForNow } from '../../utils/date';
 import { useDayKey } from '../../hooks/useDayKey';
 import { markColourVoted } from '../../native/notifications';
+import { awardColourVoteCoin } from '../../services/coinsApi';
 import { firestoreErrorMessage, SERVER_SETUP_MESSAGE } from '../../utils/firebaseErrors';
 import Avatar from '../../components/Avatar';
 import { DobRequiredModal } from '../../components/DobPicker';
@@ -394,6 +395,8 @@ export default function HomeScreen() {
     if (flashTimer.current) clearTimeout(flashTimer.current);
     flashTimer.current = setTimeout(() => setFlashName(null), 1500);
     setVoting(null);
+    // Coin flip + sound on every vote; +1 coin only on the first colour vote of today (once per day)
+    awardColourVoteCoin(today);
     recordTask(uid, 'voted').then(() => refreshPoints());
     // No more hourly vote reminders until 1 AM tomorrow (written locally + native alarm)
     markColourVoted(uid, today);

@@ -7,19 +7,21 @@ import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 
 // Coin spin sound (res/raw/coin_flip.ogg, synthesized in-house by scripts/sounds/synth_coin_flip.py,
-// no license): a new 4.0 s metallic coin spin, not the old jingle. A bright flick "ting", then the coin
-// spinning on its edge (disc-mode ring with a wobble that speeds up 6 -> 40 Hz, like a coin settling),
-// then a clear settle ting at ~3.6 s that lands with the flip (CoinFlipProvider / CoinRain FLIP_MS 4000).
-// Mono 44.1 kHz vorbis, compressed + soft-limited to about -5 LUFS integrated, true peak <= -1 dBTP
-// (loud, no clipping). SoundPool loads it once; play() is fire-and-forget on the MEDIA stream
-// (USAGE_MEDIA -> STREAM_MUSIC), so the phone's volume buttons / media volume control it.
-// playAt(volume) takes the in-app volume (0..1, Settings > Coin sound). Never throws to JS.
+// no license): a 1.5 s metallic coin spin. A bright flick "ting", the coin spinning on its edge
+// (wobble speeding up 8 -> 40 Hz), a settle ting at ~1.05 s that lands with the flip
+// (CoinFlipProvider / CoinRain FLIP_MS 1500), then a smooth raised-cosine fade to silence at 1.5 s.
+// Mono 44.1 kHz vorbis, about -3 LUFS, peak <= -1 dBFS (loud, no clipping). SoundPool loads it once;
+// play() is fire-and-forget on the MEDIA stream (USAGE_MEDIA -> STREAM_MUSIC), so it follows the
+// phone's media volume. The app never changes the system volume. playAt(volume) takes the in-app
+// volume (0..1, Settings > Coin sound slider) as the SoundPool stream volume. Never throws to JS.
 class CoinSoundModule(ctx: ReactApplicationContext) : ReactContextBaseJavaModule(ctx) {
   override fun getName(): String = "OutfitCoinSound"
 
   private var pool: SoundPool? = null
   private var soundId = 0
   @Volatile private var loaded = false
+  // A play asked for before the sound finished loading (first coin of the session): played on load
+  @Volatile private var pendingVolume = -1f
 
   // Lazy: the SoundPool is made on the first play(), never at app start (and never in safe mode)
   @Synchronized
@@ -32,7 +34,14 @@ class CoinSoundModule(ctx: ReactApplicationContext) : ReactContextBaseJavaModule
         .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
         .build()
       val p = SoundPool.Builder().setMaxStreams(4).setAudioAttributes(attrs).build()
-      p.setOnLoadCompleteListener { _, _, status -> loaded = status == 0 }
+      p.setOnLoadCompleteListener { sp, _, status ->
+        loaded = status == 0
+        val v = pendingVolume
+        pendingVolume = -1f
+        if (loaded && v > 0f) {
+          try { sp.play(soundId, v, v, 1, 0, 1f) } catch (_: Throwable) {}
+        }
+      }
       soundId = p.load(reactApplicationContext, R.raw.coin_flip, 1)
       pool = p
     } catch (_: Throwable) {
@@ -58,7 +67,8 @@ class CoinSoundModule(ctx: ReactApplicationContext) : ReactContextBaseJavaModule
     try {
       val p = ensurePool() ?: return
       val v = volume.toFloat().coerceIn(0f, 1f)
-      if (loaded && v > 0f) p.play(soundId, v, v, 1, 0, 1f)
+      if (v <= 0f) return
+      if (loaded) p.play(soundId, v, v, 1, 0, 1f) else pendingVolume = v
     } catch (_: Throwable) {}
   }
 

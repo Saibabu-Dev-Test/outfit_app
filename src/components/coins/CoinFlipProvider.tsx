@@ -1,6 +1,6 @@
 // Global coin flip overlay, mounted once at the app root. Any award calls showCoinFlip()
 // (services/coinBus). Every award gets its own flip: awards are queued and played one after
-// another (~2.4 s slow spin that lands on the coin sound's settle ring + ~1 s text). When more than 3 are waiting the rest play faster so a run
+// another (1.5 s spin with the 1.5 s coin sound + ~1 s text). When more than 3 are waiting the rest play faster so a run
 // of likes never lags behind. Non-blocking (pointerEvents none), the flip runs on the UI thread
 // (Reanimated), the coin sound plays at flip start, and an error here never reaches the app.
 import React, { useEffect, useRef, useState } from 'react';
@@ -13,8 +13,8 @@ import Coin, { CoinFace } from './Coin';
 import CoinRain from './CoinRain';
 import { isSafeMode } from '../../native/safeMode';
 
-// Matches res/raw/coin_flip.ogg (1.8 s small-coin clinks; settle ring at ~1.34 s, then it rings out)
-const FLIP_MS = 4000; // slow-motion flip, matches the 4 s coin spin sound
+// Matches res/raw/coin_flip.ogg (1.5 s coin spin; settle ting at ~1.05 s, smooth fade to silence at 1.5 s)
+const FLIP_MS = 1500; // matches the 1.5 s coin spin sound (settle ting ~1.05 s, then it fades out)
 const HOLD_MS = 1000;
 const FADE_MS = 150;
 const FAST_AFTER = 3; // more than this many waiting: play the rest faster

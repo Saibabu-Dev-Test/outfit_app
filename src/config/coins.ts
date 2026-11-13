@@ -7,7 +7,7 @@ export const COIN_POINTS: Record<CoinAction, number> = {
   upload: 10,
   share: 50,
   task: 100, // a finished monthly task (config/monthlyTasks.ts TASK_COINS)
-  vote: 1, // first vote on a colour poll (post A-F) or a circle poll, once per poll
+  vote: 1, // first vote on a colour poll (post A-F) or a circle poll, once per poll; first Home colour vote of the day
 };
 
 export type CoinTier = 'silver' | 'gold' | 'diamond';

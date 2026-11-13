@@ -1,7 +1,7 @@
 // Like coins flipping together, opened from a like notification
 // ("🪙 Gold coin likes! 12 people liked your photos"). One small coin per person (max 20), each in
 // the level's colours (Bronze / Silver / Gold / Diamond). All coins flip AT THE SAME TIME with the
-// same slow-motion 4 s flip as the award overlay (CoinFlipProvider) and the coin sound plays ONCE at
+// same 1.5 s flip as the award overlay (CoinFlipProvider) and the coin sound plays ONCE at
 // the start (Settings switch + volume respected). Visual only: no coins are awarded here.
 // Non-blocking (pointerEvents none), Reanimated on the UI thread, and any error just hides it.
 import React, { useEffect, useRef, useState } from 'react';
@@ -14,7 +14,7 @@ import { consumeLaunchPayload } from '../../native/notifications';
 import { playCoinSound } from '../../native/coinSound';
 import Coin from './Coin';
 
-const FLIP_MS = 4000; // same slow-motion flip as CoinFlipProvider (matches the 4 s coin sound)
+const FLIP_MS = 1500; // same flip as CoinFlipProvider (matches the 1.5 s coin sound)
 const HOLD_MS = 1000;
 const FADE_MS = 200;
 const COIN = 36; // small coins
