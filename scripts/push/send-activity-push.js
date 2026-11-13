@@ -57,7 +57,8 @@ async function main() {
       const res = await admin.messaging().sendEachForMulticast({
         tokens: tokens.map(t => t.token),
         notification: { title: m.title, body: m.body },
-        data: m.payload ? { outfit_payload: m.payload } : {},
+        // outfit_payload: coin flip; outfit_link: outfit://circle/... opens that circle's chat
+        data: { ...(m.payload ? { outfit_payload: m.payload } : {}), ...(m.link ? { outfit_link: m.link } : {}) },
         android: { priority: 'high', notification: { channelId: 'activity', icon: 'ic_stat_outfit', color: '#E91E63' } },
       });
       sent += res.successCount;

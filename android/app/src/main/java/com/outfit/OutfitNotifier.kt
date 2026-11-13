@@ -41,6 +41,10 @@ object OutfitNotifier {
   const val EXTRA_BODY = "body"
   // Optional JSON the app reads when the notification is tapped (e.g. like coins to flip)
   const val EXTRA_PAYLOAD = "outfit_payload"
+  // Optional deep link a push opens (outfit://circle/CIRCLE_ID[/MESSAGE_ID]); FCM data key outfit_link
+  const val EXTRA_LINK = "outfit_link"
+  private val CIRCLE_LINK = Regex("^outfit://circle/[A-Za-z0-9_-]{1,64}(/[A-Za-z0-9_-]{1,64})?$")
+  fun isCircleLink(link: String?): Boolean = !link.isNullOrEmpty() && CIRCLE_LINK.matches(link)
   private const val PREFS = "outfit_notifications"
   private const val KEY_DAILY_ON = "daily_on"
   // First name of the signed-in user (saved by the app at login / profile update) for the 8 AM title
@@ -81,19 +85,20 @@ object OutfitNotifier {
     return NotificationManagerCompat.from(ctx).areNotificationsEnabled()
   }
 
-  private fun openAppIntent(ctx: Context, requestCode: Int, payload: String? = null): PendingIntent {
+  private fun openAppIntent(ctx: Context, requestCode: Int, payload: String? = null, link: String? = null): PendingIntent {
     val i = Intent(ctx, MainActivity::class.java)
       .setAction(Intent.ACTION_MAIN)
       .addCategory(Intent.CATEGORY_LAUNCHER)
       .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
     if (!payload.isNullOrEmpty()) i.putExtra(EXTRA_PAYLOAD, payload)
+    if (isCircleLink(link)) i.putExtra(EXTRA_LINK, link)
     return PendingIntent.getActivity(
       ctx, requestCode, i, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
   }
 
   // Posts one notification. Returns false when notifications are off.
-  fun post(ctx: Context, channel: String, id: Int, title: String, body: String, payload: String? = null): Boolean {
+  fun post(ctx: Context, channel: String, id: Int, title: String, body: String, payload: String? = null, link: String? = null): Boolean {
     ensureChannels(ctx)
     if (!canPost(ctx)) return false
     val n = NotificationCompat.Builder(ctx, channel)
@@ -106,7 +111,7 @@ object OutfitNotifier {
       .setPriority(
         if (channel == CHANNEL_ACTIVITY) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_DEFAULT,
       )
-      .setContentIntent(openAppIntent(ctx, id, payload))
+      .setContentIntent(openAppIntent(ctx, id, payload, link))
       .build()
     return try {
       NotificationManagerCompat.from(ctx).notify(id, n)
@@ -125,6 +130,21 @@ object OutfitNotifier {
       if (!p.isNullOrEmpty()) {
         pendingPayload = p
         intent?.removeExtra(EXTRA_PAYLOAD)
+      }
+    } catch (_: Throwable) {}
+  }
+
+  // A push tap carries its deep link as the outfit_link extra (FCM puts data keys in the extras when
+  // Android shows the notification itself). Turned into the intent's data uri so React Native's
+  // Linking (getInitialURL / 'url' event) hands it to CircleDeepLink. Call before super.onNewIntent.
+  fun captureLink(intent: Intent?) {
+    try {
+      val link = intent?.getStringExtra(EXTRA_LINK)
+      if (intent != null && intent.data == null && isCircleLink(link)) {
+        // React Native's Linking only reads ACTION_VIEW intents with a data uri
+        intent.action = Intent.ACTION_VIEW
+        intent.data = android.net.Uri.parse(link)
+        intent.removeExtra(EXTRA_LINK)
       }
     } catch (_: Throwable) {}
   }

@@ -36,6 +36,7 @@ import { colors, themedStyles, useTheme } from '../theme';
 import AppLockGate from '../components/AppLockGate';
 import ActivityWatcher from '../components/ActivityWatcher';
 import CircleInviteLink from '../components/CircleInviteLink';
+import CircleDeepLink from '../components/CircleDeepLink';
 import SessionLockScreen from '../components/SessionLockScreen';
 import TamperScreen from '../components/TamperScreen';
 import { getVaultStatus, subscribeVault, VaultStatus } from '../native/sessionVault';
@@ -147,6 +148,7 @@ function NavigationContent() {
     <AppLockGate />
     <ActivityWatcher />
     <CircleInviteLink navigationRef={navigationRef} />
+    <CircleDeepLink navigationRef={navigationRef} />
     </React.Fragment>
   );
 }

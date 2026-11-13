@@ -4,7 +4,8 @@ import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 
 // Push (FCM). In the background, Android shows "notification" messages by itself on the activity
-// channel and a tap opens MainActivity with the data as extras (outfit_payload -> coin flips).
+// channel and a tap opens MainActivity with the data as extras (outfit_payload -> coin flips,
+// outfit_link -> outfit://circle/CIRCLE_ID[/MESSAGE_ID] opens that circle's chat).
 // With the app open, this posts the same notification itself. The token is read by the app
 // (NotificationsModule.getPushToken) and saved to Firestore, so onNewToken needs no work here
 // beyond being safe; the app re-saves the token on every start.
@@ -15,8 +16,9 @@ class OutfitMessagingService : FirebaseMessagingService() {
       val title = n?.title ?: message.data["title"] ?: return
       val body = n?.body ?: message.data["body"] ?: ""
       val payload = message.data[OutfitNotifier.EXTRA_PAYLOAD]
+      val link = message.data[OutfitNotifier.EXTRA_LINK] // outfit://circle/... (CircleDeepLink)
       val id = 9000 + ((System.currentTimeMillis() / 1000L) % 100000L).toInt()
-      OutfitNotifier.post(applicationContext, OutfitNotifier.CHANNEL_ACTIVITY, id, title, body, payload)
+      OutfitNotifier.post(applicationContext, OutfitNotifier.CHANNEL_ACTIVITY, id, title, body, payload, link)
     } catch (_: Throwable) {}
   }
 

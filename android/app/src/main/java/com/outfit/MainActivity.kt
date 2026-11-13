@@ -27,6 +27,8 @@ class MainActivity : ReactActivity() {
   // killed in the background. Restoring them crashes with "Unable to instantiate fragment ...:
   // calling Fragment constructor caused an exception". React Navigation rebuilds the screens itself.
   override fun onCreate(savedInstanceState: Bundle?) {
+    // Push tap with a circle deep link: becomes the intent's data uri (Linking.getInitialURL)
+    OutfitNotifier.captureLink(intent)
     super.onCreate(null)
     // Hardware volume buttons change MEDIA volume while the app is open (the coin sound plays there)
     volumeControlStream = AudioManager.STREAM_MUSIC
@@ -39,6 +41,7 @@ class MainActivity : ReactActivity() {
 
   // Tapped a notification while the app was already open (singleTask)
   override fun onNewIntent(intent: Intent) {
+    OutfitNotifier.captureLink(intent) // before super, so Linking emits the 'url' event
     super.onNewIntent(intent)
     setIntent(intent)
     OutfitNotifier.capturePayload(intent)
