@@ -5,6 +5,8 @@
 import { launchCamera, launchImageLibrary, Asset, ImagePickerResponse, CameraOptions } from 'react-native-image-picker';
 import { canResize, resizeImage } from './imageResize';
 import { applyPhotoBg, PhotoBgMode } from '../native/photoBackground';
+import { editPhoto } from '../native/photoEdit';
+import { NormCrop } from './cropMath';
 import { AVATAR_SPEC, AVATAR_THUMB_SPEC, CLEAR_SPEC, FULL_MAX_CHARS, FULL_SPEC, ImageSpec, POLL_SPEC, THUMB_SPEC } from './imageSpecs';
 
 // Largest photo data URI accepted anywhere (one full photo: JPEG <= 690 KB = ~942K base64 chars,
@@ -16,6 +18,17 @@ export interface PickedImage {
   thumbUri?: string; // thumbnail, when PickOptions.thumb is set
   clearUri?: string; // ~1080 px feed photo, when PickOptions.clear is set
   uri?: string;
+  faces?: number; // remakeImage with blurFaces: faces blurred (-1 = face detection not available)
+  baseUri?: string; // remakeImage: the processed file before the Adjust crop (undefined = original)
+}
+
+// Photo options for one photo, always applied to the ORIGINAL picked file in this order:
+// background (Original / Blur level / Remove BG) -> Blur face -> Adjust crop (zoom / pan frame)
+export interface PhotoEdit {
+  mode: PhotoBgMode;
+  level?: number;
+  blurFaces?: boolean;
+  crop?: NormCrop | null;
 }
 
 export interface PickOptions {
@@ -76,16 +89,25 @@ const fromAsset = async (a: Asset, o: PickOptions): Promise<PickedImage | null> 
   return { dataUri, thumbUri, clearUri, uri: a.uri };
 };
 
-// Same photo again with a background choice (Original / Blur level 1-5 / plain white-black), made
-// from the ORIGINAL picked file (uri) so switching back and forth never loses quality.
+// Same photo again with its photo options (background / Blur face / Adjust crop), made from the
+// ORIGINAL picked file (uri) so switching back and forth never loses quality.
 export const remakeImage = async (
   uri: string,
-  bg: { mode: PhotoBgMode; level?: number },
+  edit: PhotoEdit,
   opts: PickOptions = PHOTO_PICK,
 ): Promise<PickedImage | null> => {
-  const src = bg.mode === 'off' ? uri : await applyPhotoBg(uri, bg.mode, bg.level);
+  let src = edit.mode === 'off' ? uri : await applyPhotoBg(uri, edit.mode, edit.level);
+  let faces: number | undefined;
+  if (edit.blurFaces) {
+    const r = await editPhoto(src, { blurFaces: true });
+    src = r.uri;
+    faces = r.faces;
+  }
+  // The processed photo before the crop (shown in the Adjust frame); undefined = the original
+  const baseUri = src !== uri ? src : undefined;
+  if (edit.crop) src = (await editPhoto(src, { crop: edit.crop })).uri;
   const p = await fromAsset({ uri: src }, opts);
-  return p ? { ...p, uri } : null;
+  return p ? { ...p, uri, faces, baseUri } : null;
 };
 
 const TOO_BIG = 'This photo is too large to save. Please pick a smaller photo or crop it.';

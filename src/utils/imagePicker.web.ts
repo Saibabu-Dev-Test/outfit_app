@@ -10,6 +10,15 @@ export interface PickedImage {
   thumbUri?: string;
   clearUri?: string;
   uri?: string;
+  faces?: number;
+  baseUri?: string;
+}
+
+export interface PhotoEdit {
+  mode: 'plain' | 'blur' | 'off';
+  level?: number;
+  blurFaces?: boolean;
+  crop?: { x: number; y: number; w: number; h: number } | null;
 }
 
 export interface PickOptions {
@@ -106,6 +115,6 @@ export const pickImages = async (max: number, opts: PickOptions = POLL_PICK): Pr
 // Background choices are Android only: the web keeps the original photo
 export const remakeImage = async (
   _uri: string,
-  _bg: { mode: 'plain' | 'blur' | 'off'; level?: number },
+  _edit: PhotoEdit,
   _opts: PickOptions = PHOTO_PICK,
 ): Promise<PickedImage | null> => null;

@@ -129,6 +129,8 @@ function ZoomPage({ uri, width, height, active, onZoomChange }: PageProps) {
     () =>
       PanResponder.create({
         onStartShouldSetPanResponder: () => true,
+        // A second finger always goes to this page (pinch), never to the list behind it
+        onMoveShouldSetPanResponderCapture: e => (e.nativeEvent.touches?.length || 0) >= 2,
         onMoveShouldSetPanResponder: (e, g) =>
           (e.nativeEvent.touches?.length || 0) >= 2 ||
           (cur.current.scale > 1.01 && (Math.abs(g.dx) > 2 || Math.abs(g.dy) > 2)),

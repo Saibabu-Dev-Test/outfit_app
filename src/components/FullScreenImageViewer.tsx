@@ -112,6 +112,9 @@ function ZoomableImage({
       PanResponder.create({
         // Two fingers = pinch. One finger only when zoomed (otherwise the list swipes to the next photo).
         onStartShouldSetPanResponder: e => (e.nativeEvent.touches?.length || 0) >= 2,
+        // Capture a second finger before the photo's tap handler / the list can keep the touch (pinch)
+        onStartShouldSetPanResponderCapture: e => (e.nativeEvent.touches?.length || 0) >= 2,
+        onMoveShouldSetPanResponderCapture: e => (e.nativeEvent.touches?.length || 0) >= 2,
         onMoveShouldSetPanResponder: (e, s) =>
           (e.nativeEvent.touches?.length || 0) >= 2 || (g.scale > 1.01 && (Math.abs(s.dx) > 3 || Math.abs(s.dy) > 3)),
         onPanResponderTerminationRequest: () => false,

@@ -12,7 +12,6 @@ import {
   Alert,
   ActionSheetIOS,
   ActivityIndicator,
-  Modal,
   Switch,
 } from 'react-native';
 import KeyboardSafeView from '../../components/KeyboardSafeView';
@@ -27,7 +26,12 @@ import {
   getWardrobeFullImage,
 } from '../../services/wardrobeApi';
 import { pickImage, remakeImage } from '../../utils/imagePicker';
-import { isPhotoBgSupported, PHOTO_BG_LABEL, PHOTO_BG_MODES, PhotoBgMode } from '../../native/photoBackground';
+import { isPhotoBgSupported, PHOTO_BG_MODES, PhotoBgMode } from '../../native/photoBackground';
+import { isPhotoEditSupported } from '../../native/photoEdit';
+import PhotoAdjustModal, { AdjustState } from '../../components/PhotoAdjustModal';
+import ZoomableImage from '../../components/ZoomableImage';
+import { photoText } from '../../i18n/photoEditLabels';
+import { isFullCrop } from '../../utils/cropMath';
 import {
   CATEGORY_GROUPS,
   categoryGroupsForGender,
@@ -101,6 +105,11 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
   const [bgMode, setBgMode]                   = useState<PhotoBgMode>('off');
   const [blurLevel, setBlurLevel]             = useState<number>(3);
   const [bgBusy, setBgBusy]                   = useState(false);
+  // Adjust (zoom / pan frame -> crop of the processed photo) and the photos it is shown on
+  const [adjust, setAdjust]                   = useState<AdjustState | null>(null);
+  const [adjustOpen, setAdjustOpen]           = useState(false);
+  const [origPreview, setOrigPreview]         = useState<string | null>(null);
+  const [baseUri, setBaseUri]                 = useState<string | null>(null);
   const [imageChanged, setImageChanged]       = useState(false);
   // Editing: the list holds the thumbnail; show the full photo (1 read) once it loads
   useEffect(() => {
@@ -235,31 +244,44 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
       setSourceUri(picked.uri || null);
       setBgMode('off');
       setBlurLevel(3);
+      setAdjust(null);
+      setOrigPreview(picked.dataUri);
+      setBaseUri(null);
       if (picked.uri) triggerAIAnalysis(picked.uri);
     } catch (e: any) {
       Alert.alert('Photo Error', e?.message || 'Could not use this photo.');
     }
   };
-  // Original / Blur (level 1-5) / Remove BG (plain white or black, opposite to the clothes)
-  const applyBg = async (mode: PhotoBgMode, level: number) => {
+  // Photo options, always made again from the ORIGINAL file: Original / Blur (level 1-5) / Remove BG
+  // (plain white or black, opposite to the clothes), then the Adjust crop on top of that result
+  const applyEdit = async (next: { mode?: PhotoBgMode; level?: number; adjust?: AdjustState | null }) => {
     if (!sourceUri || bgBusy) return;
+    const mode = next.mode ?? bgMode;
+    const level = next.level ?? blurLevel;
+    const adj = next.adjust !== undefined ? next.adjust : adjust;
     setBgMode(mode);
     setBlurLevel(level);
+    setAdjust(adj);
     setBgBusy(true);
     try {
-      const p = await remakeImage(sourceUri, { mode, level });
+      const crop = adj && !isFullCrop(adj.crop) ? adj.crop : null;
+      const p = await remakeImage(sourceUri, { mode, level, crop });
       if (p) {
         setImageUri(p.dataUri);
         setImageThumb(p.thumbUri || null);
         setImageClear(p.clearUri || null);
         setImageChanged(true);
+        setBaseUri(p.baseUri || null);
       }
     } catch (e: any) {
-      Alert.alert('Photo Error', e?.message || 'Could not change the background.');
+      Alert.alert('Photo Error', e?.message || 'Could not change the photo.');
     } finally {
       setBgBusy(false);
     }
   };
+  const applyBg = (mode: PhotoBgMode, level: number) => applyEdit({ mode, level });
+  // The Adjust frame shows the processed photo before any crop (Blur / Remove BG already applied)
+  const adjustSource = baseUri || origPreview || imageUri;
 
   const openCamera = () => { pickFrom('camera'); };
   const openGallery = () => { pickFrom('library'); };
@@ -432,11 +454,11 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
           )}
         </View>
 
-        {/* Photo background: Original / Blur (with strength) / Remove BG */}
-        {imageUri && sourceUri && isPhotoBgSupported() ? (
+        {/* Photo options: Original / Blur (with strength) / Remove BG / Adjust (zoom + position) */}
+        {imageUri && sourceUri && (isPhotoBgSupported() || isPhotoEditSupported()) ? (
           <View style={styles.bgWrap}>
             <View style={styles.bgRow}>
-              {PHOTO_BG_MODES.slice().reverse().map(m => {
+              {(isPhotoBgSupported() ? PHOTO_BG_MODES.slice().reverse() : []).map(m => {
                 const on = bgMode === m;
                 return (
                   <TouchableOpacity
@@ -445,15 +467,29 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
                     disabled={bgBusy}
                     onPress={() => applyBg(m, blurLevel)}
                     activeOpacity={0.8}>
-                    <Text style={[styles.bgChipText, on && styles.bgChipTextOn]}>{PHOTO_BG_LABEL[m]}</Text>
+                    <Text style={[styles.bgChipText, on && styles.bgChipTextOn]}>
+                      {photoText(m === 'off' ? 'original' : m === 'blur' ? 'blur' : 'removeBg', appLanguage)}
+                    </Text>
                   </TouchableOpacity>
                 );
               })}
+              {isPhotoEditSupported() ? (
+                <TouchableOpacity
+                  style={[styles.bgChip, adjust && !isFullCrop(adjust.crop) && styles.bgChipOn]}
+                  disabled={bgBusy}
+                  onPress={() => setAdjustOpen(true)}
+                  activeOpacity={0.8}>
+                  <Text style={[styles.bgChipText, adjust && !isFullCrop(adjust.crop) && styles.bgChipTextOn]}>
+                    {adjust && !isFullCrop(adjust.crop) ? '✓ ' : '⤢ '}
+                    {photoText('adjust', appLanguage)}
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
               {bgBusy ? <ActivityIndicator size="small" color={colors.primary} /> : null}
             </View>
             {bgMode === 'blur' ? (
               <View style={styles.bgRow}>
-                <Text style={styles.bgLabel}>Blur</Text>
+                <Text style={styles.bgLabel}>{photoText('blur', appLanguage)}</Text>
                 <TouchableOpacity
                   style={styles.bgStep}
                   disabled={bgBusy || blurLevel <= 1}
@@ -673,37 +709,26 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
       </ScrollView>
       </KeyboardSafeView>
 
-      {/* Full Screen Image Preview Modal */}
-      <Modal
-        visible={isPreviewVisible}
-        transparent={false}
-        animationType="fade"
-        onRequestClose={() => setIsPreviewVisible(false)}>
-        <SafeAreaView style={styles.modalContainer}>
-          <StatusBar
-            barStyle="light-content"
-            {...(Platform.OS === 'android' ? { backgroundColor: '#000000' } : {})}
-          />
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Image Preview</Text>
-            <TouchableOpacity
-              style={styles.modalCloseBtn}
-              onPress={() => setIsPreviewVisible(false)}
-              activeOpacity={0.7}>
-              <Text style={styles.modalCloseText}>✕</Text>
-            </TouchableOpacity>
-          </View>
-          <View style={styles.modalImageWrapper}>
-            {imageUri ? (
-              <Image
-                source={{ uri: imageUri }}
-                style={styles.modalImage}
-                resizeMode="contain"
-              />
-            ) : null}
-          </View>
-        </SafeAreaView>
-      </Modal>
+      {/* Full screen preview: pinch / double-tap zoom, drag when zoomed */}
+      <ZoomableImage
+        visible={isPreviewVisible && !!imageUri}
+        images={imageUri ? [imageUri] : []}
+        labels={[photoText('imagePreview', appLanguage)]}
+        onClose={() => setIsPreviewVisible(false)}
+      />
+
+      {/* Adjust: zoom in / out and position the item in the frame; the upload is that crop */}
+      <PhotoAdjustModal
+        visible={adjustOpen}
+        uri={adjustSource}
+        initial={adjust}
+        lang={appLanguage}
+        onCancel={() => setAdjustOpen(false)}
+        onApply={st => {
+          setAdjustOpen(false);
+          applyEdit({ adjust: isFullCrop(st.crop) ? null : st });
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -886,48 +911,6 @@ const styles = themedStyles(() => StyleSheet.create({
     width: 1,
     height: 16,
     backgroundColor: 'rgba(255,255,255,0.3)',
-  },
-
-  modalContainer: {
-    flex: 1,
-    backgroundColor: '#000000',
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: '#222222',
-  },
-  modalTitle: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: fontWeight.bold,
-  },
-  modalCloseBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#222222',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  modalCloseText: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: fontWeight.bold,
-  },
-  modalImageWrapper: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 12,
-  },
-  modalImage: {
-    width: '100%',
-    height: '100%',
   },
 
   mainSectionTitle: {

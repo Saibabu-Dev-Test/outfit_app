@@ -22,6 +22,7 @@ class OutfitNativePackage : ReactPackage {
       { TranslateModule(reactContext) },
       { CoinSoundModule(reactContext) },
       { PhotoBackgroundModule(reactContext) },
+      { PhotoEditModule(reactContext) },
     )
     return makers.mapNotNull { make ->
       try {
