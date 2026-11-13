@@ -20,6 +20,7 @@ export interface PickedImage {
   uri?: string;
   faces?: number; // remakeImage with blurFaces: faces blurred (-1 = face detection not available)
   baseUri?: string; // remakeImage: the processed file before the Adjust crop (undefined = original)
+  fileUri?: string; // remakeImage: the final processed full-size file (after the crop), for previews
 }
 
 // Photo options for one photo, always applied to the ORIGINAL picked file in this order:
@@ -107,7 +108,9 @@ export const remakeImage = async (
   const baseUri = src !== uri ? src : undefined;
   if (edit.crop) src = (await editPhoto(src, { crop: edit.crop })).uri;
   const p = await fromAsset({ uri: src }, opts);
-  return p ? { ...p, uri, faces, baseUri } : null;
+  // Previews show this full-size file (not the smaller, recompressed feed copy), so the subject's
+  // outline is seen at full resolution
+  return p ? { ...p, uri, faces, baseUri, fileUri: src !== uri ? src : undefined } : null;
 };
 
 const TOO_BIG = 'This photo is too large to save. Please pick a smaller photo or crop it.';

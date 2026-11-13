@@ -179,7 +179,8 @@ export default function PhotoReviewHost() {
         </View>
 
         <View style={styles.stage}>
-          <Image source={{ uri: item.cur.clearUri || item.cur.dataUri }} style={styles.photo} resizeMode="contain" />
+          {/* Full-size processed photo (Blur / Remove BG / Blur face / Adjust), never the small feed copy */}
+          <Image source={{ uri: item.cur.fileUri || item.cur.dataUri || item.cur.clearUri }} style={styles.photo} resizeMode="contain" />
           {busy ? (
             <View style={styles.busy}>
               <ActivityIndicator color="#FFF" size="large" />
