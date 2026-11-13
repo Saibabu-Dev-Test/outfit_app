@@ -2,10 +2,7 @@ package com.outfit
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.graphics.Canvas
-import android.graphics.Color
 import android.graphics.Matrix
-import android.graphics.Paint
 import android.media.ExifInterface
 import android.net.Uri
 import android.util.Base64
@@ -25,7 +22,6 @@ import java.io.FileOutputStream
 import java.io.InputStream
 import java.util.concurrent.TimeUnit
 import kotlin.math.max
-import kotlin.math.min
 import kotlin.math.roundToInt
 
 /**
@@ -34,7 +30,12 @@ import kotlin.math.roundToInt
  *   mode "plain": the background becomes one solid colour opposite to the clothes: black behind
  *                 light clothes, white behind dark / colourful ones (by the subject's average
  *                 brightness).
- *   mode "blur":  the background is strongly blurred, the clothes stay sharp.
+ *   mode "blur":  the background is blurred (level 1..5) and slightly dimmed; the subject stays the
+ *                 original sharp pixels.
+ * The edge work (soft confidence mask refined against the photo's own colours, no subject
+ * colours smeared into the blur, no old-background halo) is in SegmentMath.kt (JVM-tested).
+ * Runs on the full-size photo BEFORE Blur face and the Adjust crop (utils/imagePicker remakeImage),
+ * so zooming / cropping never cuts or blurs the person's outline.
  * Resolves {uri: "file://...jpg", changed: true} with a new JPEG (long edge <= 2048, EXIF rotation
  * applied), or {uri: <same uri>, changed: false} when no subject was found or segmentation is not
  * available (model still downloading, old Play services). Never rejects for those cases, so a photo
@@ -101,20 +102,6 @@ class PhotoBackgroundModule(private val ctx: ReactApplicationContext) : ReactCon
     return bmp
   }
 
-  // Cheap blur: shrink by f (level 1 = light ... 5 = strong), then scale back up in two filtered steps
-  private fun blurred(src: Bitmap, level: Int): Bitmap {
-    val w = src.width
-    val h = src.height
-    val f = when (level) { 1 -> 6; 2 -> 10; 3 -> 16; 4 -> 24; else -> 36 }
-    val small = Bitmap.createScaledBitmap(src, max(1, w / f), max(1, h / f), true)
-    val mid = Bitmap.createScaledBitmap(small, max(1, w / max(2, f / 4)), max(1, h / max(2, f / 4)), true)
-    small.recycle()
-    val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-    Canvas(out).drawBitmap(Bitmap.createScaledBitmap(mid, w, h, true), 0f, 0f, Paint(Paint.FILTER_BITMAP_FLAG))
-    mid.recycle()
-    return out
-  }
-
   @ReactMethod
   fun process(uri: String, mode: String, promise: Promise) = runJob(uri, mode, 3, promise)
 
@@ -122,80 +109,61 @@ class PhotoBackgroundModule(private val ctx: ReactApplicationContext) : ReactCon
   @ReactMethod
   fun processLevel(uri: String, mode: String, level: Int, promise: Promise) = runJob(uri, mode, level.coerceIn(1, 5), promise)
 
+  // Segmentation + background on one decoded photo (long edge <= edge). Null = keep the photo.
+  private fun render(uri: String, mode: String, level: Int, edge: Int): Bitmap? {
+    val bmp = load(uri, edge)
+    try {
+      val w = bmp.width
+      val h = bmp.height
+      val segmenter = SubjectSegmentation.getClient(
+        SubjectSegmenterOptions.Builder().enableForegroundConfidenceMask().build(),
+      )
+      val result = try {
+        Tasks.await(segmenter.process(InputImage.fromBitmap(bmp, 0)), 30, TimeUnit.SECONDS)
+      } finally {
+        try { segmenter.close() } catch (_: Throwable) {}
+      }
+      // Raw confidence (0..1) for every pixel of this full-size photo (same size as the input)
+      val mask = result.foregroundConfidenceMask ?: return null
+      mask.rewind()
+      val n = w * h
+      if (mask.remaining() < n) return null
+      val conf = FloatArray(n)
+      mask.get(conf, 0, n)
+      val px = IntArray(n)
+      bmp.getPixels(px, 0, w, 0, 0, w, h)
+      val out = SegmentMath.process(px, conf, w, h, if (mode == "blur") "blur" else "plain", level) ?: return null
+      val res = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+      res.setPixels(out, 0, w, 0, 0, w, h)
+      return res
+    } finally {
+      bmp.recycle()
+    }
+  }
+
   private fun runJob(uri: String, mode: String, level: Int, promise: Promise) {
     Thread {
       val unchanged = Arguments.createMap().apply { putString("uri", uri); putBoolean("changed", false) }
       try {
-        // Full quality first; a phone short on memory gets a smaller (still clear) copy
-        val bmp = try { load(uri, 2048) } catch (e: OutOfMemoryError) { System.gc(); load(uri, 1280) }
-        val w = bmp.width
-        val h = bmp.height
-        val segmenter = SubjectSegmentation.getClient(
-          SubjectSegmenterOptions.Builder().enableForegroundConfidenceMask().build(),
-        )
-        val result = try {
-          Tasks.await(segmenter.process(InputImage.fromBitmap(bmp, 0)), 30, TimeUnit.SECONDS)
-        } finally {
-          try { segmenter.close() } catch (_: Throwable) {}
-        }
-        val mask = result.foregroundConfidenceMask
-        if (mask == null) {
-          bmp.recycle(); promise.resolve(unchanged); return@Thread
-        }
-        mask.rewind()
-        val n = w * h
-        val px = IntArray(n)
-        bmp.getPixels(px, 0, w, 0, 0, w, h)
-        val alpha = FloatArray(n)
-        var fgCount = 0
-        var lumSum = 0.0
-        var lumW = 0.0
-        for (i in 0 until n) {
-          // Soft edge: confidence 0.3..0.7 ramps 0..1
-          val c = if (mask.hasRemaining()) mask.get() else 0f
-          val a = min(1f, max(0f, (c - 0.3f) / 0.4f))
-          alpha[i] = a
-          if (a > 0.5f) {
-            fgCount++
-            val p = px[i]
-            val lum = 0.299 * Color.red(p) + 0.587 * Color.green(p) + 0.114 * Color.blue(p)
-            lumSum += lum * a
-            lumW += a
+        // Full quality (2048 px, the size the photo is saved at) so the outline is cut at full
+        // resolution and Adjust / zoom never shows an upscaled edge. A phone short on memory
+        // gets a smaller (still clear) copy.
+        var out: Bitmap? = null
+        for (edge in intArrayOf(2048, 1440, 1024)) {
+          try {
+            out = render(uri, mode, level, edge)
+            break
+          } catch (e: OutOfMemoryError) {
+            System.gc()
           }
         }
-        // No clear subject (or the whole photo is "subject"): keep the photo as it was
-        if (fgCount < n * 0.02 || fgCount > n * 0.98) {
-          bmp.recycle(); promise.resolve(unchanged); return@Thread
-        }
-        val bg = IntArray(n)
-        if (mode == "blur") {
-          val b = blurred(bmp, level)
-          b.getPixels(bg, 0, w, 0, 0, w, h)
-          b.recycle()
-        } else {
-          val avg = if (lumW > 0) lumSum / lumW else 128.0
-          val solid = if (avg >= 140.0) Color.rgb(0, 0, 0) else Color.rgb(255, 255, 255)
-          java.util.Arrays.fill(bg, solid)
-        }
-        for (i in 0 until n) {
-          val a = alpha[i]
-          if (a >= 1f) continue
-          val f = px[i]
-          val g = bg[i]
-          val r = (Color.red(f) * a + Color.red(g) * (1 - a)).roundToInt()
-          val gr = (Color.green(f) * a + Color.green(g) * (1 - a)).roundToInt()
-          val bl = (Color.blue(f) * a + Color.blue(g) * (1 - a)).roundToInt()
-          px[i] = Color.rgb(r, gr, bl)
-        }
-        val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        out.setPixels(px, 0, w, 0, 0, w, h)
-        bmp.recycle()
+        val res = out ?: run { promise.resolve(unchanged); return@Thread }
         val dir = File(ctx.cacheDir, "photo-bg").apply { mkdirs() }
         // Old outputs from earlier picks are not needed once the photo was saved
         dir.listFiles()?.filter { System.currentTimeMillis() - it.lastModified() > 6 * 3600_000L }?.forEach { it.delete() }
         val file = File(dir, "bg_${System.currentTimeMillis()}.jpg")
-        FileOutputStream(file).use { out.compress(Bitmap.CompressFormat.JPEG, 95, it) }
-        out.recycle()
+        FileOutputStream(file).use { res.compress(Bitmap.CompressFormat.JPEG, 97, it) }
+        res.recycle()
         promise.resolve(Arguments.createMap().apply { putString("uri", "file://${file.absolutePath}"); putBoolean("changed", true) })
       } catch (t: Throwable) {
         // Model not downloaded yet, out of memory, unreadable photo: save the photo unchanged
