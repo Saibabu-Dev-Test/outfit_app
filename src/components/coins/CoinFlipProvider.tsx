@@ -14,7 +14,7 @@ import CoinRain from './CoinRain';
 import { isSafeMode } from '../../native/safeMode';
 
 // Matches res/raw/coin_flip.ogg (1.8 s small-coin clinks; settle ring at ~1.34 s, then it rings out)
-const FLIP_MS = 4000; // slow-motion flip, matches the 4 s slowed coin sound
+const FLIP_MS = 4000; // slow-motion flip, matches the 4 s coin spin sound
 const HOLD_MS = 1000;
 const FADE_MS = 150;
 const FAST_AFTER = 3; // more than this many waiting: play the rest faster

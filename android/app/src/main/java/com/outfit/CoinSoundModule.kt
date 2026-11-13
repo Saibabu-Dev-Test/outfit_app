@@ -6,10 +6,12 @@ import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 
-// Small-coin jingle (res/raw/coin_flip.ogg, synthesized in-house, no license) played at the start of
-// each coin flip: 1.8 s of bright 3-6 kHz clinks spacing out like a coin settling, then a settle ring
-// that lands with the flip (CoinFlipProvider FLIP_MS 1400). Compressed + limited to about -1 dBTP peak,
-// slowed to 4 s (slow motion, deeper) and about -4.7 LUFS (louder, no clipping). SoundPool loads it once; play() is fire-and-forget on the MEDIA stream
+// Coin spin sound (res/raw/coin_flip.ogg, synthesized in-house by scripts/sounds/synth_coin_flip.py,
+// no license): a new 4.0 s metallic coin spin, not the old jingle. A bright flick "ting", then the coin
+// spinning on its edge (disc-mode ring with a wobble that speeds up 6 -> 40 Hz, like a coin settling),
+// then a clear settle ting at ~3.6 s that lands with the flip (CoinFlipProvider / CoinRain FLIP_MS 4000).
+// Mono 44.1 kHz vorbis, compressed + soft-limited to about -5 LUFS integrated, true peak <= -1 dBTP
+// (loud, no clipping). SoundPool loads it once; play() is fire-and-forget on the MEDIA stream
 // (USAGE_MEDIA -> STREAM_MUSIC), so the phone's volume buttons / media volume control it.
 // playAt(volume) takes the in-app volume (0..1, Settings > Coin sound). Never throws to JS.
 class CoinSoundModule(ctx: ReactApplicationContext) : ReactContextBaseJavaModule(ctx) {
