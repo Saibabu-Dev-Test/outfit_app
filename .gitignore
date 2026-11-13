@@ -85,7 +85,7 @@ hosting-public/get/
 hosting-public/icons/
 hosting-public/privacy/
 
-# Release signing keys come from CI secrets (RELEASE_KEYSTORE_BASE64), never from the repo
+# Release signing key: only the AES-256 encrypted android/app/release-bundle.tgz.enc is committed (decrypted in CI with RELEASE_BUNDLE_PASSPHRASE)
 *.p12
 *.jks
 *.keystore

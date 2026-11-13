@@ -115,49 +115,52 @@ jobs:
           chmod +x gradlew
           ./gradlew signingReport | grep "SHA1" | head -n 1
 
-      # 5.8. Release signing key from secrets (nothing secret in the repo).
-      # Preferred: RELEASE_KEYSTORE_BASE64 (+ RELEASE_KEYSTORE_PASSWORD, RELEASE_KEY_ALIAS,
-      # RELEASE_KEY_PASSWORD), decoded to a temp file outside the repo.
-      # RELEASE_KEYSTORE_PASSWORD may be omitted when the keystore still uses OUTFIT_KEYSTORE_PASSWORD.
-      # Legacy fallback until those exist: android/app/outfit-release.p12 + OUTFIT_KEYSTORE_PASSWORD.
-      - name: Release signing key
-        env:
-          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
-          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
-          OUTFIT_KEYSTORE_PASSWORD: ${{ secrets.OUTFIT_KEYSTORE_PASSWORD }}
-        run: |
-          if [ -n "$RELEASE_KEYSTORE_BASE64" ] && [ -n "${RELEASE_KEYSTORE_PASSWORD:-$OUTFIT_KEYSTORE_PASSWORD}" ]; then
-            umask 077
-            printf '%s' "$RELEASE_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.p12"
-            echo "RELEASE_KEYSTORE_FILE=$RUNNER_TEMP/release.p12" >> "$GITHUB_ENV"
-            echo "Release key: from RELEASE_KEYSTORE_BASE64 secret"
-          elif [ -n "$OUTFIT_KEYSTORE_PASSWORD" ] && [ -f android/app/outfit-release.p12 ]; then
-            echo "::warning::Using the legacy committed outfit-release.p12. Add the RELEASE_KEYSTORE_* secrets and delete the .p12 from the repo."
-          else
-            echo "::error::No release key: add RELEASE_KEYSTORE_BASE64 + RELEASE_KEYSTORE_PASSWORD (+ RELEASE_KEY_ALIAS, RELEASE_KEY_PASSWORD). Without it the APK would be signed with the public debug key and Play Protect blocks it."
-            exit 1
-          fi
-
-      # 6. Build Android release APK
+      # 6. Build Android release APK (+ AAB), signed with the release key.
+      # The key is android/app/release-bundle.tgz.enc: AES-256-CBC (PBKDF2, 200000 iterations) of a
+      # tar holding outfit-release-v2.p12 + outfit-release-v2.env (KEYSTORE_PASSWORD, KEY_ALIAS,
+      # KEY_PASSWORD). The passphrase is the RELEASE_BUNDLE_PASSPHRASE secret. It is decrypted into
+      # a temp dir outside the repo, the values are masked, and build.gradle reads the RELEASE_* vars.
       - name: Build APK
         working-directory: android
         env:
-          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
-          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
-          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
-          OUTFIT_KEYSTORE_PASSWORD: ${{ secrets.OUTFIT_KEYSTORE_PASSWORD }}
+          PASS: ${{ secrets.RELEASE_BUNDLE_PASSPHRASE }}
         # Retries: dependency downloads sometimes hit 504s; finished downloads stay cached between tries
         run: |
+          set -euo pipefail
+          if [ -z "${PASS:-}" ]; then
+            echo "::error::RELEASE_BUNDLE_PASSPHRASE secret missing: cannot decrypt the release key. Without it the APK would be signed with the public debug key and Play Protect blocks it."
+            exit 1
+          fi
+          umask 077
+          KEYDIR="$RUNNER_TEMP/release-key"
+          rm -rf "$KEYDIR"; mkdir -p "$KEYDIR"
+          trap 'rm -rf "$KEYDIR"' EXIT
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:PASS \
+            -in app/release-bundle.tgz.enc | tar -xz -C "$KEYDIR"
+          unset PASS
+          set -a; . "$KEYDIR/outfit-release-v2.env"; set +a
+          echo "::add-mask::$KEYSTORE_PASSWORD"
+          echo "::add-mask::$KEY_ALIAS"
+          echo "::add-mask::$KEY_PASSWORD"
+          export RELEASE_KEYSTORE_FILE="$KEYDIR/outfit-release-v2.p12"
+          export RELEASE_KEYSTORE_PASSWORD="$KEYSTORE_PASSWORD"
+          export RELEASE_KEY_ALIAS="$KEY_ALIAS"
+          export RELEASE_KEY_PASSWORD="$KEY_PASSWORD"
+          unset KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD
+          echo "Release key: decrypted from release-bundle.tgz.enc"
+          built=0
           for attempt in 1 2 3; do
-            if ./gradlew assembleRelease; then exit 0; fi
+            if ./gradlew assembleRelease; then built=1; break; fi
             echo "Build attempt $attempt failed; retrying in 60 s"
             sleep 60
           done
-          exit 1
+          [ "$built" = 1 ] || exit 1
+          # Play Store bundle (optional: a failure here does not fail the APK release)
+          ./gradlew bundleRelease || echo "::warning::bundleRelease failed; release has the APK only"
 
       - name: Remove decoded key
         if: always()
-        run: rm -f "$RUNNER_TEMP/release.p12"
+        run: rm -rf "$RUNNER_TEMP/release-key"
       # 6.5. One APK only (arm64-v8a) -> Outfit.apk
       - name: Collect APK
         run: |
@@ -166,7 +169,20 @@ jobs:
           mkdir -p apks
           if [ ! -f "$OUT/app-release.apk" ]; then echo "Missing app-release.apk"; exit 1; fi
           cp "$OUT/app-release.apk" apks/Outfit.apk
+          AAB=android/app/build/outputs/bundle/release/app-release.aab
+          if [ -f "$AAB" ]; then cp "$AAB" apks/Outfit.aab; fi
           ls -la apks
+
+      # 6.8. The APK must be signed with the release key (not the debug or the old key)
+      - name: Verify APK signer
+        env:
+          EXPECTED_CERT_SHA256: E4:59:0A:B6:71:C4:6D:C8:7E:F3:32:88:E0:6C:3B:55:7D:A3:5F:83:B3:42:3B:FF:D9:65:12:DC:21:88:E8:E2
+        run: |
+          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -n 1)
+          "$APKSIGNER" verify --print-certs apks/Outfit.apk | tee signer.txt
+          GOT=$(grep -m1 'certificate SHA-256 digest' signer.txt | awk -F': ' '{print $2}' | tr -d ' ' | tr 'a-f' 'A-F' | sed 's/../&:/g; s/:$//')
+          echo "Signer SHA-256: $GOT"
+          if [ "$GOT" != "$EXPECTED_CERT_SHA256" ]; then echo "::error::APK signer $GOT is not the release key $EXPECTED_CERT_SHA256"; exit 1; fi
 
       # 7. Upload generated APKs
       - name: Upload APK
@@ -176,15 +192,19 @@ jobs:
           path: apks/Outfit.apk
           retention-days: 3
 
-      # 8. Create GitHub Release (not a prerelease, so /releases/latest/download/<name> points here)
-      # Only for pushes to main: pull-request builds are checks (artifact only), never a release
+      # 8. Create GitHub Release. Only for pushes to main: pull-request builds are checks (artifact only).
+      # HOLD: builds signed with the NEW key (cert SHA-256 E4:59:0A:B6:...:E8:E2) are published as
+      # PRE-RELEASES, not latest, so the /get/ page and the in-app update (both use releases/latest)
+      # keep serving the last old-key build until the new SHA-1/SHA-256 are added to Firebase
+      # (Google Sign-In). After that, set prerelease: false and make_latest: true again.
       - name: Create GitHub Release
         if: github.event_name == 'push'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
           name: Outfit build ${{ github.run_number }}
-          prerelease: false
-          make_latest: true
+          prerelease: true
+          make_latest: false
           files: |
             apks/Outfit.apk
+            apks/Outfit.aab

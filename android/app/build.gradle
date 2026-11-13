@@ -62,21 +62,17 @@ react {
 def enableProguardInReleaseBuilds = true
 
 // Release key: your own private key, never the public debug key (Play Protect blocks APKs signed
-// with the shared debug key). Nothing secret lives in the repo: CI decodes the keystore from the
-// RELEASE_KEYSTORE_BASE64 secret into a temp file and passes its path + passwords as env vars:
+// with the shared debug key). Nothing secret lives in the repo in plain form: CI decrypts
+// android/app/release-bundle.tgz.enc (AES-256, passphrase = RELEASE_BUNDLE_PASSPHRASE secret) into a
+// temp dir outside the repo and passes the keystore path + passwords as env vars:
 //   RELEASE_KEYSTORE_FILE, RELEASE_KEYSTORE_PASSWORD, RELEASE_KEY_ALIAS, RELEASE_KEY_PASSWORD
-// Legacy fallback (until those secrets exist): outfit-release.p12 + OUTFIT_KEYSTORE_PASSWORD.
+// Without them (local builds) the release build falls back to the debug key.
 def envOr = { String name, String fallback -> def v = System.getenv(name); v ? v : fallback }
-def legacyPassword = System.getenv("OUTFIT_KEYSTORE_PASSWORD")
-// The committed legacy .p12 still has the OLD password (OUTFIT_KEYSTORE_PASSWORD). RELEASE_KEYSTORE_PASSWORD
-// belongs to the new re-passworded keystore, so only use it when CI decoded RELEASE_KEYSTORE_BASE64
-// (RELEASE_KEYSTORE_FILE set). Otherwise the legacy file is opened with the legacy password.
-def usingLegacyFile = !System.getenv("RELEASE_KEYSTORE_FILE")
-def releaseStorePassword = usingLegacyFile ? (legacyPassword ?: System.getenv("RELEASE_KEYSTORE_PASSWORD")) : envOr("RELEASE_KEYSTORE_PASSWORD", legacyPassword)
-def releaseKeyPassword = usingLegacyFile ? releaseStorePassword : envOr("RELEASE_KEY_PASSWORD", releaseStorePassword)
+def releaseStoreFile = System.getenv("RELEASE_KEYSTORE_FILE")
+def releaseStorePassword = System.getenv("RELEASE_KEYSTORE_PASSWORD")
+def releaseKeyPassword = envOr("RELEASE_KEY_PASSWORD", releaseStorePassword)
 def releaseKeyAlias = envOr("RELEASE_KEY_ALIAS", "outfit")
-def releaseStoreFile = envOr("RELEASE_KEYSTORE_FILE", "outfit-release.p12")
-def hasReleaseKey = releaseStorePassword && file(releaseStoreFile).exists()
+def hasReleaseKey = releaseStoreFile && releaseStorePassword && file(releaseStoreFile).exists()
 
 // GITHUB_RUN_NUMBER of the Android CI run (main.yml), which is also the build-N release tag
 def ciBuildNumber = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInteger()
