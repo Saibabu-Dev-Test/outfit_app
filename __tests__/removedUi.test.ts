@@ -60,4 +60,9 @@ describe('removed UI stays removed', () => {
     expect(por).toBeLessThan(elseAt);
     expect(src).toMatch(/Watch 1 ad to see full astrology/);
   });
+  it('full astrology never opens free when no ad loads (only after watching 1 ad)', () => {
+    const src = read('src/components/AstrologyPanel.tsx');
+    const noAd = src.slice(src.indexOf("r === 'no_ad'"), src.indexOf('Closed before the reward'));
+    expect(noAd).not.toMatch(/saveAstroUnlock|setUnlocked\(true\)/);
+  });
 });

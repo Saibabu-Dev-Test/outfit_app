@@ -5,8 +5,9 @@
 // new day, so the saved day no longer matches and the reading locks again by itself. Never throws.
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// Not under "outfit:" (sign-out clears those): an unlock survives a quick sign-out / sign-in
-export const astroUnlockKey = (uid: string) => `outfitastro:fullUnlock:${uid || 'anon'}`;
+// Not under "outfit:" (sign-out clears those): an unlock survives a quick sign-out / sign-in.
+// V2: old free (no-ad) unlocks are ignored, so only an unlock earned by watching an ad counts.
+export const astroUnlockKey = (uid: string) => `outfitastro:fullUnlockV2:${uid || 'anon'}`;
 
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 

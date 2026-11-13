@@ -17,7 +17,6 @@ import { festivalDressFor, PLAN_LABELS, planText } from '../services/festivalPla
 import { astroAiAvailable, fetchAstroDetails, getCachedAstroDetails } from '../services/astrologyAi';
 import { loadAstroUnlock, saveAstroUnlock, shortText } from '../services/astroUnlock';
 import { showRewardedAd } from '../native/ads';
-import { REWARDED_FALLBACK_WAIT_MS } from '../config/ads';
 import type { WardrobeItemResponse } from '../services/wardrobeApi';
 import { formatDate } from '../utils/formatDate';
 
@@ -40,7 +39,7 @@ const LOCK_TEXT: Record<string, { summary: string; title: string; body: string; 
     btn: '▶ Watch 1 ad to see full astrology',
     busy: 'Loading ad…',
     closed: 'The ad was closed before the end, so full astrology stays locked. Tap the button to try again.',
-    noAd: 'No ad was available right now, so full astrology is open free for today.',
+    noAd: 'No ad is available right now. Full astrology stays locked, please try again in a little while.',
     open: '🔓 Full astrology open for today',
   },
   Telugu: {
@@ -50,7 +49,7 @@ const LOCK_TEXT: Record<string, { summary: string; title: string; body: string; 
     btn: '▶ 1 యాడ్ చూసి పూర్తి జాతకం చూడండి',
     busy: 'యాడ్ లోడ్ అవుతోంది…',
     closed: 'యాడ్ పూర్తి కాకముందే మూసేశారు, అందుకే పూర్తి జాతకం తెరవలేదు. మళ్లీ ప్రయత్నించండి.',
-    noAd: 'ఇప్పుడు యాడ్ అందుబాటులో లేదు, అందుకే ఈ రోజుకు పూర్తి జాతకం ఉచితంగా తెరిచాం.',
+    noAd: 'ఇప్పుడు యాడ్ అందుబాటులో లేదు. పూర్తి జాతకం లాక్‌లోనే ఉంటుంది, కొద్దిసేపటి తర్వాత మళ్లీ ప్రయత్నించండి.',
     open: '🔓 ఈ రోజుకు పూర్తి జాతకం తెరిచి ఉంది',
   },
 };
@@ -104,11 +103,7 @@ export default function AstrologyPanel({ uid, profile, wardrobe, onEditProfile, 
         await saveAstroUnlock(uid, day);
         setUnlocked(true);
       } else if (r === 'no_ad') {
-        // No fill / offline / web / ads off: never leave the user stuck. Open for today after a
-        // short wait and say why (counts as today's one unlock).
-        await new Promise<void>(res => setTimeout(res, REWARDED_FALLBACK_WAIT_MS));
-        await saveAstroUnlock(uid, day);
-        setUnlocked(true);
+        // No ad could load: full astrology stays LOCKED (owner rule: full astrology only after 1 ad)
         setUnlockMsg(lt.noAd);
       } else {
         // Closed before the reward: stays locked, the button stays there to try again
@@ -453,11 +448,11 @@ export default function AstrologyPanel({ uid, profile, wardrobe, onEditProfile, 
                 </Text>
               </View>
             ) : null}
-            {reading.rashiLine ? <Bi style={styles.rashi} text={reading.rashiLine} enText={en?.rashiLine} /> : null}
+            {/* Free summary: ONE short paragraph only (rashi line + first sentence). Everything else needs 1 ad. */}
             <Bi
               style={styles.body}
-              text={shortText(reading.verdict?.summary || reading.overview)}
-              enText={en ? shortText(en.verdict?.summary || en.overview) : null}
+              text={[reading.rashiLine, shortText(reading.verdict?.summary || reading.overview)].filter(Boolean).join(' ')}
+              enText={en ? [en.rashiLine, shortText(en.verdict?.summary || en.overview)].filter(Boolean).join(' ') : null}
             />
           </View>
           <View style={[styles.card, styles.lockCard]}>
