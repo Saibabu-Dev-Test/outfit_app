@@ -26,7 +26,7 @@ import {
   getWardrobeFullImage,
 } from '../../services/wardrobeApi';
 import { pickImage, remakeImage } from '../../utils/imagePicker';
-import { isPhotoBgSupported, PHOTO_BG_MODES, PhotoBgMode } from '../../native/photoBackground';
+import { isPhotoBgSupported, PHOTO_BG_MODES, PhotoBgMode, warmUpPhotoBg } from '../../native/photoBackground';
 import { isPhotoEditSupported } from '../../native/photoEdit';
 import PhotoAdjustModal, { AdjustState } from '../../components/PhotoAdjustModal';
 import ZoomableImage from '../../components/ZoomableImage';
@@ -114,6 +114,10 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
   const [blurFaces, setBlurFaces]             = useState(false);
   const [faceNote, setFaceNote]               = useState<string | null>(null);
   const [imageChanged, setImageChanged]       = useState(false);
+  // Load the background model when the screen opens (first Blur / Remove BG tap is then fast)
+  useEffect(() => {
+    if (isPhotoBgSupported()) warmUpPhotoBg();
+  }, []);
   // Editing: the list holds the thumbnail; show the full photo (1 read) once it loads
   useEffect(() => {
     if (!itemToEdit?.hasMedia) return;
