@@ -40,6 +40,11 @@ describe('removed UI stays removed', () => {
     expect(read('src/i18n/appLanguage.ts')).toMatch(/let current: AppLanguage = 'English'/);
   });
 
+  it("Today's pick is removed everywhere", () => {
+    expect(fs.existsSync(path.join(__dirname, '..', 'src/components/TodaysPick.tsx'))).toBe(false);
+    expect(read('src/components/WardrobeVoteGrid.tsx')).not.toMatch(/Today's pick/);
+  });
+
   it("Me profile has no Today's pick tab", () => {
     const src = read('src/screens/Profile/MeScreen.tsx');
     expect(src).not.toMatch(/Today's pick/);
