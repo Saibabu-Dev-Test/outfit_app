@@ -14,7 +14,7 @@ import { consumeLaunchPayload } from '../../native/notifications';
 import { playCoinSound } from '../../native/coinSound';
 import Coin from './Coin';
 
-const FLIP_MS = 1500; // same flip as CoinFlipProvider (matches the 1.5 s coin sound)
+const FLIP_MS = 1500; // same flip as CoinFlipProvider (coin ting plays at its start)
 const HOLD_MS = 1000;
 const FADE_MS = 200;
 const COIN = 36; // small coins

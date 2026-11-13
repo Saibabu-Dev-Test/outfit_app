@@ -1,24 +1,28 @@
-// Small dependency-free slider (0..1): tap or drag along the track. Used for the coin sound volume.
+// Small dependency-free slider (0..max, max <= 1): tap or drag along the track. Used for the coin sound volume.
 import React, { useRef, useState } from 'react';
 import { GestureResponderEvent, LayoutChangeEvent, StyleSheet, Text, View } from 'react-native';
 import { colors, fontSize, fontWeight, themedStyles } from '../theme';
 
 interface Props {
-  value: number; // 0..1
+  value: number; // 0..max
+  max?: number; // upper end of the track (default 1); the label shows the real percent
   onChange: (v: number) => void; // while dragging
   onCommit?: (v: number) => void; // on release
   label?: string;
 }
 
-const clamp = (v: number) => Math.min(1, Math.max(0, v));
+const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
 
-export default function VolumeSlider({ value, onChange, onCommit, label = 'Volume' }: Props) {
+export default function VolumeSlider({ value, onChange, onCommit, label = 'Volume', max = 1 }: Props) {
+  const top = clamp01(max) || 1;
+  const clamp = (v: number) => Math.min(top, Math.max(0, v));
+  const frac = clamp(value) / top; // 0..1 position on the track
   const width = useRef(1);
   const [w, setW] = useState(0);
   const last = useRef(value);
-  const at = (e: GestureResponderEvent) => clamp(e.nativeEvent.locationX / Math.max(1, width.current));
+  const at = (e: GestureResponderEvent) => clamp01(e.nativeEvent.locationX / Math.max(1, width.current)) * top;
   const move = (e: GestureResponderEvent) => {
-    const v = Math.round(at(e) * 20) / 20; // 5% steps
+    const v = clamp(Math.round(at(e) * 100) / 100); // 1% steps
     last.current = v;
     onChange(v);
   };
@@ -43,17 +47,17 @@ export default function VolumeSlider({ value, onChange, onCommit, label = 'Volum
         accessible
         accessibilityRole="adjustable"
         accessibilityLabel={label}
-        accessibilityValue={{ min: 0, max: 100, now: pct }}
+        accessibilityValue={{ min: 0, max: Math.round(top * 100), now: pct }}
         accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
         onAccessibilityAction={ev => {
-          const v = clamp(value + (ev.nativeEvent.actionName === 'increment' ? 0.1 : -0.1));
+          const v = clamp(value + (ev.nativeEvent.actionName === 'increment' ? 0.05 : -0.05));
           onChange(v);
           onCommit?.(v);
         }}>
         <View style={styles.track} pointerEvents="none">
-          <View style={[styles.fill, { width: `${pct}%` }]} />
+          <View style={[styles.fill, { width: `${Math.round(frac * 100)}%` }]} />
         </View>
-        <View pointerEvents="none" style={[styles.thumb, { left: Math.max(0, clamp(value) * w - 11) }]} />
+        <View pointerEvents="none" style={[styles.thumb, { left: Math.max(0, frac * w - 11) }]} />
       </View>
     </View>
   );
