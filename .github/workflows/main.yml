@@ -180,7 +180,7 @@ jobs:
         run: |
           APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -n 1)
           "$APKSIGNER" verify --print-certs apks/Outfit.apk | tee signer.txt
-          GOT=$(grep -m1 'certificate SHA-256 digest' signer.txt | awk -F': ' '{print $2}' | tr -d ' ' | tr 'a-f' 'A-F' | sed 's/../&:/g; s/:$//')
+          GOT=$(grep -m1 'certificate SHA-256 digest' signer.txt | awk '{print $NF}' | tr -d ' ' | tr 'a-f' 'A-F' | sed 's/../&:/g; s/:$//')
           echo "Signer SHA-256: $GOT"
           if [ "$GOT" != "$EXPECTED_CERT_SHA256" ]; then echo "::error::APK signer $GOT is not the release key $EXPECTED_CERT_SHA256"; exit 1; fi
 
