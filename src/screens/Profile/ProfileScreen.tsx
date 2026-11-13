@@ -18,6 +18,7 @@ import KeyboardSafeView from '../../components/KeyboardSafeView';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { pickImage, AVATAR_PICK } from '../../utils/imagePicker';
+import { reviewPhoto } from '../../components/PhotoReviewHost';
 import { getMyRole, getUserProfile, saveUserProfile, uploadAvatar } from '../../services/userApi';
 import { isValidDob } from '../../utils/age';
 import { mdFromDob, mdLabel, setBirthdayListing } from '../../services/birthdayApi';
@@ -243,7 +244,8 @@ export default function ProfileScreen() {
     }
     try {
       // Small avatar: it is also copied onto chat messages and posts
-      const picked = await pickImage(source, AVATAR_PICK);
+      // Photo options (Blur face / Adjust, e.g. a square frame) before it is saved
+      const picked = await reviewPhoto(await pickImage(source, AVATAR_PICK), AVATAR_PICK);
       if (!picked) return;
       setUploadingAvatar(true);
       const url = await uploadAvatar(uid, picked.dataUri);

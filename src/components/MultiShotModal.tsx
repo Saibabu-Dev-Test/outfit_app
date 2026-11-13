@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles } from '../theme';
 import { pickImage, POLL_PICK } from '../utils/imagePicker';
+import { reviewPhoto } from './PhotoReviewHost';
 import { POLL_LETTERS } from '../services/circlesApi';
 import FullScreenImageViewer from './FullScreenImageViewer';
 import { useBottomSpace } from '../hooks/useBottomSpace';
@@ -39,7 +40,7 @@ export default function MultiShotModal({ visible, max, startIndex = 0, onClose, 
     if (count.current >= room) return;
     setBusy(true);
     try {
-      const picked = await pickImage('camera', POLL_PICK);
+      const picked = await reviewPhoto(await pickImage('camera', POLL_PICK), POLL_PICK);
       if (picked) {
         count.current += 1;
         setShots(prev => (prev.length >= room ? prev : [...prev, picked.dataUri]));

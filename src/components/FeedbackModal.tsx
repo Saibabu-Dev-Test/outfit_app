@@ -18,6 +18,7 @@ import KeyboardSafeView from './KeyboardSafeView';
 import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { borderRadius, colors, fontSize, fontWeight, spacing, themedStyles } from '../theme';
 import { pickImage, POLL_PICK } from '../utils/imagePicker';
+import { reviewPhoto } from './PhotoReviewHost';
 import { containsProfanity } from '../utils/profanity';
 import {
   Feedback,
@@ -69,7 +70,8 @@ export default function FeedbackModal({ visible, uid, name, onClose, quote, edit
     setError(null);
     setPicking(true);
     try {
-      const picked = await pickImage('library', { ...POLL_PICK, maxChars: FEEDBACK_MAX_IMAGE });
+      const opts = { ...POLL_PICK, maxChars: FEEDBACK_MAX_IMAGE };
+      const picked = await reviewPhoto(await pickImage('library', opts), opts);
       if (picked) setImage(picked.dataUri);
     } catch (e: any) {
       setError(e?.message || 'Could not add the screenshot.');

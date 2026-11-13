@@ -30,7 +30,7 @@ import { isPhotoBgSupported, PHOTO_BG_MODES, PhotoBgMode } from '../../native/ph
 import { isPhotoEditSupported } from '../../native/photoEdit';
 import PhotoAdjustModal, { AdjustState } from '../../components/PhotoAdjustModal';
 import ZoomableImage from '../../components/ZoomableImage';
-import { photoText } from '../../i18n/photoEditLabels';
+import { faceMessage, photoText } from '../../i18n/photoEditLabels';
 import { isFullCrop } from '../../utils/cropMath';
 import {
   CATEGORY_GROUPS,
@@ -110,6 +110,9 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
   const [adjustOpen, setAdjustOpen]           = useState(false);
   const [origPreview, setOrigPreview]         = useState<string | null>(null);
   const [baseUri, setBaseUri]                 = useState<string | null>(null);
+  // Blur face: faces found on the phone are blurred before upload (+ a short note how many)
+  const [blurFaces, setBlurFaces]             = useState(false);
+  const [faceNote, setFaceNote]               = useState<string | null>(null);
   const [imageChanged, setImageChanged]       = useState(false);
   // Editing: the list holds the thumbnail; show the full photo (1 read) once it loads
   useEffect(() => {
@@ -245,6 +248,8 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
       setBgMode('off');
       setBlurLevel(3);
       setAdjust(null);
+      setBlurFaces(false);
+      setFaceNote(null);
       setOrigPreview(picked.dataUri);
       setBaseUri(null);
       if (picked.uri) triggerAIAnalysis(picked.uri);
@@ -254,18 +259,22 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
   };
   // Photo options, always made again from the ORIGINAL file: Original / Blur (level 1-5) / Remove BG
   // (plain white or black, opposite to the clothes), then the Adjust crop on top of that result
-  const applyEdit = async (next: { mode?: PhotoBgMode; level?: number; adjust?: AdjustState | null }) => {
+  const applyEdit = async (next: { mode?: PhotoBgMode; level?: number; adjust?: AdjustState | null; faces?: boolean }) => {
     if (!sourceUri || bgBusy) return;
     const mode = next.mode ?? bgMode;
     const level = next.level ?? blurLevel;
     const adj = next.adjust !== undefined ? next.adjust : adjust;
+    const faces = next.faces ?? blurFaces;
+    setBlurFaces(faces);
+    setFaceNote(null);
     setBgMode(mode);
     setBlurLevel(level);
     setAdjust(adj);
     setBgBusy(true);
     try {
       const crop = adj && !isFullCrop(adj.crop) ? adj.crop : null;
-      const p = await remakeImage(sourceUri, { mode, level, crop });
+      const p = await remakeImage(sourceUri, { mode, level, crop, blurFaces: faces });
+      if (faces) setFaceNote(faceMessage(p?.faces, appLanguage));
       if (p) {
         setImageUri(p.dataUri);
         setImageThumb(p.thumbUri || null);
@@ -485,8 +494,23 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
                   </Text>
                 </TouchableOpacity>
               ) : null}
+              {isPhotoEditSupported() ? (
+                <TouchableOpacity
+                  style={[styles.bgChip, blurFaces && styles.bgChipOn]}
+                  disabled={bgBusy}
+                  onPress={() => applyEdit({ faces: !blurFaces })}
+                  accessibilityRole="switch"
+                  accessibilityState={{ checked: blurFaces }}
+                  activeOpacity={0.8}>
+                  <Text style={[styles.bgChipText, blurFaces && styles.bgChipTextOn]}>
+                    {blurFaces ? '✓ ' : '🙂 '}
+                    {photoText('blurFace', appLanguage)}
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
               {bgBusy ? <ActivityIndicator size="small" color={colors.primary} /> : null}
             </View>
+            {faceNote && !bgBusy ? <Text style={styles.bgLabel}>{faceNote}</Text> : null}
             {bgMode === 'blur' ? (
               <View style={styles.bgRow}>
                 <Text style={styles.bgLabel}>{photoText('blur', appLanguage)}</Text>

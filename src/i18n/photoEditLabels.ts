@@ -22,7 +22,8 @@ export type PhotoEditKey =
   | 'faceUnavailable'
   | 'facesBlurred'
   | 'zoomHint'
-  | 'imagePreview';
+  | 'imagePreview'
+  | 'tooLarge';
 
 export const PHOTO_EDIT_LABELS: Record<AppLanguage, Record<PhotoEditKey, string>> = {
   English: {
@@ -46,6 +47,7 @@ export const PHOTO_EDIT_LABELS: Record<AppLanguage, Record<PhotoEditKey, string>
     facesBlurred: '{n} face(s) blurred',
     zoomHint: 'Pinch or double-tap to zoom',
     imagePreview: 'Image Preview',
+    tooLarge: 'This photo is too large. Try another option.',
   },
   Telugu: {
     original: 'ఒరిజినల్',
@@ -68,6 +70,7 @@ export const PHOTO_EDIT_LABELS: Record<AppLanguage, Record<PhotoEditKey, string>
     facesBlurred: '{n} ముఖం(లు) బ్లర్ చేశాం',
     zoomHint: 'జూమ్ కోసం పించ్ చేయండి లేదా రెండుసార్లు నొక్కండి',
     imagePreview: 'ఫోటో ప్రివ్యూ',
+    tooLarge: 'ఈ ఫోటో చాలా పెద్దది. వేరే ఎంపిక ప్రయత్నించండి.',
   },
   Hindi: {
     original: 'ओरिजिनल',
@@ -90,6 +93,7 @@ export const PHOTO_EDIT_LABELS: Record<AppLanguage, Record<PhotoEditKey, string>
     facesBlurred: '{n} चेहरे ब्लर किए',
     zoomHint: 'ज़ूम के लिए पिंच या डबल-टैप करें',
     imagePreview: 'फ़ोटो प्रीव्यू',
+    tooLarge: 'यह फ़ोटो बहुत बड़ी है। कोई दूसरा विकल्प आज़माएँ।',
   },
 };
 
@@ -98,4 +102,11 @@ export const photoText = (key: PhotoEditKey, lang?: AppLanguage | null, n?: numb
   const table = (lang && PHOTO_EDIT_LABELS[lang]) || PHOTO_EDIT_LABELS.English;
   const s = table[key] || PHOTO_EDIT_LABELS.English[key];
   return n == null ? s : s.replace('{n}', String(n));
+};
+
+/** Short note after "Blur face": how many faces were blurred, none found, or not available. */
+export const faceMessage = (faces: number | undefined | null, lang?: AppLanguage | null): string => {
+  if (faces == null || faces < 0) return photoText('faceUnavailable', lang);
+  if (faces === 0) return photoText('noFace', lang);
+  return photoText('facesBlurred', lang, faces);
 };

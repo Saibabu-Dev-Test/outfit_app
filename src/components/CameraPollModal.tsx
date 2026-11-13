@@ -25,6 +25,7 @@ import {
   themedStyles,
 } from '../theme';
 import { pickImage, pickImages, POLL_PICK } from '../utils/imagePicker';
+import { reviewPhoto, reviewPhotos } from './PhotoReviewHost';
 import ZoomableImage from './ZoomableImage';
 import {
   MAX_POLL_TOTAL_CHARS,
@@ -64,7 +65,7 @@ export default function CameraPollModal({
     if (busy || room <= 0) return;
     setBusy(true);
     try {
-      const picked = await pickImage('camera', POLL_PICK);
+      const picked = await reviewPhoto(await pickImage('camera', POLL_PICK), POLL_PICK);
       if (picked)
         setPhotos(prev =>
           prev.length >= CAMERA_POLL_MAX ? prev : [...prev, picked.dataUri],
@@ -82,7 +83,8 @@ export default function CameraPollModal({
     if (busy || room <= 0) return;
     setBusy(true);
     try {
-      const r = await pickImages(room, POLL_PICK);
+      const got = await pickImages(room, POLL_PICK);
+      const r = { skipped: got.skipped, images: await reviewPhotos(got.images, POLL_PICK) };
       if (r.skipped)
         Alert.alert(
           'Some photos skipped',

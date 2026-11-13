@@ -43,6 +43,7 @@ import {
 } from '../../services/circlesApi';
 import { resolveMyPlace } from '../../services/districtApi';
 import { CHAT_PICK, MAX_BASE64_CHARS, pickImages } from '../../utils/imagePicker';
+import { reviewPhotos } from '../../components/PhotoReviewHost';
 import { clockTime } from '../../utils/date';
 import { isPhotoExpired, PHOTO_EXPIRED_TEXT } from '../../utils/photoExpiry';
 import NameWithAge from '../../components/NameWithAge';
@@ -142,8 +143,10 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
   const sendSeveral = async () => {
     try {
       // One photo: near-original full photo + small chat copy; 2-6: poll-size photos (CHAT_PICK)
-      const r = await pickImages(6, CHAT_PICK);
-      if (r.skipped) Alert.alert('Some photos skipped', `${r.skipped} photo(s) were too large.`);
+      const picked = await pickImages(6, CHAT_PICK);
+      if (picked.skipped) Alert.alert('Some photos skipped', `${picked.skipped} photo(s) were too large.`);
+      // Photo options (Blur face / Adjust) before sending; closing them sends nothing
+      const r = { images: await reviewPhotos(picked.images, CHAT_PICK) };
       if (!r.images.length) return;
       if (r.images.length === 1) {
         setSending(true);

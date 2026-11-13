@@ -9,6 +9,7 @@ import { allowAds, initAds } from './src/native/ads';
 import { isSafeMode, markBootOk } from './src/native/safeMode';
 import { ThemeProvider, useTheme } from './src/theme';
 import CoinFlipProvider from './src/components/coins/CoinFlipProvider';
+import PhotoReviewHost from './src/components/PhotoReviewHost';
 
 function Themed() {
   const { isDark } = useTheme();
@@ -46,6 +47,8 @@ function Themed() {
           <RootNavigator />
         </NotificationGate>
       </CoinFlipProvider>
+      {/* Photo options (Blur face / Adjust) for every photo upload, opened by reviewPhotos() */}
+      <PhotoReviewHost />
     </>
   );
 }

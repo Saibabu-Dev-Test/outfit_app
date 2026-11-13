@@ -2,7 +2,12 @@ package com.outfit
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
 import android.graphics.Matrix
+import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.Rect
+import android.graphics.RectF
 import android.media.ExifInterface
 import android.net.Uri
 import android.util.Base64
@@ -12,18 +17,26 @@ import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 import com.facebook.react.bridge.ReadableMap
+import com.google.android.gms.tasks.Tasks
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.face.FaceDetection
+import com.google.mlkit.vision.face.FaceDetectorOptions
 import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.InputStream
+import java.util.concurrent.TimeUnit
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.roundToInt
 
 /**
  * Photo options on the phone, before a photo is uploaded (no upload, nothing leaves the phone):
  *   edit(uri, { blurFaces?: boolean, cropX?, cropY?, cropW?, cropH? (0..1 of the photo) })
- *     crop: keeps only that part of the photo (the "Adjust" zoom / pan frame).
+ *     1. blurFaces: ML Kit face detection (bundled model, works offline); every face found is
+ *        pixelated + softened inside an oval grown ~25% around it (more on top for hair).
+ *     2. crop: keeps only that part of the photo (the "Adjust" zoom / pan frame).
  * Resolves {uri: "file://...jpg", changed, faces} (faces = number of faces blurred, -1 when face
  * detection is not available). Never rejects: any failure resolves the photo unchanged, so a
  * photo is always uploaded. EXIF rotation is applied, long edge <= 2048. Runs on its own thread.
@@ -95,6 +108,69 @@ class PhotoEditModule(private val ctx: ReactApplicationContext) : ReactContextBa
   private fun bool(o: ReadableMap?, key: String): Boolean =
     try { o != null && o.hasKey(key) && !o.isNull(key) && o.getBoolean(key) } catch (_: Throwable) { false }
 
+  // Faces found -> pixelated + blurred ovals drawn over them. Returns the count, -1 when unavailable.
+  private fun blurFaces(bmp: Bitmap): Int {
+    val detector = try {
+      FaceDetection.getClient(
+        FaceDetectorOptions.Builder()
+          .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_ACCURATE)
+          .setMinFaceSize(0.04f)
+          .build(),
+      )
+    } catch (t: Throwable) {
+      android.util.Log.w("OutfitPhotoEdit", "face detector unavailable", t)
+      return -1
+    }
+    val faces = try {
+      Tasks.await(detector.process(InputImage.fromBitmap(bmp, 0)), 30, TimeUnit.SECONDS)
+    } catch (t: Throwable) {
+      android.util.Log.w("OutfitPhotoEdit", "face detection failed", t)
+      return -1
+    } finally {
+      try { detector.close() } catch (_: Throwable) {}
+    }
+    if (faces.isEmpty()) return 0
+    val w = bmp.width
+    val h = bmp.height
+    val canvas = Canvas(bmp)
+    val paint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
+    var done = 0
+    for (f in faces) {
+      val b = f.boundingBox
+      // Same padding as utils/cropMath.ts padFaceBox (25% around, +15% more on top for hair)
+      val l = (b.left - b.width() * 0.25f).coerceIn(0f, w.toFloat())
+      val t = (b.top - b.height() * 0.40f).coerceIn(0f, h.toFloat())
+      val r = (b.right + b.width() * 0.25f).coerceIn(0f, w.toFloat())
+      val btm = (b.bottom + b.height() * 0.25f).coerceIn(0f, h.toFloat())
+      val rw = (r - l).roundToInt()
+      val rh = (btm - t).roundToInt()
+      if (rw < 4 || rh < 4) continue
+      val src = Rect(l.roundToInt(), t.roundToInt(), l.roundToInt() + rw, t.roundToInt() + rh)
+      src.right = min(src.right, w)
+      src.bottom = min(src.bottom, h)
+      if (src.width() < 4 || src.height() < 4) continue
+      val region = Bitmap.createBitmap(bmp, src.left, src.top, src.width(), src.height())
+      // Pixelate: ~9 blocks across the face, then soften the blocks with a filtered upscale
+      val blocks = 9
+      val sw = max(2, blocks)
+      val sh = max(2, (blocks * src.height().toFloat() / src.width()).roundToInt())
+      val tiny = Bitmap.createScaledBitmap(region, sw, sh, true)
+      region.recycle()
+      val mid = Bitmap.createScaledBitmap(tiny, sw * 3, sh * 3, false)
+      tiny.recycle()
+      val cover = Bitmap.createScaledBitmap(mid, src.width(), src.height(), true)
+      mid.recycle()
+      canvas.save()
+      val oval = Path().apply { addOval(RectF(src), Path.Direction.CW) }
+      canvas.clipPath(oval)
+      canvas.drawBitmap(cover, null, src, paint)
+      canvas.restore()
+      cover.recycle()
+      done++
+    }
+    return done
+  }
+
   @ReactMethod
   fun edit(uri: String, opts: ReadableMap?, promise: Promise) {
     Thread {
@@ -105,7 +181,10 @@ class PhotoEditModule(private val ctx: ReactApplicationContext) : ReactContextBa
         var bmp = try { load(uri, 2048) } catch (e: OutOfMemoryError) { System.gc(); load(uri, 1280) }
         var changed = false
         var faces = 0
-        if (bool(opts, "blurFaces")) faces = -1 // face blur arrives in the next build
+        if (bool(opts, "blurFaces")) {
+          faces = blurFaces(bmp)
+          if (faces > 0) changed = true
+        }
         val cx = num(opts, "cropX")
         val cy = num(opts, "cropY")
         val cw = num(opts, "cropW")

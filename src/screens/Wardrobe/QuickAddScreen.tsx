@@ -7,6 +7,7 @@ import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles } fro
 import { useAuth } from '../../context/AuthContext';
 import SelectModal from '../../components/SelectModal';
 import { PHOTO_PICK, pickImages } from '../../utils/imagePicker';
+import { reviewPhotos } from '../../components/PhotoReviewHost';
 import { getAllCategoriesSorted } from '../../constants/wardrobe';
 import { QUICK_ADD_MAX, QuickItem, quickNames, saveQuickItems } from '../../services/quickAdd';
 import { batchStoredBytes, fitsInFirestore, formatBytes } from '../../utils/photoStorage';
@@ -27,7 +28,10 @@ export default function QuickAddScreen({ navigation }: { navigation: any }) {
     setPicking(true);
     try {
       const room = QUICK_ADD_MAX - items.length;
-      const { images, skipped } = await pickImages(room, PHOTO_PICK);
+      const picked = await pickImages(room, PHOTO_PICK);
+      const skipped = picked.skipped;
+      // Photo options: Original / Blur / Remove BG / Adjust / Blur face
+      const images = await reviewPhotos(picked.images, PHOTO_PICK, { bg: true });
       const def = items[items.length - 1]?.category || categories[0] || 'Others';
       setItems(prev => [
         ...prev,

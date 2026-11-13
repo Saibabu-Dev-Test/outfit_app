@@ -28,6 +28,7 @@ import Avatar from '../../components/Avatar';
 import ZoomableImage from '../../components/ZoomableImage';
 import { clockTime } from '../../utils/date';
 import { CHAT_PICK, pickImages } from '../../utils/imagePicker';
+import { reviewPhotos } from '../../components/PhotoReviewHost';
 import NameWithAge from '../../components/NameWithAge';
 import TranslatedText from '../../components/TranslatedText';
 import {
@@ -175,7 +176,8 @@ export default function BirthdayChatScreen({ navigation, route }: { navigation: 
     try {
       // Near-original photo (opened on tap) + small chat copy
       const r = await pickImages(1, CHAT_PICK);
-      const picked = r.images[0];
+      // Photo options (Blur face / Adjust) before sending; closing them sends nothing
+      const picked = (await reviewPhotos(r.images, CHAT_PICK))[0];
       if (!picked?.dataUri) return;
       setSending(true);
       await sendBdayPhoto(todayKey, me, picked.clearUri || picked.dataUri, picked.clearUri ? picked.dataUri : null);

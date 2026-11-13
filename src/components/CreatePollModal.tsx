@@ -17,6 +17,7 @@ import {
 import KeyboardSafeView from './KeyboardSafeView';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles } from '../theme';
 import { pickImages, POLL_PICK } from '../utils/imagePicker';
+import { reviewPhotos } from './PhotoReviewHost';
 import ActionSheet from './ActionSheet';
 import WardrobePickerModal from './WardrobePickerModal';
 import MultiShotModal from './MultiShotModal';
@@ -78,8 +79,10 @@ export default function CreatePollModal({ visible, onClose, onSubmit, initialIma
   const addSeveral = async () => {
     try {
       const room = MAX_POLL_OPTIONS - options.length;
-      const r = await pickImages(room);
-      if (r.skipped) Alert.alert('Some photos skipped', `${r.skipped} photo(s) were too large.`);
+      const got = await pickImages(room);
+      if (got.skipped) Alert.alert('Some photos skipped', `${got.skipped} photo(s) were too large.`);
+      // Photo options (Blur face / Adjust) for each photo
+      const r = { images: await reviewPhotos(got.images, POLL_PICK) };
       if (!r.images.length) return;
       setOptions(prev =>
         [...prev, ...r.images.map(p => ({ imageData: p.dataUri, label: '' }))].slice(0, MAX_POLL_OPTIONS),
