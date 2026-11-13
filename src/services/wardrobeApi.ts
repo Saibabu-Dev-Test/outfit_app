@@ -26,6 +26,8 @@ import { firestoreErrorMessage } from '../utils/firebaseErrors';
 import { recordTask } from './rewardsApi';
 import { awardCoins } from './coinsApi';
 import { toDate } from '../utils/date';
+import { dominantColor, imageLabels } from '../native/wardrobeVision';
+import { tagsFromVision } from '../utils/visionTags';
 
 export interface WardrobeItemPayload {
   userId: number | string;
@@ -353,14 +355,19 @@ export interface ClothingAnalysisResult {
   confidence: number;
 }
 
-// AI vision auto-fill for a new item's photo. The old vision server (plain http to a raw IP, port
-// 8000) is switched off: it sent wardrobe photos unencrypted, needed a cleartext-traffic exception
-// in the APK (a Play Protect / safety red flag) and was not reachable, so every photo waited 4 s for
-// nothing. Always null now: the Add item screen asks the user to pick the category and colour.
-// To bring it back, serve it over HTTPS and call it here.
-export const analyzeClothingPhoto = async (
-  _imageUri: string,
-): Promise<ClothingAnalysisResult | null> => null;
+// Auto-fill for a new item's photo, on the phone: ML Kit Image Labeling (labels -> category) +
+// the photo's main colour (utils/visionTags). null when nothing useful was found or the model is
+// not available (the user picks the category and colour). The old plain-http vision server stays
+// switched off.
+export const analyzeClothingPhoto = async (imageUri: string): Promise<ClothingAnalysisResult | null> => {
+  try {
+    if (!imageUri || /^data:/i.test(imageUri)) return null;
+    const [labels, hex] = await Promise.all([imageLabels(imageUri), dominantColor(imageUri)]);
+    return tagsFromVision(labels, hex);
+  } catch {
+    return null;
+  }
+};
 
 // ── Old one-time clean-up of separate feed copies (build 94): switched off in build 115 ─────
 // Since the "near original" pass the full photo is up to 2048 px / 690 KB and is read only when a

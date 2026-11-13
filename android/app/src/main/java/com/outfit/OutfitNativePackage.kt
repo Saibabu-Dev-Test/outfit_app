@@ -24,6 +24,7 @@ class OutfitNativePackage : ReactPackage {
       { PhotoBackgroundModule(reactContext) },
       { PhotoEditModule(reactContext) },
       { DeviceIdModule(reactContext) },
+      { WardrobeVisionModule(reactContext) },
     )
     return makers.mapNotNull { make ->
       try {

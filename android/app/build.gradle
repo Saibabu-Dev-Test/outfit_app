@@ -180,6 +180,9 @@ dependencies {
     implementation("com.google.mlkit:language-id:17.0.6")
     // Clothing photo background (plain white/black or blur), on-device subject segmentation via Play services
     implementation("com.google.android.gms:play-services-mlkit-subject-segmentation:16.0.0-beta1")
+    // Wardrobe auto tags (WardrobeVisionModule.kt): Play services Image Labeling, model downloaded by
+    // Play services, so no MBs are added to the APK. Called lazily and guarded.
+    implementation("com.google.android.gms:play-services-mlkit-image-labeling:16.0.8")
     // "Blur face" photo option: on-device face detection, bundled model (works offline, free, no upload)
     implementation("com.google.mlkit:face-detection:16.1.7")
     // JVM unit tests for pure Kotlin maths (src/test, e.g. SegmentMathTest): ./gradlew :app:testDebugUnitTest
