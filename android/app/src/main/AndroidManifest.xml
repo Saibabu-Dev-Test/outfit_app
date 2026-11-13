@@ -44,6 +44,12 @@
             <category android:name="android.intent.category.BROWSABLE" />
             <data android:scheme="outfit" android:host="join" />
         </intent-filter>
+        <!-- Circle poll push notifications: outfit://circle/CIRCLE_ID/MESSAGE_ID (CircleDeepLink.tsx) -->
+        <intent-filter>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.DEFAULT" />
+            <data android:scheme="outfit" android:host="circle" />
+        </intent-filter>
       </activity>
 
       <!-- Daily reminders (8 AM / 1 PM / 7 PM) + re-arm after boot, update or clock change -->
@@ -58,6 +64,19 @@
           <action android:name="android.intent.action.TIMEZONE_CHANGED" />
         </intent-filter>
       </receiver>
+
+      <!-- Circle poll pushes (FCM data messages) -->
+      <service
+        android:name=".OutfitMessagingService"
+        android:exported="false">
+        <intent-filter>
+          <action android:name="com.google.firebase.MESSAGING_EVENT" />
+        </intent-filter>
+      </service>
+      <!-- ML Kit: download the background-removal + labeling models with Play services ahead of use -->
+      <meta-data
+        android:name="com.google.mlkit.vision.DEPENDENCIES"
+        android:value="subject_segment,ica" />
 
       <!-- Camera capture (react-native-image-picker) and in-app update APKs (xml/file_paths) -->
       <provider

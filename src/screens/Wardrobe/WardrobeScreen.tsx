@@ -138,12 +138,20 @@ export default function WardrobeScreen({ navigation }: { navigation: any }) {
             <Text style={styles.subtitle}>My Collection</Text>
             <Text style={styles.title}>Wardrobe</Text>
           </View>
-          <TouchableOpacity
-            style={styles.addButton}
-            onPress={() => navigation.navigate('AddItem')}
-            activeOpacity={0.8}>
-            <Text style={styles.addButtonText}>+ Add</Text>
-          </TouchableOpacity>
+          <View style={{ flexDirection: 'row' }}>
+            <TouchableOpacity
+              style={[styles.addButton, { marginRight: 8 }]}
+              onPress={() => navigation.navigate('AddItem', { quick: true })}
+              activeOpacity={0.8}>
+              <Text style={styles.addButtonText}>⚡ Quick add</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.addButton}
+              onPress={() => navigation.navigate('AddItem')}
+              activeOpacity={0.8}>
+              <Text style={styles.addButtonText}>+ Add</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Stats Row */}

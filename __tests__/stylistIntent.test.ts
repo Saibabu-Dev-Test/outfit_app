@@ -42,10 +42,12 @@ describe('occasion scoring', () => {
       it2('t1', 'T-Shirts', 'T-Shirt', 'White'), it2('t2', 'Shirts', 'Formal shirt', 'Blue'), it2('t3', 'Kurtas', 'Kurta', 'Yellow'),
       it2('b1', 'Shorts', 'Shorts', 'Beige'), it2('b2', 'Trousers', 'Formal trousers', 'Black'), it2('b3', 'Jeans', 'Jeans', 'Blue'),
     ];
-    const r = pickLuckyPairs(w, 'English', { occasion: 'Beach' });
+    // Pinned to a Tuesday: the weekday lucky colour (vaara) also scores, so "today" made this flaky
+    const date = new Date(2026, 10, 10, 12);
+    const r = pickLuckyPairs(w, 'English', { occasion: 'Beach', date });
     expect(r.pairs.length).toBeLessThanOrEqual(3);
     expect(r.pairs[0].why).toMatch(/beach/);
-    expect(pickLuckyPairs(w, 'English', { occasion: 'Interview' }).pairs[0].top.id).toBe('t2');
-    expect(pickLuckyPairs(w, 'English', { max: 1 }).pairs).toHaveLength(1);
+    expect(pickLuckyPairs(w, 'English', { occasion: 'Interview', date }).pairs[0].top.id).toBe('t2');
+    expect(pickLuckyPairs(w, 'English', { max: 1, date }).pairs).toHaveLength(1);
   });
 });

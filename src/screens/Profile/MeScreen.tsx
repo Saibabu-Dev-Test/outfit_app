@@ -30,6 +30,7 @@ import AstrologyPanel from '../../components/AstrologyPanel';
 import { countFriendsJoined, isWeeklyStar, joinedWithLinkText } from '../../services/rewardsApi';
 import { shareMyReferral } from '../../utils/referralLink';
 import useIsAdmin from '../../hooks/useIsAdmin';
+import EarningsSection from '../../components/EarningsSection';
 
 type Tab = 'astro' | 'wardrobe' | 'likes';
 
@@ -213,14 +214,38 @@ export default function MeScreen({ navigation }: { navigation: any }) {
           <Text style={styles.inviteCta}>Invite</Text>
         </TouchableOpacity>
 
-        {isAdmin ? (
-          <TouchableOpacity style={styles.invite} onPress={() => navigation.navigate('AdminUsers')} activeOpacity={0.8}>
+        {/* Monthly tasks -> coins -> rewards; planners and matching */}
+        {[
+          { icon: '🪙', label: 'Rewards · monthly tasks & coins', screen: 'Rewards' },
+          { icon: '💍', label: 'Function planner (pelli, haldi…)', screen: 'FunctionPlanner' },
+          { icon: '💑', label: 'Pelli Porutham (couple match)', screen: 'Porutham' },
+          { icon: '🌤️', label: "Today's outfit for the weather", screen: 'WeatherOutfit' },
+        ].map(r => (
+          <TouchableOpacity key={r.screen} style={styles.invite} onPress={() => navigation.navigate(r.screen)} activeOpacity={0.8}>
             <Text style={styles.inviteText} numberOfLines={1}>
-              👥 Users
+              {r.icon} {r.label}
             </Text>
-            <Text style={styles.inviteCta}>Admin ›</Text>
+            <Text style={styles.inviteCta}>Open ›</Text>
           </TouchableOpacity>
-        ) : null}
+        ))}
+
+        {/* Earn tab ledger: totals, withdrawable vs pending, breakdown by type, recent history */}
+        {user?.id ? <EarningsSection uid={user.id} onOpenEarn={() => navigation.navigate('Earn')} /> : null}
+
+        {isAdmin
+          ? [
+              { icon: '👥', label: 'Users', screen: 'AdminUsers' },
+              { icon: '🎁', label: 'Reward & withdrawal requests', screen: 'AdminRewardRequests' },
+              { icon: '🗄️', label: 'Storage', screen: 'AdminStorage' },
+            ].map(r => (
+              <TouchableOpacity key={r.screen} style={styles.invite} onPress={() => navigation.navigate(r.screen)} activeOpacity={0.8}>
+                <Text style={styles.inviteText} numberOfLines={1}>
+                  {r.icon} {r.label}
+                </Text>
+                <Text style={styles.inviteCta}>Admin ›</Text>
+              </TouchableOpacity>
+            ))
+          : null}
 
         <View style={styles.tabs}>
           {(['astro', 'wardrobe', 'likes'] as Tab[]).map(t => (

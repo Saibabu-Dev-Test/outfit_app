@@ -26,6 +26,9 @@ import {
   getWardrobeFullImage,
 } from '../../services/wardrobeApi';
 import { pickImage } from '../../utils/imagePicker';
+import { removeBackground } from '../../native/wardrobeVision';
+import { canResize, resizeImage } from '../../utils/imageResize';
+import { FULL_SPEC, THUMB_SPEC } from '../../utils/imageSpecs';
 import {
   CATEGORY_GROUPS,
   categoryGroupsForGender,
@@ -221,11 +224,48 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
       setImageThumb(picked.thumbUri || null);
       setImageClear(picked.clearUri || null);
       setImageChanged(true);
-      if (picked.uri) triggerAIAnalysis(picked.uri);
+      setOriginal(null);
+      if (!picked.uri) return;
+      // Auto background removal (ML Kit Subject Segmentation on the phone). Unavailable / no subject
+      // found -> the original photo stays. Tags come from the cut-out (cleaner colour).
+      setAiStatusMsg('✂️ Removing background…');
+      const cut = await removeBackground(picked.uri);
+      if (cut && canResize()) {
+        try {
+          const [full, thumb] = await Promise.all([resizeImage(cut, FULL_SPEC), resizeImage(cut, THUMB_SPEC)]);
+          setOriginal({ full: picked.dataUri, thumb: picked.thumbUri || null });
+          setImageUri(full);
+          setImageThumb(thumb);
+          setImageClear(null);
+        } catch {
+          // keep the original
+        }
+      }
+      setAiStatusMsg(null);
+      triggerAIAnalysis(cut || picked.uri);
     } catch (e: any) {
+      setAiStatusMsg(null);
       Alert.alert('Photo Error', e?.message || 'Could not use this photo.');
     }
   };
+  // Undo the background removal (back to the photo as taken)
+  const [original, setOriginal] = useState<{ full: string; thumb: string | null } | null>(null);
+  const undoCut = () => {
+    if (!original) return;
+    setImageUri(original.full);
+    setImageThumb(original.thumb);
+    setOriginal(null);
+  };
+  // ⚡ Quick add (from the Wardrobe screen): opens the camera right away; the photo is cleaned and
+  // tagged automatically, so one tap on Save adds it.
+  const quickStarted = React.useRef(false);
+  useEffect(() => {
+    if (route?.params?.quick && !isEditing && !quickStarted.current) {
+      quickStarted.current = true;
+      setTimeout(() => pickFrom('camera'), 300);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const openCamera = () => { pickFrom('camera'); };
   const openGallery = () => { pickFrom('library'); };
 
@@ -402,6 +442,11 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
           <View style={styles.aiBadgeContainer}>
             <Text style={styles.aiBadgeText}>{aiStatusMsg}</Text>
           </View>
+        ) : null}
+        {original ? (
+          <TouchableOpacity style={styles.aiBadgeContainer} onPress={undoCut}>
+            <Text style={styles.aiBadgeText}>✂️ Background removed · Tap to undo</Text>
+          </TouchableOpacity>
         ) : null}
       </View>
 

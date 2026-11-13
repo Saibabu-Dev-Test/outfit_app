@@ -6,6 +6,7 @@ import {
   statusCodes,
 } from '@react-native-google-signin/google-signin';
 import { NO_INTERNET } from '../utils/firebaseErrors';
+import { pauseAppOpenAds } from '../ads/adsService';
 
 // Web client (client_type 3) from android/app/google-services.json
 const WEB_CLIENT_ID =
@@ -81,6 +82,7 @@ export const getGoogleAccount = async (silentFirst = false): Promise<GoogleAccou
       }
     }
     if (!data) {
+      pauseAppOpenAds();
       const res = await GoogleSignin.signIn();
       if (!isSuccessResponse(res)) {
         return { cancelled: true, message: '' };

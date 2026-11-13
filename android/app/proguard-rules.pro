@@ -38,3 +38,10 @@
 -keep class com.google.android.gms.ads.** { *; }
 -keep class com.google.ads.** { *; }
 -dontwarn com.google.android.gms.ads.**
+# Firebase Messaging (push) + ML Kit vision (subject segmentation, image labeling)
+-keep class com.google.firebase.messaging.** { *; }
+-keep class com.google.firebase.iid.** { *; }
+-keep class com.google.firebase.installations.** { *; }
+-keep class com.google.firebase.** { *; }
+-dontwarn com.google.firebase.**
+-keep class com.google.android.gms.vision.** { *; }

@@ -24,6 +24,10 @@ import { db } from '../config/firebaseConfig';
 import { MAX_BASE64_CHARS } from '../utils/imagePicker';
 import { firestoreErrorMessage } from '../utils/firebaseErrors';
 import { recordTask } from './rewardsApi';
+import { dominantColor, imageLabels } from '../native/wardrobeVision';
+import { tagsFromVision } from '../utils/visionTags';
+import { dataUriBytes, isQuotaError, markFull, placePhoto, recordUpload } from './photoStorage';
+import { recordMonthlyProgress } from './monthlyTasksApi';
 import { toDate } from '../utils/date';
 
 export interface WardrobeItemPayload {
@@ -58,6 +62,7 @@ export interface WardrobeItemResponse {
   gender?: string | null;
   notes?: string | null;
   imageUrl: string | null; // imageData: thumbnail on new items (full photo: getWardrobeFullImage)
+  photoUrl?: string | null; // full photo saved on another free provider (storage chain)
   hasMedia: boolean; // full photo in wardrobe/{id}/media/full
   hasClear?: boolean; // ~720 px feed photo in wardrobe/{id}/media/clear
   isPublic: boolean;
@@ -82,6 +87,7 @@ const toItem = (id: string, d: any): WardrobeItemResponse => ({
   gender: d?.gender ?? null,
   notes: d?.notes ?? null,
   imageUrl: d?.imageData ?? d?.imageUrl ?? null,
+  photoUrl: typeof d?.photoUrl === 'string' ? d.photoUrl : null,
   hasMedia: d?.media === 1,
   hasClear: d?.clear === 1,
   isPublic: d?.isPublic === true,
@@ -151,8 +157,24 @@ export const addWardrobeItem = async (
   payload: WardrobeItemPayload,
 ): Promise<WardrobeItemResponse> => {
   const uid = String(payload.userId);
-  const full = checkImage(payload.imageUri);
-  const split = !!full && okThumb(payload.imageThumb);
+  let full = checkImage(payload.imageUri);
+  // Free-tier storage chain: Firebase (inline, as before) until it is ~95% full, then the next
+  // configured provider (Cloudinary...). Only the thumbnail stays inline then; the full photo's URL
+  // and provider are saved on the item, so it keeps loading from there forever.
+  let photoUrl: string | null = null;
+  let storageProvider = 'firebase';
+  if (full && /^data:/.test(full)) {
+    const placed = await placePhoto(full, 'wardrobe');
+    if (placed.provider !== 'firebase') {
+      photoUrl = (placed as any).url;
+      storageProvider = placed.provider;
+    }
+  }
+  if (photoUrl && !okThumb(payload.imageThumb)) {
+    // no small thumbnail: the list shows the remote photo itself
+    full = photoUrl;
+  }
+  const split = !photoUrl && !!full && okThumb(payload.imageThumb);
   const data: any = {
     userId: uid,
     name: payload.name,
@@ -165,11 +187,13 @@ export const addWardrobeItem = async (
     fabric: payload.fabric || null,
     gender: payload.gender || null,
     notes: payload.notes || null,
-    imageData: split ? payload.imageThumb : full,
+    imageData: photoUrl ? (okThumb(payload.imageThumb) ? payload.imageThumb : photoUrl) : split ? payload.imageThumb : full,
     isPublic: payload.isPublic === true,
+    storageProvider,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   };
+  if (photoUrl) data.photoUrl = photoUrl;
   if (split) data.media = 1;
   const clear = split && okClear(payload.imageClear) ? payload.imageClear : null;
   if (clear) data.clear = 1;
@@ -180,13 +204,22 @@ export const addWardrobeItem = async (
     if (split) b.set(mediaRef(ref.id), { imageData: full, userId: uid, updatedAt: serverTimestamp() });
     if (clear) b.set(clearRef(ref.id), { imageData: clear, userId: uid, updatedAt: serverTimestamp() });
     await b.commit();
+    // Firestore bytes used by this item's photos (storage usage counter, Admin > Storage)
+    const inlineBytes = [data.imageData, split ? full : null, clear].reduce(
+      (n: number, x: any) => n + (typeof x === 'string' && x.startsWith('data:') ? dataUriBytes(x) : 0),
+      0,
+    );
+    if (inlineBytes) recordUpload('firebase', inlineBytes);
     recordTask(uid, 'uploaded'); // daily task (never throws)
+    recordMonthlyProgress(uid, 'wardrobe'); // monthly task (never throws)
     const now = new Date().toISOString();
     const item = { ...toItem(ref.id, data), createdAt: now, updatedAt: now };
     patchCache(uid, items => [item, ...items.filter(i => i.id !== item.id)]);
     return item;
   } catch (e: any) {
     console.warn('addWardrobeItem failed:', e?.code, e?.message);
+    // Firestore free quota exceeded: next uploads go to the next provider in the chain
+    if (isQuotaError(e)) markFull('firebase');
     throw new Error(firestoreErrorMessage(e, 'Saving item'));
   }
 };
@@ -265,7 +298,10 @@ export const hasUploadedToday = async (userId: string): Promise<boolean> => {
 };
 
 // Full-size photo for editing / the detail screen (1 read). Falls back to the thumbnail.
-export const getWardrobeFullImage = async (item: Pick<WardrobeItemResponse, 'id' | 'imageUrl' | 'hasMedia'>): Promise<string | null> => {
+export const getWardrobeFullImage = async (
+  item: Pick<WardrobeItemResponse, 'id' | 'imageUrl' | 'hasMedia'> & { photoUrl?: string | null },
+): Promise<string | null> => {
+  if (item.photoUrl) return item.photoUrl; // saved on another free provider (storage chain)
   if (!item.hasMedia) return item.imageUrl;
   try {
     const s = await getDoc(mediaRef(item.id));
@@ -356,9 +392,16 @@ export interface ClothingAnalysisResult {
 // in the APK (a Play Protect / safety red flag) and was not reachable, so every photo waited 4 s for
 // nothing. Always null now: the Add item screen asks the user to pick the category and colour.
 // To bring it back, serve it over HTTPS and call it here.
-export const analyzeClothingPhoto = async (
-  _imageUri: string,
-): Promise<ClothingAnalysisResult | null> => null;
+// Now on the phone: ML Kit Image Labeling (labels -> category) + the photo's main colour
+// (utils/visionTags). null when nothing useful was found (the user picks manually).
+export const analyzeClothingPhoto = async (imageUri: string): Promise<ClothingAnalysisResult | null> => {
+  try {
+    const [labels, hex] = await Promise.all([imageLabels(imageUri), dominantColor(imageUri)]);
+    return tagsFromVision(labels, hex);
+  } catch {
+    return null;
+  }
+};
 
 // ── One-time clean-up of the old separate feed copies (build 94) ──────────────────────────
 // Items saved between the "clear feed" and "one sharp copy" passes kept TWO big photos

@@ -663,6 +663,9 @@ service cloud.firestore {
         allow create: if isMember(cid)
           && request.resource.data.userId == me()
           && request.resource.data.type in ['text', 'image', 'poll']
+          // Photos / polls auto-delete after 60 days (Firestore TTL on expireAt); notified is server-only
+          && (request.resource.data.get('expireAt', null) == null || request.resource.data.expireAt is timestamp)
+          && !('notified' in request.resource.data)
           // Photo polls (A-F picker, or up to 4 camera shots in a row): 2-6 options of
           // {imageData, label}, kind 'buy' | 'wear'. Members vote in .../votes/{uid}.
           && (request.resource.data.type != 'poll'
@@ -928,6 +931,299 @@ service cloud.firestore {
         allow update: if false;
         allow delete: if signedIn() && (me() == uid || isAdmin());
       }
+    }
+
+    // ── Monthly tasks + coins + rewards (src/services/monthlyTasksApi.ts, values in src/config/rewards.ts) ──
+    // Keep these numbers in sync with src/config/rewards.ts (MONTHLY_TASKS / REWARD_CATALOG).
+    function monthlyTaskTarget(t) {
+      return {'polls': 5, 'votes': 30, 'wardrobe': 10, 'openDays': 15, 'adsWatched': 10, 'invites': 1}[t];
+    }
+    function monthlyTaskCoins(t) {
+      return {'polls': 50, 'votes': 50, 'wardrobe': 40, 'openDays': 60, 'adsWatched': 50, 'invites': 100}[t];
+    }
+    function rewardCoins(r) {
+      return {'amazon100': 2000, 'amazon250': 4500, 'shirt499': 8000, 'dress799': 12000}[r];
+    }
+    function isMonthKey(m) {
+      return m is string && m.matches('^[0-9]{4}-[0-9]{2}$');
+    }
+    // Only this month (any Indian / nearby timezone, a day of slack on both ends)
+    function isCurrentMonth(m) {
+      let start = timestamp.date(int(m.split('-')[0]), int(m.split('-')[1]), 1);
+      return isMonthKey(m)
+        && request.time > start - duration.value(1, 'd')
+        && request.time < start + duration.value(32, 'd');
+    }
+    function monthPath(uid, m) {
+      return /databases/$(db)/documents/users/$(uid)/months/$(m);
+    }
+    // A counter stays the same or goes up by exactly 1 in one write
+    function stepOk(field) {
+      let before = resource == null ? 0 : resource.data.get(field, 0);
+      let after = request.resource.data.get(field, 0);
+      return after is int && (after == before || after == before + 1);
+    }
+    // A list keeps every old item and gains exactly one new one (nothing can be removed and re-added)
+    function grewByOne(field) {
+      let before = resource == null ? [] : resource.data.get(field, []);
+      let after = request.resource.data.get(field, []);
+      return after is list
+        && after.toSet().hasAll(before.toSet())
+        && after.toSet().difference(before.toSet()).size() == 1
+        && after.size() == before.size() + 1;
+    }
+    function listSame(field) {
+      let before = resource == null ? [] : resource.data.get(field, []);
+      return request.resource.data.get(field, []) == before;
+    }
+    // users/{uid}/months/{YYYY-MM}
+    match /users/{uid}/months/{m} {
+      allow read: if signedIn() && (me() == uid || isAdmin());
+      allow create, update: if signedIn() && me() == uid
+        && isCurrentMonth(m)
+        && request.resource.data.keys().hasOnly(['polls', 'votes', 'wardrobe', 'openDays', 'adsWatched', 'lastOpenDay',
+                                                  'claimed', 'doubled', 'inviteRef', 'updatedAt'])
+        && stepOk('polls') && stepOk('votes') && stepOk('wardrobe') && stepOk('adsWatched')
+        // openDays: +1 only together with a new lastOpenDay (today, in this month)
+        && (request.resource.data.get('openDays', 0) == (resource == null ? 0 : resource.data.get('openDays', 0))
+            || (request.resource.data.get('openDays', 0) == (resource == null ? 0 : resource.data.get('openDays', 0)) + 1
+                && isDateKey(request.resource.data.get('lastOpenDay', ''))
+                && request.resource.data.lastOpenDay != (resource == null ? '' : resource.data.get('lastOpenDay', ''))
+                && request.resource.data.lastOpenDay.matches('^' + m + '-[0-9]{2}$')
+                && request.time > dateTs(request.resource.data.lastOpenDay) - duration.value(14, 'h')
+                && request.time < dateTs(request.resource.data.lastOpenDay) + duration.value(38, 'h')))
+        // claimed: unchanged, or + one task whose target is reached (invites: a referral naming me)
+        && (listSame('claimed') || grewByOne('claimed'))
+        && (request.resource.data.get('inviteRef', null) == null
+            || (request.resource.data.inviteRef is string
+                && get(/databases/$(db)/documents/referrals/$(request.resource.data.inviteRef)).data.referrerId == uid))
+        // doubled: unchanged, or + one already-claimed task
+        && (listSame('doubled')
+            || (grewByOne('doubled')
+                && request.resource.data.doubled.toSet().hasOnly(request.resource.data.get('claimed', []))));
+      allow delete: if false;
+    }
+    function claimOk(month, t) {
+      let after = getAfter(monthPath(me(), month)).data;
+      let before = exists(monthPath(me(), month)) ? get(monthPath(me(), month)).data : {};
+      return t in after.get('claimed', [])
+        && !(t in before.get('claimed', []))
+        && (t == 'invites'
+            ? after.get('inviteRef', null) is string
+            : after.get(t, 0) >= monthlyTaskTarget(t));
+    }
+    function doubleOk(month, t) {
+      let after = getAfter(monthPath(me(), month)).data;
+      let before = exists(monthPath(me(), month)) ? get(monthPath(me(), month)).data : {};
+      return t in after.get('doubled', [])
+        && !(t in before.get('doubled', []))
+        && t in after.get('claimed', []);
+    }
+    // users/{uid}/wallet/main: coins move only with a claim / double / redemption in the same batch
+    match /users/{uid}/wallet/{w} {
+      allow read: if signedIn() && (me() == uid || isAdmin());
+      allow create, update: if signedIn() && w == 'main' && (
+        (me() == uid
+          && request.resource.data.keys().hasOnly(['coins', 'earned', 'spent', 'lastKind', 'lastMonth', 'lastTask', 'lastRedemption', 'updatedAt'])
+          && request.resource.data.get('coins', 0) is int
+          && request.resource.data.get('coins', 0) >= 0
+          && (
+            (request.resource.data.lastKind in ['claim', 'double']
+              && isCurrentMonth(request.resource.data.lastMonth)
+              && request.resource.data.get('coins', 0) - (resource == null ? 0 : resource.data.get('coins', 0))
+                 == monthlyTaskCoins(request.resource.data.lastTask)
+              && request.resource.data.get('earned', 0) - (resource == null ? 0 : resource.data.get('earned', 0))
+                 == monthlyTaskCoins(request.resource.data.lastTask)
+              && request.resource.data.get('spent', 0) == (resource == null ? 0 : resource.data.get('spent', 0))
+              && (request.resource.data.lastKind == 'claim'
+                  ? claimOk(request.resource.data.lastMonth, request.resource.data.lastTask)
+                  : doubleOk(request.resource.data.lastMonth, request.resource.data.lastTask)))
+            || (request.resource.data.lastKind == 'redeem'
+              && request.resource.data.lastRedemption is string
+              && !exists(/databases/$(db)/documents/redemptions/$(request.resource.data.lastRedemption))
+              && getAfter(/databases/$(db)/documents/redemptions/$(request.resource.data.lastRedemption)).data.uid == me()
+              && (resource == null ? 0 : resource.data.get('coins', 0)) - request.resource.data.get('coins', 0)
+                 == getAfter(/databases/$(db)/documents/redemptions/$(request.resource.data.lastRedemption)).data.coins
+              && request.resource.data.get('earned', 0) == (resource == null ? 0 : resource.data.get('earned', 0)))
+          ))
+        // Admin refund of a rejected request
+        || (isAdmin() && resource != null
+          && request.resource.data.lastKind == 'refund'
+          && onlyChanged(['coins', 'spent', 'lastKind', 'lastRedemption', 'updatedAt']))
+      );
+      allow delete: if false;
+    }
+    // redemptions/{id}: a user's request (pending); admins decide
+    match /redemptions/{rid} {
+      allow read: if signedIn() && (resource.data.uid == me() || isAdmin());
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['uid', 'userName', 'rewardId', 'title', 'coins', 'contact', 'note', 'status', 'createdAt'])
+        && request.resource.data.uid == me()
+        && request.resource.data.status == 'pending'
+        && request.resource.data.coins == rewardCoins(request.resource.data.rewardId)
+        && request.resource.data.title is string && request.resource.data.title.size() <= 100
+        && request.resource.data.userName is string && request.resource.data.userName.size() <= 60
+        && request.resource.data.contact is string && request.resource.data.contact.size() >= 5 && request.resource.data.contact.size() <= 120
+        && request.resource.data.get('note', '') is string && request.resource.data.get('note', '').size() <= 300
+        && request.resource.data.createdAt == request.time
+        && getAfter(/databases/$(db)/documents/users/$(request.auth.uid)/wallet/main).data.lastRedemption == rid;
+      allow update: if isAdmin()
+        && onlyChanged(['status', 'decidedBy', 'decidedAt'])
+        && request.resource.data.status in ['approved', 'rejected', 'fulfilled'];
+      allow delete: if isAdmin();
+    }
+
+    // ── Function planner (pelli / haldi / mehendi ...): users/{uid}/functions/{fid}, owner only ──
+    match /users/{uid}/functions/{fid} {
+      allow read, delete: if signedIn() && me() == uid;
+      allow create, update: if signedIn() && me() == uid
+        && request.resource.data.keys().hasOnly(['title', 'events', 'circleId', 'createdAt', 'updatedAt'])
+        && request.resource.data.title is string
+        && request.resource.data.title.size() >= 1 && request.resource.data.title.size() <= 80
+        && request.resource.data.events is list
+        && request.resource.data.events.size() <= 20;
+    }
+
+    // ── Earn tab (src/config/earn.ts mirrors these numbers) ──────────────────
+    // users/{uid}/earnDaily/{yyyy-mm-dd IST}: daily gate {adWatched, voted, checkedIn, adsCount, adSkipped}
+    // owner writes, only around that date, flags never go back, adsCount +1 at a time up to 10.
+    function earnDayPath(uid, day) {
+      return /databases/$(db)/documents/users/$(uid)/earnDaily/$(day);
+    }
+    function earnMaxAds() {
+      return 10;
+    }
+    match /users/{uid}/earnDaily/{day} {
+      allow read: if signedIn() && (me() == uid || isAdmin());
+      allow create, update: if signedIn() && me() == uid
+        && isDateKey(day)
+        && request.time > dateTs(day) - duration.value(14, 'h')
+        && request.time < dateTs(day) + duration.value(38, 'h')
+        && request.resource.data.keys().hasOnly(['adWatched', 'voted', 'checkedIn', 'adsCount', 'adSkipped', 'updatedAt'])
+        && request.resource.data.get('adWatched', false) is bool
+        && request.resource.data.get('voted', false) is bool
+        && request.resource.data.get('checkedIn', false) is bool
+        && request.resource.data.get('adSkipped', false) is bool
+        && request.resource.data.get('adsCount', 0) is int
+        && request.resource.data.get('adsCount', 0) >= 0
+        && request.resource.data.get('adsCount', 0) <= earnMaxAds()
+        && request.resource.data.get('adsCount', 0) - (resource == null ? 0 : resource.data.get('adsCount', 0)) in [0, 1]
+        // check-in only once the gate is open
+        && (request.resource.data.get('checkedIn', false) == false
+            || (request.resource.data.get('adWatched', false) == true && request.resource.data.get('voted', false) == true))
+        && (resource == null
+            || ((resource.data.get('adWatched', false) == false || request.resource.data.get('adWatched', false) == true)
+                && (resource.data.get('voted', false) == false || request.resource.data.get('voted', false) == true)
+                && (resource.data.get('checkedIn', false) == false || request.resource.data.get('checkedIn', false) == true)));
+      allow delete: if false;
+    }
+
+    // users/{uid}/earnings/{id}: ledger. Owner reads. The app may only ADD small 'pending' coins tied to
+    // the same write on its earnDaily doc (ad_{day}_{n} 2 coins, vote_{day} 1, checkin_{day} 5).
+    // Approved credits, surveys, offers, referrals, approvals and reversals: server (Admin SDK) / admin only.
+    function earnSelfCreditOk(uid, eid) {
+      let d = request.resource.data;
+      let after = getAfter(earnDayPath(uid, d.day)).data;
+      let before = exists(earnDayPath(uid, d.day)) ? get(earnDayPath(uid, d.day)).data : {};
+      return d.keys().hasOnly(['type', 'coins', 'rupees', 'partner', 'status', 'day', 'createdAt'])
+        && d.status == 'pending'
+        && d.partner == 'app'
+        && d.createdAt == request.time
+        && isDateKey(d.day)
+        && existsAfter(earnDayPath(uid, d.day))
+        && d.coins is int
+        && d.rupees is number
+        && d.rupees * 100 > d.coins - 0.001
+        && d.rupees * 100 < d.coins + 0.001
+        && (
+          (d.type == 'vote' && eid == 'vote_' + d.day && d.coins == 1
+            && after.get('voted', false) == true && before.get('voted', false) == false)
+          || (d.type == 'checkin' && eid == 'checkin_' + d.day && d.coins == 5
+            && after.get('checkedIn', false) == true && before.get('checkedIn', false) == false)
+          || (d.type == 'ad' && d.coins == 2
+            && after.get('adsCount', 0) == before.get('adsCount', 0) + 1
+            && eid == 'ad_' + d.day + '_' + string(after.get('adsCount', 0)))
+        );
+    }
+    match /users/{uid}/earnings/{eid} {
+      allow read: if signedIn() && (me() == uid || isAdmin());
+      allow create: if signedIn() && me() == uid && earnSelfCreditOk(uid, eid);
+      // Admin: approve / reverse / add credits by hand (the server uses the Admin SDK, which skips rules)
+      allow create, update: if isAdmin()
+        && request.resource.data.type in ['ad', 'vote', 'survey', 'offer', 'checkin', 'referral']
+        && request.resource.data.status in ['pending', 'approved', 'reversed']
+        && request.resource.data.coins is int && request.resource.data.coins >= 0;
+      allow delete: if false;
+    }
+
+    // users/{uid}/earnMeta/main {surveyAdClearedAt, deviceHash, upiHash, upi}: owner; device / UPI only
+    // when the matching devices/ or upiIds/ claim belongs to this user
+    match /users/{uid}/earnMeta/{m} {
+      allow read: if signedIn() && (me() == uid || isAdmin());
+      allow create, update: if signedIn() && me() == uid && m == 'main'
+        && request.resource.data.keys().hasOnly(['surveyAdClearedAt', 'deviceHash', 'upiHash', 'upi', 'updatedAt'])
+        && request.resource.data.get('surveyAdClearedAt', 0) is number
+        && (request.resource.data.get('deviceHash', null) == (resource == null ? null : resource.data.get('deviceHash', null))
+            || getAfter(/databases/$(db)/documents/devices/$(request.resource.data.deviceHash)).data.uid == me())
+        && (request.resource.data.get('upiHash', null) == (resource == null ? null : resource.data.get('upiHash', null))
+            || getAfter(/databases/$(db)/documents/upiIds/$(request.resource.data.upiHash)).data.uid == me())
+        && (request.resource.data.get('upi', null) == null
+            || (request.resource.data.upi is string && request.resource.data.upi.size() <= 260));
+      allow delete: if false;
+    }
+
+    // One account per phone / per UPI id: create-only claims. Reading another account's claim is denied
+    // (the app treats that as "already used"), so uids are never revealed.
+    match /devices/{hash} {
+      allow get: if signedIn() && (resource == null || resource.data.uid == me() || isAdmin());
+      allow list: if isAdmin();
+      allow create: if signedIn()
+        && hash.matches('^(i_)?[0-9a-f]{62,64}$')
+        && request.resource.data.keys().hasOnly(['uid', 'createdAt'])
+        && request.resource.data.uid == me()
+        && request.resource.data.createdAt == request.time;
+      allow update: if false;
+      allow delete: if isAdmin();
+    }
+    match /upiIds/{hash} {
+      allow get: if signedIn() && (resource == null || resource.data.uid == me() || isAdmin());
+      allow list: if isAdmin();
+      allow create: if signedIn()
+        && hash.matches('^[0-9a-f]{64}$')
+        && request.resource.data.keys().hasOnly(['uid', 'createdAt'])
+        && request.resource.data.uid == me()
+        && request.resource.data.createdAt == request.time;
+      allow update: if false;
+      allow delete: if isAdmin();
+    }
+
+    // withdrawals/{id}: UPI payout request (pending); admin marks paid / rejected after checking the balance
+    match /withdrawals/{wid} {
+      allow read: if signedIn() && (resource.data.uid == me() || isAdmin());
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['uid', 'upi', 'rupees', 'coins', 'status', 'createdAt'])
+        && request.resource.data.uid == me()
+        && request.resource.data.status == 'pending'
+        && request.resource.data.rupees is int
+        && request.resource.data.rupees >= 50
+        && request.resource.data.coins == request.resource.data.rupees * 100
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.upi == get(/databases/$(db)/documents/users/$(request.auth.uid)/earnMeta/main).data.get('upi', '');
+      allow update: if isAdmin()
+        && onlyChanged(['status', 'decidedBy', 'decidedAt'])
+        && request.resource.data.status in ['paid', 'rejected'];
+      allow delete: if false;
+    }
+
+    // ── Push tokens: fcmTokens/{uid} {token, platform, updatedAt}; only the server (GitHub Actions,
+    // service account) reads them to send circle-poll notifications ──
+    match /fcmTokens/{uid} {
+      allow read: if signedIn() && me() == uid;
+      allow create, update: if signedIn() && me() == uid
+        && request.resource.data.keys().hasOnly(['token', 'platform', 'updatedAt'])
+        && request.resource.data.token is string
+        && request.resource.data.token.size() > 10 && request.resource.data.token.size() <= 4096;
+      allow delete: if signedIn() && me() == uid;
     }
 
     // ── Reports (moderation) ────────────────────────────────────────────

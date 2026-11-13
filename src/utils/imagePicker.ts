@@ -5,6 +5,7 @@
 import { launchCamera, launchImageLibrary, Asset, ImagePickerResponse, CameraOptions } from 'react-native-image-picker';
 import { canResize, resizeImage } from './imageResize';
 import { AVATAR_SPEC, AVATAR_THUMB_SPEC, CLEAR_SPEC, FULL_SPEC, ImageSpec, POLL_SPEC, THUMB_SPEC } from './imageSpecs';
+import { pauseAppOpenAds } from '../ads/adsService';
 
 // Firestore doc limit is 1 MiB; old (pre-split) photos were up to this size
 export const MAX_BASE64_CHARS = 700000;
@@ -90,6 +91,7 @@ export const pickImage = (source: 'camera' | 'library', opts: PickOptions = PHOT
     };
     try {
       const options = pickerOptions(opts);
+      pauseAppOpenAds();
       if (source === 'camera') launchCamera(options, cb);
       else launchImageLibrary({ ...options, selectionLimit: 1 }, cb);
     } catch (e) {
@@ -104,6 +106,7 @@ export const isDataUri = (s?: string | null): boolean => !!s && s.startsWith('da
 export const pickImages = (max: number, opts: PickOptions = POLL_PICK): Promise<{ images: PickedImage[]; skipped: number }> =>
   new Promise((resolve, reject) => {
     try {
+      pauseAppOpenAds();
       launchImageLibrary({ ...pickerOptions(opts), selectionLimit: Math.max(1, max) }, async res => {
         if (res.didCancel) return resolve({ images: [], skipped: 0 });
         if (res.errorCode || res.errorMessage) {

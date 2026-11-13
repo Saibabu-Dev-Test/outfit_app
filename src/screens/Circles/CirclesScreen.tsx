@@ -23,6 +23,9 @@ import {
   Linking,
 } from 'react-native';
 import KeyboardSafeView from '../../components/KeyboardSafeView';
+import NativeAdCard from '../../ads/NativeAdCard';
+import { interleaveAds, isAdRow } from '../../ads/interleave';
+import { ADS } from '../../config/ads';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { useDayKey } from '../../hooks/useDayKey';
@@ -542,9 +545,9 @@ export default function CirclesScreen() {
         {...(Platform.OS === 'android' ? { backgroundColor: colors.background } : {})}
       />
       <FlatList
-        data={busy ? [] : data}
+        data={busy ? [] : interleaveAds(data, ADS.listEvery)}
         keyExtractor={c => c.id}
-        renderItem={renderCircle}
+        renderItem={({ item }) => (isAdRow(item) ? <NativeAdCard width={0} variant="row" /> : renderCircle({ item }))}
         ListHeaderComponent={header}
         contentContainerStyle={styles.listContent}
         keyboardShouldPersistTaps="handled"

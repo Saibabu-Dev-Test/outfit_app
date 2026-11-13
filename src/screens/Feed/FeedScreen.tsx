@@ -25,6 +25,20 @@ import KeyboardSafeView, { useKeyboardShown } from '../../components/KeyboardSaf
 import { CommentInputFocusContext, FocusBox } from '../../components/InlineComments';
 import { FeedLoader, FeedScope, Post } from '../../services/feedApi';
 import { subscribeUnreadActivity } from '../../services/activityWatcher';
+import NativeAdCard from '../../ads/NativeAdCard';
+import { ADS } from '../../config/ads';
+
+// A native ad card (drawn like a post) after every ADS.feedEvery posts, repeating
+type AdRow = { kind: 'ad'; id: string };
+type Row = Post | AdRow;
+const withAds = (posts: Post[]): Row[] => {
+  const out: Row[] = [];
+  posts.forEach((p, i) => {
+    out.push(p);
+    if ((i + 1) % ADS.feedEvery === 0) out.push({ kind: 'ad', id: `ad_${(i + 1) / ADS.feedEvery}` });
+  });
+  return out;
+};
 
 export default function FeedScreen({ navigation, route }: { navigation: any; route: any }) {
   const { user } = useAuth();
@@ -33,6 +47,7 @@ export default function FeedScreen({ navigation, route }: { navigation: any; rou
   const { width } = useWindowDimensions();
 
   const [posts, setPosts] = useState<Post[]>([]);
+  const rows = React.useMemo(() => withAds(posts), [posts]);
   // New likes / comments / follows since Likes was last opened (badge on ♡)
   const [unreadActivity, setUnreadActivity] = useState(0);
   useEffect(() => subscribeUnreadActivity(setUnreadActivity), []);
@@ -48,7 +63,7 @@ export default function FeedScreen({ navigation, route }: { navigation: any; rou
 
   // Keep the focused card's comment box visible above the keyboard: the KeyboardSafeView shrinks the
   // list when the keyboard opens, then we scroll by however much the box sits outside the list.
-  const listRef = useRef<FlatList<Post>>(null);
+  const listRef = useRef<FlatList<Row>>(null);
   const listBox = useRef<FocusBox>(null);
   const scrollY = useRef(0);
   const focusedBox = useRef<FocusBox | null>(null);
@@ -167,14 +182,17 @@ export default function FeedScreen({ navigation, route }: { navigation: any; rou
           <View ref={listBox} style={styles.flex1} collapsable={false}>
       <FlatList
         ref={listRef}
-        data={posts}
+        data={rows}
         keyboardShouldPersistTaps="handled"
         onScroll={e => {
           scrollY.current = e.nativeEvent.contentOffset.y;
         }}
         scrollEventThrottle={32}
         keyExtractor={p => `${p.kind}_${p.id}`}
-        renderItem={({ item }) => (
+        renderItem={({ item }) =>
+          item.kind === 'ad' ? (
+            <NativeAdCard width={width} />
+          ) : (
           <PostCard
             post={item}
             width={width}
@@ -183,7 +201,8 @@ export default function FeedScreen({ navigation, route }: { navigation: any; rou
             inlineComments
             onDeleted={p => setPosts(prev => prev.filter(x => !(x.id === p.id && x.kind === p.kind)))}
           />
-        )}
+          )
+        }
         onEndReached={loadMore}
         onEndReachedThreshold={0.6}
         initialNumToRender={3}

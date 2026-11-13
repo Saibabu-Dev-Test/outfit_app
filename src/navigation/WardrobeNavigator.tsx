@@ -6,7 +6,7 @@ import WardrobeCategoryScreen from '../screens/Wardrobe/WardrobeCategoryScreen';
 
 export type WardrobeStackParamList = {
   WardrobeMain: undefined;
-  AddItem: { itemToEdit?: any; category?: string; subType?: string } | undefined;
+  AddItem: { itemToEdit?: any; category?: string; subType?: string; quick?: boolean } | undefined;
   WardrobeCategory: { category: string; subType?: string };
 };
 

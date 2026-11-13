@@ -31,6 +31,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { db } from '../config/firebaseConfig';
 import { firestoreErrorMessage } from '../utils/firebaseErrors';
 import { recordTask } from './rewardsApi';
+import { recordMonthlyProgress } from './monthlyTasksApi';
+import { markEarnVote } from './earnApi';
 import { MAX_BASE64_CHARS } from '../utils/imagePicker';
 import { toDate } from '../utils/date';
 import { inlineAvatar } from './userApi';
@@ -52,6 +54,7 @@ export interface Post {
   photos: string[]; // all photos A..F (1 for a normal post), same sizes as imageData
   hasMedia: boolean; // full-size photos are in {posts|wardrobe}/{id}/media/full
   hasClear?: boolean; // ~720 px feed photos are in {posts|wardrobe}/{id}/media/clear
+  remotePhotos?: string[]; // full photos saved on another free provider (storage chain), by URL
   caption: string;
   likeCount: number;
   commentCount: number;
@@ -207,6 +210,7 @@ export const createPost = async (
     }
     await b.commit();
     recordTask(me.uid, 'uploaded'); // daily task (never throws)
+    recordMonthlyProgress(me.uid, 'polls'); // monthly task (never throws)
   } catch (e: any) {
     fail(e, 'Posting');
   }
@@ -238,6 +242,7 @@ const forgetFullPhotos = (kind: FeedKind, id: string) => {
 // Full photos of a post / wardrobe photo (1 read, cached for the session). Older items without a
 // media doc already hold them inline. Never throws: falls back to the thumbnails.
 export const getFullPhotos = async (post: Post): Promise<string[]> => {
+  if (post.remotePhotos?.length) return post.remotePhotos;
   if (!post.hasMedia) return post.photos;
   const key = `${post.kind}_${post.id}`;
   const hit = fullCache.get(key);
@@ -269,6 +274,7 @@ export const getClearPhotos = async (post: Post): Promise<string[]> => {
   const key = `${post.kind}_${post.id}`;
   const hit = clearCache.get(key);
   if (hit) return hit;
+  if (post.remotePhotos?.length) return post.remotePhotos;
   if (!post.hasClear) return getFullPhotos(post);
   try {
     const s = await getDoc(doc(db, post.kind === 'post' ? POSTS : 'wardrobe', post.id, 'media', MEDIA_CLEAR));
@@ -363,6 +369,9 @@ export const toggleLike = async (
       tx.set(mineRef, { kind: 'post', refId: postId, createdAt: serverTimestamp() });
       if (clearDislike) tx.delete(dislikeRef);
       return { liked: true, likeCount: current + 1 };
+    }).then(r => {
+      if (r.liked) markEarnVote(uid); // a like on an outfit counts as today's Earn vote
+      return r;
     });
   } catch (e: any) {
     if (!e?.code && e instanceof Error) throw e;
@@ -555,6 +564,8 @@ export const castPostVote = async (postId: string, uid: string, optionIndex: num
   if (!option) throw new Error('Pick a photo to vote.');
   try {
     await setDoc(doc(db, POSTS, postId, 'votes', uid), { option, updatedAt: serverTimestamp() });
+    recordMonthlyProgress(uid, 'votes');
+    markEarnVote(uid); // Earn tab: today's "vote on 1 outfit"
   } catch (e: any) {
     fail(e, 'Voting');
   }
@@ -577,6 +588,7 @@ export const wardrobeToPost = (id: string, d: any, owner?: { name?: string; avat
     photos: img ? [img] : [],
     hasMedia: d?.media === 1,
     hasClear: d?.clear === 1,
+    remotePhotos: typeof d?.photoUrl === 'string' && d.photoUrl ? [d.photoUrl] : undefined,
     caption: label ? `👗 ${label}${d?.category && d?.name !== d?.category ? ` · ${d.category}` : ''}` : '',
     likeCount: 0,
     commentCount: 0,
@@ -688,6 +700,9 @@ export const toggleDislike = async (
           return { disliked: true, liked: false, likeCount: Math.max(0, current - 1) };
         }
         return { disliked: true, liked: false, likeCount: current };
+      }).then(r => {
+        if (r.disliked) markEarnVote(uid); // a dislike is an outfit vote too
+        return r;
       });
     }
     const b = writeBatch(db);

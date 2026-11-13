@@ -19,6 +19,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { colors, spacing, borderRadius, fontSize, fontWeight, themedStyles, statusBarStyle } from '../../theme';
+import { recordMonthlyOpen } from '../../services/monthlyTasksApi';
 import { useAuth } from '../../context/AuthContext';
 import { doc, setDoc, serverTimestamp, collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../../config/firebaseConfig';
@@ -299,6 +300,7 @@ export default function HomeScreen() {
       }
       await recordDailyLogin(uid);
       await recordTask(uid, 'opened');
+      recordMonthlyOpen(uid); // monthly "open the app on N days" (never throws)
       if (alive) refreshPoints();
       // Weekly celebrities: claim a finished week, then load last week's list
       await checkWeeklyStars(uid);

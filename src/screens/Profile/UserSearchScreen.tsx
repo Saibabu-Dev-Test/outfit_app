@@ -15,6 +15,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles, statusBarStyle } from '../../theme';
 import Avatar from '../../components/Avatar';
 import { PublicUser, searchUsers } from '../../services/userApi';
+import NativeAdCard from '../../ads/NativeAdCard';
+import { interleaveAds, isAdRow } from '../../ads/interleave';
+import { ADS } from '../../config/ads';
 
 export default function UserSearchScreen({ navigation }: { navigation: any }) {
   const [text, setText] = useState('');
@@ -74,10 +77,13 @@ export default function UserSearchScreen({ navigation }: { navigation: any }) {
       {loading ? <ActivityIndicator style={styles.spinner} color={colors.primary} /> : null}
       {error ? <Text style={styles.error}>{error}</Text> : null}
       <FlatList
-        data={results}
+        data={interleaveAds(results, ADS.listEvery)}
         keyExtractor={u => u.id}
         keyboardShouldPersistTaps="handled"
-        renderItem={({ item }) => (
+        renderItem={({ item }) =>
+          isAdRow(item) ? (
+            <NativeAdCard width={0} variant="row" />
+          ) : (
           <TouchableOpacity
             style={styles.row}
             onPress={() => navigation.navigate('UserProfile', { userId: item.id })}>
@@ -91,7 +97,8 @@ export default function UserSearchScreen({ navigation }: { navigation: any }) {
               ) : null}
             </View>
           </TouchableOpacity>
-        )}
+          )
+        }
         ListEmptyComponent={
           !loading && text.trim() && !error ? (
             <Text style={styles.empty}>No public profiles start with "{text.trim()}".</Text>

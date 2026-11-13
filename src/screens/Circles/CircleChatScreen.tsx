@@ -14,6 +14,15 @@ import {
   StatusBar,
 } from 'react-native';
 import KeyboardSafeView from '../../components/KeyboardSafeView';
+import { maybeShowInterstitial } from '../../ads/adsService';
+
+// A poll was posted (natural break): at most one interstitial per 5 minutes, after the sheet has
+// closed and the keyboard is down (never while typing). Never throws.
+const afterPollPosted = () => {
+  setTimeout(() => {
+    maybeShowInterstitial().catch(() => {});
+  }, 900);
+};
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles, statusBarStyle } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
@@ -405,7 +414,10 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
         }}
         initialImages={pollImages}
         userId={uid}
-        onSubmit={(kind, options) => sendPollMessage(circleId, me, kind, options)}
+        onSubmit={async (kind, options) => {
+          await sendPollMessage(circleId, me, kind, options);
+          afterPollPosted();
+        }}
       />
       <ActionSheet
         visible={attachOpen}
@@ -436,7 +448,10 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
         visible={cameraOpen}
         onClose={() => setCameraOpen(false)}
         onSendPhoto={img => sendImageMessage(circleId, me, img)}
-        onSendPoll={(kind, options) => sendPollMessage(circleId, me, kind, options)}
+        onSendPoll={async (kind, options) => {
+          await sendPollMessage(circleId, me, kind, options);
+          afterPollPosted();
+        }}
       />
       <WardrobePickerModal
         visible={wardrobeOpen}

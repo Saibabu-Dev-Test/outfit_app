@@ -38,6 +38,7 @@ import {
   arrayUnion,
   arrayRemove,
   Unsubscribe,
+  Timestamp,
 } from 'firebase/firestore';
 import { db } from '../config/firebaseConfig';
 import { firestoreErrorMessage } from '../utils/firebaseErrors';
@@ -49,6 +50,20 @@ import { encodeGeohash, geohashNeighbours, haversineKm, roundCoord } from '../ut
 import { DistrictInfo, canJoinWithoutCode, filterDistrictCircles, filterNearbyCircles } from '../utils/district';
 import { getApproxLocation } from '../native/location';
 import { cleanAge, myAgeFields } from '../utils/age';
+import { recordMonthlyProgress } from './monthlyTasksApi';
+import { markEarnVote } from './earnApi';
+import { dataUriBytes, isQuotaError, markFull, placePhoto, recordUpload } from './photoStorage';
+
+// Circle chat PHOTOS (photo messages and photo polls) auto-delete after 60 days: each gets
+// expireAt = sent time + 60 days, and a Firestore TTL policy on messages.expireAt deletes the doc
+// (.github/workflows/retention.yml). The app also hides older photos right away (isPhotoExpired).
+// Wardrobe items and feed posts never get expireAt: they are never auto-deleted.
+export const CIRCLE_PHOTO_DAYS = 60;
+const DAY_MS = 24 * 60 * 60 * 1000;
+export const photoExpireAt = (from: Date = new Date()) =>
+  Timestamp.fromDate(new Date(from.getTime() + CIRCLE_PHOTO_DAYS * DAY_MS));
+export const isPhotoExpired = (m: { type: string; createdAt: Date | null }, now = Date.now()): boolean =>
+  (m.type === 'image' || m.type === 'poll') && !!m.createdAt && now - m.createdAt.getTime() > CIRCLE_PHOTO_DAYS * DAY_MS;
 
 export interface Circle {
   id: string;
@@ -748,7 +763,11 @@ export const subscribeMessages = (
     return onSnapshot(
       query(collection(db, CIRCLES, circleId, 'messages'), orderBy('createdAt', 'desc'), limit(100)),
       snap =>
-        onData(snap.docs.map(d => toMessage(d.id, d.data({ serverTimestamps: 'estimate' })))),
+        onData(
+          snap.docs
+            .map(d => toMessage(d.id, d.data({ serverTimestamps: 'estimate' })))
+            .filter(m => !isPhotoExpired(m)),
+        ),
       e => {
         console.warn('subscribeMessages error:', e?.code, e?.message);
         onError(firestoreErrorMessage(e, 'Loading messages'));
@@ -777,6 +796,7 @@ const authorFields = (me: ChatAuthor) => ({
 });
 
 const checkImage = (uri: string, max = MAX_BASE64_CHARS + 100) => {
+  if (/^https:\/\//.test(uri)) return; // already on a free storage provider (storage chain)
   if (!/^data:image\//.test(uri)) throw new Error('Photo could not be read. Please pick it again.');
   if (uri.length > max) throw new Error('This photo is too large to send. Please pick a smaller photo.');
 };
@@ -805,11 +825,16 @@ export const sendImageMessage = async (
 ): Promise<void> => {
   checkImage(imageData);
   if (caption) assertClean(caption, 'Please keep messages respectful 🙏');
+  // Storage chain: inline in Firestore until the free quota is ~95% used, then a free provider URL
+  const placed = await placePhoto(imageData, 'circles');
+  if (placed.provider !== 'firebase') imageData = (placed as any).url;
   try {
-    const data: any = { ...authorFields(me), type: 'image', imageData };
+    const data: any = { ...authorFields(me), type: 'image', imageData, expireAt: photoExpireAt() };
     if (caption && caption.trim()) data.text = caption.trim().slice(0, 500);
     await addDoc(collection(db, CIRCLES, circleId, 'messages'), data);
+    if (placed.provider === 'firebase') recordUpload('firebase', dataUriBytes(imageData));
   } catch (e: any) {
+    if (isQuotaError(e)) markFull('firebase');
     fail(e, 'Sending photo');
   }
   bumpLastMessage(circleId);
@@ -830,9 +855,20 @@ export const sendPollMessage = async (
   if (total > MAX_POLL_TOTAL_CHARS) {
     throw new Error('These photos are too large together. Remove one or pick smaller photos.');
   }
+  // Storage chain (see sendImageMessage)
+  const first = await placePhoto(options[0].imageData, 'circles');
+  if (first.provider !== 'firebase') {
+    const urls: string[] = [(first as any).url];
+    for (const o of options.slice(1)) {
+      const pl = await placePhoto(o.imageData, 'circles');
+      urls.push(pl.provider === 'firebase' ? o.imageData : (pl as any).url);
+    }
+    options = options.map((o, i) => ({ ...o, imageData: urls[i] }));
+  }
   try {
     await addDoc(collection(db, CIRCLES, circleId, 'messages'), {
       ...authorFields(me),
+      expireAt: photoExpireAt(),
       type: 'poll',
       poll: {
         question: POLL_QUESTIONS[kind],
@@ -844,9 +880,13 @@ export const sendPollMessage = async (
         })),
       },
     });
+    const inline = options.reduce((n, o) => n + (o.imageData.startsWith('data:') ? dataUriBytes(o.imageData) : 0), 0);
+    if (inline) recordUpload('firebase', inline);
   } catch (e: any) {
+    if (isQuotaError(e)) markFull('firebase');
     fail(e, 'Sending poll');
   }
+  recordMonthlyProgress(me.uid, 'polls');
   bumpLastMessage(circleId);
 };
 
@@ -933,6 +973,8 @@ export const castPollVote = async (
       optionIndex,
       updatedAt: serverTimestamp(),
     });
+    recordMonthlyProgress(uid, 'votes');
+    markEarnVote(uid); // Earn tab: today's "vote on 1 outfit"
   } catch (e: any) {
     fail(e, 'Voting');
   }

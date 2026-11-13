@@ -14,6 +14,8 @@ import { festivalsAround, festivalText, FestivalHit } from '../services/festival
 import { festivalDressFor, PLAN_LABELS, planText } from '../services/festivalPlans';
 import { astroAiAvailable, fetchAstroDetails, getCachedAstroDetails } from '../services/astrologyAi';
 import type { WardrobeItemResponse } from '../services/wardrobeApi';
+import RewardedUnlockButton from '../ads/RewardedUnlockButton';
+import { isUnlockedToday } from '../ads/rewardUnlocks';
 
 interface Props {
   uid: string;
@@ -49,6 +51,12 @@ export default function AstrologyPanel({ uid, profile, wardrobe, onEditProfile }
     AsyncStorage.setItem(SHOW_EN_KEY, v ? '1' : '0').catch(() => undefined);
   };
   const bi = lang !== 'English' && showEn;
+  // Free: a short summary. Full reading (chart, details, timings, remedies, wardrobe pair, relation,
+  // AI more) after one rewarded ad, unlocked for the rest of the day.
+  const [full, setFull] = useState(false);
+  useEffect(() => {
+    isUnlockedToday('astro').then(setFull).catch(() => undefined);
+  }, [dayKey]);
 
   // Pure and instant: recomputed only when the day, language or profile changes
   const reading = useMemo(
@@ -205,7 +213,7 @@ export default function AstrologyPanel({ uid, profile, wardrobe, onEditProfile }
         ))}
       </View>
 
-      {reading.chartRows.length ? (
+      {full && reading.chartRows.length ? (
         <View style={styles.card}>
           <Text style={styles.title}>🪐 {t.chart}</Text>
           {reading.chartRows.map((r, i) => (
@@ -233,6 +241,8 @@ export default function AstrologyPanel({ uid, profile, wardrobe, onEditProfile }
             </Text>
           </View>
           <Bi style={styles.body} text={reading.verdict.summary} enText={en?.verdict?.summary} />
+          {full ? (
+          <>
           <View style={[styles.vBox, styles.vGoodBox]}>
             <Text style={[styles.sub, styles.vGoodText]}>✅ {reading.verdict.headings.positive}</Text>
             {reading.verdict.positives.map((x, i) => (
@@ -266,6 +276,8 @@ export default function AstrologyPanel({ uid, profile, wardrobe, onEditProfile }
               </Text>
             </View>
           ))}
+          </>
+          ) : null}
         </View>
       ) : null}
 
@@ -274,6 +286,8 @@ export default function AstrologyPanel({ uid, profile, wardrobe, onEditProfile }
         {reading.rashiLine ? <Bi style={styles.rashi} text={reading.rashiLine} enText={en?.rashiLine} /> : null}
         <Text style={styles.stars}>{'★'.repeat(reading.stars)}{'☆'.repeat(5 - reading.stars)}</Text>
         <Bi style={styles.body} text={reading.overview} enText={en?.overview} />
+        {full ? (
+        <>
         <Text style={styles.sub}>😊 {t.mood}</Text>
         <Bi style={styles.body} text={reading.mood} enText={en?.mood} />
         <Text style={styles.sub}>✅ {t.do}</Text>
@@ -302,15 +316,27 @@ export default function AstrologyPanel({ uid, profile, wardrobe, onEditProfile }
             <Bi style={styles.note} text={reading.note} enText={en?.note} />
           </TouchableOpacity>
         ) : null}
+        </>
+        ) : null}
       </View>
+
+      {!full ? (
+        <View style={[styles.card, styles.askCard]}>
+          <Text style={styles.body}>
+            This is your free short reading. Watch one short ad to open today's full reading: birth chart,
+            do / avoid, lucky time and number, bad times, remedies, outfit pair from your wardrobe and relationship tips.
+          </Text>
+          <RewardedUnlockButton feature="astro" uid={uid} label="Watch ad for full reading" onUnlocked={() => setFull(true)} />
+        </View>
+      ) : null}
 
       <View style={styles.card}>
         <Text style={styles.title}>👗 {t.dress}</Text>
         <Bi style={styles.dressTitle} text={reading.dress.title} enText={en?.dress.title} />
         {swatches(reading.dress.colours.map((c, i) => ({ ...c, en: en?.dress.colours[i]?.name })))}
-        <Bi style={styles.body} text={reading.dress.why} enText={en?.dress.why} />
-        <Bi style={[styles.body, styles.idea]} text={reading.dress.idea} enText={en?.dress.idea} />
-        {reading.dress.pair ? (
+        {full ? <Bi style={styles.body} text={reading.dress.why} enText={en?.dress.why} /> : null}
+        {full ? <Bi style={[styles.body, styles.idea]} text={reading.dress.idea} enText={en?.dress.idea} /> : null}
+        {full && reading.dress.pair ? (
           <View style={styles.pair}>
             <Text style={styles.sub}>{t.fromWardrobe}</Text>
             <View style={styles.pairRow}>
@@ -328,11 +354,13 @@ export default function AstrologyPanel({ uid, profile, wardrobe, onEditProfile }
         ) : null}
       </View>
 
+      {full ? (
       <View style={[styles.card, styles.relCard]}>
         <Bi style={styles.title} text={reading.relation.title} enText={en?.relation.title} />
         <Bi style={styles.body} text={reading.relation.text} enText={en?.relation.text} />
         {reading.relation.outing ? <Bi style={[styles.body, styles.idea]} text={`🚗 ${reading.relation.outing}`} enText={en?.relation.outing ? `🚗 ${en.relation.outing}` : null} /> : null}
       </View>
+      ) : null}
 
       {!fest.today.length && !fest.upcoming.length && fest.next ? (
         <Text style={styles.nextFest}>
@@ -346,7 +374,7 @@ export default function AstrologyPanel({ uid, profile, wardrobe, onEditProfile }
           <Text style={styles.title}>{t.more}</Text>
           <Text style={styles.body}>{more}</Text>
         </View>
-      ) : astroAiAvailable() && uid ? (
+      ) : full && astroAiAvailable() && uid ? (
         <TouchableOpacity style={styles.moreBtn} onPress={loadMore} disabled={moreBusy}>
           {moreBusy ? (
             <View style={styles.moreRow}>

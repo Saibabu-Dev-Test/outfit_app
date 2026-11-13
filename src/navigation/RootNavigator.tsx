@@ -11,6 +11,12 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import BottomTabNavigator from './BottomTabNavigator';
 import AuthNavigator from './AuthNavigator';
 import { AuthProvider, useAuth } from '../context/AuthContext';
+import { initAds, startAppOpenAds } from '../ads/adsService';
+import RewardsScreen from '../screens/Rewards/RewardsScreen';
+import FunctionPlannerScreen from '../screens/Planner/FunctionPlannerScreen';
+import PoruthamScreen from '../screens/Astro/PoruthamScreen';
+import WeatherOutfitScreen from '../screens/Stylist/WeatherOutfitScreen';
+import { registerPushToken } from '../native/push';
 import CircleChatScreen from '../screens/Circles/CircleChatScreen';
 import CircleInfoScreen from '../screens/Circles/CircleInfoScreen';
 import CommentsScreen from '../screens/Feed/CommentsScreen';
@@ -18,6 +24,9 @@ import UserProfileScreen from '../screens/Profile/UserProfileScreen';
 import UserSearchScreen from '../screens/Profile/UserSearchScreen';
 import AdminScreen from '../screens/Admin/AdminScreen';
 import AdminUsersScreen from '../screens/Admin/AdminUsersScreen';
+import AdminRewardRequestsScreen from '../screens/Admin/AdminRewardRequestsScreen';
+import AdminStorageScreen from '../screens/Admin/AdminStorageScreen';
+import EarnWallScreen from '../screens/Earn/EarnWallScreen';
 import ProfileScreen from '../screens/Profile/ProfileScreen';
 import AchievementsScreen from '../screens/Profile/AchievementsScreen';
 import LikesScreen from '../screens/Profile/LikesScreen';
@@ -29,6 +38,7 @@ import { colors, themedStyles, useTheme } from '../theme';
 import AppLockGate from '../components/AppLockGate';
 import ActivityWatcher from '../components/ActivityWatcher';
 import CircleInviteLink from '../components/CircleInviteLink';
+import CircleDeepLink from '../components/CircleDeepLink';
 import SessionLockScreen from '../components/SessionLockScreen';
 import TamperScreen from '../components/TamperScreen';
 import { getVaultStatus, subscribeVault, VaultStatus } from '../native/sessionVault';
@@ -68,6 +78,18 @@ function NavigationContent() {
       border: colors.border,
     },
   };
+
+  // Ads (AdMob) start a few seconds after sign-in, in the background; app-open ads only on return
+  // to the app (>= 4 h apart). Push token for circle-poll notifications. Both never throw.
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const t = setTimeout(() => {
+      initAds().catch(() => undefined);
+      startAppOpenAds();
+      registerPushToken().catch(() => undefined);
+    }, 3000);
+    return () => clearTimeout(t);
+  }, [isAuthenticated]);
 
   // APK not signed with the official key: blocked, signed out
   if (vault === 'tampered') return <TamperScreen />;
@@ -125,6 +147,13 @@ function NavigationContent() {
               <Stack.Screen name="UserSearch" component={UserSearchScreen} />
               <Stack.Screen name="Admin" component={AdminScreen} />
               <Stack.Screen name="AdminUsers" component={AdminUsersScreen} />
+              <Stack.Screen name="Rewards" component={RewardsScreen} />
+              <Stack.Screen name="FunctionPlanner" component={FunctionPlannerScreen} />
+              <Stack.Screen name="Porutham" component={PoruthamScreen} />
+              <Stack.Screen name="WeatherOutfit" component={WeatherOutfitScreen} />
+              <Stack.Screen name="AdminRewardRequests" component={AdminRewardRequestsScreen} />
+              <Stack.Screen name="AdminStorage" component={AdminStorageScreen} />
+              <Stack.Screen name="EarnWall" component={EarnWallScreen} />
             </Stack.Group>
           </>
         )}
@@ -133,6 +162,7 @@ function NavigationContent() {
     <AppLockGate />
     <ActivityWatcher />
     <CircleInviteLink navigationRef={navigationRef} />
+    <CircleDeepLink navigationRef={navigationRef} />
     </React.Fragment>
   );
 }
