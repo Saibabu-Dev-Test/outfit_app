@@ -13,6 +13,8 @@ import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 import com.google.android.gms.tasks.Tasks
 import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.face.FaceDetection
+import com.google.mlkit.vision.face.FaceDetectorOptions
 import com.google.mlkit.vision.segmentation.subject.SubjectSegmentation
 import com.google.mlkit.vision.segmentation.subject.SubjectSegmenterOptions
 import java.io.ByteArrayInputStream
@@ -132,13 +134,43 @@ class PhotoBackgroundModule(private val ctx: ReactApplicationContext) : ReactCon
       mask.get(conf, 0, n)
       val px = IntArray(n)
       bmp.getPixels(px, 0, w, 0, 0, w, h)
-      val out = SegmentMath.process(px, conf, w, h, if (mode == "blur") "blur" else "plain", level) ?: return null
+      val out = SegmentMath.process(px, conf, w, h, if (mode == "blur") "blur" else "plain", level, heads(bmp)) ?: return null
       val res = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
       res.setPixels(out, 0, w, 0, 0, w, h)
       return res
     } finally {
       bmp.recycle()
     }
+  }
+
+  /**
+   * Face boxes widened to cover ears, glasses temples and hair ([l, t, r, b] quads), where the
+   * mask gets a lower bar. Null when no face / detector unavailable (the mask still works).
+   */
+  private fun heads(bmp: Bitmap): IntArray? = try {
+    val det = FaceDetection.getClient(
+      FaceDetectorOptions.Builder().setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST).setMinFaceSize(0.05f).build(),
+    )
+    val faces = try {
+      Tasks.await(det.process(InputImage.fromBitmap(bmp, 0)), 10, TimeUnit.SECONDS)
+    } finally {
+      try { det.close() } catch (_: Throwable) {}
+    }
+    if (faces.isEmpty()) null else {
+      val out = IntArray(faces.size * 4)
+      faces.forEachIndexed { j, f ->
+        val b = f.boundingBox
+        val fw = b.width()
+        val fh = b.height()
+        out[j * 4] = (b.left - fw * 0.4f).roundToInt().coerceIn(0, bmp.width)
+        out[j * 4 + 1] = (b.top - fh * 0.5f).roundToInt().coerceIn(0, bmp.height)
+        out[j * 4 + 2] = (b.right + fw * 0.4f).roundToInt().coerceIn(0, bmp.width)
+        out[j * 4 + 3] = (b.bottom + fh * 0.15f).roundToInt().coerceIn(0, bmp.height)
+      }
+      out
+    }
+  } catch (t: Throwable) {
+    null
   }
 
   private fun runJob(uri: String, mode: String, level: Int, promise: Promise) {

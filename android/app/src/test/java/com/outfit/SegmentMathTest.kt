@@ -75,22 +75,89 @@ class SegmentMathTest {
     for (y in 0 until h) for (x in 0 until w) {
       val d = dist(x, y)
       val a = alpha[y * w + x]
-      if (d <= rad - 1.5) { inside++; if (a < 0.9f) insideMiss++ }
-      if (d >= rad + 3) { outside++; if (a > 0.1f) outsideSpill++ }
+      if (d <= rad - 3) { inside++; if (a < 0.9f) insideMiss++ }
+      if (d >= rad + 5) { outside++; if (a > 0.15f) outsideSpill++ }
     }
-    // The blocky, shrunk mask is snapped back to the disc's real round edge
+    // The blocky, shrunk mask is snapped back to the disc's real round edge (smooth ~2-3 px feather)
     assertTrue("subject edge eaten: $insideMiss of $inside", insideMiss < inside * 0.01)
     assertTrue("background spill: $outsideSpill of $outside", outsideSpill < outside * 0.01)
   }
 
-  @Test fun lookalikeColoursFallBackToTheSoftMask() {
-    // Subject and background the same grey: no colour cue, the mask's own soft edge is kept
+  @Test fun lookalikeColoursKeepTheModeratelySureMaskWhole() {
+    // Subject and background the same grey: no colour cue; the 0.35-confidence band is kept whole
     val px = IntArray(w * h) { rgb(128, 128, 128) }
     val alpha = SegmentMath.refineAlpha(px, poorMask(), w, h)
     val i = (cy.toInt()) * w + (cx + rad - 8).toInt() // in the 0.35-confidence band
-    assertTrue("band alpha ${alpha[i]}", alpha[i] > 0.4f && alpha[i] < 0.9f)
+    assertEquals(1f, alpha[i], 0f)
     assertEquals(1f, alpha[cy.toInt() * w + cx.toInt()], 0f)
     assertEquals(0f, alpha[10 * w + 10], 0f)
+  }
+
+  @Test fun looseDressTheModelIsUnsureAboutIsKept() {
+    // Body (red disc, model sure) + a wide green "saree / skirt" below it on a greenish wall that
+    // the model is only 0.4 sure about. It used to be re-matted against the red body colour and cut.
+    val sx0 = 250; val sx1 = 750; val sy0 = 700; val sy1 = 980
+    fun inSkirt(x: Int, y: Int) = x in sx0 until sx1 && y in sy0 until sy1
+    val px = IntArray(w * h) { i ->
+      val x = i % w; val y = i / w
+      when {
+        dist(x, y) <= rad -> rgb(220, 30, 30)
+        inSkirt(x, y) -> rgb(40, 150, 60)
+        else -> rgb(60, 140, 110)
+      }
+    }
+    val conf = FloatArray(w * h) { i ->
+      val x = i % w; val y = i / w
+      when {
+        dist(x, y) <= rad - 3 -> 0.97f
+        inSkirt(x, y) -> 0.4f
+        else -> 0.02f
+      }
+    }
+    val alpha = SegmentMath.refineAlpha(px, conf, w, h)
+    var miss = 0
+    for (y in sy0 + 3 until sy1 - 3) for (x in sx0 + 3 until sx1 - 3) if (alpha[y * w + x] < 0.99f) miss++
+    assertEquals("dress pixels cut", 0, miss)
+    assertEquals(0f, alpha[20 * w + 20], 0f)
+  }
+
+  @Test fun floatingSpecksAreDroppedAndTheEdgeIsSmooth() {
+    val px = photo()
+    // Good mask plus background specks the model half-believed, 5-20 px outside the outline
+    val conf = FloatArray(w * h) { i -> if (dist(i % w, i / w) <= rad) 0.95f else 0.02f }
+    val specks = listOf(intArrayOf(500 + 300 + 12, 500), intArrayOf(500 - 300 - 15, 520), intArrayOf(500, 500 + 300 + 18))
+    for (sp in specks) for (dy in -2..2) for (dx in -2..2) conf[(sp[1] + dy) * w + sp[0] + dx] = 0.8f
+    val alpha = SegmentMath.refineAlpha(px, conf, w, h)
+    for (sp in specks) assertTrue("speck kept at ${sp[0]},${sp[1]}: ${alpha[sp[1] * w + sp[0]]}", alpha[sp[1] * w + sp[0]] < 0.05f)
+    // Smooth: along a horizontal line through the edge alpha falls monotonically, no notches
+    var last = 1.01f
+    for (x in 500 + 280 until 500 + 320) {
+      val a = alpha[500 * w + x]
+      assertTrue("non-monotonic edge at $x", a <= last + 0.02f)
+      last = a
+    }
+  }
+
+  @Test fun headBoxesKeepLowConfidenceEarsAndGlasses() {
+    val px = photo()
+    val conf = FloatArray(w * h) { i -> if (dist(i % w, i / w) <= rad) 0.95f else 0.02f }
+    // An "ear" just outside the disc that the model is only 0.2 sure about (and red like the face)
+    for (y in 490 until 510) for (x in 800 until 812) { conf[y * w + x] = 0.2f; px[y * w + x] = rgb(220, 30, 30) }
+    val without = SegmentMath.refineAlpha(px, conf, w, h)
+    val with = SegmentMath.refineAlpha(px, conf, w, h, intArrayOf(150, 150, 850, 850))
+    assertTrue("ear kept with head box: ${with[500 * w + 806]}", with[500 * w + 806] > 0.9f)
+    assertTrue(with[500 * w + 806] >= without[500 * w + 806])
+  }
+
+  @Test fun smallGapsInsideTheSubjectAreFilledButLargeOnesStay() {
+    val ww = 200; val hh = 200
+    val keep = FloatArray(ww * hh) { i -> val x = i % ww; val y = i / ww; if (x in 20 until 180 && y in 20 until 180) 1f else 0f }
+    for (y in 50 until 55) for (x in 50 until 55) keep[y * ww + x] = 0f // small fold the model missed
+    for (y in 100 until 170) for (x in 100 until 170) keep[y * ww + x] = 0f // big real gap
+    SegmentMath.fillHoles(keep, ww, hh, 100)
+    assertEquals(1f, keep[52 * ww + 52], 0f)
+    assertEquals(0f, keep[130 * ww + 130], 0f)
+    assertEquals(0f, keep[5 * ww + 5], 0f)
   }
 
   @Test fun backgroundBlurDoesNotSmearTheSubject() {
@@ -128,9 +195,9 @@ class SegmentMathTest {
     for (y in 0 until h) for (x in 0 until w) {
       val d = dist(x, y)
       val i = y * w + x
-      if (d <= rad - 2) assertEquals("subject changed at $x,$y", px[i], blur!![i])
-      // Dark-ish red subject -> white background, no blue fringe just outside the subject
-      if (d >= rad + 2) {
+      if (d <= rad - 5) assertEquals("subject changed at $x,$y", px[i], blur!![i])
+      // Dark-ish red subject -> white background, no blue fringe outside the soft edge
+      if (d >= rad + 6) {
         val p = plain[i]
         assertTrue("fringe at $x,$y: ${red(p)},${green(p)},${blue(p)}", red(p) > 235 && green(p) > 235 && blue(p) > 235)
       }

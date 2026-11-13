@@ -12,13 +12,11 @@ import kotlin.math.roundToInt
  * Everything runs on the full-resolution photo: the ML Kit confidence mask has the photo's own
  * size, so nothing is upscaled from a small mask.
  *
- *  refineAlpha: ML Kit foreground confidence -> soft alpha that keeps the subject's edges
- *    (hair, shoulders, sleeves, curves). The mask only gives a soft prior (low threshold, never a
- *    hard cut) and an edge band ~12 px around the subject; inside the band every pixel's alpha is
- *    solved from its own colour against the local sure-subject (F) and sure-background (B)
- *    colours (I = a F + (1 - a) B), so the outline follows the real edge in the photo even where
- *    the model's mask is blocky or a few px short. Where F and B look alike the soft mask is
- *    kept. The confident core is always whole; a 1 px feather anti-aliases the outline.
+ *  refineAlpha: ML Kit foreground confidence -> soft alpha that keeps the WHOLE person incl.
+ *    loose clothing (saree, dupatta, dress hem, sleeves) and the ears / glasses / hair: cleaned
+ *    shape (low threshold, main pieces only, holes filled, closed, slightly dilated), then the
+ *    model's soft confidence refined by a colour guided filter so the edge is smooth and follows
+ *    the photo, plus a light feather.
  *  backgroundBlur: the background blurred WITHOUT the subject's colours (normalised convolution
  *    weighted by 1 - alpha), so no glow / smear of the person bleeds around the outline.
  *  composite: subject colours un-mixed from the old background at the edge pixels
@@ -147,62 +145,224 @@ object SegmentMath {
   }
 
   /**
-   * ML Kit foreground confidence (0..1, full size) -> final soft alpha (0..1, full size).
-   * [lum] is the photo's luminance (0..1) used as the edge guide.
+   * Confidence at or above this is subject, kept whole. ML Kit is often only 0.3-0.6 sure about
+   * loose clothing (saree pallu, dupatta, flared dress / lehenga hem, jacket sleeves) because it
+   * looks unlike a body; the old 0.6-0.9 "sure" level plus colour re-matting cut those parts away.
    */
-  fun refineAlpha(px: IntArray, conf: FloatArray, w: Int, h: Int): FloatArray {
-    val k = scaleFor(w, h)
+  const val KEEP_THRESHOLD = 0.35f
+
+  /** Around detected faces (ears, glasses temples, hair) the model is less sure: lower bar there. */
+  const val HEAD_THRESHOLD = 0.15f
+
+  /** Enclosed gaps in the subject up to this share of the photo are filled (missed folds / pleats). */
+  const val MAX_HOLE_SHARE = 0.004f
+
+  /** Separate foreground pieces smaller than this share of the biggest one are dropped (specks). */
+  const val MIN_PIECE_OF_LARGEST = 0.15f
+
+  /** Morphological erosion (min filter) of a 0..1 mask. */
+  fun minFilter(src: FloatArray, w: Int, h: Int, r: Int): FloatArray {
+    val inv = FloatArray(src.size) { 1f - src[it] }
+    val d = maxFilter(inv, w, h, r)
+    for (i in d.indices) d[i] = 1f - d[i]
+    return d
+  }
+
+  /**
+   * Keeps only the big 4-connected foreground pieces of binary [keep] (the person); islands smaller
+   * than MIN_PIECE_OF_LARGEST of the largest piece (background specks the model half-believed)
+   * are cleared. In place.
+   */
+  fun keepMainPieces(keep: FloatArray, w: Int, h: Int) {
     val n = w * h
-    // Prior: soft, low threshold (uncertain edge pixels such as hair or thin sleeves count partly)
-    val soft = FloatArray(n)
-    for (i in 0 until n) soft[i] = smoothstep(0.08f, 0.55f, conf[i])
-    // Edge band: everything within ~12 px of the subject may still be subject
-    val band = max(3, (12 * k).roundToInt())
-    val near = maxFilter(soft, w, h, band)
-    for (i in 0 until n) near[i] = smoothstep(0f, 0.1f, near[i]) // 1 = may be subject
-    // Local colours of the sure subject (F) and the sure background (B) around every pixel
-    val fgW = FloatArray(n)
-    val bgW = FloatArray(n)
-    for (i in 0 until n) {
-      fgW[i] = smoothstep(0.6f, 0.92f, conf[i])
-      bgW[i] = 1f - near[i]
+    val label = IntArray(n) // 0 = none, else piece id
+    val q = IntArray(n)
+    val sizes = ArrayList<Int>()
+    sizes.add(0)
+    for (s0 in 0 until n) {
+      if (keep[s0] < 0.5f || label[s0] != 0) continue
+      val id = sizes.size
+      var head = 0
+      var tail = 0
+      label[s0] = id
+      q[tail++] = s0
+      while (head < tail) {
+        val i = q[head++]
+        val x = i % w
+        if (x > 0 && keep[i - 1] >= 0.5f && label[i - 1] == 0) { label[i - 1] = id; q[tail++] = i - 1 }
+        if (x < w - 1 && keep[i + 1] >= 0.5f && label[i + 1] == 0) { label[i + 1] = id; q[tail++] = i + 1 }
+        if (i >= w && keep[i - w] >= 0.5f && label[i - w] == 0) { label[i - w] = id; q[tail++] = i - w }
+        if (i < n - w && keep[i + w] >= 0.5f && label[i + w] == 0) { label[i + w] = id; q[tail++] = i + w }
+      }
+      sizes.add(tail)
     }
-    val radius = max(6, (32 * k).roundToInt())
-    val fg = weightedMeanGrid(px, fgW, w, h, radius)
-    val bg = weightedMeanGrid(px, bgW, w, h, radius)
-    val reach = boxBlur(near, w, h, max(1, (2 * k).roundToInt()))
-    val f = FloatArray(4)
-    val g = FloatArray(4)
-    val a = FloatArray(n)
+    if (sizes.size <= 2) return
+    val largest = sizes.maxOrNull() ?: return
+    val min = largest * MIN_PIECE_OF_LARGEST
+    for (i in 0 until n) { val l = label[i]; if (l != 0 && sizes[l] < min) keep[i] = 0f }
+  }
+
+  /**
+   * Sets to 1 every 0-region of [keep] (binary 0/1) that does not touch the photo border and has
+   * at most [maxArea] pixels: gaps the model left inside the dress. Larger enclosed regions (a
+   * real gap between arm and body) stay background.
+   */
+  fun fillHoles(keep: FloatArray, w: Int, h: Int, maxArea: Int) {
+    val n = w * h
+    if (maxArea <= 0 || n == 0) return
+    // 0 = unvisited background, 1 = subject, 2 = background reached from the border, 3 = labelled
+    val st = ByteArray(n)
+    for (i in 0 until n) if (keep[i] >= 0.5f) st[i] = 1
+    val q = IntArray(n)
+    var head = 0
+    var tail = 0
+    fun seed(i: Int) { if (st[i].toInt() == 0) { st[i] = 2; q[tail++] = i } }
+    for (x in 0 until w) { seed(x); seed((h - 1) * w + x) }
+    for (y in 0 until h) { seed(y * w); seed(y * w + w - 1) }
+    while (head < tail) {
+      val i = q[head++]
+      val x = i % w
+      if (x > 0) seed(i - 1)
+      if (x < w - 1) seed(i + 1)
+      if (i >= w) seed(i - w)
+      if (i < n - w) seed(i + w)
+    }
+    for (s0 in 0 until n) {
+      if (st[s0].toInt() != 0) continue
+      head = 0
+      tail = 0
+      st[s0] = 3
+      q[tail++] = s0
+      while (head < tail) {
+        val i = q[head++]
+        val x = i % w
+        if (x > 0 && st[i - 1].toInt() == 0) { st[i - 1] = 3; q[tail++] = i - 1 }
+        if (x < w - 1 && st[i + 1].toInt() == 0) { st[i + 1] = 3; q[tail++] = i + 1 }
+        if (i >= w && st[i - w].toInt() == 0) { st[i - w] = 3; q[tail++] = i - w }
+        if (i < n - w && st[i + w].toInt() == 0) { st[i + w] = 3; q[tail++] = i + w }
+      }
+      if (tail <= maxArea) for (j in 0 until tail) keep[q[j]] = 1f
+    }
+  }
+
+  /**
+   * Fast colour guided filter (He et al.): edge-aware smoothing of [p] (0..1) that follows the
+   * edges of the RGB photo [px]. [r] and [eps] are for colours scaled 0..1 at full size. The
+   * linear coefficients are solved on a grid subsampled by [s] and upsampled bilinearly (smooth,
+   * never nearest), then applied to every full-size pixel: q = a . I + b.
+   */
+  fun guidedFilter(px: IntArray, p: FloatArray, w: Int, h: Int, r: Int, eps: Float, s: Int): FloatArray {
+    val n = w * h
+    val cr = FloatArray(n); val cg = FloatArray(n); val cb = FloatArray(n)
+    for (i in 0 until n) {
+      val v = px[i]
+      cr[i] = ((v shr 16) and 0xFF) / 255f; cg[i] = ((v shr 8) and 0xFF) / 255f; cb[i] = (v and 0xFF) / 255f
+    }
+    val sw = (w + s - 1) / s
+    val sh = (h + s - 1) / s
+    val ir = downsample(cr, w, h, s); val ig = downsample(cg, w, h, s); val ib = downsample(cb, w, h, s)
+    val ps = downsample(p, w, h, s)
+    val rs = max(1, (r.toFloat() / s).roundToInt())
+    fun bx(a: FloatArray) = boxBlur(a, sw, sh, rs)
+    fun prod(a: FloatArray, b: FloatArray) = FloatArray(a.size) { a[it] * b[it] }
+    val mr = bx(ir); val mg = bx(ig); val mb = bx(ib); val mp = bx(ps)
+    val mrp = bx(prod(ir, ps)); val mgp = bx(prod(ig, ps)); val mbp = bx(prod(ib, ps))
+    val vrr = bx(prod(ir, ir)); val vrg = bx(prod(ir, ig)); val vrb = bx(prod(ir, ib))
+    val vgg = bx(prod(ig, ig)); val vgb = bx(prod(ig, ib)); val vbb = bx(prod(ib, ib))
+    val m = sw * sh
+    val ar = FloatArray(m); val ag = FloatArray(m); val ab = FloatArray(m); val bb = FloatArray(m)
+    for (i in 0 until m) {
+      val c1 = mrp[i] - mr[i] * mp[i]; val c2 = mgp[i] - mg[i] * mp[i]; val c3 = mbp[i] - mb[i] * mp[i]
+      val a11 = vrr[i] - mr[i] * mr[i] + eps; val a12 = vrg[i] - mr[i] * mg[i]; val a13 = vrb[i] - mr[i] * mb[i]
+      val a22 = vgg[i] - mg[i] * mg[i] + eps; val a23 = vgb[i] - mg[i] * mb[i]
+      val a33 = vbb[i] - mb[i] * mb[i] + eps
+      // Inverse of the symmetric 3x3 covariance (+ eps I) by cofactors
+      val i11 = a22 * a33 - a23 * a23; val i12 = a13 * a23 - a12 * a33; val i13 = a12 * a23 - a13 * a22
+      val i22 = a11 * a33 - a13 * a13; val i23 = a12 * a13 - a11 * a23; val i33 = a11 * a22 - a12 * a12
+      val det = a11 * i11 + a12 * i12 + a13 * i13
+      if (det > 1e-12f) {
+        val inv = 1f / det
+        ar[i] = (i11 * c1 + i12 * c2 + i13 * c3) * inv
+        ag[i] = (i12 * c1 + i22 * c2 + i23 * c3) * inv
+        ab[i] = (i13 * c1 + i23 * c2 + i33 * c3) * inv
+      }
+      bb[i] = mp[i] - ar[i] * mr[i] - ag[i] * mg[i] - ab[i] * mb[i]
+    }
+    val gar = ColourGrid(sw, sh, s, bx(ar), bx(ag), bx(ab), bx(bb))
+    val out = FloatArray(n)
+    val c = FloatArray(4)
     for (y in 0 until h) {
       for (x in 0 until w) {
         val i = y * w + x
-        val core = fgW[i]
-        if (core >= 1f || reach[i] <= 0f) { a[i] = core; continue }
-        var est = soft[i]
-        fg.at(x, y, f)
-        bg.at(x, y, g)
-        if (f[3] > 0.0005f && g[3] > 0.0005f) {
-          // Closed-form alpha from the local subject / background colours: I = a F + (1 - a) B
-          val dr = f[0] - g[0]; val dg = f[1] - g[1]; val db = f[2] - g[2]
-          val l2 = dr * dr + dg * dg + db * db
-          val sure = smoothstep(30f * 30f, 80f * 80f, l2) // colours clearly different?
-          if (sure > 0f) {
-            val p = px[i]
-            val ir = ((p shr 16) and 0xFF) - g[0]
-            val ig = ((p shr 8) and 0xFF) - g[1]
-            val ib = (p and 0xFF) - g[2]
-            // (small dead zone at both ends: background texture / subject shading is not "partial")
-            val t = (((ir * dr + ig * dg + ib * db) / l2 - 0.04f) / 0.92f).coerceIn(0f, 1f)
-            est = t * sure + est * (1 - sure)
-          }
-        }
-        a[i] = max(core, min(est, reach[i])).coerceIn(0f, 1f)
+        gar.at(x, y, c)
+        out[i] = (c[0] * cr[i] + c[1] * cg[i] + c[2] * cb[i] + c[3]).coerceIn(0f, 1f)
       }
     }
-    // 1 px feather: anti-aliased outline, no jaggies (the sure core stays whole)
-    val out = boxBlur(a, w, h, max(1, k.roundToInt()))
-    for (i in 0 until n) out[i] = max(out[i], fgW[i]).coerceIn(0f, 1f)
+    return out
+  }
+
+  /** True when (x, y) is inside one of the head boxes ([l, t, r, b] quads, already expanded). */
+  private fun inHead(heads: IntArray?, x: Int, y: Int): Boolean {
+    if (heads == null) return false
+    var j = 0
+    while (j + 3 < heads.size) {
+      if (x >= heads[j] && y >= heads[j + 1] && x < heads[j + 2] && y < heads[j + 3]) return true
+      j += 4
+    }
+    return false
+  }
+
+  /**
+   * ML Kit foreground confidence (0..1, full size) -> final soft alpha (0..1, full size). One mask
+   * for Blur and Remove BG.
+   *  1. Shape: confidence >= 0.35 (0.15 around faces: ears, glasses, hair), only the main pieces
+   *     (specks dropped), small gaps filled, closed (no bitten notches), dilated ~3 px (sleeves and
+   *     dress edges not eroded). Its inner core (~3 px inside the model's edge) is always 1.
+   *  2. Edge: the model's SOFT confidence near that shape (not a hard 0/1 cut) is refined with a
+   *     colour guided filter (radius ~8 px, eps 1e-3 at 2048 px) so the outline follows the real
+   *     skin / hair / cloth edge in the photo, smooth, never a staircase.
+   *  3. Light ~2 px feather; nothing survives > ~10 px outside the shape (no floating specks).
+   * [heads]: face boxes in pixels as [l, t, r, b] quads (already widened to cover ears), or null.
+   */
+  fun refineAlpha(px: IntArray, conf: FloatArray, w: Int, h: Int, heads: IntArray? = null): FloatArray {
+    val k = scaleFor(w, h)
+    val n = w * h
+    val keep = FloatArray(n)
+    val soft = FloatArray(n)
+    for (y in 0 until h) {
+      for (x in 0 until w) {
+        val i = y * w + x
+        val c = conf[i]
+        if (inHead(heads, x, y)) {
+          keep[i] = if (c >= HEAD_THRESHOLD) 1f else 0f
+          soft[i] = smoothstep(0.03f, 0.3f, c)
+        } else {
+          keep[i] = if (c >= KEEP_THRESHOLD) 1f else 0f
+          soft[i] = smoothstep(0.1f, 0.5f, c)
+        }
+      }
+    }
+    keepMainPieces(keep, w, h)
+    fillHoles(keep, w, h, (n * MAX_HOLE_SHARE).toInt())
+    val rc = max(2, (6 * k).roundToInt())
+    val closed = minFilter(maxFilter(keep, w, h, rc), w, h, rc)
+    val shape = maxFilter(closed, w, h, max(1, (3 * k).roundToInt()))
+    val core = minFilter(shape, w, h, max(2, (6 * k).roundToInt()))
+    val band = maxFilter(shape, w, h, max(3, (10 * k).roundToInt()))
+    val near = boxBlur(maxFilter(shape, w, h, max(2, (4 * k).roundToInt())), w, h, max(1, (2 * k).roundToInt()))
+    val p = FloatArray(n)
+    for (i in 0 until n) p[i] = max(soft[i] * near[i], shape[i]) * band[i]
+    val r = max(2, (8 * k).roundToInt())
+    val q = guidedFilter(px, p, w, h, r, 1e-3f, max(1, r / 2))
+    val bandSoft = boxBlur(band, w, h, max(1, (2 * k).roundToInt()))
+    for (i in 0 until n) q[i] = max(q[i], core[i]) * bandSoft[i]
+    val f = max(1, (1.5f * k).roundToInt())
+    val out = boxBlur(boxBlur(q, w, h, f), w, h, f)
+    for (i in 0 until n) {
+      var a = max(out[i], core[i])
+      if (a < 0.02f) a = 0f else if (a > 0.98f) a = 1f
+      out[i] = a
+    }
     return out
   }
 
@@ -361,8 +521,8 @@ object SegmentMath {
    * Whole pipeline on the full-size photo. mode "blur" (level 1..5) or "plain" (solid black behind
    * light clothes, white behind dark ones). Null when there is no clear subject (keep the photo).
    */
-  fun process(px: IntArray, conf: FloatArray, w: Int, h: Int, mode: String, level: Int): IntArray? {
-    val alpha = refineAlpha(px, conf, w, h)
+  fun process(px: IntArray, conf: FloatArray, w: Int, h: Int, mode: String, level: Int, heads: IntArray? = null): IntArray? {
+    val alpha = refineAlpha(px, conf, w, h, heads)
     val share = subjectShare(alpha)
     if (share < 0.02f || share > 0.98f) return null
     val oldBg = backgroundBlur(px, alpha, w, h, max(3, (6 * scaleFor(w, h)).roundToInt()), 1f)
