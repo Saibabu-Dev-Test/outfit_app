@@ -1,8 +1,8 @@
-// "Me" tab, Instagram-like: avatar, counts (posts, wardrobe, followers, following), bio,
-// Edit profile, and 🔮 Astrology / Wardrobe / Likes. Astrology (components/AstrologyPanel.tsx) is
-// computed on the phone from the saved profile (dob, time of birth, rashi, gender, language).
-// It replaced the old Posts grid (new posts can't be made any more; old posts stay in the DB and
-// still open from the Feed / Likes). Settings live behind the ⚙️ button.
+// "Me" tab, Instagram-like: avatar (tap for full screen), counts (wear votes today, wardrobe, followers,
+// following), bio, Edit profile, and 🔮 Astrology / Wardrobe / Likes tabs.
+// Astrology (components/AstrologyPanel.tsx) is computed on the phone from the saved profile.
+// The old Posts tab was replaced by the wardrobe "Wear today" votes (old posts still open from the
+// Feed / Likes). Settings live behind the ⚙️ button.
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
@@ -20,7 +20,10 @@ import { useFocusEffect } from '@react-navigation/native';
 import { colors, fontSize, fontWeight, spacing, themedStyles, statusBarStyle } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
 import ProfileHeader, { headerButtonStyles as hb } from '../../components/ProfileHeader';
+import CoinBadge from '../../components/coins/CoinBadge';
 import PhotoGrid from '../../components/PhotoGrid';
+import WardrobeVoteGrid from '../../components/WardrobeVoteGrid';
+import useWearVotes from '../../hooks/useWearVotes';
 import { getProfileCounts, ProfileCounts } from '../../services/socialApi';
 import { getCachedLikedItems, getLikedItems, Post, rememberPosts } from '../../services/feedApi';
 import { getWardrobeItems, WardrobeItemResponse } from '../../services/wardrobeApi';
@@ -38,11 +41,13 @@ export default function MeScreen({ navigation }: { navigation: any }) {
   const { user, updateUserData } = useAuth();
   const uid = user?.id || '';
   const [counts, setCounts] = useState<ProfileCounts | null>(null);
+  const [privateIds, setPrivateIds] = useState<Set<string>>(new Set());
   const [wardrobe, setWardrobe] = useState<Post[]>([]);
   const [wardrobeItems, setWardrobeItems] = useState<WardrobeItemResponse[] | null>(null);
   const [profile, setProfile] = useState<StoredProfile>({});
   const [likes, setLikes] = useState<Post[] | null>(null);
   const [tab, setTab] = useState<Tab>('astro');
+  const wear = useWearVotes(uid, uid);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [isStar, setIsStar] = useState(false);
@@ -71,6 +76,7 @@ export default function MeScreen({ navigation }: { navigation: any }) {
       saveUserProfile(uid, upd).catch(e => console.warn('Birth chart save failed:', e?.message));
     }
     setProfile(prof);
+    setPrivateIds(new Set(w.filter(i => !!i.imageUrl && !i.isPublic).map(i => i.id)));
     const wardrobePosts: Post[] = w
         .filter(i => !!i.imageUrl)
         .map(i => ({
@@ -97,6 +103,7 @@ export default function MeScreen({ navigation }: { navigation: any }) {
     setRefreshing(false);
     isWeeklyStar(uid).then(setIsStar);
     countFriendsJoined(uid).then(setJoined);
+    wear.refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uid]);
 
@@ -142,7 +149,6 @@ export default function MeScreen({ navigation }: { navigation: any }) {
   };
 
   const open = (p: Post) => navigation.navigate('PostDetail', { kind: p.kind, id: p.id });
-  const grid = tab === 'wardrobe' ? wardrobe : likes || [];
   const editProfile = () => navigation.navigate('Settings', { edit: true });
   // Saved profile (fresh read) over the signed-in copy
   const astroProfile = {
@@ -166,6 +172,12 @@ export default function MeScreen({ navigation }: { navigation: any }) {
         <Text style={styles.barTitle} numberOfLines={1}>
           {user?.name || 'Me'}
         </Text>
+        <TouchableOpacity
+          style={styles.barBtn}
+          onPress={() => navigation.navigate('Wardrobe', { screen: 'AddItem' })}
+          accessibilityLabel="Add clothes to my wardrobe">
+          <Text style={styles.barIcon}>＋👗</Text>
+        </TouchableOpacity>
         <TouchableOpacity style={styles.barBtn} onPress={invite} accessibilityLabel="Invite friends to download the app">
           <Text style={styles.barIcon}>🎁</Text>
         </TouchableOpacity>
@@ -194,10 +206,12 @@ export default function MeScreen({ navigation }: { navigation: any }) {
           name={user?.name || 'Set your name'}
           avatarUrl={user?.avatarUrl}
           bio={user?.bio}
-          stylePrefs={user?.stylePrefs}
           counts={counts}
           isStar={isStar}
-          isPrivate={user?.isPublic === false}>
+          isPrivate={user?.isPublic === false}
+          todayVotes={wear.loading ? undefined : wear.tally.total}
+          onPressTodayVotes={() => openTab('wardrobe')}
+          badge={<CoinBadge uid={uid} />}>
           <TouchableOpacity style={hb.btn} onPress={editProfile}>
             <Text style={hb.btnText}>Edit profile</Text>
           </TouchableOpacity>
@@ -214,62 +228,61 @@ export default function MeScreen({ navigation }: { navigation: any }) {
           <Text style={styles.inviteCta}>Invite</Text>
         </TouchableOpacity>
 
-        {/* Monthly tasks -> coins -> rewards; planners and matching */}
-        {[
-          { icon: '🪙', label: 'Rewards · monthly tasks & coins', screen: 'Rewards' },
-          { icon: '💍', label: 'Function planner (pelli, haldi…)', screen: 'FunctionPlanner' },
-          { icon: '💑', label: 'Pelli Porutham (couple match)', screen: 'Porutham' },
-          { icon: '🌤️', label: "Today's outfit for the weather", screen: 'WeatherOutfit' },
-        ].map(r => (
-          <TouchableOpacity key={r.screen} style={styles.invite} onPress={() => navigation.navigate(r.screen)} activeOpacity={0.8}>
+        {isAdmin ? (
+          <TouchableOpacity style={styles.invite} onPress={() => navigation.navigate('AdminUsers')} activeOpacity={0.8}>
             <Text style={styles.inviteText} numberOfLines={1}>
-              {r.icon} {r.label}
+              📊 Admin tracking: users, content, ads, features
             </Text>
-            <Text style={styles.inviteCta}>Open ›</Text>
+            <Text style={styles.inviteCta}>Admin ›</Text>
           </TouchableOpacity>
-        ))}
+        ) : null}
+        {isAdmin ? (
+          <TouchableOpacity style={styles.invite} onPress={() => navigation.navigate('AdminWithdrawals')} activeOpacity={0.8}>
+            <Text style={styles.inviteText} numberOfLines={1}>
+              💸 Earn: UPI withdrawal requests
+            </Text>
+            <Text style={styles.inviteCta}>Admin ›</Text>
+          </TouchableOpacity>
+        ) : null}
 
         {/* Earn tab ledger: totals, withdrawable vs pending, breakdown by type, recent history */}
-        {user?.id ? <EarningsSection uid={user.id} onOpenEarn={() => navigation.navigate('Earn')} /> : null}
-
-        {isAdmin
-          ? [
-              { icon: '👥', label: 'Users', screen: 'AdminUsers' },
-              { icon: '🎁', label: 'Reward & withdrawal requests', screen: 'AdminRewardRequests' },
-              { icon: '🗄️', label: 'Storage', screen: 'AdminStorage' },
-            ].map(r => (
-              <TouchableOpacity key={r.screen} style={styles.invite} onPress={() => navigation.navigate(r.screen)} activeOpacity={0.8}>
-                <Text style={styles.inviteText} numberOfLines={1}>
-                  {r.icon} {r.label}
-                </Text>
-                <Text style={styles.inviteCta}>Admin ›</Text>
-              </TouchableOpacity>
-            ))
-          : null}
+        {uid ? <EarningsSection uid={uid} onOpenEarn={() => navigation.navigate('Earn')} /> : null}
 
         <View style={styles.tabs}>
           {(['astro', 'wardrobe', 'likes'] as Tab[]).map(t => (
             <TouchableOpacity key={t} style={[styles.tab, tab === t && styles.tabOn]} onPress={() => openTab(t)}>
               <Text style={[styles.tabText, tab === t && styles.tabTextOn]}>
-                {t === 'astro' ? '🔮 Astrology' : t === 'wardrobe' ? '👗 Wardrobe' : '♡ Likes'}
+                {t === 'astro' ? '🔮 Astro' : t === 'wardrobe' ? '👗 Wardrobe' : '♡ Likes'}
               </Text>
             </TouchableOpacity>
           ))}
         </View>
         {error ? <Text style={styles.error}>{error}</Text> : null}
         {tab === 'astro' ? (
-          <AstrologyPanel uid={uid} profile={astroProfile} wardrobe={wardrobeItems} onEditProfile={editProfile} />
+          <AstrologyPanel
+            uid={uid}
+            profile={astroProfile}
+            wardrobe={wardrobeItems}
+            onEditProfile={editProfile}
+            onOpenPorutham={() => navigation.navigate('Porutham', { self: astroProfile })}
+          />
         ) : loading || (tab === 'likes' && likes === null) ? (
           <ActivityIndicator style={styles.spinner} color={colors.primary} />
+        ) : tab === 'wardrobe' ? (
+          <WardrobeVoteGrid
+            items={wardrobe}
+            ownerId={uid}
+            ownerName={user?.name}
+            isOwner
+            wear={wear}
+            privateIds={privateIds}
+            empty="No wardrobe photos yet. Tap ＋👗 to add clothes."
+          />
         ) : (
           <PhotoGrid
-            items={grid}
+            items={likes || []}
             onPress={open}
-            empty={
-              tab === 'wardrobe'
-                ? 'No wardrobe photos yet.'
-                : 'No likes yet. Photos you like (double-tap in the Feed) show up here.'
-            }
+            empty="No likes yet. Photos you like (double-tap in the Feed) show up here."
           />
         )}
       </ScrollView>

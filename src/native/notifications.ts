@@ -10,6 +10,10 @@ const Native:
       scheduleDaily?: () => Promise<boolean>;
       cancelDaily?: () => Promise<boolean>;
       postNotification?: (title: string, body: string) => Promise<boolean>;
+      scheduleReminder?: (id: number, at: number, title: string, body: string) => Promise<boolean>;
+      cancelReminder?: (id: number) => Promise<boolean>;
+      postNotificationWithPayload?: (title: string, body: string, payload: string) => Promise<boolean>;
+      consumeLaunchPayload?: () => Promise<string | null>;
       setUserFirstName?: (name: string) => Promise<boolean>;
       scheduleVoteReminder?: () => Promise<boolean>;
       markColourVoted?: (day: string) => Promise<boolean>;
@@ -81,6 +85,46 @@ export const postNotification = async (title: string, body: string): Promise<boo
   } catch {
     return false;
   }
+};
+
+// Same, with a payload the app gets back when the user taps it (consumeLaunchPayload).
+// Older native builds without the method: a plain notification. Never throws.
+export const postNotificationWithPayload = async (title: string, body: string, payload: string): Promise<boolean> => {
+  if (Platform.OS !== 'android') return false;
+  try {
+    if (Native?.postNotificationWithPayload) return !!(await Native.postNotificationWithPayload(title, body, payload));
+    return !!(await Native?.postNotification?.(title, body));
+  } catch {
+    return false;
+  }
+};
+
+// Payload of the notification the app was just opened from (returned once), else null. Never throws.
+export const consumeLaunchPayload = async (): Promise<string | null> => {
+  if (Platform.OS !== 'android') return null;
+  try {
+    return (await Native?.consumeLaunchPayload?.()) || null;
+  } catch {
+    return null;
+  }
+};
+
+// One-off reminder at `at` (ms), e.g. the function planner (OutfitNotifier.scheduleReminder).
+// The same id replaces an earlier one. Never throws.
+export const scheduleReminder = async (id: number, at: number, title: string, body: string): Promise<boolean> => {
+  if (Platform.OS !== 'android') return false;
+  try {
+    return !!(await Native?.scheduleReminder?.(id, at, title, body));
+  } catch {
+    return false;
+  }
+};
+
+export const cancelReminder = async (id: number): Promise<void> => {
+  if (Platform.OS !== 'android') return;
+  try {
+    await Native?.cancelReminder?.(id);
+  } catch {}
 };
 
 // First word of the display name ("Priya Sharma" -> "Priya"); '' when there is none

@@ -14,21 +14,13 @@ import {
   StatusBar,
 } from 'react-native';
 import KeyboardSafeView from '../../components/KeyboardSafeView';
-import { maybeShowInterstitial } from '../../ads/adsService';
-
-// A poll was posted (natural break): at most one interstitial per 5 minutes, after the sheet has
-// closed and the keyboard is down (never while typing). Never throws.
-const afterPollPosted = () => {
-  setTimeout(() => {
-    maybeShowInterstitial().catch(() => {});
-  }, 900);
-};
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles, statusBarStyle } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
 import useIsAdmin from '../../hooks/useIsAdmin';
 import Avatar from '../../components/Avatar';
 import PollCard from '../../components/PollCard';
+import BannerAdSlot from '../../components/ads/BannerAdSlot';
 import CreatePollModal from '../../components/CreatePollModal';
 import ActionSheet from '../../components/ActionSheet';
 import WardrobePickerModal from '../../components/WardrobePickerModal';
@@ -44,13 +36,16 @@ import {
   subscribeMessages,
   sendTextMessage,
   sendImageMessage,
+  getMessageFullPhoto,
   sendPollMessage,
   deleteMessage,
   joinCircle,
 } from '../../services/circlesApi';
 import { resolveMyPlace } from '../../services/districtApi';
-import { MAX_BASE64_CHARS, pickImages } from '../../utils/imagePicker';
+import { CHAT_PICK, MAX_BASE64_CHARS, pickImages } from '../../utils/imagePicker';
+import { reviewPhotos } from '../../components/PhotoReviewHost';
 import { clockTime } from '../../utils/date';
+import { isPhotoExpired, PHOTO_EXPIRED_TEXT } from '../../utils/photoExpiry';
 import NameWithAge from '../../components/NameWithAge';
 import TranslatedText from '../../components/TranslatedText';
 
@@ -147,12 +142,16 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
   // Several photos together: 1 = normal photo, 2-6 = A-F vote post
   const sendSeveral = async () => {
     try {
-      const r = await pickImages(6);
-      if (r.skipped) Alert.alert('Some photos skipped', `${r.skipped} photo(s) were too large.`);
+      // One photo: near-original full photo + small chat copy; 2-6: poll-size photos (CHAT_PICK)
+      const picked = await pickImages(6, CHAT_PICK);
+      if (picked.skipped) Alert.alert('Some photos skipped', `${picked.skipped} photo(s) were too large.`);
+      // Photo options (Blur face / Adjust) before sending; closing them sends nothing
+      const r = { images: await reviewPhotos(picked.images, CHAT_PICK) };
       if (!r.images.length) return;
       if (r.images.length === 1) {
         setSending(true);
-        await sendImageMessage(circleId, me, r.images[0].dataUri);
+        const img = r.images[0];
+        await sendImageMessage(circleId, me, img.clearUri || img.dataUri, undefined, img.clearUri ? img.dataUri : null);
         return;
       }
       setPollImages(r.images.map(i => i.dataUri));
@@ -164,10 +163,22 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
     }
   };
 
+  // Opens the chat copy at once, then swaps in the near-original photo when it has one
+  const openPhoto = (m: ChatMessage) => {
+    if (!m.imageData) return;
+    setViewer({ images: [m.imageData], index: 0 });
+    if (!m.hasFull) return;
+    getMessageFullPhoto(circleId, m).then(full => {
+      if (full && full !== m.imageData) {
+        setViewer(v => (v && v.images.length === 1 && v.images[0] === m.imageData ? { ...v, images: [full] } : v));
+      }
+    });
+  };
+
   const openComments = (m: ChatMessage) =>
     navigation.navigate('Comments', { target: { kind: 'circle', circleId, id: m.id } });
 
-  // Wardrobe photos: 1 = normal photo, 2-6 = A-F vote (poll editor opens with them)
+  // Wardrobe photos / camera shots: 1 = normal photo, 2-6 = A-F vote (poll editor opens with them)
   const sendFromWardrobe = async (images: string[]) => {
     if (images.length === 1) {
       setSending(true);
@@ -184,7 +195,7 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
     setPollOpen(true);
   };
 
-  // Attach: From Wardrobe / Take photo / Several photos (A-F vote) / Cancel.
+  // Attach: From Wardrobe / Take photo (several shots in a row) / Several photos (A-F vote) / Cancel.
   // (Android's Alert shows only 3 buttons, so this is an ActionSheet.)
   const openAttach = () => setAttachOpen(true);
 
@@ -243,6 +254,8 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
     // Inverted list: the next item in the array is the previous message on screen
     const prev = messages[index + 1];
     const showName = !mine && (!prev || prev.userId !== item.userId);
+    // Photos (and photo polls) older than 60 days are hidden; text stays
+    const expired = item.type !== 'text' && isPhotoExpired(item.createdAt);
     return (
       <View style={[styles.row, mine ? styles.rowMine : styles.rowOther]}>
         {!mine && (
@@ -255,7 +268,7 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
           onLongPress={() => onMessageLongPress(item)}
           delayLongPress={350}
           onPress={() =>
-            item.type === 'image' && item.imageData ? setViewer({ images: [item.imageData], index: 0 }) : undefined
+            !expired && item.type === 'image' && item.imageData ? openPhoto(item) : undefined
           }
           style={[
             styles.bubble,
@@ -265,10 +278,16 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
           {showName && (
             <NameWithAge style={styles.name} onPress={() => openProfile(item.userId)} uid={item.userId} name={item.userName} age={(item as any).userAge} />
           )}
-          {item.type === 'image' && item.imageData ? (
+          {expired ? (
+            <View style={styles.expired}>
+              <Text style={styles.expiredText}>🖼️ {PHOTO_EXPIRED_TEXT}</Text>
+              {item.type === 'poll' && item.poll?.question ? <Text style={styles.expiredText}>{item.poll.question}</Text> : null}
+            </View>
+          ) : null}
+          {!expired && item.type === 'image' && item.imageData ? (
             <Image source={{ uri: item.imageData }} style={styles.photo} resizeMode="cover" />
           ) : null}
-          {item.type === 'poll' ? (
+          {!expired && item.type === 'poll' ? (
             <PollCard
               circleId={circleId}
               message={item}
@@ -279,7 +298,7 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
             />
           ) : null}
           {item.text ? <TranslatedText style={[styles.text, mine && styles.textMine]} authorId={item.userId} text={item.text} /> : null}
-          {item.type !== 'text' ? (
+          {item.type !== 'text' && !expired ? (
             <ReactionBar
               circleId={circleId}
               messageId={item.id}
@@ -404,6 +423,8 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
         {...(Platform.OS === 'android' ? { backgroundColor: colors.surface } : {})}
       />
       {header}
+      {/* Ad under the header (polls and photos are voted on here) */}
+      <BannerAdSlot slot="pollBanner" />
       <KeyboardSafeView style={styles.flex1}>{body}</KeyboardSafeView>
 
       <CreatePollModal
@@ -414,10 +435,7 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
         }}
         initialImages={pollImages}
         userId={uid}
-        onSubmit={async (kind, options) => {
-          await sendPollMessage(circleId, me, kind, options);
-          afterPollPosted();
-        }}
+        onSubmit={(kind, options) => sendPollMessage(circleId, me, kind, options)}
       />
       <ActionSheet
         visible={attachOpen}
@@ -448,10 +466,7 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
         visible={cameraOpen}
         onClose={() => setCameraOpen(false)}
         onSendPhoto={img => sendImageMessage(circleId, me, img)}
-        onSendPoll={async (kind, options) => {
-          await sendPollMessage(circleId, me, kind, options);
-          afterPollPosted();
-        }}
+        onSendPoll={(kind, options) => sendPollMessage(circleId, me, kind, options)}
       />
       <WardrobePickerModal
         visible={wardrobeOpen}
@@ -521,6 +536,8 @@ const styles = themedStyles(() => StyleSheet.create({
   bubbleMedia: { paddingHorizontal: spacing.sm, paddingTop: spacing.sm },
   name: { fontSize: fontSize.xs, fontWeight: fontWeight.bold, color: colors.accent, marginBottom: 2 },
   photo: { width: 220, height: 260, borderRadius: borderRadius.md, backgroundColor: colors.divider },
+  expired: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: borderRadius.md, backgroundColor: colors.divider },
+  expiredText: { fontSize: fontSize.xs, color: colors.textMuted, fontStyle: 'italic' },
   text: { fontSize: fontSize.base, color: colors.textPrimary, lineHeight: 21 },
   textMine: { color: colors.textInverse },
   time: { fontSize: 10, color: colors.textMuted, alignSelf: 'flex-end', marginTop: 2 },

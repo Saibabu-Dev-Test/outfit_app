@@ -1,176 +1,282 @@
-// Pelli Porutham (South-Indian marriage matching, 10 poruthams) from the bride's and groom's
-// Moon nakshatra (0 = Ashwini .. 26 = Revati) and Moon rashi (0 = Mesha .. 11 = Meena).
-// Pure and offline; nakshatra / rashi come from the birth-chart engine (utils/jathakam.ts).
-// Counting is from the BRIDE's star / rashi to the GROOM's (inclusive), as South-Indian
-// panchangams do. Rajju and Vedha are treated as essential (a mismatch there is called out).
+// Pelli Porutham (marriage compatibility): the traditional South Indian 10 poruthams worked out
+// from the bride's and groom's birth star (nakshatra 0..26) and moon sign (rashi 0..11).
+// Pure functions, no network. Counting is from the bride's star / rashi to the groom's, as is
+// customary. This is traditional guidance only, not a prediction.
 import { GANA, YONI_OF } from './jathakam';
+import { NAKSHATRAS, NAKSHATRAS_TE, RASHI_EN, RASHI_LORD, RASHI_TE } from './astro';
 
-export type PoruthamId =
-  | 'dina' | 'gana' | 'mahendra' | 'streeDeergha' | 'yoni'
-  | 'rasi' | 'rasiAdhipathi' | 'vasya' | 'rajju' | 'vedha';
+export interface PoruthamPerson {
+  nakshatra: number; // 0..26
+  rashi: number; // 0..11
+}
+
+export type PoruthamKey =
+  | 'dina'
+  | 'gana'
+  | 'mahendra'
+  | 'streeDeergha'
+  | 'yoni'
+  | 'rasi'
+  | 'rasyadhipathi'
+  | 'vasya'
+  | 'rajju'
+  | 'vedha';
 
 export interface PoruthamResult {
-  id: PoruthamId;
-  name: string;
+  key: PoruthamKey;
+  name: { en: string; te: string };
   match: boolean;
-  short: string; // one line, free
-  detail: string; // explanation (behind the rewarded ad)
+  why: { en: string; te: string }; // one line
 }
 
-export interface MatchResult {
-  items: PoruthamResult[];
+export type PoruthamVerdict = 'good' | 'fair' | 'low';
+
+export interface PoruthamReport {
+  results: PoruthamResult[];
   score: number; // matches out of 10
-  essentialOk: boolean; // Rajju and Vedha both match
-  verdict: 'excellent' | 'good' | 'average' | 'poor';
-  summary: string;
+  total: 10;
+  rajjuOk: boolean;
+  vedhaOk: boolean;
+  verdict: PoruthamVerdict;
+  verdictText: { en: string; te: string };
 }
 
-const starCount = (from: number, to: number) => ((to - from + 27) % 27) + 1; // 1..27
-const rasiCount = (from: number, to: number) => ((to - from + 12) % 12) + 1; // 1..12
+export const PORUTHAM_NAMES: Record<PoruthamKey, { en: string; te: string }> = {
+  dina: { en: 'Dina', te: 'దిన' },
+  gana: { en: 'Gana', te: 'గణ' },
+  mahendra: { en: 'Mahendra', te: 'మాహేంద్ర' },
+  streeDeergha: { en: 'Stree Deergha', te: 'స్త్రీ దీర్ఘ' },
+  yoni: { en: 'Yoni', te: 'యోని' },
+  rasi: { en: 'Rasi', te: 'రాశి' },
+  rasyadhipathi: { en: 'Rasyadhipathi', te: 'రాశ్యాధిపతి' },
+  vasya: { en: 'Vasya', te: 'వశ్య' },
+  rajju: { en: 'Rajju', te: 'రజ్జు' },
+  vedha: { en: 'Vedha', te: 'వేధ' },
+};
 
-// Rashi lords: 0 Sun 1 Moon 2 Mars 3 Mercury 4 Jupiter 5 Venus 6 Saturn
-const RASI_LORD = [2, 5, 3, 1, 0, 3, 5, 2, 4, 6, 6, 4];
-const PLANET = ['Sun', 'Moon', 'Mars', 'Mercury', 'Jupiter', 'Venus', 'Saturn'];
-// Natural enemies (Naisargika shatru)
-const ENEMIES: Record<number, number[]> = {
-  0: [5, 6], 1: [], 2: [3], 3: [1], 4: [3, 5], 5: [0, 1], 6: [0, 1, 2],
+const valid = (p: PoruthamPerson) =>
+  Number.isInteger(p.nakshatra) && p.nakshatra >= 0 && p.nakshatra < 27 && Number.isInteger(p.rashi) && p.rashi >= 0 && p.rashi < 12;
+
+// The rashi(s) a nakshatra falls in (a star spans 4 padas of 3°20'; some cross a sign boundary)
+export const rashisOfNakshatra = (n: number): number[] => {
+  const a = Math.floor((n * 4) / 9);
+  const b = Math.floor((n * 4 + 3) / 9);
+  return a === b ? [a] : [a, b];
 };
-// Vasya rashis of each rashi
-const VASYA: Record<number, number[]> = {
-  0: [4, 7], 1: [3, 6], 2: [5], 3: [7, 8], 4: [6], 5: [2, 11],
-  6: [5, 9], 7: [3], 8: [11], 9: [0, 10], 10: [0], 11: [9],
-};
-// Rajju groups: 0 Siro (head) 1 Kanta (neck) 2 Udara (navel) 3 Kati (waist) 4 Paada (feet)
-const RAJJU_OF = [4, 3, 2, 1, 0, 1, 2, 3, 4, 4, 3, 2, 1, 0, 1, 2, 3, 4, 4, 3, 2, 1, 0, 1, 2, 3, 4];
-const RAJJU_EN = ['Siro (head)', 'Kanta (neck)', 'Udara (navel)', 'Kati (waist)', 'Paada (feet)'];
-// Vedha (mutually obstructing) stars
-const VEDHA_PAIRS: [number, number][] = [
-  [0, 17], [1, 16], [2, 15], [3, 14], [5, 21], [6, 20], [7, 19], [8, 18],
-  [9, 26], [10, 25], [11, 24], [12, 23], [4, 13], [13, 22], [4, 22],
-];
-// Yoni enemies: Horse-Buffalo, Elephant-Lion, Goat-Monkey, Serpent-Mongoose, Dog-Deer, Cat-Rat, Cow-Tiger
+export const nakshatraInRashi = (n: number, r: number) => rashisOfNakshatra(n).includes(r);
+
+// Bride's star counted to the groom's (1..27; 1 = same star)
+export const starCount = (bride: number, groom: number) => ((groom - bride + 27) % 27) + 1;
+// Bride's rashi counted to the groom's (1..12; 1 = same rashi)
+export const rashiCount = (bride: number, groom: number) => ((groom - bride + 12) % 12) + 1;
+
+// Dina (Tara): good counts from the bride's star
+const DINA_GOOD = new Set([2, 4, 6, 8, 9, 11, 13, 15, 18, 20, 24, 26]);
+const MAHENDRA_GOOD = new Set([4, 7, 10, 13, 16, 19, 22, 25]);
+// Yoni enemies (animal pairs): Horse-Buffalo, Elephant-Lion, Goat-Monkey, Serpent-Mongoose,
+// Dog-Deer, Cat-Rat, Cow-Tiger (indexes as in jathakam YONI_EN)
 const YONI_ENEMY: [number, number][] = [[0, 8], [1, 13], [2, 11], [3, 12], [4, 10], [5, 6], [7, 9]];
+export const yoniEnemies = (a: number, b: number) => YONI_ENEMY.some(([x, y]) => (a === x && b === y) || (a === y && b === x));
+// Rasi: 2-12 (dwirdwadasa) and 6-8 (shashtashtaka) positions are avoided
+const RASI_BAD = new Set([2, 6, 8, 12]);
+// Natural planet friendships (0 Sun, 1 Moon, 2 Mars, 3 Mercury, 4 Jupiter, 5 Venus, 6 Saturn):
+// the planets each one regards as an enemy
+const PLANET_ENEMIES: number[][] = [
+  [5, 6], // Sun
+  [], // Moon
+  [3], // Mars
+  [1], // Mercury
+  [3, 5], // Jupiter
+  [0, 1], // Venus
+  [0, 1, 2], // Saturn
+];
+export const lordsInEnmity = (a: number, b: number) => a !== b && (PLANET_ENEMIES[a].includes(b) || PLANET_ENEMIES[b].includes(a));
+// Vasya: the rashis each rashi attracts
+const VASYA: number[][] = [
+  [4, 7], // Mesha: Simha, Vrischika
+  [3, 6], // Vrishabha: Karka, Tula
+  [5], // Mithuna: Kanya
+  [7, 8], // Karka: Vrischika, Dhanu
+  [6], // Simha: Tula
+  [2, 11], // Kanya: Mithuna, Meena
+  [9, 5], // Tula: Makara, Kanya
+  [3], // Vrischika: Karka
+  [11], // Dhanu: Meena
+  [0, 10], // Makara: Mesha, Kumbha
+  [0], // Kumbha: Mesha
+  [9], // Meena: Makara
+];
+export const isVasya = (a: number, b: number) => a === b || VASYA[a].includes(b) || VASYA[b].includes(a);
+// Rajju: 0 Pada (feet), 1 Kati (waist), 2 Nabhi (navel), 3 Kantha (neck), 4 Siro (head)
+const RAJJU_CYCLE = [0, 1, 2, 3, 4, 3, 2, 1, 0];
+export const rajjuOf = (n: number) => RAJJU_CYCLE[n % 9];
+const RAJJU_NAMES = [
+  { en: 'Pada (feet)', te: 'పాద' },
+  { en: 'Kati (waist)', te: 'కటి' },
+  { en: 'Nabhi (navel)', te: 'నాభి' },
+  { en: 'Kantha (neck)', te: 'కంఠ' },
+  { en: 'Siro (head)', te: 'శిరో' },
+];
+// Vedha: star pairs that obstruct each other (Mrigashira, Chitra, Dhanishta all with each other)
+const VEDHA: [number, number][] = [
+  [0, 17], [1, 16], [2, 15], [3, 14], [5, 21], [6, 20], [7, 19], [8, 18], [9, 26], [10, 25], [11, 24], [12, 23],
+  [4, 13], [4, 22], [13, 22],
+];
+export const isVedha = (a: number, b: number) => VEDHA.some(([x, y]) => (a === x && b === y) || (a === y && b === x));
+
 const GANA_EN = ['Deva', 'Manushya', 'Rakshasa'];
-const YONI_EN = ['Horse', 'Elephant', 'Goat', 'Serpent', 'Dog', 'Cat', 'Rat', 'Cow', 'Buffalo', 'Tiger', 'Deer', 'Monkey', 'Mongoose', 'Lion'];
+const GANA_TE = ['దేవ', 'మనుష్య', 'రాక్షస'];
 
-export const rajjuOf = (star: number) => RAJJU_OF[star];
+const res = (key: PoruthamKey, match: boolean, en: string, te: string): PoruthamResult => ({
+  key,
+  name: PORUTHAM_NAMES[key],
+  match,
+  why: { en, te },
+});
 
-export function matchPorutham(
-  bride: { nakshatra: number; rashi: number },
-  groom: { nakshatra: number; rashi: number },
-): MatchResult {
-  const g = bride.nakshatra;
-  const b = groom.nakshatra;
-  const c = starCount(g, b);
-  const items: PoruthamResult[] = [];
+export const computePorutham = (bride: PoruthamPerson, groom: PoruthamPerson): PoruthamReport => {
+  if (!valid(bride) || !valid(groom)) throw new Error('Invalid nakshatra / rashi');
+  const c = starCount(bride.nakshatra, groom.nakshatra);
+  const r = rashiCount(bride.rashi, groom.rashi);
+  const results: PoruthamResult[] = [];
 
-  // 1. Dina: count / 9 leaves 2, 4, 6, 8 or 0 (9)
-  const dinaOk = [0, 2, 4, 6, 8].includes(c % 9);
-  items.push({
-    id: 'dina', name: 'Dina', match: dinaOk,
-    short: dinaOk ? 'Good health and daily harmony' : 'Daily harmony needs effort',
-    detail: `Counting from the bride's star to the groom's gives ${c}. ${c} ÷ 9 leaves ${c % 9 || 9}; 2, 4, 6, 8 and 9 are good. Dina porutham speaks of health, long life and day-to-day happiness together.`,
-  });
+  const dina = DINA_GOOD.has(c);
+  results.push(
+    res(
+      'dina',
+      dina,
+      `Groom's star is ${c} from the bride's: ${dina ? 'favours health and daily harmony' : 'not among the favourable counts'}.`,
+      `వరుని నక్షత్రం వధువు నుండి ${c}వది: ${dina ? 'ఆరోగ్యం, రోజువారీ సఖ్యతకు అనుకూలం' : 'అనుకూల సంఖ్యలలో లేదు'}.`,
+    ),
+  );
 
-  // 2. Gana
-  const gg = GANA[g];
-  const bg = GANA[b];
-  const ganaOk = gg === bg || (gg !== 2 && bg !== 2);
-  items.push({
-    id: 'gana', name: 'Gana', match: ganaOk,
-    short: ganaOk ? 'Temperaments suit each other' : 'Very different temperaments',
-    detail: `Bride: ${GANA_EN[gg]} gana, groom: ${GANA_EN[bg]} gana. The same gana, or Deva with Manushya, is good; Rakshasa with Deva / Manushya is not. Gana describes nature and temperament.`,
-  });
+  const gb = GANA[bride.nakshatra];
+  const gg = GANA[groom.nakshatra];
+  const gana = gb === gg || (gb !== 2 && gg !== 2);
+  results.push(
+    res(
+      'gana',
+      gana,
+      `${GANA_EN[gb]} and ${GANA_EN[gg]} gana: ${gana ? 'temperaments blend well' : 'temperaments may clash'}.`,
+      `${GANA_TE[gb]} - ${GANA_TE[gg]} గణం: ${gana ? 'స్వభావాలు కలుస్తాయి' : 'స్వభావాలు భిన్నంగా ఉండవచ్చు'}.`,
+    ),
+  );
 
-  // 3. Mahendra: count 4, 7, 10, 13, 16, 19, 22, 25
-  const mahOk = c >= 4 && (c - 4) % 3 === 0 && c <= 25;
-  items.push({
-    id: 'mahendra', name: 'Mahendra', match: mahOk,
-    short: mahOk ? 'Blessing for children and wealth' : 'No Mahendra blessing',
-    detail: `Count ${c}. Mahendra matches when the count is 4, 7, 10, 13, 16, 19, 22 or 25. It speaks of children, wealth and the family growing.`,
-  });
+  const mahendra = MAHENDRA_GOOD.has(c);
+  results.push(
+    res(
+      'mahendra',
+      mahendra,
+      mahendra ? `Count ${c} is a Mahendra count: blesses children and prosperity.` : `Count ${c} is not a Mahendra count (4, 7, 10, ...).`,
+      mahendra ? `${c}వ సంఖ్య మాహేంద్రం: సంతానం, సంపదకు శుభం.` : `${c}వ సంఖ్య మాహేంద్ర సంఖ్య కాదు (4, 7, 10, ...).`,
+    ),
+  );
 
-  // 4. Stree Deergha: groom's star more than 13 from the bride's
-  const sdOk = c > 13;
-  items.push({
-    id: 'streeDeergha', name: 'Stree Deergha', match: sdOk,
-    short: sdOk ? "Bride's well-being and prosperity" : 'Stars are too close for Stree Deergha',
-    detail: `Count ${c}. More than 13 is good (more than 9 is accepted by some). It speaks of the bride's long, happy and prosperous life.`,
-  });
+  const stree = c > 13;
+  results.push(
+    res(
+      'streeDeergha',
+      stree,
+      stree ? `Groom's star is well beyond the bride's (${c} > 13): good for her well-being.` : `Groom's star is close to the bride's (${c}, needs more than 13).`,
+      stree ? `వరుని నక్షత్రం వధువుకు దూరంగా ఉంది (${c} > 13): ఆమె శ్రేయస్సుకు మంచిది.` : `వరుని నక్షత్రం దగ్గరగా ఉంది (${c}, 13 కంటే ఎక్కువ కావాలి).`,
+    ),
+  );
 
-  // 5. Yoni
-  const gy = YONI_OF[g];
-  const by = YONI_OF[b];
-  const yoniEnemy = YONI_ENEMY.some(([x, y]) => (x === gy && y === by) || (x === by && y === gy));
-  items.push({
-    id: 'yoni', name: 'Yoni', match: !yoniEnemy,
-    short: !yoniEnemy ? 'Physical compatibility is fine' : 'Yoni animals are enemies',
-    detail: `Bride: ${YONI_EN[gy]} yoni, groom: ${YONI_EN[by]} yoni. ${yoniEnemy ? 'These are enemy animals.' : 'They are not enemies.'} Yoni speaks of physical and intimate compatibility.`,
-  });
+  const yb = YONI_OF[bride.nakshatra];
+  const yg = YONI_OF[groom.nakshatra];
+  const yoni = !yoniEnemies(yb, yg);
+  results.push(
+    res(
+      'yoni',
+      yoni,
+      yoni ? 'Yoni animals are not enemies: physical harmony is favoured.' : 'Yoni animals are natural enemies: physical harmony is weaker.',
+      yoni ? 'యోని జంతువులు శత్రువులు కావు: శారీరక సఖ్యతకు అనుకూలం.' : 'యోని జంతువులు సహజ శత్రువులు: శారీరక సఖ్యత తక్కువ.',
+    ),
+  );
 
-  // 6. Rasi: 2/12, 5/9 and 6/8 positions are not good
-  const r = rasiCount(bride.rashi, groom.rashi);
-  const rasiOk = ![2, 12, 5, 9, 6, 8].includes(r);
-  items.push({
-    id: 'rasi', name: 'Rasi', match: rasiOk,
-    short: rasiOk ? 'Rashis support the family line' : 'Rashis sit in a difficult position',
-    detail: `The groom's rashi is ${r === 1 ? 'the same as' : `${r}${r === 2 ? 'nd' : r === 3 ? 'rd' : 'th'} from`} the bride's. The 2/12, 5/9 and 6/8 positions are avoided; others are good. Rasi porutham speaks of the family line and harmony.`,
-  });
+  const rasi = !RASI_BAD.has(r);
+  results.push(
+    res(
+      'rasi',
+      rasi,
+      rasi ? `Groom's rashi is ${r} from the bride's: supports family growth.` : `Groom's rashi is ${r} from the bride's (2-12 / 6-8 positions are avoided).`,
+      rasi ? `వరుని రాశి వధువు రాశి నుండి ${r}వది: వంశాభివృద్ధికి అనుకూలం.` : `వరుని రాశి వధువు నుండి ${r}వది (ద్విర్ద్వాదశ / షష్టాష్టకం వర్జ్యం).`,
+    ),
+  );
 
-  // 7. Rasi Adhipathi: lords not enemies
-  const gl = RASI_LORD[bride.rashi];
-  const bl = RASI_LORD[groom.rashi];
-  const lordEnemy = gl !== bl && (ENEMIES[gl].includes(bl) || ENEMIES[bl].includes(gl));
-  items.push({
-    id: 'rasiAdhipathi', name: 'Rasi Adhipathi', match: !lordEnemy,
-    short: !lordEnemy ? 'Rashi lords are friendly' : 'Rashi lords are enemies',
-    detail: `Bride's rashi lord: ${PLANET[gl]}, groom's: ${PLANET[bl]}. ${lordEnemy ? 'They are natural enemies.' : 'They are friends, neutral or the same planet.'} It speaks of mutual understanding and the family's prosperity.`,
-  });
+  const lb = RASHI_LORD[bride.rashi];
+  const lg = RASHI_LORD[groom.rashi];
+  const adhi = !lordsInEnmity(lb, lg);
+  results.push(
+    res(
+      'rasyadhipathi',
+      adhi,
+      adhi ? 'The two rashi lords are friendly or neutral: good understanding.' : 'The two rashi lords are enemies: views may differ.',
+      adhi ? 'రెండు రాశుల అధిపతులు మిత్రులు / సములు: మంచి అవగాహన.' : 'రెండు రాశుల అధిపతులు శత్రువులు: అభిప్రాయ భేదాలు రావచ్చు.',
+    ),
+  );
 
-  // 8. Vasya
-  const vasyaOk = VASYA[bride.rashi].includes(groom.rashi) || VASYA[groom.rashi].includes(bride.rashi);
-  items.push({
-    id: 'vasya', name: 'Vasya', match: vasyaOk,
-    short: vasyaOk ? 'Natural attraction between you' : 'No Vasya attraction',
-    detail: `Vasya matches when one rashi is "vasya" (attracted) to the other. ${vasyaOk ? 'Your rashis are.' : 'Your rashis are not.'} It speaks of affection and attraction.`,
-  });
+  const vasya = isVasya(bride.rashi, groom.rashi);
+  results.push(
+    res(
+      'vasya',
+      vasya,
+      vasya ? 'The rashis attract each other: mutual affection.' : 'No natural attraction between the rashis.',
+      vasya ? 'రాశుల మధ్య ఆకర్షణ ఉంది: పరస్పర ప్రేమ.' : 'రాశుల మధ్య సహజ ఆకర్షణ లేదు.',
+    ),
+  );
 
-  // 9. Rajju (essential)
-  const rajjuOk = RAJJU_OF[g] !== RAJJU_OF[b];
-  items.push({
-    id: 'rajju', name: 'Rajju', match: rajjuOk,
-    short: rajjuOk ? 'Rajju is fine (essential)' : 'Same Rajju (essential porutham missing)',
-    detail: `Bride: ${RAJJU_EN[RAJJU_OF[g]]} rajju, groom: ${RAJJU_EN[RAJJU_OF[b]]} rajju. Different rajjus are needed; it is the most important porutham and speaks of the husband's long life and the marriage lasting.`,
-  });
+  const rb = rajjuOf(bride.nakshatra);
+  const rg = rajjuOf(groom.nakshatra);
+  const rajju = rb !== rg;
+  results.push(
+    res(
+      'rajju',
+      rajju,
+      rajju
+        ? `Different rajju (${RAJJU_NAMES[rb].en}, ${RAJJU_NAMES[rg].en}): considered important and favourable.`
+        : `Both stars are in ${RAJJU_NAMES[rb].en} rajju: traditionally given the most weight.`,
+      rajju
+        ? `వేర్వేరు రజ్జువులు (${RAJJU_NAMES[rb].te}, ${RAJJU_NAMES[rg].te}): ముఖ్యమైనది, అనుకూలం.`
+        : `ఇద్దరిదీ ${RAJJU_NAMES[rb].te} రజ్జువు: సంప్రదాయంలో దీనికి ఎక్కువ ప్రాధాన్యం.`,
+    ),
+  );
 
-  // 10. Vedha (essential)
-  const vedha = VEDHA_PAIRS.some(([x, y]) => (x === g && y === b) || (x === b && y === g));
-  items.push({
-    id: 'vedha', name: 'Vedha', match: !vedha,
-    short: !vedha ? 'No Vedha obstruction' : 'Stars obstruct each other (Vedha)',
-    detail: `${vedha ? 'Your stars are a Vedha pair: they obstruct each other.' : 'Your stars are not a Vedha pair.'} Vedha speaks of troubles and obstacles in married life.`,
-  });
+  const vedha = !isVedha(bride.nakshatra, groom.nakshatra);
+  results.push(
+    res(
+      'vedha',
+      vedha,
+      vedha ? 'The stars do not obstruct each other.' : 'These two stars form a Vedha (mutual obstruction) pair.',
+      vedha ? 'నక్షత్రాల మధ్య వేధ లేదు.' : 'ఈ రెండు నక్షత్రాలు వేధ జంట (పరస్పర అడ్డంకి).',
+    ),
+  );
 
-  const score = items.filter(i => i.match).length;
-  const essentialOk = rajjuOk && !vedha;
-  const verdict: MatchResult['verdict'] = !essentialOk
-    ? 'poor'
-    : score >= 8
-    ? 'excellent'
-    : score >= 6
-    ? 'good'
-    : score >= 5
-    ? 'average'
-    : 'poor';
-  const summary =
-    verdict === 'excellent'
-      ? `${score}/10 poruthams match, including Rajju and Vedha. A very good match.`
-      : verdict === 'good'
-      ? `${score}/10 poruthams match, including Rajju and Vedha. A good match.`
-      : verdict === 'average'
-      ? `${score}/10 poruthams match. Average; please also consult a family astrologer.`
-      : !essentialOk
-      ? `${score}/10 match, but ${!rajjuOk ? 'Rajju' : 'Vedha'}${!rajjuOk && vedha ? ' and Vedha' : ''} do not. Traditionally not recommended without a full horoscope check.`
-      : `${score}/10 poruthams match. Not a strong match.`;
-  return { items, score, essentialOk, verdict, summary };
-}
+  const score = results.filter(x => x.match).length;
+  const verdict: PoruthamVerdict = score >= 7 && rajju && vedha ? 'good' : score >= 5 ? 'fair' : 'low';
+  const caution = !rajju || !vedha;
+  const verdictText = {
+    good: {
+      en: `${score}/10 poruthams match: a traditionally favourable pairing.`,
+      te: `${score}/10 పొరుత్తాలు కుదిరాయి: సంప్రదాయంగా అనుకూలమైన జంట.`,
+    },
+    fair: {
+      en: `${score}/10 poruthams match: a fair match${caution ? '; families usually look closer at Rajju / Vedha' : ''}.`,
+      te: `${score}/10 పొరుత్తాలు కుదిరాయి: సామాన్యంగా సరిపోతుంది${caution ? '; రజ్జు / వేధ గురించి పెద్దలను సంప్రదించండి' : ''}.`,
+    },
+    low: {
+      en: `${score}/10 poruthams match: fewer than usual. Many happy couples have low scores; talk it over with elders.`,
+      te: `${score}/10 పొరుత్తాలు మాత్రమే కుదిరాయి. తక్కువ పొంతనతో కూడా ఎన్నో జంటలు సంతోషంగా ఉన్నాయి; పెద్దలతో మాట్లాడండి.`,
+    },
+  }[verdict];
+
+  return { results, score, total: 10, rajjuOk: rajju, vedhaOk: vedha, verdict, verdictText };
+};
+
+export const PORUTHAM_DISCLAIMER = {
+  en: 'Traditional guidance only, for fun and reflection. Compatibility is built by two people, not by stars.',
+  te: 'ఇది కేవలం సంప్రదాయ మార్గదర్శనం మాత్రమే. అనుబంధాన్ని నిర్మించేది ఇద్దరు వ్యక్తులే, నక్షత్రాలు కాదు.',
+};
+
+export const nakshatraLabel = (n: number) => `${NAKSHATRAS[n]} · ${NAKSHATRAS_TE[n]}`;
+export const rashiLabel = (r: number) => `${RASHI_EN[r]} · ${RASHI_TE[r]}`;

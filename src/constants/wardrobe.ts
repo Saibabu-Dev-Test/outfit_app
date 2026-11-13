@@ -238,6 +238,12 @@ export const CATEGORY_ICONS: Record<string, string> = {
   'Maang Tikka': '🪔',
   'Clutch': '👛',
   'Hair Accessories': '🎀',
+  // Ring kinds
+  'Finger Ring': '💍',
+  'Ear Rings': '💎',
+  'Nose Ring': '✨',
+  'Toe Ring': '💫',
+  'Couple Rings': '💞',
 };
 
 // Labels for the accessory types in Telugu / Hindi (stored values stay English; anything
@@ -260,15 +266,36 @@ const ACCESSORY_LABELS: Record<string, { te: string; hi: string }> = {
   'Hair Accessories': { te: 'జుట్టు అలంకరణలు', hi: 'बालों की एक्सेसरीज़' },
   'Caps / Hats': { te: 'క్యాప్ / టోపీ', hi: 'कैप / टोपी' },
   'Accessories': { te: 'యాక్సెసరీలు', hi: 'एक्सेसरीज़' },
+  'Finger Ring': { te: 'ఉంగరం', hi: 'अंगूठी' },
+  'Ear Rings': { te: 'చెవి రింగులు', hi: 'कान की बालियाँ' },
+  'Nose Ring': { te: 'ముక్కు రింగ్', hi: 'नथ' },
+  'Toe Ring': { te: 'మెట్టెలు', hi: 'बिछिया' },
+  'Couple Rings': { te: 'జంట ఉంగరాలు', hi: 'कपल रिंग' },
 };
 
-/** Display label for a category / type in the user's language ('Telugu' / 'Hindi'); English fallback */
-export const typeLabel = (value: string, language?: string | null): string => {
-  const l = (language || '').trim().toLowerCase();
+// Kinds inside an accessory type (Rings: which ring). Saved as the item's subCategory.
+export const ACCESSORY_KINDS: Record<string, string[]> = {
+  'Rings': ['Finger Ring', 'Ear Rings', 'Nose Ring', 'Toe Ring', 'Couple Rings'],
+};
+export const ALL_ACCESSORY_KINDS: string[] = Object.values(ACCESSORY_KINDS).flat();
+
+/**
+ * Display label for a category / type. Always English: the user asked for English labels by
+ * default everywhere (Telugu/Hindi labels must not appear just because the profile language is
+ * Telugu). The language argument is accepted for old call sites and ignored. Stored values are
+ * English too, so the value itself is the label.
+ */
+export const typeLabel = (value: string, _language?: string | null): string => value;
+
+/**
+ * Label in the App language picked in Settings > App language (English by default). Only an
+ * explicit 'Telugu' / 'Hindi' choice there translates; the profile language never does.
+ */
+export const appTypeLabel = (value: string, appLanguage?: 'English' | 'Telugu' | 'Hindi' | null): string => {
   const row = ACCESSORY_LABELS[value];
   if (!row) return value;
-  if (l === 'telugu' || l === 'te') return row.te || value;
-  if (l === 'hindi' || l === 'hi') return row.hi || value;
+  if (appLanguage === 'Telugu') return row.te || value;
+  if (appLanguage === 'Hindi') return row.hi || value;
   return value;
 };
 

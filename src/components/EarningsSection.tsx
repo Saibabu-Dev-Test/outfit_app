@@ -3,7 +3,7 @@
 // the ledger is users/{uid}/earnings (services/earnApi.ts).
 import React, { useEffect, useMemo, useState } from 'react';
 import { Text, TouchableOpacity, View } from 'react-native';
-import { ui } from './ui';
+import { ui } from '../screens/Earn/earnUi';
 import { rupeesText } from '../config/earn';
 import { EARN_TYPES, EARN_TYPE_ICON, EARN_TYPE_LABEL, EarnEntry, Withdrawal, summarize } from '../services/earnLedger';
 import { getMyWithdrawals, subscribeEarnings } from '../services/earnApi';

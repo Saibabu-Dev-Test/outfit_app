@@ -4,6 +4,10 @@ on:
   push:
     branches:
       - main
+  # Pull requests into main: same build + tests (APK kept as a workflow artifact), no release
+  pull_request:
+    branches:
+      - main
 permissions:
   contents: write
 jobs:
@@ -34,6 +38,10 @@ jobs:
       # 4. Install JavaScript dependencies
       - name: Install dependencies
         run: npm install
+
+      # 4.2. Unit tests (Jest) must pass before the APK is built
+      - name: Run tests
+        run: npx jest --ci
 
       # 4.5. AI stylist key from the GEMINI_API_KEY secret (empty when the secret is missing)
       - name: Write AI config
@@ -110,6 +118,7 @@ jobs:
       # 5.8. Release signing key from secrets (nothing secret in the repo).
       # Preferred: RELEASE_KEYSTORE_BASE64 (+ RELEASE_KEYSTORE_PASSWORD, RELEASE_KEY_ALIAS,
       # RELEASE_KEY_PASSWORD), decoded to a temp file outside the repo.
+      # RELEASE_KEYSTORE_PASSWORD may be omitted when the keystore still uses OUTFIT_KEYSTORE_PASSWORD.
       # Legacy fallback until those exist: android/app/outfit-release.p12 + OUTFIT_KEYSTORE_PASSWORD.
       - name: Release signing key
         env:
@@ -117,7 +126,7 @@ jobs:
           RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
           OUTFIT_KEYSTORE_PASSWORD: ${{ secrets.OUTFIT_KEYSTORE_PASSWORD }}
         run: |
-          if [ -n "$RELEASE_KEYSTORE_BASE64" ] && [ -n "$RELEASE_KEYSTORE_PASSWORD" ]; then
+          if [ -n "$RELEASE_KEYSTORE_BASE64" ] && [ -n "${RELEASE_KEYSTORE_PASSWORD:-$OUTFIT_KEYSTORE_PASSWORD}" ]; then
             umask 077
             printf '%s' "$RELEASE_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.p12"
             echo "RELEASE_KEYSTORE_FILE=$RUNNER_TEMP/release.p12" >> "$GITHUB_ENV"
@@ -168,7 +177,9 @@ jobs:
           retention-days: 3
 
       # 8. Create GitHub Release (not a prerelease, so /releases/latest/download/<name> points here)
+      # Only for pushes to main: pull-request builds are checks (artifact only), never a release
       - name: Create GitHub Release
+        if: github.event_name == 'push'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}

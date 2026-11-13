@@ -18,7 +18,8 @@ import KeyboardSafeView from '../../components/KeyboardSafeView';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { pickImage, AVATAR_PICK } from '../../utils/imagePicker';
-import { getUserProfile, saveUserProfile, uploadAvatar } from '../../services/userApi';
+import { reviewPhoto } from '../../components/PhotoReviewHost';
+import { getMyRole, getUserProfile, saveUserProfile, uploadAvatar } from '../../services/userApi';
 import { isValidDob } from '../../utils/age';
 import { mdFromDob, mdLabel, setBirthdayListing } from '../../services/birthdayApi';
 import { checkNotifications, openNotificationSettings } from '../../native/notifications';
@@ -32,6 +33,7 @@ import {
 } from '../../services/birthProfile';
 import { astroLanguage, birthChartRows } from '../../services/astrologyDaily';
 import SelectModal from '../../components/SelectModal';
+import { APP_LANGUAGES, setAppLanguage, useAppLanguage } from '../../i18n/appLanguage';
 import CityPickerModal from '../../components/CityPickerModal';
 import FeedbackBoardModal from '../../components/FeedbackBoardModal';
 import ZoomableImage from '../../components/ZoomableImage';
@@ -50,6 +52,10 @@ import { getLockCapability, isAppLockOn, turnOffAppLock, turnOnAppLock } from '.
 import { signOutKeepLock } from '../../services/authApi';
 import { auth } from '../../config/firebaseConfig';
 import { isAutoUpdateOn, isUpdateSupported, setAutoUpdate } from '../../native/appUpdate';
+import { MAX_COIN_VOLUME, getCoinVolume, isCoinSoundOn, isCoinSoundSupported, playCoinSound, setCoinSound, setCoinVolume } from '../../native/coinSound';
+import VolumeSlider from '../../components/VolumeSlider';
+import { formatDate } from '../../utils/formatDate';
+import { useBottomSpace } from '../../hooks/useBottomSpace';
 
 // "+91 98765 43210" from users/{uid}.phone (10 digits), else the saved phoneNumber
 const phoneLabel = (p?: { phone?: string; phoneNumber?: string } | null): string => {
@@ -93,10 +99,12 @@ const MARITAL_OPTIONS = ['Single', 'Married', 'Prefer not to say'];
 const THEME_LABEL: Record<ThemeMode, string> = { system: 'System', light: 'Light', dark: 'Dark' };
 
 export default function ProfileScreen() {
+  const bottomPad = useBottomSpace();
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const { user: authUser, logout, updateUserData } = useAuth();
   const { mode: themeMode, isDark, setMode: setThemeMode } = useTheme();
+  const appLanguage = useAppLanguage();
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
   const [editIsPublic, setEditIsPublic] = useState<boolean>(true);
@@ -113,6 +121,17 @@ export default function ProfileScreen() {
   useEffect(() => {
     isAutoUpdateOn().then(setAutoUpdateState);
   }, []);
+  // Coin sound: plays with each coin flip, ON by default
+  const [coinSound, setCoinSoundState] = useState(true);
+  const [coinVolume, setCoinVolumeState] = useState(MAX_COIN_VOLUME);
+  useEffect(() => {
+    isCoinSoundOn().then(setCoinSoundState);
+    getCoinVolume().then(setCoinVolumeState);
+  }, []);
+  const toggleCoinSound = (on: boolean) => {
+    setCoinSoundState(on);
+    setCoinSound(on);
+  };
   const toggleAutoUpdate = (on: boolean) => {
     setAutoUpdateState(on);
     setAutoUpdate(on);
@@ -225,7 +244,8 @@ export default function ProfileScreen() {
     }
     try {
       // Small avatar: it is also copied onto chat messages and posts
-      const picked = await pickImage(source, AVATAR_PICK);
+      // Photo options (Blur face / Adjust, e.g. a square frame) before it is saved
+      const picked = await reviewPhoto(await pickImage(source, AVATAR_PICK), AVATAR_PICK);
       if (!picked) return;
       setUploadingAvatar(true);
       const url = await uploadAvatar(uid, picked.dataUri);
@@ -239,6 +259,8 @@ export default function ProfileScreen() {
       setUploadingAvatar(false);
     }
   };
+
+
 
   const handleSelectAvatarSource = () => {
     Alert.alert(
@@ -284,6 +306,7 @@ const fetchProfile = async () => {
       showBirthday: stored.showBirthday === true,
     };
     setIsAdmin(stored.role === 'admin');
+    getMyRole(authUser.id).then(r => r === 'admin' && setIsAdmin(true));
     // Birth chart saved for other details (or before this screen computed it): recompute and save
     if (astroChartStale(merged, merged.astroChart)) {
       const upd = birthProfileUpdate(merged, { prevConfirmedKey: merged.birthConfirmedKey });
@@ -323,6 +346,11 @@ const fetchProfile = async () => {
       { text: 'Follow system', onPress: () => setThemeMode('system') },
       { text: 'Light', onPress: () => setThemeMode('light') },
       { text: 'Dark', onPress: () => setThemeMode('dark') },
+    ]);
+
+  const pickAppLanguage = () =>
+    Alert.alert('App language', `Wardrobe labels show in: ${appLanguage}`, [
+      ...APP_LANGUAGES.map(l => ({ text: l, onPress: () => setAppLanguage(l) })),
     ]);
 
   // App lock, invite code, friends joined, ⭐ badge
@@ -538,7 +566,7 @@ const fetchProfile = async () => {
       />
       <ScrollView
         style={styles.scroll}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: bottomPad }]}
         showsVerticalScrollIndicator={false}>
 
         {/* Header */}
@@ -660,7 +688,7 @@ const fetchProfile = async () => {
               <View style={styles.infoItem}>
                 <Text style={styles.infoLabel}>🎂 Date of Birth</Text>
                 <Text style={styles.infoValue}>
-                  {profileData?.dob ? profileData.dob : 'Not specified'}
+                  {profileData?.dob ? formatDate(profileData.dob) : 'Not specified'}
                 </Text>
               </View>
             </View>
@@ -879,6 +907,44 @@ const fetchProfile = async () => {
           </View>
         )}
 
+        {/* Coin sound: on by default */}
+        {isCoinSoundSupported() && (
+          <View style={styles.menuSection}>
+            <View style={styles.menuItem}>
+              <View style={[styles.menuLeft, styles.flexTitle]}>
+                <View style={styles.menuIconBox}>
+                  <Text style={styles.menuIcon}>🪙</Text>
+                </View>
+                <View style={styles.flexTitle}>
+                  <Text style={styles.menuLabel}>Coin sound</Text>
+                  <Text style={styles.lockValue}>
+                    {coinSound ? 'On: a ding when you earn coins (at most 40% of phone media volume)' : 'Off: coin flips are silent'}
+                  </Text>
+                </View>
+              </View>
+              <Switch
+                value={coinSound}
+                onValueChange={toggleCoinSound}
+                trackColor={{ false: colors.border, true: colors.accent }}
+                thumbColor={colors.textInverse}
+              />
+            </View>
+            {coinSound ? (
+              <View style={styles.volumeRow}>
+                <VolumeSlider
+                  label="Coin sound volume"
+                  value={coinVolume}
+                  max={MAX_COIN_VOLUME}
+                  onChange={setCoinVolumeState}
+                  onCommit={v => {
+                    setCoinVolume(v).then(playCoinSound); // save, then a test ding at the new level
+                  }}
+                />
+              </View>
+            ) : null}
+          </View>
+        )}
+
         {/* Menu Section */}
         <View style={styles.menuSection}>
           {[
@@ -896,6 +962,13 @@ const fetchProfile = async () => {
               label: 'Dark mode',
               value: THEME_LABEL[themeMode],
               onPress: pickTheme,
+            },
+            {
+              id: 'applang',
+              icon: '🌐',
+              label: 'App language',
+              value: appLanguage,
+              onPress: pickAppLanguage,
             },
             ...(isUpdateSupported()
               ? [
@@ -916,7 +989,7 @@ const fetchProfile = async () => {
               onPress: () => setFeedbackOpen(true),
             },
             { id: 'help', icon: '❓', label: 'Help & Support' },
-            { id: 'terms', icon: '📋', label: 'Terms & Conditions' },
+            { id: 'terms', icon: '📋', label: 'Terms & Conditions', value: 'About Outfit, features, coins and rules', onPress: () => navigation.navigate('Terms') },
           ].map(item => (
             <TouchableOpacity
               key={item.id}
@@ -994,7 +1067,7 @@ const fetchProfile = async () => {
             activeOpacity={1}
             onPress={() => setIsEditModalVisible(false)}
           />
-          <View style={styles.modalContent}>
+          <View style={[styles.modalContent, { paddingBottom: bottomPad }]}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Edit Profile Details</Text>
               <TouchableOpacity
@@ -1069,7 +1142,7 @@ const fetchProfile = async () => {
                     onPress={handleOpenCalendar}
                     activeOpacity={0.85}>
                     <Text style={editDob ? styles.modalInputValueText : styles.modalInputPlaceholderText}>
-                      {editDob || 'Select DOB'}
+                      {editDob ? formatDate(editDob) : 'Select DOB'}
                     </Text>
                     <Text style={styles.inputCalendarIcon}>📅</Text>
                   </TouchableOpacity>
@@ -1257,7 +1330,7 @@ const fetchProfile = async () => {
             <View style={styles.calendarCardHeader}>
               <Text style={styles.calendarCardSub}>SELECT DATE OF BIRTH</Text>
               <Text style={styles.calendarCardTitle}>
-                {MONTH_NAMES[calMonth]} {selectedDay}, {calYear}
+                {`${String(selectedDay).padStart(2, '0')}-${String(calMonth + 1).padStart(2, '0')}-${calYear}`}
               </Text>
             </View>
 
@@ -2057,4 +2130,5 @@ const styles = themedStyles(() => StyleSheet.create({
     fontWeight: fontWeight.bold,
     fontSize: fontSize.sm,
   },
+  volumeRow: { paddingHorizontal: 16, paddingBottom: 12 },
 }));

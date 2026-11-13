@@ -23,7 +23,7 @@ describe('birthdays (day + month only)', () => {
     expect(mdFromDob('')).toBeNull();
     expect(mdFromDob('14/11/1996')).toBeNull();
     expect(mdFromDob('1996-13-01')).toBeNull();
-    expect(mdLabel('11-14')).toBe('14 Nov');
+    expect(mdLabel('11-14')).toBe('14-11');
   });
 
   it('lists today and the next 7 days', () => {

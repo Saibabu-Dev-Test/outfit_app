@@ -2,7 +2,7 @@
 export type RootStackParamList = {
   Auth: undefined;
   MainApp: { screen?: string; params?: any } | undefined;
-  CircleChat: { circleId: string; messageId?: string };
+  CircleChat: { circleId: string };
   CircleInfo: { circleId: string };
   UserProfile: { userId: string };
   UserSearch: undefined;
@@ -10,20 +10,21 @@ export type RootStackParamList = {
   Comments: { postId?: string; highlightId?: string; target?: any };
   Admin: undefined;
   AdminUsers: undefined;
+  Terms: undefined;
   Settings: { edit?: boolean } | undefined;
   Achievements: undefined;
+  FunctionPlanner: undefined;
+  MonthlyTasks: undefined;
+  AdminRewards: undefined;
+  // Earn tab: UPI withdrawal requests (admin) and the survey / offer wall in a WebView
+  AdminWithdrawals: undefined;
+  EarnWall: { url: string; title?: string; kind?: 'survey' | 'offer' };
   Likes: { tab?: 'activity' | 'likes' } | undefined;
   LikedBy: { kind: 'post' | 'wardrobe'; id: string };
   PostDetail: { kind: 'post' | 'wardrobe'; id: string };
   FollowList: { userId: string; mode: 'followers' | 'following'; name?: string };
   // Birthday wishes for one person, or today's "Happy birthday to all" circle
-  Rewards: undefined;
-  FunctionPlanner: undefined;
-  Porutham: undefined;
-  WeatherOutfit: undefined;
-  AdminRewardRequests: undefined;
-  AdminStorage: undefined;
-  // Survey wall / offerwall in a WebView (Earn tab)
-  EarnWall: { url: string; title?: string; kind?: 'survey' | 'offer' };
+  // 💑 Pelli Porutham: self = the signed-in user's birth details (from Me)
+  Porutham: { self?: { name?: string | null; dob?: string | null; timeOfBirth?: string | null; placeOfBirth?: string | null; rashi?: string | null; gender?: string | null } } | undefined;
   BirthdayChat: { mode: 'wishes'; uid?: string } | { mode: 'circle' };
 };

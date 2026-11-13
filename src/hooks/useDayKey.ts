@@ -4,6 +4,7 @@
 import { useEffect, useState } from 'react';
 import { AppState } from 'react-native';
 import { localDateKey } from '../utils/date';
+import { istDateKey, msUntilNextIstMidnight } from '../services/astroUnlock';
 
 // Milliseconds until the next local midnight (+1 s so the new day has surely started)
 export const msUntilNextMidnight = (now: Date = new Date()): number => {
@@ -11,18 +12,18 @@ export const msUntilNextMidnight = (now: Date = new Date()): number => {
   return Math.max(1000, next.getTime() - now.getTime());
 };
 
-export const useDayKey = (): string => {
-  const [dayKey, setDayKey] = useState<string>(localDateKey());
+const useRollingKey = (keyFn: () => string, untilNext: () => number): string => {
+  const [dayKey, setDayKey] = useState<string>(keyFn());
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null;
-    const check = () => setDayKey(prev => (prev === localDateKey() ? prev : localDateKey()));
+    const check = () => setDayKey(prev => (prev === keyFn() ? prev : keyFn()));
     const arm = () => {
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
         check();
         arm();
-      }, msUntilNextMidnight());
+      }, untilNext());
     };
     arm();
     const sub = AppState.addEventListener('change', s => {
@@ -35,7 +36,13 @@ export const useDayKey = (): string => {
       if (timer) clearTimeout(timer);
       sub.remove();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return dayKey;
 };
+
+export const useDayKey = (): string => useRollingKey(localDateKey, () => msUntilNextMidnight());
+
+// India date (IST) key that rolls over at 12:00 AM IST: used for the once-a-day astrology unlock
+export const useIstDayKey = (): string => useRollingKey(() => istDateKey(), () => msUntilNextIstMidnight());

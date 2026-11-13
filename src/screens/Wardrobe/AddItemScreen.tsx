@@ -12,30 +12,33 @@ import {
   Alert,
   ActionSheetIOS,
   ActivityIndicator,
-  Modal,
   Switch,
 } from 'react-native';
 import KeyboardSafeView from '../../components/KeyboardSafeView';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles, statusBarStyle } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
+import { useAppLanguage } from '../../i18n/appLanguage';
 import {
   addWardrobeItem as apiAddWardrobeItem,
   updateWardrobeItem as apiUpdateWardrobeItem,
   analyzeClothingPhoto,
   getWardrobeFullImage,
 } from '../../services/wardrobeApi';
-import { pickImage } from '../../utils/imagePicker';
-import { removeBackground } from '../../native/wardrobeVision';
-import { canResize, resizeImage } from '../../utils/imageResize';
-import { FULL_SPEC, THUMB_SPEC } from '../../utils/imageSpecs';
+import { pickImage, remakeImage } from '../../utils/imagePicker';
+import { isPhotoBgSupported, PHOTO_BG_MODES, PhotoBgMode, warmUpPhotoBg } from '../../native/photoBackground';
+import { isPhotoEditSupported } from '../../native/photoEdit';
+import PhotoAdjustModal, { AdjustState } from '../../components/PhotoAdjustModal';
+import ZoomableImage from '../../components/ZoomableImage';
+import { faceMessage, photoText } from '../../i18n/photoEditLabels';
+import { isFullCrop } from '../../utils/cropMath';
 import {
   CATEGORY_GROUPS,
   categoryGroupsForGender,
   ALL_CATEGORIES,
   SHOE_TYPES,
   ACCESSORY_TYPES,
-  typeLabel,
+  appTypeLabel,
   groupOfCategory,
   normalizeCategory,
   resolveCategory,
@@ -44,12 +47,13 @@ import {
   COLOR_SWATCHES,
   WEAR_TYPES,
   colorNameFromHex,
+  ACCESSORY_KINDS,
+  ALL_ACCESSORY_KINDS,
 } from '../../constants/wardrobe';
 
 // Labels the item name may be auto-filled with (replaced when the pick changes)
-const AUTO_NAMES = new Set([...ALL_CATEGORIES, ...SHOE_TYPES, ...ACCESSORY_TYPES]);
+const AUTO_NAMES = new Set([...ALL_CATEGORIES, ...SHOE_TYPES, ...ACCESSORY_TYPES, ...ALL_ACCESSORY_KINDS]);
 
-const FABRIC_TYPES = [ 'Formal', 'Casual', 'Party', 'Ethnic', 'Sports'];
 
 interface AddItemScreenProps {
   navigation: any;
@@ -67,6 +71,7 @@ interface AddItemScreenProps {
 
 export default function AddItemScreen({ navigation, route, onSave }: AddItemScreenProps) {
   const { user } = useAuth();
+  const appLanguage = useAppLanguage();
   const itemToEdit = route?.params?.itemToEdit;
   const isEditing = Boolean(itemToEdit?.id);
 
@@ -95,7 +100,24 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
   const [imageUri, setImageUri]               = useState<string | null>(itemToEdit?.imageUrl || null);
   const [imageThumb, setImageThumb]           = useState<string | null>(null);
   const [imageClear, setImageClear]           = useState<string | null>(null);
+  // Background choice for a newly picked photo: made again from the original file each time
+  const [sourceUri, setSourceUri]             = useState<string | null>(null);
+  const [bgMode, setBgMode]                   = useState<PhotoBgMode>('off');
+  const [blurLevel, setBlurLevel]             = useState<number>(3);
+  const [bgBusy, setBgBusy]                   = useState(false);
+  // Adjust (zoom / pan frame -> crop of the processed photo) and the photos it is shown on
+  const [adjust, setAdjust]                   = useState<AdjustState | null>(null);
+  const [adjustOpen, setAdjustOpen]           = useState(false);
+  const [origPreview, setOrigPreview]         = useState<string | null>(null);
+  const [baseUri, setBaseUri]                 = useState<string | null>(null);
+  // Blur face: faces found on the phone are blurred before upload (+ a short note how many)
+  const [blurFaces, setBlurFaces]             = useState(false);
+  const [faceNote, setFaceNote]               = useState<string | null>(null);
   const [imageChanged, setImageChanged]       = useState(false);
+  // Load the background model when the screen opens (first Blur / Remove BG tap is then fast)
+  useEffect(() => {
+    if (isPhotoBgSupported()) warmUpPhotoBg();
+  }, []);
   // Editing: the list holds the thumbnail; show the full photo (1 read) once it loads
   useEffect(() => {
     if (!itemToEdit?.hasMedia) return;
@@ -119,7 +141,7 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
   );
   const [selectedCategory, setSelectedCategory]   = useState<string | null>(initialCategory);
   const [selectedSubType, setSelectedSubType]     = useState<string | null>(initialSubType);
-  const [selectedSubCategory] = useState<string | null>(itemToEdit?.subCategory || null);
+  const [selectedSubCategory, setSelectedSubCategory] = useState<string | null>(itemToEdit?.subCategory || null);
   const [selectedWearType, setSelectedWearType]   = useState<string>(itemToEdit?.wearType || 'Daily Wear');
   const [selectedColor, setSelectedColor]       = useState<string | null>(initialColor);
   const [selectedFabric, setSelectedFabric]     = useState<string | null>(itemToEdit?.fabric || null);
@@ -161,6 +183,8 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
       const next = selectedSubType === label ? null : label; // tap again = no type (All / Other)
       setSelectedCategory(selectedGroup.categories[0]);
       setSelectedSubType(next);
+      // A new type clears its kind (Rings › Nose Ring...)
+      if (next !== selectedSubType && selectedSubCategory && ALL_ACCESSORY_KINDS.includes(selectedSubCategory)) setSelectedSubCategory(null);
       autoName(next || selectedGroup.categories[0]);
     } else {
       setSelectedCategory(label);
@@ -224,48 +248,54 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
       setImageThumb(picked.thumbUri || null);
       setImageClear(picked.clearUri || null);
       setImageChanged(true);
-      setOriginal(null);
-      if (!picked.uri) return;
-      // Auto background removal (ML Kit Subject Segmentation on the phone). Unavailable / no subject
-      // found -> the original photo stays. Tags come from the cut-out (cleaner colour).
-      setAiStatusMsg('✂️ Removing background…');
-      const cut = await removeBackground(picked.uri);
-      if (cut && canResize()) {
-        try {
-          const [full, thumb] = await Promise.all([resizeImage(cut, FULL_SPEC), resizeImage(cut, THUMB_SPEC)]);
-          setOriginal({ full: picked.dataUri, thumb: picked.thumbUri || null });
-          setImageUri(full);
-          setImageThumb(thumb);
-          setImageClear(null);
-        } catch {
-          // keep the original
-        }
-      }
-      setAiStatusMsg(null);
-      triggerAIAnalysis(cut || picked.uri);
+      setSourceUri(picked.uri || null);
+      setBgMode('off');
+      setBlurLevel(3);
+      setAdjust(null);
+      setBlurFaces(false);
+      setFaceNote(null);
+      setOrigPreview(picked.dataUri);
+      setBaseUri(null);
+      if (picked.uri) triggerAIAnalysis(picked.uri);
     } catch (e: any) {
-      setAiStatusMsg(null);
       Alert.alert('Photo Error', e?.message || 'Could not use this photo.');
     }
   };
-  // Undo the background removal (back to the photo as taken)
-  const [original, setOriginal] = useState<{ full: string; thumb: string | null } | null>(null);
-  const undoCut = () => {
-    if (!original) return;
-    setImageUri(original.full);
-    setImageThumb(original.thumb);
-    setOriginal(null);
-  };
-  // ⚡ Quick add (from the Wardrobe screen): opens the camera right away; the photo is cleaned and
-  // tagged automatically, so one tap on Save adds it.
-  const quickStarted = React.useRef(false);
-  useEffect(() => {
-    if (route?.params?.quick && !isEditing && !quickStarted.current) {
-      quickStarted.current = true;
-      setTimeout(() => pickFrom('camera'), 300);
+  // Photo options, always made again from the ORIGINAL file: Original / Blur (level 1-5) / Remove BG
+  // (plain white or black, opposite to the clothes), then the Adjust crop on top of that result
+  const applyEdit = async (next: { mode?: PhotoBgMode; level?: number; adjust?: AdjustState | null; faces?: boolean }) => {
+    if (!sourceUri || bgBusy) return;
+    const mode = next.mode ?? bgMode;
+    const level = next.level ?? blurLevel;
+    const adj = next.adjust !== undefined ? next.adjust : adjust;
+    const faces = next.faces ?? blurFaces;
+    setBlurFaces(faces);
+    setFaceNote(null);
+    setBgMode(mode);
+    setBlurLevel(level);
+    setAdjust(adj);
+    setBgBusy(true);
+    try {
+      const crop = adj && !isFullCrop(adj.crop) ? adj.crop : null;
+      const p = await remakeImage(sourceUri, { mode, level, crop, blurFaces: faces });
+      if (faces) setFaceNote(faceMessage(p?.faces, appLanguage));
+      if (p) {
+        setImageUri(p.dataUri);
+        setImageThumb(p.thumbUri || null);
+        setImageClear(p.clearUri || null);
+        setImageChanged(true);
+        setBaseUri(p.baseUri || null);
+      }
+    } catch (e: any) {
+      Alert.alert('Photo Error', e?.message || 'Could not change the photo.');
+    } finally {
+      setBgBusy(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  };
+  const applyBg = (mode: PhotoBgMode, level: number) => applyEdit({ mode, level });
+  // The Adjust frame shows the processed photo before any crop (Blur / Remove BG already applied)
+  const adjustSource = baseUri || origPreview || imageUri;
+
   const openCamera = () => { pickFrom('camera'); };
   const openGallery = () => { pickFrom('library'); };
 
@@ -437,16 +467,82 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
           )}
         </View>
 
+        {/* Photo options: Original / Blur (with strength) / Remove BG / Adjust (zoom + position) */}
+        {imageUri && sourceUri && (isPhotoBgSupported() || isPhotoEditSupported()) ? (
+          <View style={styles.bgWrap}>
+            <View style={styles.bgRow}>
+              {(isPhotoBgSupported() ? PHOTO_BG_MODES.slice().reverse() : []).map(m => {
+                const on = bgMode === m;
+                return (
+                  <TouchableOpacity
+                    key={m}
+                    style={[styles.bgChip, on && styles.bgChipOn]}
+                    disabled={bgBusy}
+                    onPress={() => applyBg(m, blurLevel)}
+                    activeOpacity={0.8}>
+                    <Text style={[styles.bgChipText, on && styles.bgChipTextOn]}>
+                      {photoText(m === 'off' ? 'original' : m === 'blur' ? 'blur' : 'removeBg', appLanguage)}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+              {isPhotoEditSupported() ? (
+                <TouchableOpacity
+                  style={[styles.bgChip, adjust && !isFullCrop(adjust.crop) && styles.bgChipOn]}
+                  disabled={bgBusy}
+                  onPress={() => setAdjustOpen(true)}
+                  activeOpacity={0.8}>
+                  <Text style={[styles.bgChipText, adjust && !isFullCrop(adjust.crop) && styles.bgChipTextOn]}>
+                    {adjust && !isFullCrop(adjust.crop) ? '✓ ' : '⤢ '}
+                    {photoText('adjust', appLanguage)}
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
+              {isPhotoEditSupported() ? (
+                <TouchableOpacity
+                  style={[styles.bgChip, blurFaces && styles.bgChipOn]}
+                  disabled={bgBusy}
+                  onPress={() => applyEdit({ faces: !blurFaces })}
+                  accessibilityRole="switch"
+                  accessibilityState={{ checked: blurFaces }}
+                  activeOpacity={0.8}>
+                  <Text style={[styles.bgChipText, blurFaces && styles.bgChipTextOn]}>
+                    {blurFaces ? '✓ ' : '🙂 '}
+                    {photoText('blurFace', appLanguage)}
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
+              {bgBusy ? <ActivityIndicator size="small" color={colors.primary} /> : null}
+            </View>
+            {faceNote && !bgBusy ? <Text style={styles.bgLabel}>{faceNote}</Text> : null}
+            {bgMode === 'blur' ? (
+              <View style={styles.bgRow}>
+                <Text style={styles.bgLabel}>{photoText('blur', appLanguage)}</Text>
+                <TouchableOpacity
+                  style={styles.bgStep}
+                  disabled={bgBusy || blurLevel <= 1}
+                  onPress={() => applyBg('blur', blurLevel - 1)}
+                  accessibilityLabel="Less blur">
+                  <Text style={styles.bgStepText}>−</Text>
+                </TouchableOpacity>
+                <Text style={styles.bgLabel}>{'●'.repeat(blurLevel)}{'○'.repeat(5 - blurLevel)}</Text>
+                <TouchableOpacity
+                  style={styles.bgStep}
+                  disabled={bgBusy || blurLevel >= 5}
+                  onPress={() => applyBg('blur', blurLevel + 1)}
+                  accessibilityLabel="More blur">
+                  <Text style={styles.bgStepText}>＋</Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
+          </View>
+        ) : null}
+
         {/* AI Status Badge */}
         {aiStatusMsg ? (
           <View style={styles.aiBadgeContainer}>
             <Text style={styles.aiBadgeText}>{aiStatusMsg}</Text>
           </View>
-        ) : null}
-        {original ? (
-          <TouchableOpacity style={styles.aiBadgeContainer} onPress={undoCut}>
-            <Text style={styles.aiBadgeText}>✂️ Background removed · Tap to undo</Text>
-          </TouchableOpacity>
         ) : null}
       </View>
 
@@ -502,7 +598,34 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
                     onPress={() => pickType(t)}
                     activeOpacity={0.75}>
                     <Text style={styles.chipEmojiSmall}>{categoryIcon(t)}</Text>
-                    <Text style={[styles.pillText, isSelected && styles.itemChipTextSelected]}>{typeLabel(t, user?.language)}</Text>
+                    <Text style={[styles.pillText, isSelected && styles.itemChipTextSelected]}>{appTypeLabel(t, appLanguage)}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </>
+        ) : null}
+        {selectedSubType && ACCESSORY_KINDS[selectedSubType] ? (
+          <>
+            <Text style={styles.swipeHint}>{appTypeLabel(selectedSubType, appLanguage)} kind (optional) · swipe ›</Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.chipSlider}
+              contentContainerStyle={styles.chipSliderContent}>
+              {ACCESSORY_KINDS[selectedSubType].map(k => {
+                const on = selectedSubCategory === k;
+                return (
+                  <TouchableOpacity
+                    key={k}
+                    style={[styles.pill, styles.pillSmall, on && styles.itemChipSelected]}
+                    onPress={() => {
+                      setSelectedSubCategory(on ? null : k);
+                      autoName(on ? selectedSubType : k);
+                    }}
+                    activeOpacity={0.75}>
+                    <Text style={styles.chipEmojiSmall}>{categoryIcon(k)}</Text>
+                    <Text style={[styles.pillText, on && styles.itemChipTextSelected]}>{appTypeLabel(k, appLanguage)}</Text>
                   </TouchableOpacity>
                 );
               })}
@@ -511,7 +634,7 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
         ) : null}
         {selectedLabel ? (
           <Text style={styles.pickedText}>
-            Selected: {categoryIcon(selectedLabel)} {selectedSubType ? `${selectedCategory} › ${selectedSubType}` : selectedCategory}
+            Selected: {categoryIcon(selectedLabel)} {selectedSubType ? `${selectedCategory} › ${selectedSubType}${selectedSubCategory && ALL_ACCESSORY_KINDS.includes(selectedSubCategory) ? ` › ${selectedSubCategory}` : ''}` : selectedCategory}
           </Text>
         ) : null}
 
@@ -575,23 +698,6 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
           </Text>
         ) : null}
 
-        {/* Fabric Type */}
-        <Text style={styles.mainSectionTitle}>FABRIC TYPE</Text>
-        <View style={styles.fabricWrap}>
-          {FABRIC_TYPES.map(fab => {
-            const active = selectedFabric === fab;
-            return (
-              <TouchableOpacity
-                key={fab}
-                style={[styles.fabricChip, active && styles.fabricChipActive]}
-                onPress={() => setSelectedFabric(active ? null : fab)}
-                activeOpacity={0.8}>
-                <Text style={[styles.fabricChipText, active && styles.fabricChipTextActive]}>{fab}</Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-
         {/* Public toggle (for a later public feed) */}
         <View style={styles.publicRow}>
           <Text style={styles.publicLabel}>Show in public feed</Text>
@@ -608,7 +714,6 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
               <Text style={styles.previewName}>{itemName.trim() || selectedCategory}</Text>
               <Text style={styles.previewMeta}>
                 {selectedSubType ? `${selectedCategory} › ${selectedSubType}` : selectedCategory} · {selectedWearType}{selectedColor ? ` · ${selectedColor}` : ''}
-                {selectedFabric ? ` · ${selectedFabric}` : ''}
               </Text>
             </View>
             {selectedColor ? (
@@ -632,37 +737,26 @@ export default function AddItemScreen({ navigation, route, onSave }: AddItemScre
       </ScrollView>
       </KeyboardSafeView>
 
-      {/* Full Screen Image Preview Modal */}
-      <Modal
-        visible={isPreviewVisible}
-        transparent={false}
-        animationType="fade"
-        onRequestClose={() => setIsPreviewVisible(false)}>
-        <SafeAreaView style={styles.modalContainer}>
-          <StatusBar
-            barStyle="light-content"
-            {...(Platform.OS === 'android' ? { backgroundColor: '#000000' } : {})}
-          />
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Image Preview</Text>
-            <TouchableOpacity
-              style={styles.modalCloseBtn}
-              onPress={() => setIsPreviewVisible(false)}
-              activeOpacity={0.7}>
-              <Text style={styles.modalCloseText}>✕</Text>
-            </TouchableOpacity>
-          </View>
-          <View style={styles.modalImageWrapper}>
-            {imageUri ? (
-              <Image
-                source={{ uri: imageUri }}
-                style={styles.modalImage}
-                resizeMode="contain"
-              />
-            ) : null}
-          </View>
-        </SafeAreaView>
-      </Modal>
+      {/* Full screen preview: pinch / double-tap zoom, drag when zoomed */}
+      <ZoomableImage
+        visible={isPreviewVisible && !!imageUri}
+        images={imageUri ? [imageUri] : []}
+        labels={[photoText('imagePreview', appLanguage)]}
+        onClose={() => setIsPreviewVisible(false)}
+      />
+
+      {/* Adjust: zoom in / out and position the item in the frame; the upload is that crop */}
+      <PhotoAdjustModal
+        visible={adjustOpen}
+        uri={adjustSource}
+        initial={adjust}
+        lang={appLanguage}
+        onCancel={() => setAdjustOpen(false)}
+        onApply={st => {
+          setAdjustOpen(false);
+          applyEdit({ adjust: isFullCrop(st.crop) ? null : st });
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -847,48 +941,6 @@ const styles = themedStyles(() => StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.3)',
   },
 
-  modalContainer: {
-    flex: 1,
-    backgroundColor: '#000000',
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: '#222222',
-  },
-  modalTitle: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: fontWeight.bold,
-  },
-  modalCloseBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#222222',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  modalCloseText: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: fontWeight.bold,
-  },
-  modalImageWrapper: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 12,
-  },
-  modalImage: {
-    width: '100%',
-    height: '100%',
-  },
-
   mainSectionTitle: {
     fontSize: 11,
     fontWeight: '800',
@@ -1001,18 +1053,16 @@ const styles = themedStyles(() => StyleSheet.create({
   swatchActive: { borderWidth: 3, borderColor: colors.primary, transform: [{ scale: 1.2 }] },
   colorName: { fontSize: 11, color: colors.textSecondary, fontWeight: fontWeight.semiBold, marginBottom: spacing.sm },
 
-  fabricWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  fabricChip: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 20,
-    borderWidth: 1.5,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
-  },
-  fabricChipActive: { backgroundColor: '#E91E63', borderColor: '#E91E63' },
-  fabricChipText: { fontSize: 12, fontWeight: fontWeight.semiBold, color: colors.textSecondary },
-  fabricChipTextActive: { color: '#FFFFFF' },
+  bgWrap: { marginTop: 8, gap: 6 },
+  bgRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+  bgChip: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 18, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface },
+  bgChipOn: { backgroundColor: colors.primary, borderColor: colors.primary },
+  bgChipText: { fontSize: 13, fontWeight: fontWeight.semiBold, color: colors.textSecondary },
+  bgChipTextOn: { color: '#FFFFFF' },
+  bgLabel: { fontSize: 13, color: colors.textSecondary },
+  bgStep: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.border },
+  bgStepText: { fontSize: 18, color: colors.textPrimary, fontWeight: fontWeight.bold },
+
 
   previewCard: {
     flexDirection: 'row',

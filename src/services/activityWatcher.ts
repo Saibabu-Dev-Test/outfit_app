@@ -7,7 +7,11 @@ import { collection, limit, onSnapshot, orderBy, query, Timestamp, where } from 
 import { db } from '../config/firebaseConfig';
 import { toDate } from '../utils/date';
 import { activityLine, ActivityItem } from './activityApi';
-import { postNotification } from '../native/notifications';
+import { postNotification, postNotificationWithPayload } from '../native/notifications';
+import { likeLevelFor } from '../config/likeLevels';
+import { loadLikesReceived } from './coinsApi';
+import { countLikers, encodeCoinRain, likeNotificationText } from './likeCoins';
+import { serverPushActive } from './pushApi';
 
 const seenKey = (uid: string) => `outfitact:lastSeen:${uid}`;
 const notifiedKey = (uid: string) => `outfitact:lastNotified:${uid}`;
@@ -57,6 +61,15 @@ const itemFrom = (id: string, d: any): ActivityItem => ({
   createdAt: toDate(d?.createdAt),
 });
 
+// "🪙 Gold coin likes! 12 people liked your photos..." (my own level from users/{me}.likesReceived)
+const notifyLikeCoins = async (uid: string, people: number, likes: number): Promise<void> => {
+  try {
+    const level = likeLevelFor((await loadLikesReceived(uid)) ?? 0);
+    const { title, body } = likeNotificationText(people, likes, level);
+    await postNotificationWithPayload(title, body, encodeCoinRain({ level, count: people }));
+  } catch {}
+};
+
 // Starts (or restarts) the listener for this user. Returns a stop function.
 export const startActivityWatcher = (uid: string): (() => void) => {
   stopActivityWatcher();
@@ -81,6 +94,10 @@ export const startActivityWatcher = (uid: string): (() => void) => {
     }
     if (!alive) return;
     const since = lastSeen;
+    let pushOn = false;
+    serverPushActive()
+      .then(v => (pushOn = v))
+      .catch(() => undefined);
     let notifiedMark = lastNotified;
     try {
       unsub = onSnapshot(
@@ -97,11 +114,18 @@ export const startActivityWatcher = (uid: string): (() => void) => {
           if (!fresh.length) return;
           notifiedMark = Math.max(...fresh.map(a => a.createdAt?.getTime() || 0));
           writeMs(notifiedKey(uid), notifiedMark);
-          fresh.slice(0, MAX_EACH).forEach(a => {
+          // Push sender live and this phone registered: the push shows it (no double notification)
+          if (pushOn) return;
+          // Likes: ONE notification with the coin level and how many people liked; tapping it
+          // flips those coins across the screen (CoinRain)
+          const liked = countLikers(fresh);
+          if (liked.likes) notifyLikeCoins(uid, liked.people, liked.likes);
+          const others = fresh.filter(a => a.type !== 'like');
+          others.slice(0, MAX_EACH).forEach(a => {
             postNotification(a.type === 'feedback' ? 'New feedback' : a.type === 'wish' || a.type === 'mention' ? '🎂 Birthday wishes' : 'Outfit', activityLine(a));
           });
-          if (fresh.length > MAX_EACH) {
-            postNotification('Outfit', `${fresh.length - MAX_EACH} more new likes, comments and follows`);
+          if (others.length > MAX_EACH) {
+            postNotification('Outfit', `${others.length - MAX_EACH} more new comments and follows`);
           }
         },
         e => console.warn('activity watcher error:', e?.code, e?.message),

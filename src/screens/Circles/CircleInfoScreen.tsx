@@ -40,6 +40,7 @@ import { getPublicUser } from '../../services/userApi';
 import { PRIVATE_NOTICE, EMOJIS } from './CirclesScreen';
 import { shareWithReferral } from '../../utils/referralLink';
 import NameWithAge from '../../components/NameWithAge';
+import { useBottomSpace } from '../../hooks/useBottomSpace';
 
 interface MemberRow {
   id: string;
@@ -49,6 +50,7 @@ interface MemberRow {
 }
 
 export default function CircleInfoScreen({ navigation, route }: { navigation: any; route: any }) {
+  const bottomPad = useBottomSpace();
   const circleId: string = route?.params?.circleId || '';
   const { user } = useAuth();
   const uid = user?.id;
@@ -282,7 +284,7 @@ export default function CircleInfoScreen({ navigation, route }: { navigation: an
       ) : error || !circle ? (
         <Text style={styles.error}>{error || 'Circle not found.'}</Text>
       ) : (
-        <ScrollView contentContainerStyle={styles.content}>
+        <ScrollView contentContainerStyle={[styles.content, { paddingBottom: bottomPad }]}>
           <View style={styles.hero}>
             <Text style={styles.heroEmoji}>{circle.emoji}</Text>
             <Text style={styles.heroName}>{circle.name}</Text>

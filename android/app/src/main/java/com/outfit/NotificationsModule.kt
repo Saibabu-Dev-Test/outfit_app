@@ -128,6 +128,72 @@ class NotificationsModule(private val ctx: ReactApplicationContext) : ReactConte
     }
   }
 
+  // Activity notification that carries a payload for the app (read on tap via consumeLaunchPayload)
+  @ReactMethod
+  fun postNotificationWithPayload(title: String, body: String, payload: String, promise: Promise) {
+    try {
+      val id = 8000 + ((System.currentTimeMillis() / 1000L) % 100000L).toInt()
+      promise.resolve(OutfitNotifier.post(ctx, OutfitNotifier.CHANNEL_ACTIVITY, id, title, body, payload))
+    } catch (e: Exception) {
+      promise.resolve(false)
+    }
+  }
+
+  // The payload of the notification the app was opened from (once), or null
+  @ReactMethod
+  fun consumeLaunchPayload(promise: Promise) {
+    try {
+      val p = OutfitNotifier.pendingPayload
+      OutfitNotifier.pendingPayload = null
+      promise.resolve(p)
+    } catch (e: Exception) {
+      promise.resolve(null)
+    }
+  }
+
+  // One-off reminder (function planner) at a time in ms; same id replaces it
+  @ReactMethod
+  fun scheduleReminder(id: Double, at: Double, title: String, body: String, promise: Promise) {
+    try {
+      OutfitNotifier.scheduleReminder(ctx, id.toInt(), at.toLong(), title, body)
+      promise.resolve(true)
+    } catch (e: Exception) {
+      promise.resolve(false)
+    }
+  }
+
+  @ReactMethod
+  fun cancelReminder(id: Double, promise: Promise) {
+    try {
+      OutfitNotifier.cancelReminder(ctx, id.toInt())
+      promise.resolve(true)
+    } catch (e: Exception) {
+      promise.resolve(false)
+    }
+  }
+
+  // FCM registration token for push, or null (no Firebase / Play services / offline). Never rejects.
+  @ReactMethod
+  fun getPushToken(promise: Promise) {
+    try {
+      OutfitNotifier.ensureChannels(ctx)
+      if (com.google.firebase.FirebaseApp.getApps(ctx).isEmpty()) {
+        promise.resolve(null)
+        return
+      }
+      com.google.firebase.messaging.FirebaseMessaging.getInstance().token
+        .addOnCompleteListener { t ->
+          try {
+            promise.resolve(if (t.isSuccessful) t.result else null)
+          } catch (e: Exception) {
+            promise.resolve(null)
+          }
+        }
+    } catch (e: Throwable) {
+      promise.resolve(null)
+    }
+  }
+
   companion object {
     const val NAME = "OutfitNotifications"
   }

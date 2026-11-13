@@ -28,23 +28,28 @@ import {
   serverTimestamp,
   setDoc,
   where,
+  writeBatch,
 } from 'firebase/firestore';
 import { db } from '../config/firebaseConfig';
+import { awardCoins } from './coinsApi';
 import { firestoreErrorMessage } from '../utils/firebaseErrors';
 import { assertClean } from '../utils/profanity';
 import { localDateKey, toDate } from '../utils/date';
 import { inlineAvatar, saveUserProfile } from './userApi';
 import { logActivity } from './activityApi';
 import { cleanAge, myAgeFields } from '../utils/age';
+import { INLINE_MAX_CHARS, splitChatPhoto } from './photoSplit';
+import { formatDayMonth } from '../utils/formatDate';
 
 export const BIRTHDAYS = 'birthdays';
 export const BDAY_CIRCLES = 'bdayCircles';
 export const BIRTHDAY_DAYS_AHEAD = 7;
 export const WISH_MAX = 300;
 export const BDAY_MSG_MAX = 1000;
-export const BDAY_PHOTO_MAX_CHARS = 150000; // POLL_SPEC photo (~80 KB WebP -> ~109K chars) + slack
+export const BDAY_PHOTO_MAX_CHARS = 150000; // inline photo before build 115 (POLL_SPEC ~80 KB WebP -> ~109K chars) + slack
+// Since build 115 the inline (chat) copy is a CLEAR_SPEC photo (<= 56 KB) and the near-original
+// photo is in bdayCircles/{day}/messages/{id}/media/full {imageData, userId, createdAt}
 
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const pad = (n: number) => String(n).padStart(2, '0');
 const isLeap = (y: number) => (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
 
@@ -58,10 +63,10 @@ export const mdFromDob = (dob?: string | null): string | null => {
   return `${m[2]}-${m[3]}`;
 };
 
-// '11-14' -> '14 Nov' (day and month only)
+// '11-14' -> '14-11' (day and month only, DD-MM; the year is never shown)
 export const mdLabel = (md: string): string => {
-  const [m, d] = md.split('-').map(Number);
-  return m >= 1 && m <= 12 ? `${d} ${MONTHS[m - 1]}` : md;
+  const [m] = md.split('-').map(Number);
+  return m >= 1 && m <= 12 ? formatDayMonth(md) : md;
 };
 
 // The 'MM-DD' keys that have their birthday on this calendar date. 29 Feb birthdays are
@@ -342,6 +347,7 @@ export interface BdayMessage {
   type: 'text' | 'image';
   text: string;
   imageData: string | null;
+  hasFull?: boolean; // near-original photo in media/full (getBdayFullPhoto)
   createdAt: Date | null;
 }
 
@@ -354,6 +360,7 @@ const toBdayMsg = (id: string, d: any): BdayMessage => ({
   type: d?.type === 'image' ? 'image' : 'text',
   text: d?.text || '',
   imageData: typeof d?.imageData === 'string' ? d.imageData : null,
+  hasFull: d?.full === 1,
   createdAt: toDate(d?.createdAt),
 });
 
@@ -392,20 +399,65 @@ export const sendBdayText = async (day: string, me: ChatAuthorLite, text: string
   }
 };
 
-export const sendBdayPhoto = async (day: string, me: ChatAuthorLite, imageData: string): Promise<void> => {
-  if (!/^data:image\//.test(imageData)) throw new Error('Photo could not be read. Please pick it again.');
-  if (imageData.length > BDAY_PHOTO_MAX_CHARS) throw new Error('This photo is too large to send. Please pick a smaller photo.');
+// imageData: the chat copy (or one big photo, which is split here); full: the near-original photo
+export const sendBdayPhoto = async (
+  day: string,
+  me: ChatAuthorLite,
+  imageData: string,
+  full?: string | null,
+): Promise<void> => {
+  const photo = await splitChatPhoto(imageData, full);
+  // The inline copy must fit the rules' limit (firestore.rules: imageData <= 240000)
+  if (photo.inline.length > INLINE_MAX_CHARS) {
+    throw new Error('This photo is too large to send. Please pick a smaller photo.');
+  }
   try {
-    await addDoc(collection(db, BDAY_CIRCLES, day, 'messages'), { ...bdayAuthor(me), type: 'image', imageData });
+    const ref = doc(collection(db, BDAY_CIRCLES, day, 'messages'));
+    const data: any = { ...bdayAuthor(me), type: 'image', imageData: photo.inline };
+    const b = writeBatch(db);
+    if (photo.full) {
+      data.full = 1;
+      b.set(ref, data);
+      b.set(doc(db, BDAY_CIRCLES, day, 'messages', ref.id, 'media', 'full'), {
+        imageData: photo.full,
+        userId: me.uid,
+        createdAt: serverTimestamp(),
+      });
+    } else {
+      b.set(ref, data);
+    }
+    await b.commit();
+    awardCoins('upload', `bday_${day}_${ref.id}`); // coins (fire-and-forget)
   } catch (e: any) {
     throw new Error(firestoreErrorMessage(e, 'Sending photo'));
   }
 };
 
-export const deleteBdayMessage = async (day: string, id: string): Promise<void> => {
+export const deleteBdayMessage = async (day: string, id: string, hasFull?: boolean): Promise<void> => {
   try {
-    await deleteDoc(doc(db, BDAY_CIRCLES, day, 'messages', id));
+    if (hasFull) {
+      const b = writeBatch(db);
+      b.delete(doc(db, BDAY_CIRCLES, day, 'messages', id, 'media', 'full'));
+      b.delete(doc(db, BDAY_CIRCLES, day, 'messages', id));
+      await b.commit();
+    } else {
+      await deleteDoc(doc(db, BDAY_CIRCLES, day, 'messages', id));
+    }
   } catch (e: any) {
     throw new Error(firestoreErrorMessage(e, 'Deleting'));
+  }
+};
+
+// Near-original photo of a birthday-circle photo (1 read). Never throws: falls back to the chat copy.
+export const getBdayFullPhoto = async (day: string, m: { id: string; imageData?: string | null; hasFull?: boolean }): Promise<string> => {
+  const shown = m.imageData || '';
+  if (!m.hasFull) return shown;
+  try {
+    const s = await getDoc(doc(db, BDAY_CIRCLES, day, 'messages', m.id, 'media', 'full'));
+    const full = s.exists() ? (s.data() as any)?.imageData : null;
+    return typeof full === 'string' && full ? full : shown;
+  } catch (e: any) {
+    console.warn('birthday full photo failed:', e?.code, e?.message);
+    return shown;
   }
 };

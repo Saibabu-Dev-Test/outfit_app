@@ -1,42 +1,104 @@
-import { matchPorutham, rajjuOf } from '../src/utils/porutham';
+import {
+  computePorutham,
+  isVedha,
+  lordsInEnmity,
+  rajjuOf,
+  rashiCount,
+  rashisOfNakshatra,
+  starCount,
+  yoniEnemies,
+} from '../src/utils/porutham';
 
-describe('pelli porutham', () => {
-  it('has 10 poruthams and a score', () => {
-    const r = matchPorutham({ nakshatra: 3, rashi: 1 }, { nakshatra: 21, rashi: 9 });
-    expect(r.items).toHaveLength(10);
-    expect(r.score).toBe(r.items.filter(i => i.match).length);
+const matches = (r: ReturnType<typeof computePorutham>) =>
+  Object.fromEntries(r.results.map(x => [x.key, x.match])) as Record<string, boolean>;
+
+describe('porutham helpers', () => {
+  test('counts from the bride to the groom, inclusive', () => {
+    expect(starCount(0, 0)).toBe(1);
+    expect(starCount(0, 3)).toBe(4);
+    expect(starCount(20, 2)).toBe(10);
+    expect(rashiCount(0, 1)).toBe(2);
+    expect(rashiCount(11, 0)).toBe(2);
   });
-  it('same star -> same Rajju -> not recommended', () => {
-    const r = matchPorutham({ nakshatra: 7, rashi: 3 }, { nakshatra: 7, rashi: 3 });
-    expect(r.items.find(i => i.id === 'rajju')!.match).toBe(false);
-    expect(r.essentialOk).toBe(false);
-    expect(r.verdict).toBe('poor');
+  test('nakshatra -> rashi(s)', () => {
+    expect(rashisOfNakshatra(0)).toEqual([0]); // Ashwini: Mesha
+    expect(rashisOfNakshatra(2)).toEqual([0, 1]); // Krittika: Mesha / Vrishabha
+    expect(rashisOfNakshatra(3)).toEqual([1]); // Rohini: Vrishabha
+    expect(rashisOfNakshatra(4)).toEqual([1, 2]); // Mrigashira
+    expect(rashisOfNakshatra(26)).toEqual([11]); // Revati: Meena
   });
-  it('rajju groups cover 27 stars as 3/6/6/6/6', () => {
-    const counts = [0, 0, 0, 0, 0];
-    for (let s = 0; s < 27; s++) counts[rajjuOf(s)]++;
-    expect(counts).toEqual([3, 6, 6, 6, 6]);
+  test('rajju groups', () => {
+    // Pada: Ashwini, Ashlesha, Magha, Jyeshtha, Mula, Revati
+    expect([0, 8, 9, 17, 18, 26].map(rajjuOf)).toEqual([0, 0, 0, 0, 0, 0]);
+    // Siro: Mrigashira, Chitra, Dhanishta
+    expect([4, 13, 22].map(rajjuOf)).toEqual([4, 4, 4]);
+    // Kantha: Rohini, Ardra, Hasta, Swati, Shravana, Shatabhisha
+    expect([3, 5, 12, 14, 21, 23].map(rajjuOf)).toEqual([3, 3, 3, 3, 3, 3]);
   });
-  it('vedha pairs (Ashwini-Jyeshtha, Mrigashira-Chitra)', () => {
-    expect(matchPorutham({ nakshatra: 0, rashi: 0 }, { nakshatra: 17, rashi: 7 }).items.find(i => i.id === 'vedha')!.match).toBe(false);
-    expect(matchPorutham({ nakshatra: 4, rashi: 1 }, { nakshatra: 13, rashi: 5 }).items.find(i => i.id === 'vedha')!.match).toBe(false);
+  test('vedha, yoni and lord tables', () => {
+    expect(isVedha(0, 17)).toBe(true); // Ashwini - Jyeshtha
+    expect(isVedha(13, 22)).toBe(true); // Chitra - Dhanishta
+    expect(isVedha(0, 3)).toBe(false);
+    expect(yoniEnemies(5, 6)).toBe(true); // Cat - Rat
+    expect(yoniEnemies(9, 7)).toBe(true); // Tiger - Cow
+    expect(yoniEnemies(0, 3)).toBe(false);
+    expect(lordsInEnmity(0, 6)).toBe(true); // Sun - Saturn
+    expect(lordsInEnmity(2, 5)).toBe(false); // Mars - Venus (neutral)
   });
-  it('dina, mahendra and stree deergha follow the count from the bride', () => {
-    // Bride Ashwini (0), groom Rohini (3): count 4 -> dina good, mahendra good, stree deergha no
-    const r = matchPorutham({ nakshatra: 0, rashi: 0 }, { nakshatra: 3, rashi: 1 });
-    const get = (id: string) => r.items.find(i => i.id === id)!.match;
-    expect(get('dina')).toBe(true);
-    expect(get('mahendra')).toBe(true);
-    expect(get('streeDeergha')).toBe(false);
+});
+
+describe('computePorutham known pairs', () => {
+  test('Ashwini bride, Rohini groom: 7/10, favourable', () => {
+    const r = computePorutham({ nakshatra: 0, rashi: 0 }, { nakshatra: 3, rashi: 1 });
+    expect(matches(r)).toEqual({
+      dina: true,
+      gana: true,
+      mahendra: true,
+      streeDeergha: false,
+      yoni: true,
+      rasi: false,
+      rasyadhipathi: true,
+      vasya: false,
+      rajju: true,
+      vedha: true,
+    });
+    expect(r.score).toBe(7);
+    expect(r.verdict).toBe('good');
   });
-  it('rasi 6/8 is not good, 7th is good', () => {
-    const six = matchPorutham({ nakshatra: 0, rashi: 0 }, { nakshatra: 14, rashi: 5 });
-    expect(six.items.find(i => i.id === 'rasi')!.match).toBe(false);
-    const seven = matchPorutham({ nakshatra: 0, rashi: 0 }, { nakshatra: 14, rashi: 6 });
-    expect(seven.items.find(i => i.id === 'rasi')!.match).toBe(true);
+  test('Ashwini bride, Magha groom: same (Pada) rajju, 6/10', () => {
+    const r = computePorutham({ nakshatra: 0, rashi: 0 }, { nakshatra: 9, rashi: 4 });
+    const m = matches(r);
+    expect(m.rajju).toBe(false);
+    expect(m.gana).toBe(false); // Deva - Rakshasa
+    expect(m.mahendra).toBe(true); // count 10
+    expect(m.vasya).toBe(true); // Mesha -> Simha
+    expect(r.score).toBe(6);
+    expect(r.rajjuOk).toBe(false);
+    expect(r.verdict).toBe('fair');
   });
-  it('yoni enemies: Cat (Punarvasu) and Rat (Magha)', () => {
-    const r = matchPorutham({ nakshatra: 6, rashi: 2 }, { nakshatra: 9, rashi: 4 });
-    expect(r.items.find(i => i.id === 'yoni')!.match).toBe(false);
+  test('Ashwini bride, Jyeshtha groom: Vedha', () => {
+    const r = computePorutham({ nakshatra: 0, rashi: 0 }, { nakshatra: 17, rashi: 7 });
+    const m = matches(r);
+    expect(m.vedha).toBe(false);
+    expect(m.dina).toBe(true); // count 18
+    expect(m.streeDeergha).toBe(true);
+    expect(r.verdict).not.toBe('good');
+  });
+  test('same star (Rohini) both: 6/10 with rajju dosha', () => {
+    const r = computePorutham({ nakshatra: 3, rashi: 1 }, { nakshatra: 3, rashi: 1 });
+    expect(r.score).toBe(6);
+    expect(matches(r).rajju).toBe(false);
+  });
+  test('every result has English and Telugu lines', () => {
+    const r = computePorutham({ nakshatra: 12, rashi: 5 }, { nakshatra: 21, rashi: 9 });
+    expect(r.results).toHaveLength(10);
+    r.results.forEach(x => {
+      expect(x.why.en.length).toBeGreaterThan(5);
+      expect(x.why.te.length).toBeGreaterThan(5);
+    });
+    expect(r.verdictText.te.length).toBeGreaterThan(5);
+  });
+  test('rejects invalid input', () => {
+    expect(() => computePorutham({ nakshatra: 27, rashi: 0 }, { nakshatra: 0, rashi: 0 })).toThrow();
   });
 });

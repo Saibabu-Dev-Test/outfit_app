@@ -1,57 +1,65 @@
-// ALL AdMob ids and ad pacing in one place.
+// AdMob: the ONE place for the app id and every ad unit id.
 //
-// TODO(AdMob): these are Google's official TEST ids (they always fill with "Test Ad" creatives and
-// never pay). To earn money:
-//   1. Create a free AdMob account (admob.google.com), add the Android app "Outfit Vote"
-//      (package com.saibabu.outfit) and copy its App ID (ca-app-pub-XXXXXXXXXXXXXXXX~YYYYYYYYYY).
-//   2. Create one ad unit per format below (Native advanced, Rewarded, Rewarded interstitial,
-//      Interstitial, App open, Banner) and paste the unit ids into ADMOB_UNITS.
-//   3. Put the App ID in ADMOB_APP_ID here AND in app.json ("react-native-google-mobile-ads"
-//      .android_app_id) AND android/app/src/main/AndroidManifest.xml (APPLICATION_ID meta-data).
-//   4. Set USE_TEST_ADS = false. Never click your own real ads (AdMob bans accounts for it).
-export const USE_TEST_ADS = true;
+// Release builds use the real ids below. Debug builds (__DEV__) always use Google's official TEST
+// ids, so testing on your own phone never counts as self-clicks on the publisher account.
+// The app id is ALSO read by the Android SDK at start-up (keep all three equal):
+//   android/app/src/main/AndroidManifest.xml  meta-data com.google.android.gms.ads.APPLICATION_ID
+//   app.json                                   "react-native-google-mobile-ads".android_app_id
+// A missing or malformed app id there crashes the app at launch, so never leave it empty.
 
-export const ADMOB_APP_ID = 'ca-app-pub-3940256099942544~3347511713'; // TEST app id
+export type AdSlot = 'feedNative' | 'circlesBanner' | 'searchBanner' | 'pollBanner' | 'astroRewarded' | 'poruthamRewarded' | 'earnRewarded';
 
-// Google's official Android test unit ids
-const TEST_UNITS = {
-  native: 'ca-app-pub-3940256099942544/2247696110',
-  rewarded: 'ca-app-pub-3940256099942544/5224354917',
-  rewardedInterstitial: 'ca-app-pub-3940256099942544/5354046379',
-  interstitial: 'ca-app-pub-3940256099942544/1033173712',
-  appOpen: 'ca-app-pub-3940256099942544/9257395921',
-  banner: 'ca-app-pub-3940256099942544/9214589741',
-};
+// Real ids (AdMob > Apps > Outfit). Unit names as in the AdMob console.
+export const REAL_ADS = {
+  appId: 'ca-app-pub-8006246175093661~4589468267',
+  feedNative: 'ca-app-pub-8006246175093661/9650223257', // feed_native (Native advanced): Feed, after every 5 posts
+  circlesBanner: 'ca-app-pub-8006246175093661/4345035031', // circles_banner (Banner): under the Circles list
+  searchBanner: 'ca-app-pub-8006246175093661/1718871690', // search_banner (Banner): people search
+  // Polls in circle chats: uses the circles banner unit until a poll_banner unit is made in AdMob
+  pollBanner: 'ca-app-pub-8006246175093661/9905142618',
+  astroRewarded: 'ca-app-pub-8006246175093661/8348090730', // astro_rewarded (Rewarded): "See full reading"
+  poruthamRewarded: 'ca-app-pub-8006246175093661/4708656255', // porutham_rewarded (Rewarded): full Pelli Porutham
+  // TODO(AdMob): make an earn_rewarded (Rewarded) unit and put it here. Until then the Earn tab
+  // reuses astro_rewarded, and only when USE_TEST_ADS_EARN is false.
+  earnRewarded: 'ca-app-pub-8006246175093661/8348090730',
+} as const;
 
-// TODO(AdMob): your real unit ids (leave '' until created; '' falls back to the test id while
-// USE_TEST_ADS is true and disables that format when it is false)
-const REAL_UNITS: typeof TEST_UNITS = {
-  native: '',
-  rewarded: '',
-  rewardedInterstitial: '',
-  interstitial: '',
-  appOpen: '',
-  banner: '',
-};
+// Google's official test ids (Android): https://developers.google.com/admob/android/test-ads
+export const TEST_ADS = {
+  appId: 'ca-app-pub-3940256099942544~3347511713',
+  feedNative: 'ca-app-pub-3940256099942544/2247696110',
+  circlesBanner: 'ca-app-pub-3940256099942544/9214589741',
+  searchBanner: 'ca-app-pub-3940256099942544/9214589741',
+  pollBanner: 'ca-app-pub-3940256099942544/9214589741',
+  astroRewarded: 'ca-app-pub-3940256099942544/5224354917',
+  poruthamRewarded: 'ca-app-pub-3940256099942544/5224354917',
+  earnRewarded: 'ca-app-pub-3940256099942544/5224354917',
+} as const;
 
-export type AdFormat = keyof typeof TEST_UNITS;
-export const adUnitId = (f: AdFormat): string | null =>
-  USE_TEST_ADS ? REAL_UNITS[f] || TEST_UNITS[f] : REAL_UNITS[f] || null;
+// true forces test ad units in release builds too (e.g. a build for testers). Normally false.
+export const FORCE_TEST_ADS = false;
 
-// Pacing (kept non-annoying and inside AdMob policy: every full-screen ad follows a natural
-// break or a user's own tap, never on top of typing, never inside chat)
-export const ADS = {
-  // Native post-style card after every N feed posts (repeats)
-  feedEvery: 5,
-  // Native card after every N rows in other long lists (circles, user search)
-  listEvery: 8,
-  // Interstitial (e.g. after posting a poll): at most once per this many ms
-  interstitialMinGapMs: 5 * 60 * 1000,
-  // App-open ad when coming back to the app: at most once per 4 hours, only after >= 30 s away
-  appOpenMinGapMs: 4 * 60 * 60 * 1000,
-  appOpenMinAwayMs: 30 * 1000,
-  // No full-screen ad within this long after another one
-  anyFullscreenGapMs: 90 * 1000,
-  // Rewarded-interstitial intro countdown (policy: the user can say "No thanks" before it plays)
-  rewardedInterstitialIntroSec: 5,
-};
+// Earn tab (gate ad + one ad after each survey): Google TEST ads in every build while the Earn tab is
+// being tested (no own-click risk on the real account). Set false once a real earn_rewarded unit is in
+// REAL_ADS.earnRewarded.
+export const USE_TEST_ADS_EARN = true;
+
+// Kill switch: false hides every ad (rewarded content then unlocks after a short wait)
+export const ADS_ENABLED = true;
+
+// A sponsored card after every N posts in the Feed
+export const FEED_AD_EVERY = 5;
+
+// Rewarded ads: give up loading after this long and unlock anyway (never punish users for no fill)
+export const REWARDED_LOAD_TIMEOUT_MS = 15000;
+// Short wait shown before unlocking when no ad could be shown
+export const REWARDED_FALLBACK_WAIT_MS = 2500;
+
+declare const __DEV__: boolean | undefined;
+const isDev = typeof __DEV__ !== 'undefined' && !!__DEV__;
+
+export const usingTestAds = (): boolean => FORCE_TEST_ADS || isDev;
+
+// The unit id for a slot: Google test ids in debug builds, the real ids in release builds
+export const adUnitId = (slot: AdSlot, opts: { test?: boolean } = {}): string =>
+  (opts.test ?? (usingTestAds() || (slot === 'earnRewarded' && USE_TEST_ADS_EARN))) ? TEST_ADS[slot] : REAL_ADS[slot];

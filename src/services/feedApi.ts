@@ -30,9 +30,9 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { db } from '../config/firebaseConfig';
 import { firestoreErrorMessage } from '../utils/firebaseErrors';
-import { recordTask } from './rewardsApi';
-import { recordMonthlyProgress } from './monthlyTasksApi';
 import { markEarnVote } from './earnApi';
+import { recordTask } from './rewardsApi';
+import { awardCoins, awardLikeCoins } from './coinsApi';
 import { MAX_BASE64_CHARS } from '../utils/imagePicker';
 import { toDate } from '../utils/date';
 import { inlineAvatar } from './userApi';
@@ -53,8 +53,8 @@ export interface Post {
   imageData: string; // first photo (A): thumbnail on new posts, full photo on older ones
   photos: string[]; // all photos A..F (1 for a normal post), same sizes as imageData
   hasMedia: boolean; // full-size photos are in {posts|wardrobe}/{id}/media/full
+  fullDocs?: boolean; // posts with media: 2: one full photo per doc, media/full0..full5
   hasClear?: boolean; // ~720 px feed photos are in {posts|wardrobe}/{id}/media/clear
-  remotePhotos?: string[]; // full photos saved on another free provider (storage chain), by URL
   caption: string;
   likeCount: number;
   commentCount: number;
@@ -64,8 +64,12 @@ export interface Post {
 // Multi-photo posts: up to 6 photos labelled A-F, one vote per user
 export const OPTION_LABELS = ['A', 'B', 'C', 'D', 'E', 'F'];
 export const MAX_POST_PHOTOS = 6;
-// Whole post doc must stay under Firestore's 1 MiB
+// Whole post doc must stay under Firestore's 1 MiB. Since build 115 this caps the photos SHOWN on the
+// post (thumbnails); full photos (up to ~942K chars each) live in their own media docs.
 export const MAX_POST_TOTAL_CHARS = 900000;
+// media/full {photos: [...]} holds every full photo when they fit one doc together; otherwise
+// (media: 2) each is in media/full0..full5 {imageData, userId, createdAt}
+const ONE_MEDIA_DOC_CHARS = 940000;
 // One thumbnail (THUMB_SPEC <= 16 KB = ~22K chars) with slack for a picker that overshoots
 const MAX_THUMB_CHARS = 40000;
 export const MEDIA_FULL = 'full';
@@ -96,7 +100,8 @@ const toPost = (id: string, d: any): Post => ({
   photos: [d?.imageData || '', ...(Array.isArray(d?.morePhotos) ? d.morePhotos : [])]
     .filter((x: any) => typeof x === 'string' && x)
     .slice(0, MAX_POST_PHOTOS),
-  hasMedia: d?.media === 1,
+  hasMedia: d?.media === 1 || d?.media === 2,
+  fullDocs: d?.media === 2,
   hasClear: d?.clear === 1,
   caption: d?.caption || '',
   likeCount: typeof d?.likeCount === 'number' ? Math.max(0, d.likeCount) : 0,
@@ -164,12 +169,14 @@ export const createPost = async (
     }
   });
   const total = list.reduce((n, x) => n + x.full.length, 0);
-  if (total > MAX_POST_TOTAL_CHARS) {
-    throw new Error('These photos are too large together. Remove one or pick smaller photos.');
-  }
   assertClean(caption, 'Please keep captions respectful 🙏');
   // Split only when every photo has a small thumbnail
   const split = list.every(x => !!x.thumb && /^data:image\//.test(x.thumb) && x.thumb.length <= MAX_THUMB_CHARS);
+  // Without thumbnails the full photos go on the post itself, so they must fit it together
+  if (!split && total > MAX_POST_TOTAL_CHARS) {
+    throw new Error('These photos are too large together. Remove one or pick smaller photos.');
+  }
+  const perPhotoDocs = split && total > ONE_MEDIA_DOC_CHARS;
   const shown = split ? list.map(x => x.thumb as string) : list.map(x => x.full);
   try {
     const data: any = {
@@ -188,16 +195,26 @@ export const createPost = async (
     const ref = doc(collection(db, POSTS));
     const b = writeBatch(db);
     if (split) {
-      data.media = 1;
+      data.media = perPhotoDocs ? 2 : 1;
       // Clear feed copies only when every photo has one
       const clear = list.every(x => !!x.clear && /^data:image\//.test(x.clear) && x.clear.length <= MAX_CLEAR_CHARS);
       if (clear) data.clear = 1;
       b.set(ref, data);
-      b.set(doc(db, POSTS, ref.id, 'media', MEDIA_FULL), {
-        photos: list.map(x => x.full),
-        userId: me.uid,
-        createdAt: serverTimestamp(),
-      });
+      if (perPhotoDocs) {
+        list.forEach((x, i) =>
+          b.set(doc(db, POSTS, ref.id, 'media', `${MEDIA_FULL}${i}`), {
+            imageData: x.full,
+            userId: me.uid,
+            createdAt: serverTimestamp(),
+          }),
+        );
+      } else {
+        b.set(doc(db, POSTS, ref.id, 'media', MEDIA_FULL), {
+          photos: list.map(x => x.full),
+          userId: me.uid,
+          createdAt: serverTimestamp(),
+        });
+      }
       if (clear) {
         b.set(doc(db, POSTS, ref.id, 'media', MEDIA_CLEAR), {
           photos: list.map(x => x.clear as string),
@@ -210,7 +227,7 @@ export const createPost = async (
     }
     await b.commit();
     recordTask(me.uid, 'uploaded'); // daily task (never throws)
-    recordMonthlyProgress(me.uid, 'polls'); // monthly task (never throws)
+    awardCoins('upload', `post_${ref.id}`); // coins (fire-and-forget)
   } catch (e: any) {
     fail(e, 'Posting');
   }
@@ -222,6 +239,8 @@ export const deletePost = async (postId: string): Promise<void> => {
   try {
     const b = writeBatch(db);
     b.delete(doc(db, POSTS, postId, 'media', MEDIA_FULL));
+    // media: 2 posts (deleting a doc that does not exist is fine)
+    for (let i = 0; i < MAX_POST_PHOTOS; i++) b.delete(doc(db, POSTS, postId, 'media', `${MEDIA_FULL}${i}`));
     b.delete(doc(db, POSTS, postId, 'media', MEDIA_CLEAR));
     b.delete(doc(db, POSTS, postId));
     await b.commit();
@@ -242,17 +261,31 @@ const forgetFullPhotos = (kind: FeedKind, id: string) => {
 // Full photos of a post / wardrobe photo (1 read, cached for the session). Older items without a
 // media doc already hold them inline. Never throws: falls back to the thumbnails.
 export const getFullPhotos = async (post: Post): Promise<string[]> => {
-  if (post.remotePhotos?.length) return post.remotePhotos;
   if (!post.hasMedia) return post.photos;
   const key = `${post.kind}_${post.id}`;
   const hit = fullCache.get(key);
   if (hit) return hit;
   try {
-    const s = await getDoc(doc(db, post.kind === 'post' ? POSTS : 'wardrobe', post.id, 'media', MEDIA_FULL));
-    const d: any = s.exists() ? s.data() : null;
-    const arr: string[] = (post.kind === 'post' ? (Array.isArray(d?.photos) ? d.photos : []) : [d?.imageData])
-      .filter((x: any) => typeof x === 'string' && x);
-    if (!arr.length) return post.photos;
+    let arr: string[];
+    if (post.kind === 'post' && post.fullDocs) {
+      // One doc per photo (media/full0..): read them together; a missing one keeps its thumbnail
+      const docs = await Promise.all(
+        post.photos.map((_, i) =>
+          getDoc(doc(db, POSTS, post.id, 'media', `${MEDIA_FULL}${i}`)).catch(() => null),
+        ),
+      );
+      arr = docs.map(s => {
+        const v = s && s.exists() ? (s.data() as any)?.imageData : '';
+        return typeof v === 'string' ? v : '';
+      });
+    } else {
+      const s = await getDoc(doc(db, post.kind === 'post' ? POSTS : 'wardrobe', post.id, 'media', MEDIA_FULL));
+      const d: any = s.exists() ? s.data() : null;
+      arr = (post.kind === 'post' ? (Array.isArray(d?.photos) ? d.photos : []) : [d?.imageData]).map((x: any) =>
+        typeof x === 'string' ? x : '',
+      );
+    }
+    if (!arr.some(Boolean)) return post.photos;
     const out = post.photos.map((thumb, i) => arr[i] || thumb);
     if (fullCache.size >= FULL_CACHE_MAX) fullCache.delete(fullCache.keys().next().value as string);
     fullCache.set(key, out);
@@ -274,7 +307,6 @@ export const getClearPhotos = async (post: Post): Promise<string[]> => {
   const key = `${post.kind}_${post.id}`;
   const hit = clearCache.get(key);
   if (hit) return hit;
-  if (post.remotePhotos?.length) return post.remotePhotos;
   if (!post.hasClear) return getFullPhotos(post);
   try {
     const s = await getDoc(doc(db, post.kind === 'post' ? POSTS : 'wardrobe', post.id, 'media', MEDIA_CLEAR));
@@ -346,8 +378,9 @@ export const toggleLike = async (
   const postRef = doc(db, POSTS, postId);
   const likeRef = doc(db, POSTS, postId, 'likes', uid);
   const dislikeRef = doc(db, POSTS, postId, 'dislikes', uid);
+  let owner = '';
   try {
-    return await runTransaction(db, async tx => {
+    const res = await runTransaction(db, async tx => {
       const post = await tx.get(postRef);
       if (!post.exists()) throw new Error('This post was deleted.');
       const like = await tx.get(likeRef);
@@ -360,6 +393,7 @@ export const toggleLike = async (
         tx.delete(mineRef);
         return { liked: false, likeCount: Math.max(0, current - 1) };
       }
+      owner = String((post.data() as any)?.userId || '');
       tx.set(likeRef, {
         createdAt: serverTimestamp(),
         name: ((me?.name || '').trim() || 'Outfit user').slice(0, 60),
@@ -369,10 +403,11 @@ export const toggleLike = async (
       tx.set(mineRef, { kind: 'post', refId: postId, createdAt: serverTimestamp() });
       if (clearDislike) tx.delete(dislikeRef);
       return { liked: true, likeCount: current + 1 };
-    }).then(r => {
-      if (r.liked) markEarnVote(uid); // a like on an outfit counts as today's Earn vote
-      return r;
     });
+    // Coin flip with the owner's like-level coin; coins once per post (fire-and-forget)
+    if (res.liked) awardLikeCoins('post', postId, owner);
+    if (res.liked) markEarnVote(uid); // Earn tab: a like on an outfit counts as today's vote
+    return res;
   } catch (e: any) {
     if (!e?.code && e instanceof Error) throw e;
     return fail(e, 'Liking');
@@ -564,11 +599,12 @@ export const castPostVote = async (postId: string, uid: string, optionIndex: num
   if (!option) throw new Error('Pick a photo to vote.');
   try {
     await setDoc(doc(db, POSTS, postId, 'votes', uid), { option, updatedAt: serverTimestamp() });
-    recordMonthlyProgress(uid, 'votes');
-    markEarnVote(uid); // Earn tab: today's "vote on 1 outfit"
   } catch (e: any) {
     fail(e, 'Voting');
   }
+  // +1 coin on my first vote on this poll (coinEvents/vote_post_<id> is create-only) + coin flip
+  awardCoins('vote', `post_${postId}`);
+  markEarnVote(uid); // Earn tab: today's "vote on 1 outfit"
 };
 
 // ── Public wardrobe photos in the feed ──────────────────────────────────
@@ -588,7 +624,6 @@ export const wardrobeToPost = (id: string, d: any, owner?: { name?: string; avat
     photos: img ? [img] : [],
     hasMedia: d?.media === 1,
     hasClear: d?.clear === 1,
-    remotePhotos: typeof d?.photoUrl === 'string' && d.photoUrl ? [d.photoUrl] : undefined,
     caption: label ? `👗 ${label}${d?.category && d?.name !== d?.category ? ` · ${d.category}` : ''}` : '',
     likeCount: 0,
     commentCount: 0,
@@ -641,6 +676,8 @@ export const toggleWardrobeLike = async (
   }
   try {
     await b.commit();
+    if (!likedNow) awardLikeCoins('wardrobe', itemId); // coin flip + coins once per photo (fire-and-forget)
+    if (!likedNow) markEarnVote(uid); // Earn tab: a like on an outfit counts as today's vote
     return !likedNow;
   } catch (e: any) {
     return fail(e, 'Liking');
@@ -683,7 +720,7 @@ export const toggleDislike = async (
     if (kind === 'post') {
       const postRef = doc(db, POSTS, id);
       const likeRef = doc(db, POSTS, id, 'likes', uid);
-      return await runTransaction(db, async tx => {
+      const r = await runTransaction(db, async tx => {
         const post = await tx.get(postRef);
         if (!post.exists()) throw new Error('This post was deleted.');
         const like = await tx.get(likeRef);
@@ -700,10 +737,9 @@ export const toggleDislike = async (
           return { disliked: true, liked: false, likeCount: Math.max(0, current - 1) };
         }
         return { disliked: true, liked: false, likeCount: current };
-      }).then(r => {
-        if (r.disliked) markEarnVote(uid); // a dislike is an outfit vote too
-        return r;
       });
+      if (r.disliked) markEarnVote(uid); // Earn tab: a dislike is an outfit vote too
+      return r;
     }
     const b = writeBatch(db);
     if (dislikedNow) {
@@ -716,6 +752,7 @@ export const toggleDislike = async (
       }
     }
     await b.commit();
+    if (!dislikedNow) markEarnVote(uid); // Earn tab: a dislike is an outfit vote too
     return { disliked: !dislikedNow, liked: dislikedNow ? likedNow : false };
   } catch (e: any) {
     if (!e?.code && e instanceof Error) throw e;
@@ -813,6 +850,47 @@ export const getLikedItems = async (uid: string, max = 60): Promise<Post[]> => {
     if (cached) return cached;
     throw e;
   }
+};
+
+// ── Another user's public Likes (profile › Likes tab), one page at a time ──
+// One query on users/{uid}/liked (createdAt desc, single-field index, no composite index) + one read
+// per liked item not already cached. Private wardrobe photos, deleted posts and items the reader may
+// not see are skipped. Rules: a signed-in user may read the list of a public profile (read-only).
+export const USER_LIKES_PAGE = 20;
+export const getUserLikesPage = async (
+  uid: string,
+  cursor: FeedCursor = null,
+  pageSize = USER_LIKES_PAGE,
+): Promise<{ items: Post[]; cursor: FeedCursor; hasMore: boolean }> => {
+  let snap;
+  try {
+    const base = collection(db, 'users', uid, 'liked');
+    snap = await getDocs(
+      cursor
+        ? query(base, orderBy('createdAt', 'desc'), startAfter(cursor), limit(pageSize))
+        : query(base, orderBy('createdAt', 'desc'), limit(pageSize)),
+    );
+  } catch (e: any) {
+    return fail(e, 'Loading likes');
+  }
+  const refs = snap.docs
+    .map(d => d.data() as any)
+    .filter(x => (x?.kind === 'post' || x?.kind === 'wardrobe') && typeof x?.refId === 'string')
+    .map(x => ({ kind: x.kind as FeedKind, refId: x.refId as string }));
+  const items = await Promise.all(
+    refs.map(r => {
+      const known = cachedPost(r.kind, r.refId);
+      if (known) return Promise.resolve(known);
+      return r.kind === 'post' ? getPost(r.refId).catch(() => null) : getWardrobeAsPost(r.refId);
+    }),
+  );
+  const visible = items.filter((x): x is Post => !!x && !!x.imageData);
+  rememberPosts(visible);
+  return {
+    items: visible,
+    cursor: snap.docs.length ? snap.docs[snap.docs.length - 1] : cursor,
+    hasMore: snap.docs.length === pageSize,
+  };
 };
 
 // ── Circle feed: posts + public wardrobe photos from people who share a circle with me ──

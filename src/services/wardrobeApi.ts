@@ -24,10 +24,7 @@ import { db } from '../config/firebaseConfig';
 import { MAX_BASE64_CHARS } from '../utils/imagePicker';
 import { firestoreErrorMessage } from '../utils/firebaseErrors';
 import { recordTask } from './rewardsApi';
-import { dominantColor, imageLabels } from '../native/wardrobeVision';
-import { tagsFromVision } from '../utils/visionTags';
-import { dataUriBytes, isQuotaError, markFull, placePhoto, recordUpload } from './photoStorage';
-import { recordMonthlyProgress } from './monthlyTasksApi';
+import { awardCoins } from './coinsApi';
 import { toDate } from '../utils/date';
 
 export interface WardrobeItemPayload {
@@ -62,7 +59,6 @@ export interface WardrobeItemResponse {
   gender?: string | null;
   notes?: string | null;
   imageUrl: string | null; // imageData: thumbnail on new items (full photo: getWardrobeFullImage)
-  photoUrl?: string | null; // full photo saved on another free provider (storage chain)
   hasMedia: boolean; // full photo in wardrobe/{id}/media/full
   hasClear?: boolean; // ~720 px feed photo in wardrobe/{id}/media/clear
   isPublic: boolean;
@@ -87,7 +83,6 @@ const toItem = (id: string, d: any): WardrobeItemResponse => ({
   gender: d?.gender ?? null,
   notes: d?.notes ?? null,
   imageUrl: d?.imageData ?? d?.imageUrl ?? null,
-  photoUrl: typeof d?.photoUrl === 'string' ? d.photoUrl : null,
   hasMedia: d?.media === 1,
   hasClear: d?.clear === 1,
   isPublic: d?.isPublic === true,
@@ -110,7 +105,7 @@ const MAX_THUMB_CHARS = 40000;
 const okThumb = (t?: string | null): t is string => !!t && /^data:image\//.test(t) && t.length <= MAX_THUMB_CHARS;
 const mediaRef = (id: string) => doc(db, COLL, id, 'media', 'full');
 const clearRef = (id: string) => doc(db, COLL, id, 'media', 'clear');
-// Clear feed photo: a WebP / JPEG data URI of at most 80 KB (CLEAR_SPEC, ~109K chars) with slack
+// Clear feed photo: a WebP / JPEG data URI of at most 56 KB now (CLEAR_SPEC; 80 KB before) with slack
 const MAX_CLEAR_CHARS = 160000;
 const okClear = (t?: string | null): t is string => !!t && /^data:image\//.test(t) && t.length <= MAX_CLEAR_CHARS;
 
@@ -157,24 +152,8 @@ export const addWardrobeItem = async (
   payload: WardrobeItemPayload,
 ): Promise<WardrobeItemResponse> => {
   const uid = String(payload.userId);
-  let full = checkImage(payload.imageUri);
-  // Free-tier storage chain: Firebase (inline, as before) until it is ~95% full, then the next
-  // configured provider (Cloudinary...). Only the thumbnail stays inline then; the full photo's URL
-  // and provider are saved on the item, so it keeps loading from there forever.
-  let photoUrl: string | null = null;
-  let storageProvider = 'firebase';
-  if (full && /^data:/.test(full)) {
-    const placed = await placePhoto(full, 'wardrobe');
-    if (placed.provider !== 'firebase') {
-      photoUrl = (placed as any).url;
-      storageProvider = placed.provider;
-    }
-  }
-  if (photoUrl && !okThumb(payload.imageThumb)) {
-    // no small thumbnail: the list shows the remote photo itself
-    full = photoUrl;
-  }
-  const split = !photoUrl && !!full && okThumb(payload.imageThumb);
+  const full = checkImage(payload.imageUri);
+  const split = !!full && okThumb(payload.imageThumb);
   const data: any = {
     userId: uid,
     name: payload.name,
@@ -187,13 +166,11 @@ export const addWardrobeItem = async (
     fabric: payload.fabric || null,
     gender: payload.gender || null,
     notes: payload.notes || null,
-    imageData: photoUrl ? (okThumb(payload.imageThumb) ? payload.imageThumb : photoUrl) : split ? payload.imageThumb : full,
+    imageData: split ? payload.imageThumb : full,
     isPublic: payload.isPublic === true,
-    storageProvider,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   };
-  if (photoUrl) data.photoUrl = photoUrl;
   if (split) data.media = 1;
   const clear = split && okClear(payload.imageClear) ? payload.imageClear : null;
   if (clear) data.clear = 1;
@@ -204,22 +181,14 @@ export const addWardrobeItem = async (
     if (split) b.set(mediaRef(ref.id), { imageData: full, userId: uid, updatedAt: serverTimestamp() });
     if (clear) b.set(clearRef(ref.id), { imageData: clear, userId: uid, updatedAt: serverTimestamp() });
     await b.commit();
-    // Firestore bytes used by this item's photos (storage usage counter, Admin > Storage)
-    const inlineBytes = [data.imageData, split ? full : null, clear].reduce(
-      (n: number, x: any) => n + (typeof x === 'string' && x.startsWith('data:') ? dataUriBytes(x) : 0),
-      0,
-    );
-    if (inlineBytes) recordUpload('firebase', inlineBytes);
     recordTask(uid, 'uploaded'); // daily task (never throws)
-    recordMonthlyProgress(uid, 'wardrobe'); // monthly task (never throws)
+    awardCoins('upload', `wardrobe_${ref.id}`); // coins (fire-and-forget)
     const now = new Date().toISOString();
     const item = { ...toItem(ref.id, data), createdAt: now, updatedAt: now };
     patchCache(uid, items => [item, ...items.filter(i => i.id !== item.id)]);
     return item;
   } catch (e: any) {
     console.warn('addWardrobeItem failed:', e?.code, e?.message);
-    // Firestore free quota exceeded: next uploads go to the next provider in the chain
-    if (isQuotaError(e)) markFull('firebase');
     throw new Error(firestoreErrorMessage(e, 'Saving item'));
   }
 };
@@ -298,10 +267,7 @@ export const hasUploadedToday = async (userId: string): Promise<boolean> => {
 };
 
 // Full-size photo for editing / the detail screen (1 read). Falls back to the thumbnail.
-export const getWardrobeFullImage = async (
-  item: Pick<WardrobeItemResponse, 'id' | 'imageUrl' | 'hasMedia'> & { photoUrl?: string | null },
-): Promise<string | null> => {
-  if (item.photoUrl) return item.photoUrl; // saved on another free provider (storage chain)
+export const getWardrobeFullImage = async (item: Pick<WardrobeItemResponse, 'id' | 'imageUrl' | 'hasMedia'>): Promise<string | null> => {
   if (!item.hasMedia) return item.imageUrl;
   try {
     const s = await getDoc(mediaRef(item.id));
@@ -392,44 +358,13 @@ export interface ClothingAnalysisResult {
 // in the APK (a Play Protect / safety red flag) and was not reachable, so every photo waited 4 s for
 // nothing. Always null now: the Add item screen asks the user to pick the category and colour.
 // To bring it back, serve it over HTTPS and call it here.
-// Now on the phone: ML Kit Image Labeling (labels -> category) + the photo's main colour
-// (utils/visionTags). null when nothing useful was found (the user picks manually).
-export const analyzeClothingPhoto = async (imageUri: string): Promise<ClothingAnalysisResult | null> => {
-  try {
-    const [labels, hex] = await Promise.all([imageLabels(imageUri), dominantColor(imageUri)]);
-    return tagsFromVision(labels, hex);
-  } catch {
-    return null;
-  }
-};
+export const analyzeClothingPhoto = async (
+  _imageUri: string,
+): Promise<ClothingAnalysisResult | null> => null;
 
-// ── One-time clean-up of the old separate feed copies (build 94) ──────────────────────────
-// Items saved between the "clear feed" and "one sharp copy" passes kept TWO big photos
-// (media/full 1600 px + media/clear 1080 px). The feed now shows media/full (>= 1080 px, < 1 MB),
-// so the extra clear copy only used free-tier space. Runs once per user per device, on the
-// owner's phone (rules: only the owner may delete their media docs). Never throws.
-const COMPACT_KEY = (uid: string) => `outfit:compactClear:v1:${uid}`;
-export const compactMyClearCopies = async (uid?: string | null): Promise<number> => {
-  if (!uid) return 0;
-  try {
-    if (await AsyncStorage.getItem(COMPACT_KEY(uid))) return 0;
-    const snap = await getDocs(query(collection(db, COLL), where('userId', '==', uid), where('clear', '==', 1)));
-    let done = 0;
-    const docs = snap.docs.filter(d => (d.data() as any)?.media === 1); // keep clear copies of items without a full copy
-    for (let i = 0; i < docs.length; i += 200) {
-      const b = writeBatch(db);
-      docs.slice(i, i + 200).forEach(d => {
-        b.delete(clearRef(d.id));
-        b.update(d.ref, { clear: 0 });
-      });
-      await b.commit();
-      done += Math.min(200, docs.length - i);
-    }
-    await AsyncStorage.setItem(COMPACT_KEY(uid), String(Date.now()));
-    if (done) console.log(`compactMyClearCopies: removed ${done} duplicate feed copies`);
-    return done;
-  } catch (e: any) {
-    console.warn('compactMyClearCopies failed:', e?.code, e?.message);
-    return 0;
-  }
-};
+// ── Old one-time clean-up of separate feed copies (build 94): switched off in build 115 ─────
+// Since the "near original" pass the full photo is up to 2048 px / 690 KB and is read only when a
+// photo is opened, so the ~1080 px clear copy (media/clear) is what feed cards show again. Deleting
+// clear copies would make the feed load the big photos, so this is now a no-op (kept so older
+// callers still compile).
+export const compactMyClearCopies = async (_uid?: string | null): Promise<number> => 0;

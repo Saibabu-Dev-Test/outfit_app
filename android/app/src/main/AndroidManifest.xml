@@ -11,6 +11,7 @@
          capture goes to the app's cache via FileProvider (react-native-image-picker, saveToPhotos off) -->
 
     <application
+      android:largeHeap="true"
       android:name=".MainApplication"
       android:label="@string/app_name"
       android:icon="@mipmap/ic_launcher"
@@ -19,12 +20,12 @@
       android:theme="@style/AppTheme"
       android:networkSecurityConfig="@xml/network_security_config"
       android:supportsRtl="true">
-      <!-- AdMob App ID. TODO(AdMob): this is Google's official TEST app id. Replace it (here AND in
-           app.json "react-native-google-mobile-ads".android_app_id AND src/config/ads.ts) with the real
-           id from your AdMob account (Apps > App settings), or ads will never earn money. -->
+      <!-- AdMob App ID (real). Keep equal to app.json "react-native-google-mobile-ads".android_app_id
+           and REAL_ADS.appId in src/config/ads.ts. Debug builds still use Google's TEST ad UNIT ids
+           (src/config/ads.ts), which is the recommended setup. Never remove: the SDK crashes at start. -->
       <meta-data
         android:name="com.google.android.gms.ads.APPLICATION_ID"
-        android:value="ca-app-pub-3940256099942544~3347511713"
+        android:value="ca-app-pub-8006246175093661~4589468267"
         tools:replace="android:value" />
       <activity
         android:name=".MainActivity"
@@ -44,12 +45,6 @@
             <category android:name="android.intent.category.BROWSABLE" />
             <data android:scheme="outfit" android:host="join" />
         </intent-filter>
-        <!-- Circle poll push notifications: outfit://circle/CIRCLE_ID/MESSAGE_ID (CircleDeepLink.tsx) -->
-        <intent-filter>
-            <action android:name="android.intent.action.VIEW" />
-            <category android:name="android.intent.category.DEFAULT" />
-            <data android:scheme="outfit" android:host="circle" />
-        </intent-filter>
       </activity>
 
       <!-- Daily reminders (8 AM / 1 PM / 7 PM) + re-arm after boot, update or clock change -->
@@ -65,7 +60,8 @@
         </intent-filter>
       </receiver>
 
-      <!-- Circle poll pushes (FCM data messages) -->
+      <!-- Push (FCM): shown on the "activity" channel; a tap opens the app with the data payload
+           (outfit_payload) as intent extras, which MainActivity hands to the app -->
       <service
         android:name=".OutfitMessagingService"
         android:exported="false">
@@ -73,10 +69,17 @@
           <action android:name="com.google.firebase.MESSAGING_EVENT" />
         </intent-filter>
       </service>
-      <!-- ML Kit: download the background-removal + labeling models with Play services ahead of use -->
+      <meta-data
+        android:name="com.google.firebase.messaging.default_notification_channel_id"
+        android:value="activity" />
+      <meta-data
+        android:name="com.google.firebase.messaging.default_notification_icon"
+        android:resource="@drawable/ic_stat_outfit" />
+
+      <!-- Download the ML Kit subject segmentation model with the app (photo background) -->
       <meta-data
         android:name="com.google.mlkit.vision.DEPENDENCIES"
-        android:value="subject_segment,ica" />
+        android:value="subject_segment" />
 
       <!-- Camera capture (react-native-image-picker) and in-app update APKs (xml/file_paths) -->
       <provider

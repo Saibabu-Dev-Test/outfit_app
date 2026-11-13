@@ -19,7 +19,6 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { colors, spacing, borderRadius, fontSize, fontWeight, themedStyles, statusBarStyle } from '../../theme';
-import { recordMonthlyOpen } from '../../services/monthlyTasksApi';
 import { useAuth } from '../../context/AuthContext';
 import { doc, setDoc, serverTimestamp, collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../../config/firebaseConfig';
@@ -29,12 +28,14 @@ import { getTodayVaaraColour, getRashiLuckyColour, getTodayLuckyMessage } from '
 import { localDateKey, greetingForNow } from '../../utils/date';
 import { useDayKey } from '../../hooks/useDayKey';
 import { markColourVoted } from '../../native/notifications';
+import { awardColourVoteCoin } from '../../services/coinsApi';
 import { firestoreErrorMessage, SERVER_SETUP_MESSAGE } from '../../utils/firebaseErrors';
 import Avatar from '../../components/Avatar';
 import { DobRequiredModal } from '../../components/DobPicker';
 import NameWithAge from '../../components/NameWithAge';
 import { ageFromDobIST, isValidDob } from '../../utils/age';
 import BirthdaysCard from '../../components/BirthdaysCard';
+import FunctionPlanCard from '../../components/FunctionPlanCard';
 import {
   checkWeeklyStars,
   getDay,
@@ -43,6 +44,7 @@ import {
   setStarProfile,
   WeeklyStar,
 } from '../../services/rewardsApi';
+import { useBottomSpace } from '../../hooks/useBottomSpace';
 
 // Colours shown in the daily vote: exactly 10, ranked 1..10
 const VOTE_COLOURS = [
@@ -120,6 +122,7 @@ const emptyTally = (): ColourTally[] =>
   VOTE_COLOURS.map((c, i) => ({ rank: i + 1, ...c, votes: 0, boys: 0, girls: 0, men: '0%', women: '0%', percentage: '0%' }));
 
 export default function HomeScreen() {
+  const modalPad = useBottomSpace(24);
   const navigation = useNavigation<any>();
   const { user, updateUserData } = useAuth();
   // Once per user: drop the old duplicate 1080 px feed copies (free-tier space); runs in the background
@@ -300,7 +303,6 @@ export default function HomeScreen() {
       }
       await recordDailyLogin(uid);
       await recordTask(uid, 'opened');
-      recordMonthlyOpen(uid); // monthly "open the app on N days" (never throws)
       if (alive) refreshPoints();
       // Weekly celebrities: claim a finished week, then load last week's list
       await checkWeeklyStars(uid);
@@ -393,6 +395,8 @@ export default function HomeScreen() {
     if (flashTimer.current) clearTimeout(flashTimer.current);
     flashTimer.current = setTimeout(() => setFlashName(null), 1500);
     setVoting(null);
+    // Coin flip + sound on every vote; +1 coin only on the first colour vote of today (once per day)
+    awardColourVoteCoin(today);
     recordTask(uid, 'voted').then(() => refreshPoints());
     // No more hourly vote reminders until 1 AM tomorrow (written locally + native alarm)
     markColourVoted(uid, today);
@@ -480,7 +484,7 @@ export default function HomeScreen() {
 
   const voterModal = (
     <Modal visible={!!voterList} transparent animationType="fade" onRequestClose={() => setVoterList(null)}>
-      <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setVoterList(null)}>
+      <TouchableOpacity style={[styles.modalOverlay, { paddingBottom: modalPad }]} activeOpacity={1} onPress={() => setVoterList(null)}>
         <View style={styles.modalCard}>
           <Text style={styles.modalTitle}>{voterList?.title}</Text>
           <FlatList
@@ -573,6 +577,7 @@ export default function HomeScreen() {
         </View>
 
         {/* 🎂 Birthdays today + next 7 days (opt-in), wishes, and the birthday circle on my birthday */}
+        {user?.id ? <FunctionPlanCard uid={String(user.id)} /> : null}
         {user?.id ? <BirthdaysCard uid={String(user.id)} /> : null}
         <DobRequiredModal visible={needDob} onSave={saveDob} />
 

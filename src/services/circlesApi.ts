@@ -38,9 +38,10 @@ import {
   arrayUnion,
   arrayRemove,
   Unsubscribe,
-  Timestamp,
 } from 'firebase/firestore';
+import { awardCoins } from './coinsApi';
 import { db } from '../config/firebaseConfig';
+import { splitChatPhoto } from './photoSplit';
 import { firestoreErrorMessage } from '../utils/firebaseErrors';
 import { MAX_BASE64_CHARS } from '../utils/imagePicker';
 import { toDate } from '../utils/date';
@@ -50,20 +51,7 @@ import { encodeGeohash, geohashNeighbours, haversineKm, roundCoord } from '../ut
 import { DistrictInfo, canJoinWithoutCode, filterDistrictCircles, filterNearbyCircles } from '../utils/district';
 import { getApproxLocation } from '../native/location';
 import { cleanAge, myAgeFields } from '../utils/age';
-import { recordMonthlyProgress } from './monthlyTasksApi';
 import { markEarnVote } from './earnApi';
-import { dataUriBytes, isQuotaError, markFull, placePhoto, recordUpload } from './photoStorage';
-
-// Circle chat PHOTOS (photo messages and photo polls) auto-delete after 60 days: each gets
-// expireAt = sent time + 60 days, and a Firestore TTL policy on messages.expireAt deletes the doc
-// (.github/workflows/retention.yml). The app also hides older photos right away (isPhotoExpired).
-// Wardrobe items and feed posts never get expireAt: they are never auto-deleted.
-export const CIRCLE_PHOTO_DAYS = 60;
-const DAY_MS = 24 * 60 * 60 * 1000;
-export const photoExpireAt = (from: Date = new Date()) =>
-  Timestamp.fromDate(new Date(from.getTime() + CIRCLE_PHOTO_DAYS * DAY_MS));
-export const isPhotoExpired = (m: { type: string; createdAt: Date | null }, now = Date.now()): boolean =>
-  (m.type === 'image' || m.type === 'poll') && !!m.createdAt && now - m.createdAt.getTime() > CIRCLE_PHOTO_DAYS * DAY_MS;
 
 export interface Circle {
   id: string;
@@ -111,7 +99,8 @@ export interface ChatMessage {
   userAge?: number | null;
   userAvatar: string | null;
   text?: string;
-  imageData?: string;
+  imageData?: string; // photo shown in the chat (clear copy on new messages)
+  hasFull?: boolean; // near-original photo in messages/{id}/media/full (getMessageFullPhoto)
   type: MessageType;
   poll?: Poll;
   createdAt: Date | null;
@@ -178,6 +167,7 @@ const toMessage = (id: string, d: any): ChatMessage => {
   };
   if (typeof d?.text === 'string') m.text = d.text;
   if (typeof d?.imageData === 'string') m.imageData = d.imageData;
+  if (d?.full === 1) m.hasFull = true;
   if (type === 'poll' && d?.poll && Array.isArray(d.poll.options)) {
     const kind: PollKind = d.poll.kind === 'wear' ? 'wear' : 'buy';
     m.poll = {
@@ -763,11 +753,7 @@ export const subscribeMessages = (
     return onSnapshot(
       query(collection(db, CIRCLES, circleId, 'messages'), orderBy('createdAt', 'desc'), limit(100)),
       snap =>
-        onData(
-          snap.docs
-            .map(d => toMessage(d.id, d.data({ serverTimestamps: 'estimate' })))
-            .filter(m => !isPhotoExpired(m)),
-        ),
+        onData(snap.docs.map(d => toMessage(d.id, d.data({ serverTimestamps: 'estimate' })))),
       e => {
         console.warn('subscribeMessages error:', e?.code, e?.message);
         onError(firestoreErrorMessage(e, 'Loading messages'));
@@ -796,7 +782,6 @@ const authorFields = (me: ChatAuthor) => ({
 });
 
 const checkImage = (uri: string, max = MAX_BASE64_CHARS + 100) => {
-  if (/^https:\/\//.test(uri)) return; // already on a free storage provider (storage chain)
   if (!/^data:image\//.test(uri)) throw new Error('Photo could not be read. Please pick it again.');
   if (uri.length > max) throw new Error('This photo is too large to send. Please pick a smaller photo.');
 };
@@ -822,19 +807,32 @@ export const sendImageMessage = async (
   me: ChatAuthor,
   imageData: string,
   caption?: string,
+  fullImage?: string | null,
 ): Promise<void> => {
   checkImage(imageData);
+  if (fullImage) checkImage(fullImage);
   if (caption) assertClean(caption, 'Please keep messages respectful 🙏');
-  // Storage chain: inline in Firestore until the free quota is ~95% used, then a free provider URL
-  const placed = await placePhoto(imageData, 'circles');
-  if (placed.provider !== 'firebase') imageData = (placed as any).url;
+  // Small copy in the message (chat list), near-original photo in media/full (opened on tap)
+  const photo = await splitChatPhoto(imageData, fullImage);
   try {
-    const data: any = { ...authorFields(me), type: 'image', imageData, expireAt: photoExpireAt() };
+    const data: any = { ...authorFields(me), type: 'image', imageData: photo.inline };
     if (caption && caption.trim()) data.text = caption.trim().slice(0, 500);
-    await addDoc(collection(db, CIRCLES, circleId, 'messages'), data);
-    if (placed.provider === 'firebase') recordUpload('firebase', dataUriBytes(imageData));
+    const ref = doc(collection(db, CIRCLES, circleId, 'messages'));
+    const b = writeBatch(db);
+    if (photo.full) {
+      data.full = 1;
+      b.set(ref, data);
+      b.set(doc(db, CIRCLES, circleId, 'messages', ref.id, 'media', 'full'), {
+        imageData: photo.full,
+        userId: me.uid,
+        createdAt: serverTimestamp(),
+      });
+    } else {
+      b.set(ref, data);
+    }
+    await b.commit();
+    awardCoins('upload', `msg_${circleId}_${ref.id}`); // coins (fire-and-forget)
   } catch (e: any) {
-    if (isQuotaError(e)) markFull('firebase');
     fail(e, 'Sending photo');
   }
   bumpLastMessage(circleId);
@@ -855,20 +853,9 @@ export const sendPollMessage = async (
   if (total > MAX_POLL_TOTAL_CHARS) {
     throw new Error('These photos are too large together. Remove one or pick smaller photos.');
   }
-  // Storage chain (see sendImageMessage)
-  const first = await placePhoto(options[0].imageData, 'circles');
-  if (first.provider !== 'firebase') {
-    const urls: string[] = [(first as any).url];
-    for (const o of options.slice(1)) {
-      const pl = await placePhoto(o.imageData, 'circles');
-      urls.push(pl.provider === 'firebase' ? o.imageData : (pl as any).url);
-    }
-    options = options.map((o, i) => ({ ...o, imageData: urls[i] }));
-  }
   try {
-    await addDoc(collection(db, CIRCLES, circleId, 'messages'), {
+    const ref = await addDoc(collection(db, CIRCLES, circleId, 'messages'), {
       ...authorFields(me),
-      expireAt: photoExpireAt(),
       type: 'poll',
       poll: {
         question: POLL_QUESTIONS[kind],
@@ -880,13 +867,10 @@ export const sendPollMessage = async (
         })),
       },
     });
-    const inline = options.reduce((n, o) => n + (o.imageData.startsWith('data:') ? dataUriBytes(o.imageData) : 0), 0);
-    if (inline) recordUpload('firebase', inline);
+    awardCoins('upload', `msg_${circleId}_${ref.id}`); // coins (fire-and-forget)
   } catch (e: any) {
-    if (isQuotaError(e)) markFull('firebase');
     fail(e, 'Sending poll');
   }
-  recordMonthlyProgress(me.uid, 'polls');
   bumpLastMessage(circleId);
 };
 
@@ -905,9 +889,38 @@ export const deleteMessage = async (circleId: string, message: ChatMessage): Pro
     }
   }
   try {
-    await deleteDoc(ref);
+    if (message.hasFull) {
+      const b = writeBatch(db);
+      b.delete(doc(ref, 'media', 'full'));
+      b.delete(ref);
+      await b.commit();
+    } else {
+      await deleteDoc(ref);
+    }
   } catch (e: any) {
     fail(e, 'Deleting message');
+  }
+};
+
+// Near-original photo of an image message (1 read, cached for the session). Never throws: falls
+// back to the photo shown in the chat.
+const msgFullCache = new Map<string, string>();
+export const getMessageFullPhoto = async (circleId: string, message: ChatMessage): Promise<string> => {
+  const shown = message.imageData || '';
+  if (!message.hasFull) return shown;
+  const key = `${circleId}_${message.id}`;
+  const hit = msgFullCache.get(key);
+  if (hit) return hit;
+  try {
+    const s = await getDoc(doc(db, CIRCLES, circleId, 'messages', message.id, 'media', 'full'));
+    const full = s.exists() ? (s.data() as any)?.imageData : null;
+    if (typeof full !== 'string' || !full) return shown;
+    if (msgFullCache.size >= 12) msgFullCache.delete(msgFullCache.keys().next().value as string);
+    msgFullCache.set(key, full);
+    return full;
+  } catch (e: any) {
+    console.warn('message full photo failed:', e?.code, e?.message);
+    return shown;
   }
 };
 
@@ -973,9 +986,10 @@ export const castPollVote = async (
       optionIndex,
       updatedAt: serverTimestamp(),
     });
-    recordMonthlyProgress(uid, 'votes');
-    markEarnVote(uid); // Earn tab: today's "vote on 1 outfit"
   } catch (e: any) {
     fail(e, 'Voting');
   }
+  // +1 coin on my first vote on this poll (coinEvents/vote_poll_<circleId>_<msgId>) + coin flip
+  awardCoins('vote', `poll_${circleId}_${messageId}`);
+  markEarnVote(uid); // Earn tab: today's "vote on 1 outfit"
 };

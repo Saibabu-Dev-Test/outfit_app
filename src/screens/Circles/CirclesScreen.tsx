@@ -23,9 +23,7 @@ import {
   Linking,
 } from 'react-native';
 import KeyboardSafeView from '../../components/KeyboardSafeView';
-import NativeAdCard from '../../ads/NativeAdCard';
-import { interleaveAds, isAdRow } from '../../ads/interleave';
-import { ADS } from '../../config/ads';
+import BannerAdSlot from '../../components/ads/BannerAdSlot';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { useDayKey } from '../../hooks/useDayKey';
@@ -48,6 +46,7 @@ import { timeAgo } from '../../utils/date';
 import { getApproxLocation, LocationFailReason } from '../../native/location';
 import { MyDistrict, pickMyDistrict, resolveMyPlace } from '../../services/districtApi';
 import CityPickerModal from '../../components/CityPickerModal';
+import { useBottomSpace } from '../../hooks/useBottomSpace';
 
 export const EMOJIS = ['👗', '🔥', '🤍', '💼', '🌟', '🕰️', '👟', '💍', '🎉', '🌸', '🧥', '🪔', '👜', '🕶️', '🥻', '💄'];
 
@@ -58,6 +57,7 @@ type TabKey = 'mine' | 'discover' | 'nearby';
 const TABS: TabKey[] = ['mine', 'discover', 'nearby'];
 
 export default function CirclesScreen() {
+  const sheetPad = useBottomSpace(16);
   const navigation = useNavigation<any>();
   const { user } = useAuth();
   const uid = user?.id;
@@ -545,9 +545,9 @@ export default function CirclesScreen() {
         {...(Platform.OS === 'android' ? { backgroundColor: colors.background } : {})}
       />
       <FlatList
-        data={busy ? [] : interleaveAds(data, ADS.listEvery)}
+        data={busy ? [] : data}
         keyExtractor={c => c.id}
-        renderItem={({ item }) => (isAdRow(item) ? <NativeAdCard width={0} variant="row" /> : renderCircle({ item }))}
+        renderItem={renderCircle}
         ListHeaderComponent={header}
         contentContainerStyle={styles.listContent}
         keyboardShouldPersistTaps="handled"
@@ -583,6 +583,8 @@ export default function CirclesScreen() {
           )
         }
       />
+      {/* Banner under the circles list (nothing when there is no ad) */}
+      <BannerAdSlot slot="circlesBanner" />
 
       {/* Create circle */}
       <Modal
@@ -597,7 +599,7 @@ export default function CirclesScreen() {
             activeOpacity={1}
             onPress={() => setCreateOpen(false)}
           />
-          <View style={styles.modalCard}>
+          <View style={[styles.modalCard, { paddingBottom: sheetPad }]}>
             <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
               <Text style={styles.modalTitle}>Create a circle</Text>
 

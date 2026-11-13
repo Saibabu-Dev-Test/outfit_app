@@ -35,6 +35,7 @@ import {
 } from '../../services/rewardsApi';
 import { getUserProfile } from '../../services/userApi';
 import { localDateKey } from '../../utils/date';
+import { useBottomSpace } from '../../hooks/useBottomSpace';
 
 interface Item {
   id: string;
@@ -49,6 +50,7 @@ interface Item {
 const DAY_LETTERS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 
 export default function AchievementsScreen({ navigation }: { navigation: any }) {
+  const bottomPad = useBottomSpace();
   const { user } = useAuth();
   const uid = user?.id || '';
   const [day, setDay] = useState<DayState | null>(null);
@@ -182,7 +184,7 @@ export default function AchievementsScreen({ navigation }: { navigation: any }) 
         <Text style={styles.title}>Achievements 🏆</Text>
       </View>
       <ScrollView
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, { paddingBottom: bottomPad }]}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -203,6 +205,15 @@ export default function AchievementsScreen({ navigation }: { navigation: any }) 
             {star ? <Text style={styles.heroChip}>⭐ Celebrity</Text> : null}
           </View>
         </View>
+
+        <TouchableOpacity style={[styles.card, styles.monthly]} onPress={() => navigation.navigate('MonthlyTasks')} activeOpacity={0.8}>
+          <Text style={styles.rowIcon}>🎯</Text>
+          <View style={styles.rowBody}>
+            <Text style={styles.rowTitle}>Monthly tasks & rewards</Text>
+            <Text style={styles.rowSub}>7 tasks · earn coins · redeem 4 rewards</Text>
+          </View>
+          <Text style={styles.monthlyGo}>›</Text>
+        </TouchableOpacity>
 
         {!day ? (
           <ActivityIndicator style={styles.spinner} color={colors.primary} />
@@ -274,6 +285,8 @@ const styles = themedStyles(() => StyleSheet.create({
     overflow: 'hidden',
   },
   spinner: { marginTop: spacing.xl },
+  monthly: { flexDirection: 'row', alignItems: 'center', marginTop: spacing.md },
+  monthlyGo: { fontSize: 26, color: colors.primary, marginLeft: spacing.sm },
   section: {
     fontSize: fontSize.md,
     fontWeight: fontWeight.extraBold,

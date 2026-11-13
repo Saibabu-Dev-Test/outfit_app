@@ -1,10 +1,12 @@
 // Me > 🔮 Astrology (జాతకం) tab: today's offline reading (services/astrologyDaily.ts), festival of
 // the day / coming soon (services/festivals.ts), and an optional one-a-day AI "More details".
-// Everything shows instantly from the phone; nothing here needs the network except "More details".
+// Free: a short summary (Good / Mixed / Caution, rashi + nakshatra, 1-2 lines). Everything else
+// (full verdict, remedies, Rahu kalam, panchang, dasha, chart, dress, festivals + plans, Porutham)
+// opens after ONE rewarded ad and stays open for the rest of the IST day (services/astroUnlock.ts).
 import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, TouchableOpacity, Image, ActivityIndicator, StyleSheet, Switch } from 'react-native';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles } from '../theme';
-import { useDayKey } from '../hooks/useDayKey';
+import { useDayKey, useIstDayKey } from '../hooks/useDayKey';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AstroLang, AstroProfile, astroLanguage, dailyReading } from '../services/astrologyDaily';
 import { LABELS } from '../i18n/astroLabels';
@@ -13,26 +15,48 @@ import { proseFor } from '../i18n/astroProse';
 import { festivalsAround, festivalText, FestivalHit } from '../services/festivals';
 import { festivalDressFor, PLAN_LABELS, planText } from '../services/festivalPlans';
 import { astroAiAvailable, fetchAstroDetails, getCachedAstroDetails } from '../services/astrologyAi';
+import { loadAstroUnlock, saveAstroUnlock, shortText } from '../services/astroUnlock';
+import { showRewardedAd } from '../native/ads';
 import type { WardrobeItemResponse } from '../services/wardrobeApi';
-import RewardedUnlockButton from '../ads/RewardedUnlockButton';
-import { isUnlockedToday } from '../ads/rewardUnlocks';
+import { formatDate } from '../utils/formatDate';
 
 interface Props {
   uid: string;
   profile: AstroProfile;
   wardrobe?: WardrobeItemResponse[] | null;
   onEditProfile: () => void;
+  onOpenPorutham?: () => void; // 💑 Pelli Porutham screen
 }
 
 const SHOW_EN_KEY = 'outfit.astro.showEnglish';
-const fill = (t: string, v: Record<string, string | number>) => t.replace(/\{(\w+)\}/g, (_, k) => String(v[k] ?? ''));
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-const shortDate = (k: string) => {
-  const [, m, d] = k.split('-').map(Number);
-  return `${d} ${MONTHS[m - 1]}`;
-};
 
-export default function AstrologyPanel({ uid, profile, wardrobe, onEditProfile }: Props) {
+// Free summary / rewarded-ad lock texts (English + Telugu; other languages show English)
+const LOCK_TEXT: Record<string, { summary: string; title: string; body: string; btn: string; busy: string; closed: string; noAd: string; open: string }> = {
+  English: {
+    summary: 'Today in short',
+    title: '🔒 Full astrology',
+    body: 'Full verdict, positives and cautions, remedies, Rahu kalam and timings, panchang, dasha, birth chart, what to wear, festivals and festival plans, and Pelli Porutham. One short ad opens everything for the rest of today.',
+    btn: '▶ Watch 1 ad to see full astrology',
+    busy: 'Loading ad…',
+    closed: 'The ad was closed before the end, so full astrology stays locked. Tap the button to try again.',
+    noAd: 'No ad is available right now. Full astrology stays locked, please try again in a little while.',
+    open: '🔓 Full astrology open for today',
+  },
+  Telugu: {
+    summary: 'ఈ రోజు సంక్షిప్తంగా',
+    title: '🔒 పూర్తి జాతకం',
+    body: 'పూర్తి ఫలితం, మంచి / జాగ్రత్తలు, పరిహారాలు, రాహు కాలం, పంచాంగం, దశ, జన్మ చార్ట్, దుస్తులు, పండుగలు, పండుగ ప్లాన్లు, పెళ్లి పొరుత్తం. ఒక్క చిన్న యాడ్ చూస్తే ఈ రోజంతా అన్నీ తెరుచుకుంటాయి.',
+    btn: '▶ 1 యాడ్ చూసి పూర్తి జాతకం చూడండి',
+    busy: 'యాడ్ లోడ్ అవుతోంది…',
+    closed: 'యాడ్ పూర్తి కాకముందే మూసేశారు, అందుకే పూర్తి జాతకం తెరవలేదు. మళ్లీ ప్రయత్నించండి.',
+    noAd: 'ఇప్పుడు యాడ్ అందుబాటులో లేదు. పూర్తి జాతకం లాక్‌లోనే ఉంటుంది, కొద్దిసేపటి తర్వాత మళ్లీ ప్రయత్నించండి.',
+    open: '🔓 ఈ రోజుకు పూర్తి జాతకం తెరిచి ఉంది',
+  },
+};
+const fill = (t: string, v: Record<string, string | number>) => t.replace(/\{(\w+)\}/g, (_, k) => String(v[k] ?? ''));
+const shortDate = (k: string) => formatDate(k); // DD-MM-YYYY
+
+export default function AstrologyPanel({ uid, profile, wardrobe, onEditProfile, onOpenPorutham }: Props) {
   const dayKey = useDayKey();
   const appLang = astroLanguage(profile.language);
   const [lang, setLang] = useState<AstroLang>(appLang);
@@ -51,12 +75,44 @@ export default function AstrologyPanel({ uid, profile, wardrobe, onEditProfile }
     AsyncStorage.setItem(SHOW_EN_KEY, v ? '1' : '0').catch(() => undefined);
   };
   const bi = lang !== 'English' && showEn;
-  // Free: a short summary. Full reading (chart, details, timings, remedies, wardrobe pair, relation,
-  // AI more) after one rewarded ad, unlocked for the rest of the day.
-  const [full, setFull] = useState(false);
+
+  // Full astrology: open for the rest of the IST day after ONE rewarded ad (services/astroUnlock.ts).
+  // istDay changes at 12:00 AM IST, which re-reads the saved day and locks it again.
+  const istDay = useIstDayKey();
+  const [unlocked, setUnlocked] = useState(false);
+  const [unlockBusy, setUnlockBusy] = useState(false);
+  const [unlockMsg, setUnlockMsg] = useState<string | null>(null);
   useEffect(() => {
-    isUnlockedToday('astro').then(setFull).catch(() => undefined);
-  }, [dayKey]);
+    let alive = true;
+    setUnlocked(false);
+    setUnlockMsg(null);
+    loadAstroUnlock(uid, istDay).then(v => alive && setUnlocked(v));
+    return () => {
+      alive = false;
+    };
+  }, [uid, istDay]);
+  const lt = LOCK_TEXT[lang] || LOCK_TEXT.English;
+  const unlockFull = async () => {
+    if (unlockBusy) return;
+    setUnlockBusy(true);
+    setUnlockMsg(null);
+    try {
+      const day = istDay;
+      const r = await showRewardedAd('astroRewarded');
+      if (r === 'earned') {
+        await saveAstroUnlock(uid, day);
+        setUnlocked(true);
+      } else if (r === 'no_ad') {
+        // No ad could load: full astrology stays LOCKED (owner rule: full astrology only after 1 ad)
+        setUnlockMsg(lt.noAd);
+      } else {
+        // Closed before the reward: stays locked, the button stays there to try again
+        setUnlockMsg(lt.closed);
+      }
+    } finally {
+      setUnlockBusy(false);
+    }
+  };
 
   // Pure and instant: recomputed only when the day, language or profile changes
   const reading = useMemo(
@@ -189,7 +245,6 @@ export default function AstrologyPanel({ uid, profile, wardrobe, onEditProfile }
         </View>
       ) : null}
 
-      {shownFest.map(festivalCard)}
 
       {reading.needsDob ? (
         <View style={[styles.card, styles.askCard]}>
@@ -200,193 +255,227 @@ export default function AstrologyPanel({ uid, profile, wardrobe, onEditProfile }
         </View>
       ) : null}
 
-      <View style={styles.card}>
-        <Text style={styles.title}>🗓️ {t.panchang}</Text>
-        {reading.panchang.map((p, i) => (
-          <View key={p.label} style={styles.row}>
-            <Text style={styles.rowLabel}>{p.label}</Text>
-            <Text style={styles.rowValue}>
-              {p.value}
-              {bi && en && en.panchang[i] && en.panchang[i].value !== p.value ? `\n${en.panchang[i].value}` : ''}
-            </Text>
-          </View>
-        ))}
-      </View>
-
-      {full && reading.chartRows.length ? (
+      {unlocked ? (
+        <>
+          <Text style={styles.unlockedTag}>{lt.open}</Text>
+          {unlockMsg ? <Text style={[styles.note, styles.centerNote]}>{unlockMsg}</Text> : null}
         <View style={styles.card}>
-          <Text style={styles.title}>🪐 {t.chart}</Text>
-          {reading.chartRows.map((r, i) => (
-            <View key={r.label} style={styles.row}>
-              <Text style={styles.rowLabel}>
-                {r.label}
-                {bi && en?.chartRows[i] ? `\n${en.chartRows[i].label}` : ''}
-              </Text>
+          <Text style={styles.title}>🗓️ {t.panchang}</Text>
+          {reading.panchang.map((p, i) => (
+            <View key={p.label} style={styles.row}>
+              <Text style={styles.rowLabel}>{p.label}</Text>
               <Text style={styles.rowValue}>
-                {r.value}
-                {bi && en?.chartRows[i] && en.chartRows[i].value !== r.value ? `\n${en.chartRows[i].value}` : ''}
+                {p.value}
+                {bi && en && en.panchang[i] && en.panchang[i].value !== p.value ? `\n${en.panchang[i].value}` : ''}
               </Text>
             </View>
           ))}
         </View>
-      ) : null}
 
-      {reading.verdict ? (
-        <View style={[styles.card, reading.verdict.rating === 'good' ? styles.vGoodCard : reading.verdict.rating === 'caution' ? styles.vBadCard : styles.vMixedCard]}>
-          <Bi style={styles.title} text={`⚖️ ${reading.verdict.headings.title}`} enText={en?.verdict ? `⚖️ ${en.verdict.headings.title}` : null} />
-          <View style={[styles.badge, reading.verdict.rating === 'good' ? styles.badgeGood : reading.verdict.rating === 'caution' ? styles.badgeBad : styles.badgeMixed]}>
-            <Text style={styles.badgeText}>
-              {reading.verdict.ratingLabel}
-              {bi && en?.verdict && en.verdict.ratingLabel !== reading.verdict.ratingLabel ? ` · ${en.verdict.ratingLabel}` : ''}
-            </Text>
-          </View>
-          <Bi style={styles.body} text={reading.verdict.summary} enText={en?.verdict?.summary} />
-          {full ? (
-          <>
-          <View style={[styles.vBox, styles.vGoodBox]}>
-            <Text style={[styles.sub, styles.vGoodText]}>✅ {reading.verdict.headings.positive}</Text>
-            {reading.verdict.positives.map((x, i) => (
-              <Bi key={x.text} style={[styles.bullet, styles.vGoodText]} text={`• ${x.areaLabel}: ${x.text}`} enText={en?.verdict?.positives[i] ? `  ${en.verdict.positives[i].text}` : null} />
+        {reading.chartRows.length ? (
+          <View style={styles.card}>
+            <Text style={styles.title}>🪐 {t.chart}</Text>
+            {reading.chartRows.map((r, i) => (
+              <View key={r.label} style={styles.row}>
+                <Text style={styles.rowLabel}>
+                  {r.label}
+                  {bi && en?.chartRows[i] ? `\n${en.chartRows[i].label}` : ''}
+                </Text>
+                <Text style={styles.rowValue}>
+                  {r.value}
+                  {bi && en?.chartRows[i] && en.chartRows[i].value !== r.value ? `\n${en.chartRows[i].value}` : ''}
+                </Text>
+              </View>
             ))}
           </View>
-          <View style={[styles.vBox, styles.vBadBox]}>
-            <Text style={[styles.sub, styles.vBadText]}>⚠️ {reading.verdict.headings.careful}</Text>
-            {reading.verdict.cautions.map((x, i) => (
-              <Bi key={x.text} style={[styles.bullet, styles.vBadText]} text={`• ${x.areaLabel}: ${x.text}`} enText={en?.verdict?.cautions[i] ? `  ${en.verdict.cautions[i].text}` : null} />
+        ) : null}
+
+        {reading.verdict ? (
+          <View style={[styles.card, reading.verdict.rating === 'good' ? styles.vGoodCard : reading.verdict.rating === 'caution' ? styles.vBadCard : styles.vMixedCard]}>
+            <Bi style={styles.title} text={`⚖️ ${reading.verdict.headings.title}`} enText={en?.verdict ? `⚖️ ${en.verdict.headings.title}` : null} />
+            <View style={[styles.badge, reading.verdict.rating === 'good' ? styles.badgeGood : reading.verdict.rating === 'caution' ? styles.badgeBad : styles.badgeMixed]}>
+              <Text style={styles.badgeText}>
+                {reading.verdict.ratingLabel}
+                {bi && en?.verdict && en.verdict.ratingLabel !== reading.verdict.ratingLabel ? ` · ${en.verdict.ratingLabel}` : ''}
+              </Text>
+            </View>
+            <Bi style={styles.body} text={reading.verdict.summary} enText={en?.verdict?.summary} />
+            <View style={[styles.vBox, styles.vGoodBox]}>
+              <Text style={[styles.sub, styles.vGoodText]}>✅ {reading.verdict.headings.positive}</Text>
+              {reading.verdict.positives.map((x, i) => (
+                <Bi key={x.text} style={[styles.bullet, styles.vGoodText]} text={`• ${x.areaLabel}: ${x.text}`} enText={en?.verdict?.positives[i] ? `  ${en.verdict.positives[i].text}` : null} />
+              ))}
+            </View>
+            <View style={[styles.vBox, styles.vBadBox]}>
+              <Text style={[styles.sub, styles.vBadText]}>⚠️ {reading.verdict.headings.careful}</Text>
+              {reading.verdict.cautions.map((x, i) => (
+                <Bi key={x.text} style={[styles.bullet, styles.vBadText]} text={`• ${x.areaLabel}: ${x.text}`} enText={en?.verdict?.cautions[i] ? `  ${en.verdict.cautions[i].text}` : null} />
+              ))}
+            </View>
+            <Text style={styles.sub}>⏳ {reading.verdict.headings.badTimes}</Text>
+            <Bi style={styles.note} text={reading.verdict.headings.timingLine} enText={en?.verdict?.headings.timingLine} />
+            {reading.verdict.badTimes.map(r => (
+              <View key={r.label} style={styles.row}>
+                <Text style={styles.rowLabel}>{r.label}</Text>
+                <Text style={styles.rowValue}>{r.value}</Text>
+              </View>
+            ))}
+            <Text style={styles.sub}>🙏 {reading.verdict.headings.remedies}</Text>
+            {reading.verdict.remedies.map((r, i) => (
+              <View key={r.label} style={styles.row}>
+                <Text style={styles.rowLabel}>
+                  {r.label}
+                  {bi && en?.verdict?.remedies[i] && en.verdict.remedies[i].label !== r.label ? `\n${en.verdict.remedies[i].label}` : ''}
+                </Text>
+                <Text style={styles.rowValue}>
+                  {r.value}
+                  {bi && en?.verdict?.remedies[i] && en.verdict.remedies[i].value !== r.value ? `\n${en.verdict.remedies[i].value}` : ''}
+                </Text>
+              </View>
             ))}
           </View>
-          <Text style={styles.sub}>⏳ {reading.verdict.headings.badTimes}</Text>
-          <Bi style={styles.note} text={reading.verdict.headings.timingLine} enText={en?.verdict?.headings.timingLine} />
-          {reading.verdict.badTimes.map(r => (
-            <View key={r.label} style={styles.row}>
-              <Text style={styles.rowLabel}>{r.label}</Text>
-              <Text style={styles.rowValue}>{r.value}</Text>
-            </View>
+        ) : null}
+
+        <View style={styles.card}>
+          <Text style={styles.title}>🔮 {t.jathakam}</Text>
+          {reading.rashiLine ? <Bi style={styles.rashi} text={reading.rashiLine} enText={en?.rashiLine} /> : null}
+          <Text style={styles.stars}>{'★'.repeat(reading.stars)}{'☆'.repeat(5 - reading.stars)}</Text>
+          <Bi style={styles.body} text={reading.overview} enText={en?.overview} />
+          <Text style={styles.sub}>😊 {t.mood}</Text>
+          <Bi style={styles.body} text={reading.mood} enText={en?.mood} />
+          <Text style={styles.sub}>✅ {t.do}</Text>
+          {reading.doList.map((d, i) => (
+            <Bi key={d} style={styles.bullet} text={`• ${d}`} enText={en ? `  ${en.doList[i] || ''}` : null} />
           ))}
-          <Text style={styles.sub}>🙏 {reading.verdict.headings.remedies}</Text>
-          {reading.verdict.remedies.map((r, i) => (
-            <View key={r.label} style={styles.row}>
-              <Text style={styles.rowLabel}>
-                {r.label}
-                {bi && en?.verdict?.remedies[i] && en.verdict.remedies[i].label !== r.label ? `\n${en.verdict.remedies[i].label}` : ''}
-              </Text>
-              <Text style={styles.rowValue}>
-                {r.value}
-                {bi && en?.verdict?.remedies[i] && en.verdict.remedies[i].value !== r.value ? `\n${en.verdict.remedies[i].value}` : ''}
-              </Text>
-            </View>
+          <Text style={styles.sub}>🙅 {t.avoid}</Text>
+          {reading.avoidList.map((d, i) => (
+            <Bi key={d} style={styles.bullet} text={`• ${d}`} enText={en ? `  ${en.avoidList[i] || ''}` : null} />
           ))}
-          </>
+          <Text style={styles.sub}>⏰ {t.lucky}</Text>
+          <Bi style={styles.body} text={reading.luckyTime} enText={en?.luckyTime} />
+          {reading.luckyNumber !== null ? (
+            <>
+              <Text style={styles.sub}>🔢 {t.luckyNumber}</Text>
+              <Text style={styles.luckyNumber}>
+                {reading.luckyNumber}
+                {reading.luckyNumber2 !== null ? ` · ${reading.luckyNumber2}` : ''}
+              </Text>
+            </>
+          ) : null}
+          <Text style={styles.sub}>🧘 {t.calm}</Text>
+          <Bi style={styles.body} text={reading.calmTime} enText={en?.calmTime} />
+          {reading.note ? (
+            <TouchableOpacity onPress={onEditProfile}>
+              <Bi style={styles.note} text={reading.note} enText={en?.note} />
+            </TouchableOpacity>
           ) : null}
         </View>
-      ) : null}
 
-      <View style={styles.card}>
-        <Text style={styles.title}>🔮 {t.jathakam}</Text>
-        {reading.rashiLine ? <Bi style={styles.rashi} text={reading.rashiLine} enText={en?.rashiLine} /> : null}
-        <Text style={styles.stars}>{'★'.repeat(reading.stars)}{'☆'.repeat(5 - reading.stars)}</Text>
-        <Bi style={styles.body} text={reading.overview} enText={en?.overview} />
-        {full ? (
-        <>
-        <Text style={styles.sub}>😊 {t.mood}</Text>
-        <Bi style={styles.body} text={reading.mood} enText={en?.mood} />
-        <Text style={styles.sub}>✅ {t.do}</Text>
-        {reading.doList.map((d, i) => (
-          <Bi key={d} style={styles.bullet} text={`• ${d}`} enText={en ? `  ${en.doList[i] || ''}` : null} />
-        ))}
-        <Text style={styles.sub}>🙅 {t.avoid}</Text>
-        {reading.avoidList.map((d, i) => (
-          <Bi key={d} style={styles.bullet} text={`• ${d}`} enText={en ? `  ${en.avoidList[i] || ''}` : null} />
-        ))}
-        <Text style={styles.sub}>⏰ {t.lucky}</Text>
-        <Bi style={styles.body} text={reading.luckyTime} enText={en?.luckyTime} />
-        {reading.luckyNumber !== null ? (
-          <>
-            <Text style={styles.sub}>🔢 {t.luckyNumber}</Text>
-            <Text style={styles.luckyNumber}>
-              {reading.luckyNumber}
-              {reading.luckyNumber2 !== null ? ` · ${reading.luckyNumber2}` : ''}
-            </Text>
-          </>
+        <View style={styles.card}>
+          <Text style={styles.title}>👗 {t.dress}</Text>
+          <Bi style={styles.dressTitle} text={reading.dress.title} enText={en?.dress.title} />
+          {swatches(reading.dress.colours.map((c, i) => ({ ...c, en: en?.dress.colours[i]?.name })))}
+          <Bi style={styles.body} text={reading.dress.why} enText={en?.dress.why} />
+          <Bi style={[styles.body, styles.idea]} text={reading.dress.idea} enText={en?.dress.idea} />
+          {reading.dress.pair ? (
+            <View style={styles.pair}>
+              <Text style={styles.sub}>{t.fromWardrobe}</Text>
+              <View style={styles.pairRow}>
+                {[reading.dress.pair.top, reading.dress.pair.bottom].map(i => (
+                  <View key={i.id} style={styles.pairItem}>
+                    {i.imageUrl ? <Image source={{ uri: i.imageUrl }} style={styles.pairImg} /> : <View style={[styles.pairImg, styles.pairEmpty]} />}
+                    <Text style={styles.pairName} numberOfLines={1}>
+                      {i.name}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+              <Text style={styles.body}>{reading.dress.pair.why}</Text>
+            </View>
+          ) : null}
+        </View>
+
+        <View style={[styles.card, styles.relCard]}>
+          <Bi style={styles.title} text={reading.relation.title} enText={en?.relation.title} />
+          <Bi style={styles.body} text={reading.relation.text} enText={en?.relation.text} />
+          {reading.relation.outing ? <Bi style={[styles.body, styles.idea]} text={`🚗 ${reading.relation.outing}`} enText={en?.relation.outing ? `🚗 ${en.relation.outing}` : null} /> : null}
+        </View>
+
+        {!fest.today.length && !fest.upcoming.length && fest.next ? (
+          <Text style={styles.nextFest}>
+            {fest.next.festival.emoji}{' '}
+            {fill(t.next, { name: festivalText(fest.next.festival, lang).name, date: shortDate(fest.next.date), n: fest.next.inDays })}
+          </Text>
         ) : null}
-        <Text style={styles.sub}>🧘 {t.calm}</Text>
-        <Bi style={styles.body} text={reading.calmTime} enText={en?.calmTime} />
-        {reading.note ? (
-          <TouchableOpacity onPress={onEditProfile}>
-            <Bi style={styles.note} text={reading.note} enText={en?.note} />
+
+        {more ? (
+          <View style={styles.card}>
+            <Text style={styles.title}>{t.more}</Text>
+            <Text style={styles.body}>{more}</Text>
+          </View>
+        ) : astroAiAvailable() && uid ? (
+          <TouchableOpacity style={styles.moreBtn} onPress={loadMore} disabled={moreBusy}>
+            {moreBusy ? (
+              <View style={styles.moreRow}>
+                <ActivityIndicator size="small" color={colors.primary} />
+                <Text style={styles.moreText}> {t.moreLoading}</Text>
+              </View>
+            ) : (
+              <Text style={styles.moreText}>{t.more}</Text>
+            )}
+          </TouchableOpacity>
+        ) : null}
+        {moreErr ? <Text style={styles.note}>{t.moreFail}</Text> : null}
+
+        {/* Festivals and festival plans come after today's astrology reading (full view only) */}
+        {shownFest.map(festivalCard)}
+
+        {onOpenPorutham ? (
+          <TouchableOpacity style={styles.moreBtn} onPress={onOpenPorutham} accessibilityLabel="Pelli Porutham">
+            <Text style={styles.moreText}>💑 Pelli Porutham · పెళ్లి పొరుత్తం</Text>
           </TouchableOpacity>
         ) : null}
         </>
-        ) : null}
-      </View>
-
-      {!full ? (
-        <View style={[styles.card, styles.askCard]}>
-          <Text style={styles.body}>
-            This is your free short reading. Watch one short ad to open today's full reading: birth chart,
-            do / avoid, lucky time and number, bad times, remedies, outfit pair from your wardrobe and relationship tips.
-          </Text>
-          <RewardedUnlockButton feature="astro" uid={uid} label="Watch ad for full reading" onUnlocked={() => setFull(true)} />
-        </View>
-      ) : null}
-
-      <View style={styles.card}>
-        <Text style={styles.title}>👗 {t.dress}</Text>
-        <Bi style={styles.dressTitle} text={reading.dress.title} enText={en?.dress.title} />
-        {swatches(reading.dress.colours.map((c, i) => ({ ...c, en: en?.dress.colours[i]?.name })))}
-        {full ? <Bi style={styles.body} text={reading.dress.why} enText={en?.dress.why} /> : null}
-        {full ? <Bi style={[styles.body, styles.idea]} text={reading.dress.idea} enText={en?.dress.idea} /> : null}
-        {full && reading.dress.pair ? (
-          <View style={styles.pair}>
-            <Text style={styles.sub}>{t.fromWardrobe}</Text>
-            <View style={styles.pairRow}>
-              {[reading.dress.pair.top, reading.dress.pair.bottom].map(i => (
-                <View key={i.id} style={styles.pairItem}>
-                  {i.imageUrl ? <Image source={{ uri: i.imageUrl }} style={styles.pairImg} /> : <View style={[styles.pairImg, styles.pairEmpty]} />}
-                  <Text style={styles.pairName} numberOfLines={1}>
-                    {i.name}
-                  </Text>
-                </View>
-              ))}
-            </View>
-            <Text style={styles.body}>{reading.dress.pair.why}</Text>
+      ) : (
+        <>
+          <View style={styles.card}>
+            <Text style={styles.title}>🌟 {lt.summary}</Text>
+            {reading.verdict ? (
+              <View style={[styles.badge, reading.verdict.rating === 'good' ? styles.badgeGood : reading.verdict.rating === 'caution' ? styles.badgeBad : styles.badgeMixed]}>
+                <Text style={styles.badgeText}>
+                  {reading.verdict.ratingLabel}
+                  {bi && en?.verdict && en.verdict.ratingLabel !== reading.verdict.ratingLabel ? ` · ${en.verdict.ratingLabel}` : ''}
+                </Text>
+              </View>
+            ) : null}
+            {/* Free summary: ONE short paragraph only (rashi line + first sentence). Everything else needs 1 ad. */}
+            <Bi
+              style={styles.body}
+              text={[reading.rashiLine, shortText(reading.verdict?.summary || reading.overview)].filter(Boolean).join(' ')}
+              enText={en ? [en.rashiLine, shortText(en.verdict?.summary || en.overview)].filter(Boolean).join(' ') : null}
+            />
           </View>
-        ) : null}
-      </View>
-
-      {full ? (
-      <View style={[styles.card, styles.relCard]}>
-        <Bi style={styles.title} text={reading.relation.title} enText={en?.relation.title} />
-        <Bi style={styles.body} text={reading.relation.text} enText={en?.relation.text} />
-        {reading.relation.outing ? <Bi style={[styles.body, styles.idea]} text={`🚗 ${reading.relation.outing}`} enText={en?.relation.outing ? `🚗 ${en.relation.outing}` : null} /> : null}
-      </View>
-      ) : null}
-
-      {!fest.today.length && !fest.upcoming.length && fest.next ? (
-        <Text style={styles.nextFest}>
-          {fest.next.festival.emoji}{' '}
-          {fill(t.next, { name: festivalText(fest.next.festival, lang).name, date: shortDate(fest.next.date), n: fest.next.inDays })}
-        </Text>
-      ) : null}
-
-      {more ? (
-        <View style={styles.card}>
-          <Text style={styles.title}>{t.more}</Text>
-          <Text style={styles.body}>{more}</Text>
-        </View>
-      ) : full && astroAiAvailable() && uid ? (
-        <TouchableOpacity style={styles.moreBtn} onPress={loadMore} disabled={moreBusy}>
-          {moreBusy ? (
-            <View style={styles.moreRow}>
-              <ActivityIndicator size="small" color={colors.primary} />
-              <Text style={styles.moreText}> {t.moreLoading}</Text>
-            </View>
-          ) : (
-            <Text style={styles.moreText}>{t.more}</Text>
-          )}
-        </TouchableOpacity>
-      ) : null}
-      {moreErr ? <Text style={styles.note}>{t.moreFail}</Text> : null}
+          <View style={[styles.card, styles.lockCard]}>
+            <Text style={styles.title}>{lt.title}</Text>
+            <Text style={styles.body}>{lt.body}</Text>
+            <TouchableOpacity
+              style={[styles.askBtn, styles.unlockBtn]}
+              onPress={unlockFull}
+              disabled={unlockBusy}
+              accessibilityLabel="Watch 1 ad to see full astrology for today">
+              {unlockBusy ? (
+                <View style={styles.moreRow}>
+                  <ActivityIndicator size="small" color={colors.textInverse} />
+                  <Text style={styles.askBtnText}> {lt.busy}</Text>
+                </View>
+              ) : (
+                <Text style={styles.askBtnText}>{lt.btn}</Text>
+              )}
+            </TouchableOpacity>
+            {unlockMsg ? <Text style={styles.note}>{unlockMsg}</Text> : null}
+          </View>
+        </>
+      )}
 
       <Bi style={styles.disclaimer} text={t.disclaimer} enText={proseFor('English').t.disclaimer} />
     </View>
@@ -394,6 +483,10 @@ export default function AstrologyPanel({ uid, profile, wardrobe, onEditProfile }
 }
 
 const styles = themedStyles(() => StyleSheet.create({
+  lockCard: { borderWidth: 1, borderColor: colors.primary },
+  unlockBtn: { alignSelf: 'stretch', alignItems: 'center' },
+  centerNote: { textAlign: 'center', marginBottom: spacing.sm },
+  unlockedTag: { fontSize: fontSize.xs, color: colors.textSecondary, marginBottom: spacing.sm, textAlign: 'center' },
   wrap: { paddingHorizontal: spacing.base, paddingTop: spacing.md, paddingBottom: spacing.xxl },
   topRow: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.sm },
   greeting: { flex: 1, fontSize: fontSize.lg, fontWeight: fontWeight.extraBold, color: colors.textPrimary },

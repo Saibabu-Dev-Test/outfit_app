@@ -1,5 +1,8 @@
 package com.outfit
 
+import android.content.Intent
+import android.media.AudioManager
+import android.os.Bundle
 import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate
 import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint.fabricEnabled
@@ -20,14 +23,35 @@ class MainActivity : ReactActivity() {
   override fun createReactActivityDelegate(): ReactActivityDelegate =
       DefaultReactActivityDelegate(this, mainComponentName, fabricEnabled)
 
+  // react-native-screens: never let Android restore old screen fragments after the process was
+  // killed in the background. Restoring them crashes with "Unable to instantiate fragment ...:
+  // calling Fragment constructor caused an exception". React Navigation rebuilds the screens itself.
+  override fun onCreate(savedInstanceState: Bundle?) {
+    super.onCreate(null)
+    // Hardware volume buttons change MEDIA volume while the app is open (the coin sound plays there)
+    volumeControlStream = AudioManager.STREAM_MUSIC
+    // Opened from a notification with a payload (e.g. like coins to flip): kept for the app
+    OutfitNotifier.capturePayload(intent)
+    // Last run crashed / was killed: show why in a native dialog before JavaScript starts, so the
+    // tester sees it even if the app closes again a moment later (CrashModule.kt)
+    CrashModule.showPendingCrash(this)
+  }
+
+  // Tapped a notification while the app was already open (singleTask)
+  override fun onNewIntent(intent: Intent) {
+    super.onNewIntent(intent)
+    setIntent(intent)
+    OutfitNotifier.capturePayload(intent)
+  }
+
   // App lock privacy: FLAG_SECURE on the lock screen, and no recents preview while the lock is on
   override fun onPause() {
-    AppLockModule.applyPrivacy(this, true)
+    try { AppLockModule.applyPrivacy(this, true) } catch (_: Throwable) {}
     super.onPause()
   }
 
   override fun onResume() {
     super.onResume()
-    AppLockModule.applyPrivacy(this, false)
+    try { AppLockModule.applyPrivacy(this, false) } catch (_: Throwable) {}
   }
 }

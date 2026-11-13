@@ -4,17 +4,32 @@
 // The picker hands over the original file (no pre-shrink), so every size is made from the original.
 import { launchCamera, launchImageLibrary, Asset, ImagePickerResponse, CameraOptions } from 'react-native-image-picker';
 import { canResize, resizeImage } from './imageResize';
-import { AVATAR_SPEC, AVATAR_THUMB_SPEC, CLEAR_SPEC, FULL_SPEC, ImageSpec, POLL_SPEC, THUMB_SPEC } from './imageSpecs';
-import { pauseAppOpenAds } from '../ads/adsService';
+import { applyPhotoBg, PhotoBgMode } from '../native/photoBackground';
+import { editPhoto } from '../native/photoEdit';
+import { NormCrop } from './cropMath';
+import { AVATAR_SPEC, AVATAR_THUMB_SPEC, CLEAR_SPEC, FULL_MAX_CHARS, FULL_SPEC, ImageSpec, POLL_SPEC, THUMB_SPEC } from './imageSpecs';
 
-// Firestore doc limit is 1 MiB; old (pre-split) photos were up to this size
-export const MAX_BASE64_CHARS = 700000;
+// Largest photo data URI accepted anywhere (one full photo: JPEG <= 690 KB = ~942K base64 chars,
+// still one per Firestore document under the 1 MiB limit). Old photos were smaller.
+export const MAX_BASE64_CHARS = FULL_MAX_CHARS;
 
 export interface PickedImage {
   dataUri: string; // full photo (spec size)
   thumbUri?: string; // thumbnail, when PickOptions.thumb is set
   clearUri?: string; // ~1080 px feed photo, when PickOptions.clear is set
   uri?: string;
+  faces?: number; // remakeImage with blurFaces: faces blurred (-1 = face detection not available)
+  baseUri?: string; // remakeImage: the processed file before the Adjust crop (undefined = original)
+  fileUri?: string; // remakeImage: the final processed full-size file (after the crop), for previews
+}
+
+// Photo options for one photo, always applied to the ORIGINAL picked file in this order:
+// background (Original / Blur level / Remove BG) -> Blur face -> Adjust crop (zoom / pan frame)
+export interface PhotoEdit {
+  mode: PhotoBgMode;
+  level?: number;
+  blurFaces?: boolean;
+  crop?: NormCrop | null;
 }
 
 export interface PickOptions {
@@ -22,15 +37,19 @@ export interface PickOptions {
   thumb?: ImageSpec | null; // also make a thumbnail of this size
   clear?: ImageSpec | null; // also make a clear feed-size copy (CLEAR_SPEC)
   maxChars?: number; // extra cap on the full photo's base64 length
+  ifSeveral?: PickOptions; // pickImages: options used instead when more than one photo was picked
 }
 
-// Posts and wardrobe items: full photo (1600 px) + 360 px thumbnail + 1080 px clear feed photo
-export const PHOTO_PICK: PickOptions = { spec: FULL_SPEC, thumb: THUMB_SPEC, clear: null };
-void CLEAR_SPEC; // kept for older code paths
+// Posts and wardrobe items: near-original full photo (2048 px JPEG <= 690 KB, opened on tap) + 360 px
+// thumbnail (grids) + ~1080 px clear copy (feed cards)
+export const PHOTO_PICK: PickOptions = { spec: FULL_SPEC, thumb: THUMB_SPEC, clear: CLEAR_SPEC };
 // Avatars are shown small; the tiny copy goes on posts / comments / likes
 export const AVATAR_PICK: PickOptions = { spec: AVATAR_SPEC, thumb: AVATAR_THUMB_SPEC };
 // A poll message / chat photo set holds up to 6 photos in one Firestore doc (1 MiB limit)
 export const POLL_PICK: PickOptions = { spec: POLL_SPEC, thumb: null };
+// Circle / birthday chat: one photo = near-original full photo (opened in the viewer) + a ~1080 px
+// clear copy shown in the chat bubble; several photos (an A-F vote) = poll-size photos as before
+export const CHAT_PICK: PickOptions = { spec: FULL_SPEC, thumb: null, clear: CLEAR_SPEC, ifSeveral: POLL_PICK };
 
 const specOf = (o: PickOptions) => o.spec || FULL_SPEC;
 
@@ -71,6 +90,29 @@ const fromAsset = async (a: Asset, o: PickOptions): Promise<PickedImage | null> 
   return { dataUri, thumbUri, clearUri, uri: a.uri };
 };
 
+// Same photo again with its photo options (background / Blur face / Adjust crop), made from the
+// ORIGINAL picked file (uri) so switching back and forth never loses quality.
+export const remakeImage = async (
+  uri: string,
+  edit: PhotoEdit,
+  opts: PickOptions = PHOTO_PICK,
+): Promise<PickedImage | null> => {
+  let src = edit.mode === 'off' ? uri : await applyPhotoBg(uri, edit.mode, edit.level);
+  let faces: number | undefined;
+  if (edit.blurFaces) {
+    const r = await editPhoto(src, { blurFaces: true });
+    src = r.uri;
+    faces = r.faces;
+  }
+  // The processed photo before the crop (shown in the Adjust frame); undefined = the original
+  const baseUri = src !== uri ? src : undefined;
+  if (edit.crop) src = (await editPhoto(src, { crop: edit.crop })).uri;
+  const p = await fromAsset({ uri: src }, opts);
+  // Previews show this full-size file (not the smaller, recompressed feed copy), so the subject's
+  // outline is seen at full resolution
+  return p ? { ...p, uri, faces, baseUri, fileUri: src !== uri ? src : undefined } : null;
+};
+
 const TOO_BIG = 'This photo is too large to save. Please pick a smaller photo or crop it.';
 
 // Resolves null when cancelled; rejects with a readable Error
@@ -91,7 +133,6 @@ export const pickImage = (source: 'camera' | 'library', opts: PickOptions = PHOT
     };
     try {
       const options = pickerOptions(opts);
-      pauseAppOpenAds();
       if (source === 'camera') launchCamera(options, cb);
       else launchImageLibrary({ ...options, selectionLimit: 1 }, cb);
     } catch (e) {
@@ -106,7 +147,6 @@ export const isDataUri = (s?: string | null): boolean => !!s && s.startsWith('da
 export const pickImages = (max: number, opts: PickOptions = POLL_PICK): Promise<{ images: PickedImage[]; skipped: number }> =>
   new Promise((resolve, reject) => {
     try {
-      pauseAppOpenAds();
       launchImageLibrary({ ...pickerOptions(opts), selectionLimit: Math.max(1, max) }, async res => {
         if (res.didCancel) return resolve({ images: [], skipped: 0 });
         if (res.errorCode || res.errorMessage) {
@@ -114,9 +154,11 @@ export const pickImages = (max: number, opts: PickOptions = POLL_PICK): Promise<
         }
         const images: PickedImage[] = [];
         let skipped = 0;
-        for (const a of (res.assets || []).slice(0, max)) {
+        const assets = (res.assets || []).slice(0, max);
+        const o = assets.length > 1 && opts.ifSeveral ? opts.ifSeveral : opts;
+        for (const a of assets) {
           try {
-            const p = await fromAsset(a, opts);
+            const p = await fromAsset(a, o);
             if (p) images.push(p);
             else skipped += 1;
           } catch {

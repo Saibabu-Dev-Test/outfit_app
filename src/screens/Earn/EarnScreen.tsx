@@ -8,11 +8,10 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ActivityIndicator, Alert, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
-import { ui } from '../../components/ui';
+import { ui } from './earnUi';
 import { colors } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
-import { showRewardedAd, showRewardedInterstitialAd } from '../../ads/adsService';
-import { recordMonthlyProgress } from '../../services/monthlyTasksApi';
+import { showRewardedAd } from '../../native/ads';
 import {
   COINS_PER_RUPEE,
   EARN_AD_COINS,
@@ -139,11 +138,14 @@ export default function EarnScreen({ navigation }: { navigation: any }) {
   const watchGateAd = async () => {
     setBusy('gateAd');
     try {
-      const ok = await showRewardedAd();
-      if (ok) {
+      const r = await showRewardedAd('earnRewarded');
+      if (r === 'earned') {
         const coins = await recordEarnAd(uid);
-        recordMonthlyProgress(uid, 'adsWatched', 1);
         if (coins) Alert.alert('Ad watched', `+${coins} coins (pending) 🪙`);
+        return;
+      }
+      if (r === 'closed') {
+        Alert.alert('Ad closed early', 'Watch the ad to the end to tick this off.');
         return;
       }
       adFails.gate = (adFails.gate || 0) + 1;
@@ -175,17 +177,20 @@ export default function EarnScreen({ navigation }: { navigation: any }) {
   const payOwedAd = async () => {
     setBusy('surveyAd');
     try {
-      let ok = await showRewardedInterstitialAd();
-      if (!ok) {
+      const r = await showRewardedAd('earnRewarded');
+      if (r === 'closed') {
+        Alert.alert('Ad closed early', 'Watch the ad to the end to open the next survey.');
+        return;
+      }
+      if (r === 'no_ad') {
         adFails.survey = (adFails.survey || 0) + 1;
         if (adFails.survey < 2) {
           Alert.alert('No ad right now', 'Could not load an ad. Please try again in a minute.');
           return;
         }
-        ok = true; // two no-fills: let the user continue
+        // two no-fills: let the user continue
       } else {
         await recordEarnAd(uid);
-        recordMonthlyProgress(uid, 'adsWatched', 1);
       }
       await clearSurveyAd(uid, latestSurveyAt(entries));
     } catch (e: any) {

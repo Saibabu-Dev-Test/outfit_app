@@ -14,12 +14,12 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, fontSize, fontWeight, spacing, borderRadius, themedStyles, statusBarStyle } from '../../theme';
 import Avatar from '../../components/Avatar';
+import BannerAdSlot from '../../components/ads/BannerAdSlot';
 import { PublicUser, searchUsers } from '../../services/userApi';
-import NativeAdCard from '../../ads/NativeAdCard';
-import { interleaveAds, isAdRow } from '../../ads/interleave';
-import { ADS } from '../../config/ads';
+import { useBottomSpace } from '../../hooks/useBottomSpace';
 
 export default function UserSearchScreen({ navigation }: { navigation: any }) {
+  const bottomPad = useBottomSpace();
   const [text, setText] = useState('');
   const [results, setResults] = useState<PublicUser[]>([]);
   const [loading, setLoading] = useState(false);
@@ -77,13 +77,11 @@ export default function UserSearchScreen({ navigation }: { navigation: any }) {
       {loading ? <ActivityIndicator style={styles.spinner} color={colors.primary} /> : null}
       {error ? <Text style={styles.error}>{error}</Text> : null}
       <FlatList
-        data={interleaveAds(results, ADS.listEvery)}
+        contentContainerStyle={{ paddingBottom: bottomPad }}
+        data={results}
         keyExtractor={u => u.id}
         keyboardShouldPersistTaps="handled"
-        renderItem={({ item }) =>
-          isAdRow(item) ? (
-            <NativeAdCard width={0} variant="row" />
-          ) : (
+        renderItem={({ item }) => (
           <TouchableOpacity
             style={styles.row}
             onPress={() => navigation.navigate('UserProfile', { userId: item.id })}>
@@ -97,14 +95,15 @@ export default function UserSearchScreen({ navigation }: { navigation: any }) {
               ) : null}
             </View>
           </TouchableOpacity>
-          )
-        }
+        )}
         ListEmptyComponent={
           !loading && text.trim() && !error ? (
             <Text style={styles.empty}>No public profiles start with "{text.trim()}".</Text>
           ) : undefined
         }
       />
+      {/* Banner under the results (nothing when there is no ad) */}
+      <BannerAdSlot slot="searchBanner" />
     </SafeAreaView>
   );
 }
