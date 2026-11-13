@@ -89,6 +89,8 @@ export default function WardrobePickerModal({
       chosen.map(async i => {
         const full = await getWardrobeFullImage(i);
         const limit = chosen.length > 1 ? Math.min(maxChars, specChars(POLL_SPEC)) : maxChars;
+        // Full copy on another storage provider (https URL): polls need inline photos -> thumbnail
+        if (full && !/^data:/.test(full)) return i.imageUrl || '';
         if (full && full.length <= limit) return full;
         if (full && canResize()) {
           try {

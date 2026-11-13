@@ -17,6 +17,8 @@ import {
 import { FREE_TIER, formatBytes, percentOf } from '../../utils/storageEstimate';
 import { timeAgo } from '../../utils/date';
 import NameWithAge from '../../components/NameWithAge';
+import { CHAIN, ProviderId, VIDEO_UPLOADS_ENABLED, totalFreeBytes } from '../../config/storage';
+import { ProviderStats, dailyRate, getStorageStats, pickProvider, providerStatus } from '../../services/photoStorage';
 
 function Bar({ pct }: { pct: number }) {
   const p = Math.min(100, Math.max(0, pct));
@@ -36,6 +38,8 @@ export default function AdminStoragePanel({ refreshKey, onNavigateUser }: { refr
   const [top, setTop] = useState<{ users: TopUser[]; scanned: number; readsUsed: number } | null>(null);
   const [topBusy, setTopBusy] = useState(false);
   const [topError, setTopError] = useState<string | null>(null);
+  // Photo storage chain (config/storage.ts): usage per free provider; read only, nothing is moved
+  const [chain, setChain] = useState<{ stats: Record<string, ProviderStats>; activeId: ProviderId | null } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -44,6 +48,9 @@ export default function AdminStoragePanel({ refreshKey, onNavigateUser }: { refr
       const [r, l] = await Promise.all([getStorageReport(), getLocalCacheInfo().catch(() => null)]);
       setReport(r);
       setLocal(l);
+      getStorageStats(0)
+        .then(async st => setChain({ stats: st, activeId: (await pickProvider('image', st).catch(() => null))?.id || null }))
+        .catch(() => undefined);
     } catch (e: any) {
       setError(e?.message || 'Could not load storage info.');
     }
@@ -194,6 +201,57 @@ export default function AdminStoragePanel({ refreshKey, onNavigateUser }: { refr
         </>
       ) : null}
 
+      {/* Photo storage chain: new photos go to the first free provider with room */}
+      <View style={styles.card}>
+        <Text style={styles.kind}>Photo storage chain (free tiers)</Text>
+        <Text style={styles.meta}>
+          New photos go to the first provider below that is set up and under 95% of its free limit; when it fills up the next
+          one takes over. Photos already saved are never moved or deleted. Wardrobe photos are kept; circle chat photos are
+          hidden after 60 days. Videos: {VIDEO_UPLOADS_ENABLED ? 'on' : 'off (not enabled yet)'}.
+        </Text>
+        {chain ? (
+          <>
+            <View style={styles.limitRow}>
+              <Text style={styles.rowTitle}>Counted uploads</Text>
+              <Text style={styles.value}>
+                {formatBytes(Object.values(chain.stats).reduce((n, x) => n + x.bytesUsed, 0))} / {formatBytes(totalFreeBytes('image'))}
+              </Text>
+            </View>
+            {CHAIN.map(p => {
+              const st = chain.stats[p.id];
+              const status = providerStatus(p, st, chain.activeId);
+              const bytes = st?.bytesUsed || 0;
+              const rate = dailyRate(st);
+              const daysLeft = rate > 0 ? Math.max(0, Math.floor((p.freeBytes * 0.95 - bytes) / rate)) : null;
+              return (
+                <View key={p.id} style={styles.chainRow}>
+                  <View style={styles.limitRow}>
+                    <Text style={[styles.rowTitle, styles.flex1]} numberOfLines={1}>
+                      {p.name}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.value,
+                        status === 'active' ? styles.good : status === 'full' ? styles.error : styles.metaInline,
+                      ]}>
+                      {status.toUpperCase()}
+                    </Text>
+                  </View>
+                  <Text style={styles.meta}>
+                    {formatBytes(bytes)} of {formatBytes(p.freeBytes)} · {st?.fileCount || 0} files
+                    {daysLeft !== null ? ` · switches in ~${daysLeft} days` : ''}
+                  </Text>
+                  <Bar pct={percentOf(bytes, p.freeBytes)} />
+                  <Text style={styles.meta}>{status === 'needs setup' ? `Setup: ${p.setupNote}` : p.freeNote}</Text>
+                </View>
+              );
+            })}
+          </>
+        ) : (
+          <Text style={styles.meta}>{loading ? 'Loading…' : 'Not available.'}</Text>
+        )}
+      </View>
+
       {/* This phone */}
       <View style={styles.card}>
         <Text style={styles.kind}>This phone (local cache)</Text>
@@ -251,4 +309,7 @@ const styles = themedStyles(() => StyleSheet.create({
   btn: { marginTop: spacing.sm, borderWidth: 1, borderColor: colors.primary, borderRadius: borderRadius.md, paddingVertical: 10, alignItems: 'center' },
   btnText: { color: colors.primary, fontWeight: fontWeight.bold, fontSize: fontSize.sm },
   spinner: { marginVertical: spacing.lg },
+  chainRow: { paddingVertical: 6, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
+  good: { color: colors.success },
+  metaInline: { color: colors.textMuted },
 }));

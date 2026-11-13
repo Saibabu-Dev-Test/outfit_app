@@ -28,6 +28,7 @@ import { awardCoins } from './coinsApi';
 import { toDate } from '../utils/date';
 import { dominantColor, imageLabels } from '../native/wardrobeVision';
 import { tagsFromVision } from '../utils/visionTags';
+import { dataUriBytes, isQuotaError, markFull, placePhoto, recordUpload } from './photoStorage';
 
 export interface WardrobeItemPayload {
   userId: number | string;
@@ -176,13 +177,29 @@ export const addWardrobeItem = async (
   if (split) data.media = 1;
   const clear = split && okClear(payload.imageClear) ? payload.imageClear : null;
   if (clear) data.clear = 1;
+  // Photo storage chain (services/photoStorage): the near-original copy goes to the first free
+  // provider with room. Firebase -> inline in media/full as before; another provider -> its URL in
+  // media/full + storageProvider on the item. Thumbnail and feed copy always stay in Firestore.
+  let fullStored: string | null = split ? full : null;
+  if (split && full && /^data:/.test(full)) {
+    const placed = await placePhoto(full, 'wardrobe');
+    if (placed.provider !== 'firebase') {
+      fullStored = (placed as { url: string }).url;
+      data.storageProvider = placed.provider;
+    }
+  }
   try {
     const ref = doc(collection(db, COLL));
     const b = writeBatch(db);
     b.set(ref, data);
-    if (split) b.set(mediaRef(ref.id), { imageData: full, userId: uid, updatedAt: serverTimestamp() });
+    if (split) b.set(mediaRef(ref.id), { imageData: fullStored, userId: uid, updatedAt: serverTimestamp() });
     if (clear) b.set(clearRef(ref.id), { imageData: clear, userId: uid, updatedAt: serverTimestamp() });
     await b.commit();
+    // Firestore usage for Admin > Storage + the chain's switch point (never throws)
+    recordUpload(
+      'firebase',
+      dataUriBytes(String(data.imageData || '')) + (fullStored && fullStored === full ? dataUriBytes(full) : 0) + (clear ? dataUriBytes(clear) : 0),
+    );
     recordTask(uid, 'uploaded'); // daily task (never throws)
     awardCoins('upload', `wardrobe_${ref.id}`); // coins (fire-and-forget)
     const now = new Date().toISOString();
@@ -191,6 +208,7 @@ export const addWardrobeItem = async (
     return item;
   } catch (e: any) {
     console.warn('addWardrobeItem failed:', e?.code, e?.message);
+    if (isQuotaError(e)) markFull('firebase'); // next photos go to the next provider
     throw new Error(firestoreErrorMessage(e, 'Saving item'));
   }
 };
@@ -310,6 +328,16 @@ export const updateWardrobeItem = async (
     }
     // New photo: the old clear copy no longer matches
     changes.clear = clear ? 1 : 0;
+    // New photo -> photo storage chain, like a new item (old photos are never moved)
+    if (full && /^data:/.test(full)) {
+      const placed = await placePhoto(full, 'wardrobe');
+      if (placed.provider !== 'firebase') {
+        full = (placed as { url: string }).url;
+        changes.storageProvider = placed.provider;
+      } else {
+        changes.storageProvider = 'firebase';
+      }
+    }
   }
   try {
     const r = doc(db, COLL, id);
@@ -324,6 +352,7 @@ export const updateWardrobeItem = async (
     return item;
   } catch (e: any) {
     console.warn('updateWardrobeItem failed:', e?.code, e?.message);
+    if (isQuotaError(e)) markFull('firebase');
     throw new Error(firestoreErrorMessage(e, 'Updating item'));
   }
 };

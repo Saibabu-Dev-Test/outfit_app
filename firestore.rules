@@ -464,6 +464,22 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // ── Photo storage chain usage: stats/storage/providers/{id} {bytesUsed, fileCount, lastUpload,
+    //    days {YYYY-MM-DD: bytes}, full, fullAt} (services/photoStorage) ──
+    // Every signed-in phone reads it to pick where new photos go and adds its own uploads
+    // (increments); nobody deletes it. Admin › Storage shows it.
+    match /stats/storage/providers/{pid} {
+      allow read: if signedIn();
+      allow create, update: if signedIn()
+        && pid in ['firebase', 'cloudinary', 'supabase', 'backblaze', 'tigris', 'imagekit', 'appwrite', 'imgbb']
+        && request.resource.data.keys().hasOnly(['bytesUsed', 'fileCount', 'lastUpload', 'days', 'full', 'fullAt'])
+        && (!('bytesUsed' in request.resource.data) || request.resource.data.bytesUsed is number)
+        && (!('fileCount' in request.resource.data) || request.resource.data.fileCount is number)
+        && (!('days' in request.resource.data) || request.resource.data.days is map)
+        && (!('full' in request.resource.data) || request.resource.data.full is bool);
+      allow delete: if false;
+    }
+
     // ── Public list of admin uids: config/admins {uids, updatedAt} ──
     // Read by any signed-in user (feedback notifies the admins); written only by an admin
     // (AdminScreen adds the admin who opens it).

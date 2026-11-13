@@ -42,6 +42,7 @@ import {
 import { awardCoins } from './coinsApi';
 import { db } from '../config/firebaseConfig';
 import { splitChatPhoto } from './photoSplit';
+import { dataUriBytes, isQuotaError, markFull, placePhoto, recordUpload } from './photoStorage';
 import { firestoreErrorMessage } from '../utils/firebaseErrors';
 import { MAX_BASE64_CHARS } from '../utils/imagePicker';
 import { toDate } from '../utils/date';
@@ -814,6 +815,14 @@ export const sendImageMessage = async (
   if (caption) assertClean(caption, 'Please keep messages respectful 🙏');
   // Small copy in the message (chat list), near-original photo in media/full (opened on tap)
   const photo = await splitChatPhoto(imageData, fullImage);
+  // Photo storage chain: the near-original copy goes to the first free provider with room
+  // (Firebase -> inline in media/full as before; another provider -> its URL in media/full).
+  // Chat photos are hidden after 60 days (utils/photoExpiry); nothing is moved or deleted.
+  let fullStored: string | null = photo.full || null;
+  if (photo.full) {
+    const placed = await placePhoto(photo.full, 'circles');
+    if (placed.provider !== 'firebase') fullStored = (placed as { url: string }).url;
+  }
   try {
     const data: any = { ...authorFields(me), type: 'image', imageData: photo.inline };
     if (caption && caption.trim()) data.text = caption.trim().slice(0, 500);
@@ -823,7 +832,7 @@ export const sendImageMessage = async (
       data.full = 1;
       b.set(ref, data);
       b.set(doc(db, CIRCLES, circleId, 'messages', ref.id, 'media', 'full'), {
-        imageData: photo.full,
+        imageData: fullStored,
         userId: me.uid,
         createdAt: serverTimestamp(),
       });
@@ -831,8 +840,10 @@ export const sendImageMessage = async (
       b.set(ref, data);
     }
     await b.commit();
+    recordUpload('firebase', dataUriBytes(photo.inline) + (fullStored && fullStored === photo.full ? dataUriBytes(photo.full) : 0));
     awardCoins('upload', `msg_${circleId}_${ref.id}`); // coins (fire-and-forget)
   } catch (e: any) {
+    if (isQuotaError(e)) markFull('firebase'); // next photos go to the next provider
     fail(e, 'Sending photo');
   }
   bumpLastMessage(circleId);
