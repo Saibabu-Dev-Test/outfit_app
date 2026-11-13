@@ -6,16 +6,19 @@ import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 
-// Coin spin sound (res/raw/coin_flip.ogg, synthesized in-house by scripts/sounds/synth_coin_flip.py,
-// no license): a 1.5 s metallic coin spin. A bright flick "ting", the coin spinning on its edge
-// (wobble speeding up 8 -> 40 Hz), a settle ting at ~1.05 s that lands with the flip
-// (CoinFlipProvider / CoinRain FLIP_MS 1500), then a smooth raised-cosine fade to silence at 1.5 s.
-// Mono 44.1 kHz vorbis, about -3 LUFS, peak <= -1 dBFS (loud, no clipping). SoundPool loads it once;
-// play() is fire-and-forget on the MEDIA stream (USAGE_MEDIA -> STREAM_MUSIC), so it follows the
-// phone's media volume. The app never changes the system volume. playAt(volume) takes the in-app
-// volume (0..1, Settings > Coin sound slider) as the SoundPool stream volume. Never throws to JS.
+// Coin sound (res/raw/coin_flip.ogg, synthesized in-house by scripts/sounds/synth_coin_flip.py,
+// no license): one soft, smooth coin "ting" (0.6 s): partials ~1.25/1.88/2.46 kHz, ~5 ms soft attack,
+// smooth exponential decay, gentle low-pass. Mono 44.1 kHz vorbis,
+// peak -6 dBFS. SoundPool loads it once; play() is fire-and-forget on the MEDIA stream (USAGE_MEDIA ->
+// STREAM_MUSIC), so it follows the phone's media volume. The app never changes the system volume.
+// playAt(volume) takes the in-app volume (Settings > Coin sound slider) as the SoundPool stream volume,
+// hard-capped at MAX_VOLUME (40% of media volume). Never throws to JS.
 class CoinSoundModule(ctx: ReactApplicationContext) : ReactContextBaseJavaModule(ctx) {
   override fun getName(): String = "OutfitCoinSound"
+
+  companion object {
+    const val MAX_VOLUME = 0.4f // the coin ting is never louder than 40% of the phone media volume
+  }
 
   private var pool: SoundPool? = null
   private var soundId = 0
@@ -58,15 +61,15 @@ class CoinSoundModule(ctx: ReactApplicationContext) : ReactContextBaseJavaModule
 
   @ReactMethod
   fun play() {
-    playAt(1.0)
+    playAt(MAX_VOLUME.toDouble())
   }
 
-  // volume 0..1 (in-app setting, default 1.0 = full); the phone's media volume still applies on top
+  // volume 0..0.4 (in-app setting, default 0.4 = the cap); the phone's media volume still applies on top
   @ReactMethod
   fun playAt(volume: Double) {
     try {
       val p = ensurePool() ?: return
-      val v = volume.toFloat().coerceIn(0f, 1f)
+      val v = volume.toFloat().coerceIn(0f, MAX_VOLUME)
       if (v <= 0f) return
       if (loaded) p.play(soundId, v, v, 1, 0, 1f) else pendingVolume = v
     } catch (_: Throwable) {}

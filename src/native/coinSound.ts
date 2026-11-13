@@ -1,12 +1,14 @@
 // Coin flip sound (Android: CoinSoundModule.kt, SoundPool on the media stream).
-// User switch + volume slider in Settings ("Coin sound"), on at full volume by default. Never throws; no-op when the
+// User switch + volume slider in Settings ("Coin sound"), on by default at the 40% cap (MAX_COIN_VOLUME). Never throws; no-op when the
 // native module is missing (older native build, tests).
 import { NativeModules, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { isSafeMode } from './safeMode';
 
 export const COIN_SOUND_KEY = 'outfitpref:coinSound'; // '0' = off; kept across sign-out
-export const COIN_VOLUME_KEY = 'outfitpref:coinVolume'; // '0'..'1', default '1' (full)
+export const COIN_VOLUME_KEY = 'outfitpref:coinVolume'; // '0'..'0.4', default '0.4'
+// The coin ting plays at most at 40% of the phone's media volume (older saved values above it are capped)
+export const MAX_COIN_VOLUME = 0.4;
 
 type NativeCoin = { play?: () => void; playAt?: (v: number) => void };
 
@@ -25,19 +27,19 @@ const native = (): NativeCoin | null => {
 };
 
 let enabled = true;
-let volume = 1;
+let volume = MAX_COIN_VOLUME;
 let loadedPref = false;
 
 export const clampVolume = (v: unknown): number => {
   const n = typeof v === 'number' ? v : parseFloat(String(v));
-  return Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 1;
+  return Number.isFinite(n) ? Math.min(MAX_COIN_VOLUME, Math.max(0, n)) : MAX_COIN_VOLUME;
 };
 
 const loadPref = async () => {
   try {
     enabled = (await AsyncStorage.getItem(COIN_SOUND_KEY)) !== '0';
     const v = await AsyncStorage.getItem(COIN_VOLUME_KEY);
-    volume = v === null ? 1 : clampVolume(v);
+    volume = v === null ? MAX_COIN_VOLUME : clampVolume(v);
   } catch {}
   loadedPref = true;
 };
@@ -74,7 +76,7 @@ export const playCoinSound = (): void => {
   try {
     if (!enabled || Platform.OS !== 'android' || volume <= 0) return;
     const n = native();
-    if (n?.playAt) n.playAt(volume);
-    else n?.play?.(); // older native build
+    if (n?.playAt) n.playAt(Math.min(volume, MAX_COIN_VOLUME));
+    else n?.play?.(); // older native build (native play() is capped at 0.4 too)
   } catch {}
 };

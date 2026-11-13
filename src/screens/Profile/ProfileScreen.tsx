@@ -52,7 +52,7 @@ import { getLockCapability, isAppLockOn, turnOffAppLock, turnOnAppLock } from '.
 import { signOutKeepLock } from '../../services/authApi';
 import { auth } from '../../config/firebaseConfig';
 import { isAutoUpdateOn, isUpdateSupported, setAutoUpdate } from '../../native/appUpdate';
-import { getCoinVolume, isCoinSoundOn, isCoinSoundSupported, playCoinSound, setCoinSound, setCoinVolume } from '../../native/coinSound';
+import { MAX_COIN_VOLUME, getCoinVolume, isCoinSoundOn, isCoinSoundSupported, playCoinSound, setCoinSound, setCoinVolume } from '../../native/coinSound';
 import VolumeSlider from '../../components/VolumeSlider';
 import { formatDate } from '../../utils/formatDate';
 import { useBottomSpace } from '../../hooks/useBottomSpace';
@@ -123,7 +123,7 @@ export default function ProfileScreen() {
   }, []);
   // Coin sound: plays with each coin flip, ON by default
   const [coinSound, setCoinSoundState] = useState(true);
-  const [coinVolume, setCoinVolumeState] = useState(1);
+  const [coinVolume, setCoinVolumeState] = useState(MAX_COIN_VOLUME);
   useEffect(() => {
     isCoinSoundOn().then(setCoinSoundState);
     getCoinVolume().then(setCoinVolumeState);
@@ -918,7 +918,7 @@ const fetchProfile = async () => {
                 <View style={styles.flexTitle}>
                   <Text style={styles.menuLabel}>Coin sound</Text>
                   <Text style={styles.lockValue}>
-                    {coinSound ? 'On: a ding when you earn coins (phone media volume × this slider)' : 'Off: coin flips are silent'}
+                    {coinSound ? 'On: a ding when you earn coins (at most 40% of phone media volume)' : 'Off: coin flips are silent'}
                   </Text>
                 </View>
               </View>
@@ -934,6 +934,7 @@ const fetchProfile = async () => {
                 <VolumeSlider
                   label="Coin sound volume"
                   value={coinVolume}
+                  max={MAX_COIN_VOLUME}
                   onChange={setCoinVolumeState}
                   onCommit={v => {
                     setCoinVolume(v).then(playCoinSound); // save, then a test ding at the new level
