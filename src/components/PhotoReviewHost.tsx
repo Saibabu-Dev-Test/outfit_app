@@ -20,7 +20,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PickOptions, PickedImage, PHOTO_PICK, remakeImage } from '../utils/imagePicker';
-import { isPhotoBgSupported, PHOTO_BG_MODES, PhotoBgMode } from '../native/photoBackground';
+import { isPhotoBgSupported, PHOTO_BG_MODES, PhotoBgMode, warmUpPhotoBg } from '../native/photoBackground';
 import { isPhotoEditSupported } from '../native/photoEdit';
 import { isFullCrop } from '../utils/cropMath';
 import { useAppLanguage } from '../i18n/appLanguage';
@@ -130,6 +130,10 @@ export default function PhotoReviewHost() {
 
   const item = items[index];
   const canBg = !!req?.review.bg && isPhotoBgSupported();
+  // Load the background model while the user looks at the photo (first tap is then fast)
+  useEffect(() => {
+    if (canBg) warmUpPhotoBg();
+  }, [canBg]);
 
   const remake = async (i: number, change: Partial<Item>) => {
     const r = reqRef.current;
