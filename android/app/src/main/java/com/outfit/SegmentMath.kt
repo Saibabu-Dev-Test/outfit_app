@@ -235,18 +235,20 @@ object SegmentMath {
   const val HOLE_FILL_MIN_CONF = 0.2f
 
   /** Soft edge width (px at a 2048 px photo) so the cut-out line never looks cut with scissors. */
-  const val FEATHER_PX = 3f
+  const val FEATHER_PX = 4f
 
   /**
    * Feathers a full-size alpha: two box passes (~Gaussian, sigma ~ [r] px) then a small inward
    * shift so the softened rim fades into the blur instead of growing a halo of old background.
    * Jagged steps and 1-2 px specks along the outline melt away. Pixels well inside stay 1.
    */
+  const val FEATHER_INSET = 0.2f
+
   fun featherAlpha(alpha: FloatArray, w: Int, h: Int, r: Int): FloatArray {
     if (r <= 0) return alpha
     val b = boxBlur(boxBlur(alpha, w, h, r), w, h, r)
     for (i in b.indices) {
-      val v = ((b[i] - 0.12f) / 0.88f).coerceIn(0f, 1f)
+      val v = ((b[i] - FEATHER_INSET) / (1f - FEATHER_INSET)).coerceIn(0f, 1f)
       b[i] = if (v < 0.01f) 0f else if (v > 0.995f) 1f else v
     }
     return b
@@ -693,8 +695,9 @@ object SegmentMath {
         alpha[i] = fieldK.alpha(x, y, px[i])
       }
     }
-    // Blur mode only: Remove BG keeps its tight edge on the plain background
-    val soft = if (blur) featherAlpha(alpha, w, h, max(1, (FEATHER_PX * scaleFor(w, h)).roundToInt())) else alpha
+    // Both modes: Blur and Remove BG get the same soft, slightly inset edge (no cut-out look,
+    // no specks of the old wall along the outline)
+    val soft = featherAlpha(alpha, w, h, max(1, (FEATHER_PX * scaleFor(w, h)).roundToInt()))
     // Pass 2: composite, split into row bands over a few cores
     val jobs = (0 until workers).map { k ->
       Thread {

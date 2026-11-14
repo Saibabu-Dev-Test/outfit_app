@@ -108,8 +108,8 @@ class SegmentMathTest {
     for (y in 0 until h step 2) for (x in 0 until w step 2) {
       val d = dist(x, y)
       val p = out[y * w + x]
-      if (d >= rad + 2) { n++; if (red(p) < 235 || green(p) < 235 || blue(p) < 235) bad++ }
-      if (d <= rad - 2) assertTrue("subject greyed at $x,$y: ${red(p)},${green(p)},${blue(p)}", red(p) > 200 && green(p) < 60)
+      if (d >= rad + 3) { n++; if (red(p) < 235 || green(p) < 235 || blue(p) < 235) bad++ }
+      if (d <= rad - 8) assertTrue("subject greyed at $x,$y: ${red(p)},${green(p)},${blue(p)}", red(p) > 200 && green(p) < 60)
     }
     assertTrue("grey fringe: $bad of $n", bad < n * 0.002)
   }
@@ -252,8 +252,8 @@ class SegmentMathTest {
     assertNotNull(blur)
     for (y in 0 until h step 3) for (x in 0 until w step 3) {
       val i = y * w + x
-      // The outline is feathered (~6 px soft edge), everything further inside stays untouched
-      if (dist(x, y) <= rad - 7) assertEquals("subject changed at $x,$y", px[i], blur!![i])
+      // The outline is feathered (~8 px soft edge), everything further inside stays untouched
+      if (dist(x, y) <= rad - 8) assertEquals("subject changed at $x,$y", px[i], blur!![i])
       if (dist(x, y) >= rad + 4) assertTrue("red glow at $x,$y", red(blur!![i]) < 60)
     }
   }
