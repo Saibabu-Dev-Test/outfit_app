@@ -184,7 +184,7 @@ object SegmentMath {
    * at most [maxArea] pixels: gaps the model left inside the dress. Larger enclosed regions (a
    * real gap between arm and body) stay background.
    */
-  fun fillHoles(keep: FloatArray, w: Int, h: Int, maxArea: Int) {
+  fun fillHoles(keep: FloatArray, w: Int, h: Int, maxArea: Int, conf: FloatArray? = null) {
     val n = w * h
     if (maxArea <= 0 || n == 0) return
     // 0 = unvisited background, 1 = subject, 2 = background reached from the border, 3 = labelled
@@ -218,8 +218,38 @@ object SegmentMath {
         if (i >= w && st[i - w].toInt() == 0) { st[i - w] = 3; q[tail++] = i - w }
         if (i < n - w && st[i + w].toInt() == 0) { st[i + w] = 3; q[tail++] = i + w }
       }
-      if (tail <= maxArea) for (j in 0 until tail) keep[q[j]] = 1f
+      if (tail > maxArea) continue
+      // With the model's confidence: a gap it is clearly sure is background (the space between an
+      // arm and the body, between the legs) stays background so it gets blurred too. Only gaps
+      // the model half-believes are subject (missed folds / pleats) are filled.
+      if (conf != null) {
+        var sum = 0f
+        for (j in 0 until tail) sum += conf[q[j]]
+        if (sum / tail < HOLE_FILL_MIN_CONF) continue
+      }
+      for (j in 0 until tail) keep[q[j]] = 1f
     }
+  }
+
+  /** A gap inside the subject is filled only when the model's mean confidence there is at least this. */
+  const val HOLE_FILL_MIN_CONF = 0.2f
+
+  /** Soft edge width (px at a 2048 px photo) so the cut-out line never looks cut with scissors. */
+  const val FEATHER_PX = 3f
+
+  /**
+   * Feathers a full-size alpha: two box passes (~Gaussian, sigma ~ [r] px) then a small inward
+   * shift so the softened rim fades into the blur instead of growing a halo of old background.
+   * Jagged steps and 1-2 px specks along the outline melt away. Pixels well inside stay 1.
+   */
+  fun featherAlpha(alpha: FloatArray, w: Int, h: Int, r: Int): FloatArray {
+    if (r <= 0) return alpha
+    val b = boxBlur(boxBlur(alpha, w, h, r), w, h, r)
+    for (i in b.indices) {
+      val v = ((b[i] - 0.12f) / 0.88f).coerceIn(0f, 1f)
+      b[i] = if (v < 0.01f) 0f else if (v > 0.995f) 1f else v
+    }
+    return b
   }
 
   /** Above this confidence a mask pixel is subject (the alpha ramp is centred here: no halo). */
@@ -332,7 +362,7 @@ object SegmentMath {
     }
     val before = keep.copyOf()
     keepMainPieces(keep, sw, sh)
-    fillHoles(keep, sw, sh, (n * MAX_HOLE_SHARE).toInt())
+    fillHoles(keep, sw, sh, (n * MAX_HOLE_SHARE).toInt(), conf)
     val allowed = maxFilter(keep, sw, sh, 1)
     val p = FloatArray(n)
     for (i in 0 until n) {
@@ -648,18 +678,32 @@ object SegmentMath {
     val solid = if (subjectLuminance(low, pLow) >= 140.0) 0xFF000000.toInt() else 0xFFFFFFFF.toInt()
     val dim = 0.9f
     val out = IntArray(w * h)
-    // The one full-size pass, split into row bands over a few cores
     val workers = max(1, min(4, Runtime.getRuntime().availableProcessors()))
     val band = (h + workers - 1) / workers
+    fun runBands(body: (Int) -> Unit) {
+      val ts = (0 until workers).map { k -> Thread { body(k) }.apply { start() } }
+      ts.forEach { it.join() }
+    }
+    // Pass 1: alpha for every pixel, then a soft feathered edge (no hard scissor line)
+    val alpha = FloatArray(w * h)
+    runBands { k ->
+      val fieldK = field.copy()
+      for (y in k * band until min(h, (k + 1) * band)) for (x in 0 until w) {
+        val i = y * w + x
+        alpha[i] = fieldK.alpha(x, y, px[i])
+      }
+    }
+    // Blur mode only: Remove BG keeps its tight edge on the plain background
+    val soft = if (blur) featherAlpha(alpha, w, h, max(1, (FEATHER_PX * scaleFor(w, h)).roundToInt())) else alpha
+    // Pass 2: composite, split into row bands over a few cores
     val jobs = (0 until workers).map { k ->
       Thread {
-        val fieldK = field.copy()
         val nb = FloatArray(4); val ob = FloatArray(4); val fm = FloatArray(4)
         for (y in k * band until min(h, (k + 1) * band)) {
           for (x in 0 until w) {
             val i = y * w + x
             val p = px[i]
-            val a = fieldK.alpha(x, y, p)
+            val a = soft[i]
             if (a >= 1f) { out[i] = p or (0xFF shl 24); continue }
             val nr: Float; val ng: Float; val nbl: Float
             if (blurGrid != null) {

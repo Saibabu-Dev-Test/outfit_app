@@ -252,9 +252,31 @@ class SegmentMathTest {
     assertNotNull(blur)
     for (y in 0 until h step 3) for (x in 0 until w step 3) {
       val i = y * w + x
-      if (dist(x, y) <= rad - 3) assertEquals("subject changed at $x,$y", px[i], blur!![i])
+      // The outline is feathered (~6 px soft edge), everything further inside stays untouched
+      if (dist(x, y) <= rad - 7) assertEquals("subject changed at $x,$y", px[i], blur!![i])
       if (dist(x, y) >= rad + 4) assertTrue("red glow at $x,$y", red(blur!![i]) < 60)
     }
+  }
+
+  @Test fun blurEdgeIsSoftNotAScissorCut() {
+    val px = photo()
+    val blur = SegmentMath.process(px, mask(), w, h, "blur", 3, null, s)!!
+    // Across the outline there are several in-between pixels, not a 1 px jump
+    var mid = 0
+    val y = cy.toInt()
+    for (x in (cx + rad - 10).toInt()..(cx + rad + 10).toInt()) { val r = red(blur[y * w + x]); if (r in 70..190) mid++ }
+    assertTrue("hard edge: only $mid soft pixels", mid >= 3)
+  }
+
+  @Test fun gapTheModelSaysIsBackgroundIsNotFilled() {
+    val ww = 200; val hh = 200
+    val keep = FloatArray(ww * hh) { i -> val x = i % ww; val y = i / ww; if (x in 20 until 180 && y in 20 until 180) 1f else 0f }
+    val conf = FloatArray(ww * hh) { keep[it] }
+    for (y in 50 until 55) for (x in 50 until 55) { keep[y * ww + x] = 0f; conf[y * ww + x] = 0.35f } // missed fold
+    for (y in 90 until 98) for (x in 90 until 98) { keep[y * ww + x] = 0f; conf[y * ww + x] = 0.02f } // arm-body gap
+    SegmentMath.fillHoles(keep, ww, hh, 100, conf)
+    assertEquals(1f, keep[52 * ww + 52], 0f)
+    assertEquals(0f, keep[94 * ww + 94], 0f)
   }
 
   @Test fun noSubjectKeepsThePhoto() {
