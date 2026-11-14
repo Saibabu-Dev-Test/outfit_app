@@ -2,7 +2,7 @@
 // 1. Daily gate (resets 00:00 IST): watch 1 rewarded ad + vote on 1 outfit, ticked live from
 //    users/{uid}/earnDaily/{day}. Until both are done only the checklist shows.
 // 2. Unlocked: balance, daily check-in, Surveys (CPX Research wall, one ad after each completed
-//    survey before the next one opens), Offerwall.GG, referral code, UPI + withdrawal.
+//    survey before the next one opens), Offerwall.GG, BitLabs (surveys & offers), referral code, UPI + withdrawal.
 // Values: config/earn.ts. Data: services/earnApi.ts. Maths: services/earnLedger.ts.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
@@ -22,7 +22,9 @@ import {
   HOLD_DAYS_MIN,
   MIN_WITHDRAW_RUPEES,
   USER_SHARE,
+  bitlabsWallUrl,
   cpxWallUrl,
+  isBitlabsConfigured,
   isCpxConfigured,
   offerwallUrl,
   rupeesText,
@@ -226,6 +228,14 @@ export default function EarnScreen({ navigation }: { navigation: any }) {
     navigation.navigate('EarnWall', { url, title: 'Offers', kind: 'offer' });
   };
 
+  const openBitlabs = () => {
+    if (!isBitlabsConfigured()) {
+      Alert.alert('Surveys & offers', 'BitLabs is coming soon. Check back in a few days.');
+      return;
+    }
+    navigation.navigate('EarnWall', { url: bitlabsWallUrl(uid), title: 'BitLabs', kind: 'offer' });
+  };
+
   const onSaveUpi = async () => {
     setBusy('upi');
     const r = await saveUpi(uid, upiInput);
@@ -352,6 +362,16 @@ export default function EarnScreen({ navigation }: { navigation: any }) {
           </Text>
           <TouchableOpacity style={[ui.btn, { marginTop: 10 }]} onPress={openOffers}>
             <Text style={ui.btnText}>{offerwallUrl(uid) ? 'Open offers' : 'Coming soon'}</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={ui.card}>
+          <Text style={ui.h2}>📋 Surveys & offers by BitLabs</Text>
+          <Text style={ui.body}>
+            Surveys, offers and games from BitLabs. Earnings depend on you and the company. You get {Math.round(USER_SHARE * 100)}% of what BitLabs pays, held {HOLD_DAYS_MIN}–{HOLD_DAYS_MAX} days.
+          </Text>
+          <TouchableOpacity style={[ui.btn, { marginTop: 10 }]} onPress={openBitlabs}>
+            <Text style={ui.btnText}>{isBitlabsConfigured() ? 'Open BitLabs' : 'Coming soon'}</Text>
           </TouchableOpacity>
         </View>
 

@@ -46,6 +46,11 @@ export const CPX_HASH_ENDPOINT: string = '';
 // id goes, e.g. 'https://offerwall.gg/wall/XXXX?user_id={uid}'. Empty = "coming soon".
 export const OFFERWALL_GG_URL: string = '';
 
+// BitLabs (surveys + offers in one wall). The app/API token is PUBLIC (it is in every wall link),
+// so it is fine in git. The BitLabs Secret Key and S2S key are secrets: server only (server/earn/,
+// secrets.BITLABS_SECRET), never here. Empty token = "coming soon".
+export const BITLABS_TOKEN: string = '68646bb9-fb3b-45db-8043-a92bd5a2ba21';
+
 export const coinsToRupees = (coins: number): number => Math.round((coins / COINS_PER_RUPEE) * 100) / 100;
 export const rupeesText = (coins: number): string => `₹${coinsToRupees(coins).toFixed(2)}`;
 
@@ -64,3 +69,12 @@ export const cpxWallUrl = (uid: string, hash: string): string =>
 
 export const offerwallUrl = (uid: string): string | null =>
   OFFERWALL_GG_URL ? OFFERWALL_GG_URL.replace('{uid}', encodeURIComponent(uid)) : null;
+
+export const isBitlabsConfigured = (): boolean => !!BITLABS_TOKEN && !BITLABS_TOKEN.includes('PLACEHOLDER');
+
+// BitLabs web offer wall link (developer.bitlabs.ai/docs/iframeweb-integration: uid + token are the
+// only mandatory params). uid comes back to the server as [%USER:UID%] in the reward callback.
+export const bitlabsWallUrl = (uid: string): string =>
+  'https://web.bitlabs.ai/' +
+  `?uid=${encodeURIComponent(uid)}` +
+  `&token=${encodeURIComponent(BITLABS_TOKEN)}`;
