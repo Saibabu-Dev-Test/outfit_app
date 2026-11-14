@@ -355,7 +355,7 @@ class AppLockModule(private val ctx: ReactApplicationContext) : ReactContextBase
     try {
       val hashes = signingSha256(ctx)
       val map = com.facebook.react.bridge.Arguments.createMap()
-      map.putBoolean("ok", hashes.any { it.equals(EXPECTED_SIGNING_SHA256, ignoreCase = true) })
+      map.putBoolean("ok", hashes.any { h -> ALLOWED_SIGNING_SHA256.any { h.equals(it, ignoreCase = true) } })
       map.putString("sha256", hashes.firstOrNull() ?: "")
       promise.resolve(map)
     } catch (e: Exception) {
@@ -496,8 +496,13 @@ class AppLockModule(private val ctx: ReactApplicationContext) : ReactContextBase
      *   keytool -list -v -keystore <your.keystore> -alias <alias>   (the "SHA256:" line)
      * or run `./gradlew signingReport` and copy the release variant's "SHA-256" line.
      */
+    // New release key (rotated Nov 2026, same as EXPECTED_CERT_SHA256 in .github/workflows/main.yml)
     const val EXPECTED_SIGNING_SHA256 =
+      "E4:59:0A:B6:71:C4:6D:C8:7E:F3:32:88:E0:6C:3B:55:7D:A3:5F:83:B3:42:3B:FF:D9:65:12:DC:21:88:E8:E2"
+    // Old release key, still accepted so older installs keep working
+    const val LEGACY_SIGNING_SHA256 =
       "20:8C:35:C0:3D:12:DA:97:9F:53:A6:99:6D:A4:1B:DA:A4:6F:7B:30:5B:88:B3:85:4C:55:94:68:6D:2C:32:4B"
+    val ALLOWED_SIGNING_SHA256 = listOf(EXPECTED_SIGNING_SHA256, LEGACY_SIGNING_SHA256)
 
     @Volatile var lockEnabled = false
     @Volatile var lockScreenShown = false
@@ -542,7 +547,7 @@ class AppLockModule(private val ctx: ReactApplicationContext) : ReactContextBase
     fun signatureOk(context: Context): Boolean {
       signatureChecked?.let { return it }
       val ok = try {
-        signingSha256(context).any { it.equals(EXPECTED_SIGNING_SHA256, ignoreCase = true) }
+        signingSha256(context).any { h -> ALLOWED_SIGNING_SHA256.any { h.equals(it, ignoreCase = true) } }
       } catch (e: Exception) {
         false
       }
