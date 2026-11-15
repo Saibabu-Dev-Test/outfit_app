@@ -372,12 +372,6 @@ export default function EarnScreen({ navigation }: { navigation: any }) {
           </TouchableOpacity>
         </View>
 
-        <TouchableOpacity onPress={() => navigation.navigate('Terms')} style={{ marginBottom: 12 }}>
-          <Text style={[ui.muted, { textAlign: 'center', textDecorationLine: 'underline' }]}>
-            How payments, holds and withdrawals work: see Terms & About
-          </Text>
-        </TouchableOpacity>
-
         <View style={ui.card}>
           <Text style={ui.h2}>🤝 Invite friends</Text>
           <Text style={ui.body}>
