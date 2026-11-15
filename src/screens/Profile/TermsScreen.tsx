@@ -7,8 +7,9 @@ import { borderRadius, colors, fontSize, fontWeight, spacing, themedStyles } fro
 import { COIN_POINTS, COIN_TIERS } from '../../config/coins';
 import { LIKE_LEVELS } from '../../config/likeLevels';
 import { REWARDS, TASK_COINS } from '../../config/monthlyTasks';
+import { COINS_PER_RUPEE, HOLD_DAYS_MAX, HOLD_DAYS_MIN, MIN_WITHDRAW_RUPEES, USER_SHARE } from '../../config/earn';
 
-export const TERMS_UPDATED = '12 Nov 2026';
+export const TERMS_UPDATED = '15 Nov 2026';
 
 const tiers = [...COIN_TIERS].reverse().map(t => `${t.label} from ${t.min.toLocaleString()} coins`).join(' · ');
 const levels = [...LIKE_LEVELS].reverse().map(l => `${l.label} from ${l.min.toLocaleString()} likes`).join(' · ');
@@ -59,6 +60,16 @@ const SECTIONS: { title: string; lines: string[] }[] = [
       ...REWARDS.map(r => `${r.emoji} ${r.title}: ${r.cost.toLocaleString()} coins. ${r.description}.`),
       'Rewards are checked and approved by the Outfit team. If a claim is rejected, the coins come back to you.',
       'We plan to add more benefits for active members in future updates: more rewards, shopping offers and special badges. Coins are a fun loyalty point inside the app, not money, and cannot be sold or exchanged for cash.',
+    ],
+  },
+  {
+    title: '💰 Earn: surveys, offers and payments',
+    lines: [
+      'Surveys, offers and games on the Earn tab come from third-party partners. What each task pays depends on you and the partner, and is never guaranteed.',
+      `You get ${Math.round(USER_SHARE * 100)}% of what the partner pays Outfit for a task you complete. Outfit keeps the remaining ${100 - Math.round(USER_SHARE * 100)}% to run the app.`,
+      `Earnings from surveys and offers stay on hold for ${HOLD_DAYS_MIN}-${HOLD_DAYS_MAX} days, then become withdrawable. A partner can cancel a completion it finds invalid during this time.`,
+      `${COINS_PER_RUPEE} Earn coins = ₹1. You can withdraw to your UPI ID once you have ₹${MIN_WITHDRAW_RUPEES} or more. Every withdrawal is checked and approved by the Outfit team.`,
+      'Cheating, fake answers, VPNs or multiple accounts can lead to cancelled earnings and a removed account.',
     ],
   },
   {

@@ -18,10 +18,7 @@ import {
   EARN_CHECKIN_COINS,
   EARN_REFERRAL_COINS,
   EARN_VOTE_COINS,
-  HOLD_DAYS_MAX,
-  HOLD_DAYS_MIN,
   MIN_WITHDRAW_RUPEES,
-  USER_SHARE,
   bitlabsWallUrl,
   cpxWallUrl,
   isBitlabsConfigured,
@@ -230,10 +227,10 @@ export default function EarnScreen({ navigation }: { navigation: any }) {
 
   const openBitlabs = () => {
     if (!isBitlabsConfigured()) {
-      Alert.alert('Surveys & offers', 'BitLabs is coming soon. Check back in a few days.');
+      Alert.alert('Surveys & offers', 'Coming soon. Check back in a few days.');
       return;
     }
-    navigation.navigate('EarnWall', { url: bitlabsWallUrl(uid), title: 'BitLabs', kind: 'offer' });
+    navigation.navigate('EarnWall', { url: bitlabsWallUrl(uid), title: 'Surveys & offers', kind: 'offer' });
   };
 
   const onSaveUpi = async () => {
@@ -343,7 +340,7 @@ export default function EarnScreen({ navigation }: { navigation: any }) {
         <View style={ui.card}>
           <Text style={ui.h2}>📝 Surveys</Text>
           <Text style={ui.body}>
-            Answer paid surveys from CPX Research. You get {Math.round(USER_SHARE * 100)}% of what the survey pays. Earnings are held {HOLD_DAYS_MIN}–{HOLD_DAYS_MAX} days, then become withdrawable.
+            Answer paid surveys and earn coins.
           </Text>
           {owed ? <Text style={[ui.muted, { marginTop: 6 }]}>Survey done! Watch 1 ad to open the next survey.</Text> : null}
           <TouchableOpacity style={[ui.btn, { marginTop: 10 }, busy === 'survey' || busy === 'surveyAd' ? ui.btnOff : null]} onPress={openSurveys} disabled={!!busy}>
@@ -356,9 +353,9 @@ export default function EarnScreen({ navigation }: { navigation: any }) {
         </View>
 
         <View style={ui.card}>
-          <Text style={ui.h2}>🎯 Offers (Offerwall.GG)</Text>
+          <Text style={ui.h2}>🎯 Offers</Text>
           <Text style={ui.body}>
-            Try apps and complete offers. You get {Math.round(USER_SHARE * 100)}% of the payout, held {HOLD_DAYS_MIN}–{HOLD_DAYS_MAX} days.
+            Try apps and complete offers to earn coins.
           </Text>
           <TouchableOpacity style={[ui.btn, { marginTop: 10 }]} onPress={openOffers}>
             <Text style={ui.btnText}>{offerwallUrl(uid) ? 'Open offers' : 'Coming soon'}</Text>
@@ -366,12 +363,12 @@ export default function EarnScreen({ navigation }: { navigation: any }) {
         </View>
 
         <View style={ui.card}>
-          <Text style={ui.h2}>📋 Surveys & offers by BitLabs</Text>
+          <Text style={ui.h2}>📋 Surveys & offers</Text>
           <Text style={ui.body}>
-            Surveys, offers and games from BitLabs. Earnings depend on you and the company. You get {Math.round(USER_SHARE * 100)}% of what BitLabs pays, held {HOLD_DAYS_MIN}–{HOLD_DAYS_MAX} days.
+            Surveys, offers and games. Earnings depend on you and the task.
           </Text>
           <TouchableOpacity style={[ui.btn, { marginTop: 10 }]} onPress={openBitlabs}>
-            <Text style={ui.btnText}>{isBitlabsConfigured() ? 'Open BitLabs' : 'Coming soon'}</Text>
+            <Text style={ui.btnText}>{isBitlabsConfigured() ? 'Open' : 'Coming soon'}</Text>
           </TouchableOpacity>
         </View>
 
