@@ -90,3 +90,7 @@ hosting-public/privacy/
 *.jks
 *.keystore
 !android/app/debug.keystore
+
+# Cloudflare Worker (server/earn-worker): wrangler local state / secrets file
+.wrangler/
+.dev.vars

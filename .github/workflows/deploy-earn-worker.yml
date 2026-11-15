@@ -1,0 +1,85 @@
+name: Deploy earn Worker (Cloudflare, free plan)
+
+# Deploys server/earn-worker (BitLabs reward / reconciliation callback) to Cloudflare Workers on
+# the free plan: https://outfit-earn.<account-subdomain>.workers.dev/bitlabsPostback
+# Runs when the Worker changes on main, or by hand from the Actions tab (workflow_dispatch).
+#
+# Repo secrets (Settings > Secrets and variables > Actions):
+#   CLOUDFLARE_API_TOKEN      Cloudflare API token with "Edit Cloudflare Workers" permission
+#   CLOUDFLARE_ACCOUNT_ID     Cloudflare account id
+#   BITLABS_SECRET            BitLabs dashboard > App > Integration > Secret Key
+#   FIREBASE_SERVICE_ACCOUNT  Google service account JSON key with Firestore access (outfit-vote-9edca)
+# Without CLOUDFLARE_API_TOKEN (or the account id) the job is skipped with a warning instead of failing.
+on:
+  push:
+    branches: [main]
+    paths:
+      - server/earn-worker/**
+      - .github/workflows/deploy-earn-worker.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-earn-worker
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check Cloudflare secrets
+        id: cfg
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          BITLABS_SECRET: ${{ secrets.BITLABS_SECRET }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          if [ -z "$CF_TOKEN" ] || [ -z "$CF_ACCOUNT" ]; then
+            echo "::warning::CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID not set: earn Worker NOT deployed."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+          if [ -z "$BITLABS_SECRET" ] || [ -z "$FIREBASE_SERVICE_ACCOUNT" ]; then
+            echo "::warning::BITLABS_SECRET / FIREBASE_SERVICE_ACCOUNT not set: deploying code only; worker secrets unchanged (callbacks answer 403/500 until both are set)."
+            echo "secrets=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "secrets=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.cfg.outputs.ready == 'true'
+
+      - uses: actions/setup-node@v4
+        if: steps.cfg.outputs.ready == 'true'
+        with:
+          node-version: 22
+
+      - name: Deploy Worker + secrets
+        if: steps.cfg.outputs.ready == 'true' && steps.cfg.outputs.secrets == 'true'
+        uses: cloudflare/wrangler-action@v3
+        env:
+          BITLABS_SECRET: ${{ secrets.BITLABS_SECRET }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: "4"
+          workingDirectory: server/earn-worker
+          command: deploy
+          secrets: |
+            BITLABS_SECRET
+            FIREBASE_SERVICE_ACCOUNT
+
+      - name: Deploy Worker (code only)
+        if: steps.cfg.outputs.ready == 'true' && steps.cfg.outputs.secrets != 'true'
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: "4"
+          workingDirectory: server/earn-worker
+          command: deploy
