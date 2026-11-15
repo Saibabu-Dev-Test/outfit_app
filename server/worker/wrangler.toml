@@ -1,0 +1,6 @@
+name = "outfit-earn"
+main = "worker.js"
+compatibility_date = "2026-11-01"
+
+[triggers]
+crons = ["30 0 * * *"] # daily 06:00 IST: release held earnings
