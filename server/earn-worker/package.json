@@ -1,0 +1,13 @@
+{
+  "name": "outfit-earn-worker",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Free Cloudflare Worker hosting the BitLabs reward callback (deployed by .github/workflows/deploy-earn-worker.yml)",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}

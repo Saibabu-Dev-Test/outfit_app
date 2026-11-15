@@ -35,3 +35,31 @@ https://<YOUR-FUNCTION-HOST>/bitlabsPostback?uid=[%USER:UID%]&val=[%VALUE:USD%]&
   bad hash, `500` on a storage error so BitLabs retries.
 - `USD_TO_INR` (83) is a fixed rate in `index.js`; update it by hand when the rupee moves.
 - Test with the dashboard's callback tester (Integration → Test callback).
+
+## Free host: Cloudflare Worker (`server/earn-worker`)
+
+`bitlabsPostback` also runs as a free Cloudflare Worker (free plan, no Blaze needed), with the same
+behaviour as the handler in `index.js`. It writes to Firestore (`outfit-vote-9edca`) through the REST
+API with a service account; server writes bypass the security rules, so `firestore.rules` stays as is.
+`.github/workflows/deploy-earn-worker.yml` deploys it on every push to `main` that touches
+`server/earn-worker/**` (or by hand from the Actions tab), and skips with a warning when the
+Cloudflare secrets are not set.
+
+BitLabs callback URL (replace `<account-subdomain>` with your workers.dev subdomain, shown in the
+Cloudflare dashboard → Workers & Pages, and in the deploy log):
+
+```
+https://outfit-earn.<account-subdomain>.workers.dev/bitlabsPostback?uid=[%USER:UID%]&val=[%VALUE:USD%]&tx=[%TX%]&type=[%ACTIVITY:TYPE%]&ref=[%REF%]
+```
+
+Repo secrets to add (GitHub → Settings → Secrets and variables → Actions); the workflow pushes the
+last two to the Worker as Worker secrets:
+
+- `CLOUDFLARE_API_TOKEN`: Cloudflare API token with the "Edit Cloudflare Workers" template.
+- `CLOUDFLARE_ACCOUNT_ID`: Cloudflare account id (dashboard sidebar).
+- `BITLABS_SECRET`: BitLabs → Integration → Secret Key.
+- `FIREBASE_SERVICE_ACCOUNT`: the whole JSON key of a Google service account in `outfit-vote-9edca`
+  with Firestore write access (e.g. role "Cloud Datastore User"), pasted as one secret.
+
+Optional Worker secret `BITLABS_CALLBACK_BASE` (set with `wrangler secret put`) pins the scheme + host
+used for the hash; not needed on workers.dev. Never commit any of these values.

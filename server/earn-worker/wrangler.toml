@@ -1,0 +1,14 @@
+# Cloudflare Worker (free plan) for the BitLabs reward / reconciliation callback.
+# Deployed by .github/workflows/deploy-earn-worker.yml. Only free features: one module worker on
+# workers.dev, no KV / D1 / R2 / Durable Objects / Queues / cron, no paid usage model.
+# Secrets are pushed by the workflow (wrangler secret), never written here:
+#   BITLABS_SECRET            BitLabs dashboard > App > Integration > Secret Key
+#   FIREBASE_SERVICE_ACCOUNT  Google service account JSON key (Firestore access) as one string
+#   BITLABS_CALLBACK_BASE     optional: exact https://host BitLabs calls, to pin scheme + host
+name = "outfit-earn"
+main = "src/index.js"
+compatibility_date = "2026-11-01"
+workers_dev = true
+
+[vars]
+FIREBASE_PROJECT_ID = "outfit-vote-9edca"
