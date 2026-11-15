@@ -70,4 +70,11 @@ describe('removed UI stays removed', () => {
     const noAd = src.slice(src.indexOf("r === 'no_ad'"), src.indexOf('Closed before the reward'));
     expect(noAd).not.toMatch(/saveAstroUnlock|setUnlocked\(true\)/);
   });
+
+  it('Earn tab shows no partner names or payout percentages (they live in Terms)', () => {
+    const src = read('src/screens/Earn/EarnScreen.tsx');
+    expect(src).not.toMatch(/from CPX Research|\(Offerwall\.GG\)|by BitLabs|Open BitLabs|from BitLabs/);
+    expect(src).not.toMatch(/USER_SHARE|You get \{/);
+    expect(read('src/screens/Profile/TermsScreen.tsx')).toMatch(/USER_SHARE/);
+  });
 });
