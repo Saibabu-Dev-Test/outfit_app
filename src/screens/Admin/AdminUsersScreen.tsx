@@ -1,6 +1,9 @@
 // 📊 Admin tracking (admins only, opened from the Me tab): users (total, new today / this week,
 // active today), app content counts, ads status on this phone, and every feature with its status. Four Firestore count() aggregations (services/adminStats.getUserCounts), so no
 // user docs are read. The full gender / age breakdown stays in Admin > Stats.
+// Owner only: each number opens its list (AdminList), and 💰 Earnings shows the real partner
+// credits from the earn ledger (services/adminEarnings.ts). Earn sources in 🧩 Features get their
+// status from the real config (featureTracker.earnFeatures).
 import React, { useCallback, useState } from 'react';
 import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -10,7 +13,20 @@ import { useAuth } from '../../context/AuthContext';
 import useIsAdmin from '../../hooks/useIsAdmin';
 import { AppCounts, getAppCounts, getUserCounts, UserCounts } from '../../services/adminStats';
 import { adStatuses } from '../../native/ads';
-import { FEATURE_STATUS_LABEL, TRACKED_FEATURES } from '../../config/featureTracker';
+import { FEATURE_STATUS_LABEL, TRACKED_FEATURES, currentEarnConfig, earnFeatures } from '../../config/featureTracker';
+import { AdminListKind } from '../../services/adminLists';
+import { isOwnerUser } from '../../services/adminSystem';
+import {
+  EARN_PARTNERS,
+  EARN_PARTNER_LABEL,
+  EarnBucket,
+  EarningsReport,
+  STATUS_ICON,
+  categoryLabel,
+  getEarningsReport,
+  hasEarnings,
+  rupees,
+} from '../../services/adminEarnings';
 import { timeAgo } from '../../utils/date';
 import { useBottomSpace } from '../../hooks/useBottomSpace';
 
@@ -25,10 +41,24 @@ export default function AdminUsersScreen({ navigation }: { navigation: any }) {
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const owner = isOwnerUser();
+  const [earn, setEarn] = useState<EarningsReport | null>(null);
+  const [earnError, setEarnError] = useState<string | null>(null);
+
+  const loadEarnings = useCallback(async () => {
+    if (!isOwnerUser()) return;
+    setEarnError(null);
+    try {
+      setEarn(await getEarningsReport());
+    } catch (e: any) {
+      setEarnError(e?.message || 'Could not load earnings.');
+    }
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
+    loadEarnings();
     try {
       const [u, a] = await Promise.all([getUserCounts(), getAppCounts().catch(() => null)]);
       setCounts(u);
@@ -38,7 +68,7 @@ export default function AdminUsersScreen({ navigation }: { navigation: any }) {
     }
     setLoading(false);
     setRefreshing(false);
-  }, []);
+  }, [loadEarnings]);
 
   useFocusEffect(
     useCallback(() => {
@@ -46,22 +76,107 @@ export default function AdminUsersScreen({ navigation }: { navigation: any }) {
     }, [isAdmin, load]),
   );
 
-  const tiles: { label: string; value: number | null }[] = counts
+  const tiles: { label: string; value: number | null; kind: AdminListKind }[] = counts
     ? [
-        { label: 'Registered users', value: counts.total },
-        { label: 'New today', value: counts.newToday },
-        { label: 'New this week (since Mon)', value: counts.newThisWeek },
-        { label: 'Active today', value: counts.activeToday },
+        { label: 'Registered users', value: counts.total, kind: 'users' },
+        { label: 'New today', value: counts.newToday, kind: 'usersNewToday' },
+        { label: 'New this week (since Mon)', value: counts.newThisWeek, kind: 'usersNewWeek' },
+        { label: 'Active today', value: counts.activeToday, kind: 'usersActiveToday' },
         ...(app
-          ? [
-              { label: 'Wardrobe items', value: app.wardrobe },
-              { label: 'Posts & polls', value: app.posts },
-              { label: 'Circles', value: app.circles },
-            ]
+          ? ([
+              { label: 'Wardrobe items', value: app.wardrobe, kind: 'wardrobe' },
+              { label: 'Posts & polls', value: app.posts, kind: 'posts' },
+              { label: 'Circles', value: app.circles, kind: 'circles' },
+            ] as const)
           : []),
       ]
     : [];
   const ads = adStatuses();
+  const features = [
+    ...earnFeatures({
+      app: currentEarnConfig(),
+      worker: earn ? Object.fromEntries(EARN_PARTNERS.map(p => [p, earn.partners[p]?.configured === true])) : undefined,
+    }),
+    ...TRACKED_FEATURES,
+  ];
+
+  const bucketLine = (b: EarnBucket) =>
+    `${b.tasks} done · paid ${rupees(b.payout)} · users ${rupees(b.user)} · you ${rupees(b.owner)}\n` +
+    `⏳ ${b.pending} pending · ✅ ${b.approved} approved · ↩️ ${b.reversed} reversed${b.reversed ? ` (${rupees(b.reversedPayout)})` : ''}`;
+
+  const earningsSection = !owner ? null : (
+    <>
+      <Text style={styles.section}>💰 Earnings (real partner credits)</Text>
+      {earnError ? <Text style={styles.error}>{earnError}</Text> : null}
+      {!earn && !earnError ? <ActivityIndicator color={colors.primary} /> : null}
+      {earn ? (
+        <>
+          <View style={styles.grid}>
+            {[
+              { label: 'Today (India) · paid by partners', value: rupees(earn.today.payout), sub: `${earn.today.tasks} tasks · you ${rupees(earn.today.owner)}` },
+              { label: 'This month · paid by partners', value: rupees(earn.month.payout), sub: `${earn.month.tasks} tasks · you ${rupees(earn.month.owner)}` },
+              { label: 'All time · paid by partners', value: rupees(earn.total.payout), sub: `${earn.total.tasks} tasks done` },
+              { label: 'All time · your share', value: rupees(earn.total.owner), sub: `users' share ${rupees(earn.total.user)}` },
+            ].map(t => (
+              <View key={t.label} style={styles.tile}>
+                <Text style={styles.money}>{t.value}</Text>
+                <Text style={styles.label}>{t.label}</Text>
+                <Text style={styles.featureNote}>{t.sub}</Text>
+              </View>
+            ))}
+          </View>
+          <Text style={styles.row}>
+            ⏳ {earn.total.pending} pending · ✅ {earn.total.approved} approved · ↩️ {earn.total.reversed} reversed
+            {earn.total.reversed ? ` (${rupees(earn.total.reversedPayout)})` : ''}
+          </Text>
+
+          <Text style={styles.subsection}>By partner</Text>
+          {EARN_PARTNERS.map(p => {
+            const b = earn.partners[p];
+            if (!b) return null;
+            return (
+              <View key={p} style={styles.feature}>
+                <Text style={styles.featureTitle}>
+                  {EARN_PARTNER_LABEL[p]}
+                  <Text style={styles.featurePr}>  {b.configured ? '✅ Credits ON' : '🔴 Credits OFF (Worker secret missing)'}</Text>
+                </Text>
+                <Text style={styles.featureStatus}>{bucketLine(b)}</Text>
+              </View>
+            );
+          })}
+
+          <Text style={styles.subsection}>By type</Text>
+          {Object.keys(earn.byCategory).length ? (
+            Object.entries(earn.byCategory).map(([c, b]) => (
+              <View key={c} style={styles.feature}>
+                <Text style={styles.featureTitle}>{categoryLabel(c)}</Text>
+                <Text style={styles.featureStatus}>{bucketLine(b)}</Text>
+              </View>
+            ))
+          ) : (
+            <Text style={styles.row}>No earnings yet.</Text>
+          )}
+
+          <Text style={styles.subsection}>Latest credits</Text>
+          {hasEarnings(earn) ? (
+            earn.recent.map(r => (
+              <View key={`${r.user}_${r.id}`} style={styles.feature}>
+                <Text style={styles.featureTitle}>
+                  {STATUS_ICON[r.status] || '•'} {categoryLabel(r.category)} · {EARN_PARTNER_LABEL[r.partner as keyof typeof EARN_PARTNER_LABEL] || r.partner} · {rupees(r.payout)}
+                </Text>
+                <Text style={styles.featureStatus}>
+                  {r.taskName ? `${r.taskName} · ` : ''}user {r.user} · users {rupees(r.userRupees)} · you {rupees(r.ownerRupees)} · {r.status} · {timeAgo(new Date(r.createdAt))}
+                </Text>
+              </View>
+            ))
+          ) : (
+            <Text style={styles.row}>No earnings yet. Credits show here when a partner confirms a task a user finished.</Text>
+          )}
+          <Text style={styles.meta}>From the earn server ledger · updated {timeAgo(new Date(earn.at))}</Text>
+        </>
+      ) : null}
+    </>
+  );
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
@@ -93,15 +208,27 @@ export default function AdminUsersScreen({ navigation }: { navigation: any }) {
           {error ? <Text style={styles.error}>{error}</Text> : null}
           <View style={styles.grid}>
             {tiles.map(t => (
-              <View key={t.label} style={styles.tile}>
+              <TouchableOpacity
+                key={t.label}
+                style={styles.tile}
+                disabled={!owner}
+                activeOpacity={0.7}
+                onPress={() => navigation.navigate('AdminList', { kind: t.kind })}>
                 <Text style={styles.value}>{show(t.value)}</Text>
-                <Text style={styles.label}>{t.label}</Text>
-              </View>
+                <Text style={styles.label}>
+                  {t.label}
+                  {owner ? ' ›' : ''}
+                </Text>
+              </TouchableOpacity>
             ))}
           </View>
           {counts ? (
-            <Text style={styles.meta}>Updated {timeAgo(counts.at)} · pull down to refresh</Text>
+            <Text style={styles.meta}>
+              Updated {timeAgo(counts.at)} · pull down to refresh{owner ? ' · tap a number to see the list' : ''}
+            </Text>
           ) : null}
+
+          {earningsSection}
 
           <Text style={styles.section}>📺 Ads on this phone</Text>
           {ads.length ? (
@@ -115,7 +242,7 @@ export default function AdminUsersScreen({ navigation }: { navigation: any }) {
           )}
 
           <Text style={styles.section}>🧩 Features</Text>
-          {TRACKED_FEATURES.map(f => (
+          {features.map(f => (
             <View key={f.title} style={styles.feature}>
               <Text style={styles.featureTitle}>
                 {f.title}
@@ -156,6 +283,8 @@ const styles = themedStyles(() =>
       marginBottom: spacing.sm,
     },
     value: { fontSize: 32, fontWeight: fontWeight.extraBold, color: colors.textPrimary },
+    money: { fontSize: 24, fontWeight: fontWeight.extraBold, color: colors.textPrimary },
+    subsection: { fontSize: fontSize.sm, fontWeight: fontWeight.bold, color: colors.textPrimary, marginTop: spacing.md, marginBottom: 4 },
     label: { fontSize: fontSize.sm, color: colors.textSecondary, marginTop: 2 },
     meta: { fontSize: fontSize.sm, color: colors.textSecondary, marginTop: spacing.sm, textAlign: 'center' },
     link: { marginTop: spacing.lg, padding: spacing.md, borderRadius: borderRadius.md, borderWidth: 1, borderColor: colors.border },

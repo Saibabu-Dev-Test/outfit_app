@@ -13,6 +13,7 @@
 // Every handler answers 503 'not configured' until its secret is set (wrangler secret put).
 import { COINS_PER_RUPEE, HOLD_DAYS, USD_TO_INR, USER_SHARE, safeId, timingSafeEqual, userCoins } from './bitlabs.js';
 import { md5Hex } from './md5.js';
+import { CATEGORY_PARAMS, categoryOf, cleanTaskName } from './report.js';
 
 const enc = new TextEncoder();
 const toHex = buf => Array.from(new Uint8Array(buf), b => b.toString(16).padStart(2, '0')).join('');
@@ -26,7 +27,8 @@ const NOT_CONFIGURED = { status: 503, body: 'not configured' };
 const round2 = n => Math.round(n * 100) / 100;
 
 // Shared shape with bitlabs.js plans: { status, body, write?: { op, docPath, fields, serverTime } }
-const creditWrite = (uid, id, { type, coins, partner, activity, usd, ownerRupees }, now) => ({
+// payoutRupees = the partner's full payout in rupees (user share + owner share).
+const creditWrite = (uid, id, { type, coins, partner, activity, usd, ownerRupees, category, taskName, payoutRupees }, now) => ({
   op: 'create',
   docPath: `users/${uid}/earnings/${id}`,
   fields: {
@@ -38,6 +40,9 @@ const creditWrite = (uid, id, { type, coins, partner, activity, usd, ownerRupees
     activity,
     ...(usd === null || usd === undefined ? {} : { usd }),
     ownerRupees,
+    ...(category ? { category } : {}),
+    ...(taskName ? { taskName } : {}),
+    ...(Number.isFinite(payoutRupees) && payoutRupees > 0 ? { payoutRupees: round2(payoutRupees) } : {}),
     holdUntil: new Date(now + HOLD_DAYS * 86400000),
   },
   serverTime: ['createdAt'],
@@ -49,6 +54,15 @@ const reverseWrite = (uid, id, partner, extra = {}) => ({
   fields: { status: 'reversed', partner, ...extra },
   serverTime: ['reversedAt'],
 });
+
+const pick = (q, names) => {
+  for (const n of names) {
+    if (q[n] !== undefined && q[n] !== null && q[n] !== '') {
+      return String(q[n]);
+    }
+  }
+  return '';
+};
 
 export const cpxHashFor = (uid, secret) => md5Hex(`${uid}-${secret}`);
 
@@ -75,18 +89,23 @@ export function planCpxPostback({ query, secret, now = Date.now() }) {
   return {
     status: 200,
     body: '1',
-    write: creditWrite(uid, `cpx_${trans}`, { type: 'survey', coins, partner: 'cpx', activity: 'COMPLETE', ownerRupees: round2(payout * (1 - USER_SHARE)) }, now),
+    write: creditWrite(
+      uid,
+      `cpx_${trans}`,
+      {
+        type: 'survey',
+        coins,
+        partner: 'cpx',
+        activity: 'COMPLETE',
+        ownerRupees: round2(payout * (1 - USER_SHARE)),
+        // CPX is a survey wall; an explicit cat= in the postback URL can still say otherwise
+        category: categoryOf(pick(query, CATEGORY_PARAMS)) || 'survey',
+        payoutRupees: payout,
+      },
+      now,
+    ),
   };
 }
-
-const pick = (q, names) => {
-  for (const n of names) {
-    if (q[n] !== undefined && q[n] !== null && q[n] !== '') {
-      return String(q[n]);
-    }
-  }
-  return '';
-};
 
 export async function planOfferwallPostback({ query, secret, now = Date.now() }) {
   if (!secret) {
@@ -125,7 +144,18 @@ export async function planOfferwallPostback({ query, secret, now = Date.now() })
     write: creditWrite(
       uid,
       `offerwall_${tx}`,
-      { type: 'offer', coins, partner: 'offerwall', activity: 'COMPLETE', usd: Number.isFinite(usd) && usd > 0 ? usd : null, ownerRupees: round2(fullRupees * (1 - USER_SHARE)) },
+      {
+        type: 'offer',
+        coins,
+        partner: 'offerwall',
+        activity: 'COMPLETE',
+        usd: Number.isFinite(usd) && usd > 0 ? usd : null,
+        ownerRupees: round2(fullRupees * (1 - USER_SHARE)),
+        // Offerwall.GG sends no category field; offers unless cat= is added to the placement URL
+        category: categoryOf(pick(query, CATEGORY_PARAMS)) || 'offer',
+        taskName: cleanTaskName(pick(query, ['offerName', 'offer_name', 'name'])),
+        payoutRupees: fullRupees,
+      },
       now,
     ),
   };
@@ -146,8 +176,8 @@ export async function applyEarningToD1(db, write, now = Date.now()) {
   const f = write.fields || {};
   if (write.op === 'create') {
     const r = await db.run(
-      `INSERT OR IGNORE INTO earnings (uid, id, type, partner, status, coins, rupees, owner_rupees, usd, activity, hold_until, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT OR IGNORE INTO earnings (uid, id, type, partner, status, coins, rupees, owner_rupees, usd, activity, hold_until, created_at, updated_at, category, task_name, payout_rupees)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       at.uid,
       at.id,
       String(f.type || 'offer'),
@@ -161,6 +191,9 @@ export async function applyEarningToD1(db, write, now = Date.now()) {
       f.holdUntil instanceof Date ? f.holdUntil.getTime() : null,
       now,
       now,
+      f.category ? String(f.category) : null,
+      f.taskName ? String(f.taskName) : null,
+      f.payoutRupees === undefined || f.payoutRupees === null ? null : Number(f.payoutRupees),
     );
     return r && r.meta && r.meta.changes === 0 ? 'duplicate' : 'created';
   }
@@ -200,4 +233,4 @@ export const rowToEarning = r => ({
   holdUntil: r.hold_until === null || r.hold_until === undefined ? null : Number(r.hold_until),
 });
 
-export { USD_TO_INR };
+export { USD_TO_INR, CATEGORY_PARAMS, categoryOf, cleanTaskName };

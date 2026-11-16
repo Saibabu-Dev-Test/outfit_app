@@ -2,6 +2,7 @@
 // Pure BitLabs callback logic shared by the Cloudflare Worker (src/index.js) and the jest tests.
 // Only standard Web APIs (WebCrypto, TextEncoder): runs on Workers and on Node 22
 // (globalThis.crypto.subtle). Same numbers and rules as bitlabsPostback in server/earn/index.js.
+import { bitlabsCategory, bitlabsTaskName } from './report.js';
 
 export const USER_SHARE = 0.65;
 export const COINS_PER_RUPEE = 100;
@@ -137,6 +138,8 @@ export async function planBitlabsCallback({ url, secret, base, now = Date.now() 
     return { status: 200, body: 'OK' }; // $0 / screenout: nothing to credit
   }
   const rupees = usd * USD_TO_INR;
+  const category = bitlabsCategory(q);
+  const taskName = bitlabsTaskName(q);
   return {
     status: 200,
     body: 'OK',
@@ -152,6 +155,10 @@ export async function planBitlabsCallback({ url, secret, base, now = Date.now() 
         activity: type,
         usd,
         ownerRupees: Math.round(rupees * (1 - USER_SHARE) * 100) / 100,
+        // Reporting only (owner's Earnings): what BitLabs says the task was, its name, full payout
+        ...(category ? { category } : {}),
+        ...(taskName ? { taskName } : {}),
+        payoutRupees: Math.round(rupees * 100) / 100,
         holdUntil: new Date(now + HOLD_DAYS * 86400000),
       },
       serverTime: ['createdAt'],

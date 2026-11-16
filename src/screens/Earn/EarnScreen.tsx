@@ -3,6 +3,8 @@
 //    users/{uid}/earnDaily/{day}. Until both are done only the checklist shows.
 // 2. Unlocked: balance, daily check-in, Surveys (CPX Research wall, one ad after each completed
 //    survey before the next one opens), Offerwall.GG, BitLabs (surveys & offers), referral code, UPI + withdrawal.
+//    While locked, a preview lists every option (Available / Coming soon) so none looks removed.
+//    The cards stay on screen whether or not a partner is configured: unconfigured = "Coming soon".
 // Values: config/earn.ts. Data: services/earnApi.ts. Maths: services/earnLedger.ts.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
@@ -261,6 +263,15 @@ export default function EarnScreen({ navigation }: { navigation: any }) {
     }
   };
 
+  // Every earning option, neutral labels (no partner names on the Earn tab)
+  const earnOptions = [
+    { label: '📝 Surveys', ready: isCpxConfigured() },
+    { label: '🎯 Offers', ready: !!offerwallUrl(uid || 'x') },
+    { label: '📋 Surveys & offers (games too)', ready: isBitlabsConfigured() },
+    { label: '📅 Daily check-in', ready: true },
+    { label: '🤝 Invite friends', ready: true },
+  ];
+
   // ── Render ──
   const header = (
     <View style={[ui.row, { paddingHorizontal: 16, paddingVertical: 10, backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border }]}>
@@ -306,6 +317,16 @@ export default function EarnScreen({ navigation }: { navigation: any }) {
           <Text style={ui.muted}>
             You get +{EARN_AD_COINS} coins per ad and +{EARN_VOTE_COINS} for your first vote today. {COINS_PER_RUPEE} coins = ₹1.
           </Text>
+          {/* What opens after the two steps, so every earning option is visible before unlocking */}
+          <View style={[ui.card, { marginTop: 12 }]}>
+            <Text style={ui.h2}>🔓 Unlocks after these 2 steps</Text>
+            {earnOptions.map(o => (
+              <View key={o.label} style={[ui.row, { marginTop: 6 }]}>
+                <Text style={[ui.body, ui.flex1]}>{o.label}</Text>
+                <Text style={o.ready ? ui.good : ui.muted}>{o.ready ? 'Available' : 'Coming soon'}</Text>
+              </View>
+            ))}
+          </View>
         </ScrollView>
       </SafeAreaView>
     );

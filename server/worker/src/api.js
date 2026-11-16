@@ -16,6 +16,7 @@
 //   POST   /v1/coins {type, targetId}     coin event (fixed points, create-only, daily cap)
 //   GET    /v1/earnings                   my D1 earn ledger (read-only)
 //   GET    /v1/admin/system               owner only: usage, earn, users (Admin > System)
+//   GET    /v1/admin/earnings             owner only: real earn ledger report (Admin tracking > Earnings)
 import {
   BACKEND_SWITCH_AT,
   COIN_POINTS,
@@ -32,6 +33,7 @@ import { addUsage, setUsage, usageFor } from './db.js';
 import { istDay, ptDay, utcDay } from './days.js';
 import { isOwner } from './auth.js';
 import { rowToEarning } from './earn.js';
+import { istDayStartMs, istMonthStartMs, shortUid } from './report.js';
 import { serviceAccountJson } from './handler.js';
 
 export class HttpError extends Error {
@@ -335,6 +337,95 @@ export async function getAdminSystem({ db, user, env, now }) {
     },
     earn,
     users: { day: today, activeToday: Number(active && active.n) || 0 },
+    at: now,
+  };
+}
+
+// ── Owner: Admin tracking > Earnings ──
+// Everything comes from the D1 earn ledger the partner postbacks write (every verified credit lands
+// here; Firestore only mirrors it). No sample numbers: an empty ledger gives zeros and no rows.
+// payout = the partner's full payout in rupees (payout_rupees; older rows: user rupees + owner rupees).
+const PAYOUT_SQL = 'COALESCE(payout_rupees, rupees + owner_rupees)';
+const CATEGORY_SQL = "COALESCE(category, type, 'other')";
+const r2 = n => Math.round((Number(n) || 0) * 100) / 100;
+const emptyBucket = () => ({ tasks: 0, payout: 0, user: 0, owner: 0, pending: 0, approved: 0, reversed: 0, reversedPayout: 0 });
+
+// rows: [{ status, n, payout, user, owner }] for one group -> one bucket
+// tasks / payout / user / owner count credits still standing (pending + approved); reversed apart.
+export function bucketOf(rows) {
+  const b = emptyBucket();
+  rows.forEach(r => {
+    const n = Number(r.n) || 0;
+    if (r.status === 'reversed') {
+      b.reversed += n;
+      b.reversedPayout += Number(r.payout) || 0;
+      return;
+    }
+    if (r.status === 'pending') {
+      b.pending += n;
+    } else if (r.status === 'approved') {
+      b.approved += n;
+    } else {
+      return;
+    }
+    b.tasks += n;
+    b.payout += Number(r.payout) || 0;
+    b.user += Number(r.user) || 0;
+    b.owner += Number(r.owner) || 0;
+  });
+  b.payout = r2(b.payout);
+  b.user = r2(b.user);
+  b.owner = r2(b.owner);
+  b.reversedPayout = r2(b.reversedPayout);
+  return b;
+}
+
+const groupBy = (rows, keyFn) => {
+  const out = {};
+  rows.forEach(r => {
+    const k = keyFn(r);
+    (out[k] = out[k] || []).push(r);
+  });
+  return Object.fromEntries(Object.entries(out).map(([k, v]) => [k, bucketOf(v)]));
+};
+
+export async function getAdminEarnings({ db, user, env, now }) {
+  if (!isOwner(user)) {
+    throw new HttpError(403, 'owner only');
+  }
+  const sums = `COUNT(*) AS n, COALESCE(SUM(${PAYOUT_SQL}), 0) AS payout, COALESCE(SUM(rupees), 0) AS user, COALESCE(SUM(owner_rupees), 0) AS owner`;
+  const grouped = await db.all(`SELECT partner, ${CATEGORY_SQL} AS category, status, ${sums} FROM earnings GROUP BY partner, ${CATEGORY_SQL}, status`);
+  const dayStart = istDayStartMs(now);
+  const monthStart = istMonthStartMs(now);
+  const today = await db.all(`SELECT status, ${sums} FROM earnings WHERE created_at >= ? GROUP BY status`, dayStart);
+  const month = await db.all(`SELECT status, ${sums} FROM earnings WHERE created_at >= ? GROUP BY status`, monthStart);
+  const recentRows = await db.all(
+    `SELECT uid, id, partner, ${CATEGORY_SQL} AS category, status, ${PAYOUT_SQL} AS payout, rupees, owner_rupees, task_name, activity, created_at FROM earnings ORDER BY created_at DESC LIMIT 20`,
+  );
+  const partners = {};
+  PARTNERS.forEach(p => {
+    partners[p] = { configured: !!env[PARTNER_SECRET[p]], ...bucketOf(grouped.filter(r => r.partner === p)) };
+  });
+  return {
+    partners,
+    byCategory: groupBy(grouped, r => r.category || 'other'),
+    byPartnerCategory: groupBy(grouped, r => `${r.partner}:${r.category || 'other'}`),
+    total: bucketOf(grouped),
+    today: { since: dayStart, ...bucketOf(today) },
+    month: { since: monthStart, ...bucketOf(month) },
+    recent: recentRows.map(r => ({
+      id: r.id,
+      user: shortUid(r.uid),
+      partner: r.partner,
+      category: r.category,
+      status: r.status,
+      payout: r2(r.payout),
+      userRupees: r2(r.rupees),
+      ownerRupees: r2(r.owner_rupees),
+      taskName: r.task_name || null,
+      activity: r.activity || null,
+      createdAt: Number(r.created_at) || 0,
+    })),
     at: now,
   };
 }

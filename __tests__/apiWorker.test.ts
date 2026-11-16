@@ -46,7 +46,12 @@ class FakeStmt {
 }
 const makeD1 = () => {
   const db = new DatabaseSync(':memory:');
-  db.exec(fsMod.readFileSync(pathMod.join(ROOT, 'server/worker/migrations/0001_init.sql'), 'utf8'));
+  const dir = pathMod.join(ROOT, 'server/worker/migrations');
+  fsMod
+    .readdirSync(dir)
+    .filter((f: string) => f.endsWith('.sql'))
+    .sort()
+    .forEach((f: string) => db.exec(fsMod.readFileSync(pathMod.join(dir, f), 'utf8')));
   return {
     raw: db,
     prepare: (sql: string) => new FakeStmt(db, sql),
@@ -283,5 +288,121 @@ describe('Worker routes on D1 (node:sqlite)', () => {
     expect(a.json.earn.bitlabs.configured).toBe(true);
     expect(a.json.earn.cpx.configured).toBe(false);
     expect(a.json.d1.reads).toBeGreaterThan(0); // the Worker counts its own D1 rows
+  });
+});
+
+// ── Owner's Admin tracking > Earnings: real ledger report + category stored from partner callbacks ──
+const report = require('../server/worker/src/report.js');
+const { planBitlabsCallback, hmacSha1Hex } = require('../server/worker/src/bitlabs.js');
+
+describe('earn categories from partner callbacks', () => {
+  test('categoryOf / bitlabsCategory / task names', () => {
+    expect(report.categoryOf('')).toBeNull();
+    expect(report.categoryOf('Survey')).toBe('survey');
+    expect(report.categoryOf('GAME')).toBe('game');
+    expect(report.categoryOf('quiz')).toBe('quiz');
+    expect(report.categoryOf('app install')).toBe('offer');
+    expect(report.categoryOf('weird')).toBe('other');
+    expect(report.bitlabsCategory({})).toBeNull();
+    expect(report.bitlabsCategory({ cat: 'game' })).toBe('game');
+    expect(report.bitlabsCategory({ offer_id: '12' })).toBe('offer');
+    expect(report.bitlabsCategory({ survey_id: 's', loi: '10' })).toBe('survey');
+    expect(report.bitlabsTaskName({ offer_name: 'Sea\nBattle', task_name: 'Level 5' })).toBe('Sea Battle · Level 5');
+    expect(report.cleanTaskName('x'.repeat(200))).toHaveLength(80);
+    expect(report.shortUid('abcdefghijk')).toBe('abcdef…');
+  });
+
+  test('IST day / month starts', () => {
+    const now = Date.UTC(2026, 10, 16, 20, 0, 0); // 17 Nov 01:30 IST
+    expect(new Date(report.istDayStartMs(now)).toISOString()).toBe('2026-11-16T18:30:00.000Z');
+    expect(new Date(report.istMonthStartMs(now)).toISOString()).toBe('2026-10-31T18:30:00.000Z');
+  });
+
+  test('CPX + Offerwall.GG plans carry category, task name, full payout (old fields unchanged)', async () => {
+    const cpx = planCpxPostback({ query: { user_id: 'u1', trans_id: 't1', amount_local: '10', hash: md5Hex('t1-sec') }, secret: 'sec', now: NOW });
+    expect(cpx.write.fields).toMatchObject({ type: 'survey', coins: 650, partner: 'cpx', category: 'survey', payoutRupees: 10, ownerRupees: 3.5 });
+    const sig = await hmacSha256Hex('ow', 'u1:tx1:830');
+    const ow = await planOfferwallPostback({ query: { user: 'u1', tx: 'tx1', amount: '830', sig, payout: '0.1', offerName: 'World of Sea Battle', cat: 'game' }, secret: 'ow', now: NOW });
+    expect(ow.write.fields).toMatchObject({ type: 'offer', partner: 'offerwall', category: 'game', taskName: 'World of Sea Battle', payoutRupees: 8.3 });
+    const ow2 = await planOfferwallPostback({ query: { user: 'u1', tx: 'tx1', amount: '830', sig }, secret: 'ow', now: NOW });
+    expect(ow2.write.fields.category).toBe('offer');
+    expect(ow2.write.fields.taskName).toBeUndefined();
+  });
+
+  test('BitLabs plan stores category only when BitLabs tells us', async () => {
+    const BASE = 'https://outfit-api.example.workers.dev';
+    const sign = async (p: string) => `${BASE}${p}&hash=${await hmacSha1Hex('bs', BASE + p)}`;
+    const plain = await planBitlabsCallback({ url: await sign('/bitlabsPostback?uid=u1&val=1&tx=t1&type=COMPLETE'), secret: 'bs', now: NOW });
+    expect(plain.write.fields.type).toBe('offer'); // unchanged for the app
+    expect(plain.write.fields.category).toBeUndefined();
+    expect(plain.write.fields.payoutRupees).toBe(83);
+    const offer = await planBitlabsCallback({ url: await sign('/bitlabsPostback?uid=u1&val=1&tx=t2&type=COMPLETE&offer_id=9&offer_name=Bingo'), secret: 'bs', now: NOW });
+    expect(offer.write.fields).toMatchObject({ category: 'offer', taskName: 'Bingo' });
+    const survey = await planBitlabsCallback({ url: await sign('/bitlabsPostback?uid=u1&val=1&tx=t3&type=COMPLETE&cat=survey'), secret: 'bs', now: NOW });
+    expect(survey.write.fields.category).toBe('survey');
+  });
+});
+
+describe('GET /v1/admin/earnings (owner only, real D1 ledger)', () => {
+  const env = (extra: any = {}) => ({ DB: makeD1(), FIREBASE_PROJECT_ID: 'outfit-vote-9edca', ...extra });
+  const call = async (e: any, path: string, tok: string | null, now = NOW) => {
+    const headers: any = {};
+    if (tok) headers.authorization = `Bearer ${tok}`;
+    const res = await handleRequest(new Request(`https://outfit-api.example.workers.dev${path}`, { headers }), e, { waitUntil: () => undefined }, { fetchImpl: jwksFetch, now });
+    const t = await res.text();
+    let json: any = t;
+    try {
+      json = JSON.parse(t);
+    } catch {}
+    return { status: res.status, json };
+  };
+  const owner = () => token({ email: '2saibabug@gmail.com', sub: 'ownerUid' });
+
+  test('not the owner -> 403', async () => {
+    const e = env();
+    expect((await call(e, '/v1/admin/earnings', token())).status).toBe(403);
+    expect((await call(e, '/v1/admin/earnings', null)).status).toBe(401);
+  });
+
+  test('empty ledger -> zeros, no rows (never sample numbers)', async () => {
+    const r = await call(env(), '/v1/admin/earnings', owner());
+    expect(r.status).toBe(200);
+    expect(r.json.total).toMatchObject({ tasks: 0, payout: 0, user: 0, owner: 0, pending: 0, approved: 0, reversed: 0 });
+    expect(r.json.recent).toEqual([]);
+    expect(r.json.byCategory).toEqual({});
+    expect(r.json.partners.cpx).toMatchObject({ configured: false, tasks: 0 });
+  });
+
+  test('credits, reversal and approval are aggregated per partner / category / status', async () => {
+    const e = env({ CPX_SECURE_HASH: 'sec', OFFERWALL_GG_SECRET: 'ow' });
+    // CPX survey ₹10 (user 6.5, owner 3.5), yesterday IST
+    await call(e, `/cpxPostback?user_id=userAAAA1&trans_id=t1&amount_local=10&hash=${md5Hex('t1-sec')}`, null, NOW - 86400000);
+    // CPX survey ₹20 today, then reversed
+    await call(e, `/cpxPostback?user_id=userBBBB2&trans_id=t2&amount_local=20&hash=${md5Hex('t2-sec')}`, null);
+    await call(e, `/cpxPostback?user_id=userBBBB2&trans_id=t2&status=2&hash=${md5Hex('t2-sec')}`, null);
+    // Offerwall.GG game 830 coins (₹8.30) today
+    const sig = await hmacSha256Hex('ow', 'userAAAA1:g1:830');
+    await call(e, `/offerwallPostback?user=userAAAA1&tx=g1&amount=830&sig=${sig}&cat=game&offerName=Sea%20Battle`, null, NOW + 1000);
+    // A row written before migration 0002 (no category / payout columns) still counts
+    e.DB.raw
+      .prepare("INSERT INTO earnings (uid, id, type, partner, status, coins, rupees, owner_rupees, created_at, updated_at) VALUES ('old', 'bitlabs_x', 'offer', 'bitlabs', 'approved', 130, 1.3, 0.7, ?, ?)")
+      .run(NOW - 40 * 86400000, NOW - 40 * 86400000);
+
+    const r = await call(e, '/v1/admin/earnings', owner(), NOW + 2000);
+    expect(r.status).toBe(200);
+    const j = r.json;
+    expect(j.partners.cpx).toMatchObject({ configured: true, tasks: 1, payout: 10, user: 6.5, owner: 3.5, pending: 1, reversed: 1, reversedPayout: 20 });
+    expect(j.partners.offerwall).toMatchObject({ configured: true, tasks: 1, payout: 8.3, pending: 1 });
+    expect(j.partners.bitlabs).toMatchObject({ configured: false, tasks: 1, payout: 2, approved: 1 });
+    expect(j.byCategory.survey).toMatchObject({ tasks: 1, reversed: 1 });
+    expect(j.byCategory.game).toMatchObject({ tasks: 1, payout: 8.3 });
+    expect(j.byCategory.offer).toMatchObject({ tasks: 1, payout: 2 }); // old row: type fallback
+    expect(j.byPartnerCategory['offerwall:game'].tasks).toBe(1);
+    expect(j.total).toMatchObject({ tasks: 3, payout: 20.3, reversed: 1 });
+    expect(j.today).toMatchObject({ tasks: 1, payout: 8.3, reversed: 1 }); // the ₹20 survey was reversed
+    expect(j.month.tasks).toBe(2);
+    expect(j.recent).toHaveLength(4);
+    expect(j.recent[0]).toMatchObject({ partner: 'offerwall', category: 'game', taskName: 'Sea Battle', status: 'pending', user: 'userAA…' });
+    expect(JSON.stringify(j.recent)).not.toMatch(/userAAAA1|userBBBB2/); // short uids only
   });
 });

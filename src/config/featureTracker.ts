@@ -1,5 +1,8 @@
 // Admin tracking: every feature the owner asked for, with where it stands. Shown on
 // Admin tracking (Me > 📊 Admin tracking). Update this list with each release.
+// Earn sources are not hand-written: earnFeatures() works their status out from the real config
+// (config/earn.ts) and, when the owner's Earnings report has loaded, from the Worker's secrets.
+import { bitlabsWallUrl, isBitlabsConfigured, isCpxConfigured, offerwallUrl } from './earn';
 export type FeatureStatus = 'live' | 'in_review' | 'owner_todo';
 
 export interface TrackedFeature {
@@ -39,6 +42,8 @@ export const TRACKED_FEATURES: TrackedFeature[] = [
   { title: 'Terms & About this app (Settings)', status: 'in_review', pr: 27 },
   { title: 'Sign up required before upload, vote, like, comment', status: 'in_review', pr: 27 },
   { title: 'Astrology: free summary; full astrology, festivals and Porutham after 1 ad a day (IST)', status: 'in_review' },
+  { title: 'Admin tracking: 💰 Earnings from partner credits (owner only)', status: 'in_review' },
+  { title: 'Admin tracking: tap any number to open its list (owner only)', status: 'in_review' },
   {
     title: 'Push notifications on phones',
     status: 'owner_todo',
@@ -50,3 +55,66 @@ export const TRACKED_FEATURES: TrackedFeature[] = [
     note: 'AdMob: app approved and linked to the Play Store listing, app-ads.txt on the website, payments set up',
   },
 ];
+
+// ── Earn sources ──
+const WORKER = 'https://outfit-api.babusai927.workers.dev';
+export const POSTBACK_URLS = {
+  offerwall: `${WORKER}/offerwallPostback?user={userId}&tx={transactionId}&amount={currencyAmount}&status={status}&sig={signature}&payout={payoutUsd}&test={test}&offerName={offerName}`,
+  bitlabs: `${WORKER}/bitlabsPostback?uid=[%USER:UID%]&val=[%VALUE:USD%]&tx=[%TX%]&type=[%ACTIVITY:TYPE%]&ref=[%REF%]`,
+  cpx: `${WORKER}/cpxPostback?user_id={user_id}&trans_id={trans_id}&amount_local={amount_local}&status={status}&hash={secure_hash}`,
+};
+
+export interface EarnConfigState {
+  // app side (public values in config/earn.ts): the wall opens in this build
+  app: { offerwall: boolean; bitlabs: boolean; cpx: boolean };
+  // Worker secret set (credits are recorded); undefined = not known yet (report not loaded)
+  worker?: Partial<Record<'offerwall' | 'bitlabs' | 'cpx', boolean>>;
+}
+
+export const currentEarnConfig = (): EarnConfigState['app'] => ({
+  offerwall: !!offerwallUrl('x'),
+  bitlabs: isBitlabsConfigured() && !!bitlabsWallUrl('x'),
+  cpx: isCpxConfigured(),
+});
+
+// Live = the wall opens in this release AND (as far as we know) credits are recorded.
+// Needs you = the exact step only the owner can do.
+export const earnFeatures = ({ app, worker = {} }: EarnConfigState): TrackedFeature[] => {
+  const credits = (p: 'offerwall' | 'bitlabs' | 'cpx', secret: string, url: string): Pick<TrackedFeature, 'status' | 'note'> =>
+    worker[p] === false
+      ? { status: 'owner_todo', note: `Wall opens in the app, but credits are not recorded yet: add the Worker secret ${secret} on outfit-api and set the postback URL ${url}` }
+      : {
+          status: 'live',
+          note: worker[p] === true ? 'Wall open in the app; credits recorded on the earn server' : `Wall open in the app; credits need ${secret} on the Worker (see 💰 Earnings: Credits ON/OFF)`,
+        };
+  const offers: TrackedFeature = app.offerwall
+    ? { title: 'Earn: 🎯 Offers (Offerwall.GG)', pr: 56, ...credits('offerwall', 'OFFERWALL_GG_SECRET', POSTBACK_URLS.offerwall) }
+    : { title: 'Earn: 🎯 Offers (Offerwall.GG)', status: 'owner_todo', note: 'Put the Offerwall.GG wall link in OFFERWALL_GG_URL (src/config/earn.ts)' };
+  const wall: TrackedFeature = app.bitlabs
+    ? { title: 'Earn: 📋 Surveys, offers & games (BitLabs)', pr: 47, ...credits('bitlabs', 'BITLABS_SECRET', POSTBACK_URLS.bitlabs) }
+    : { title: 'Earn: 📋 Surveys, offers & games (BitLabs)', status: 'owner_todo', note: 'Put the BitLabs app token in BITLABS_TOKEN (src/config/earn.ts)' };
+  const surveys: TrackedFeature = app.cpx
+    ? { title: 'Earn: 📝 Surveys (CPX Research)', ...credits('cpx', 'CPX_SECURE_HASH', POSTBACK_URLS.cpx) }
+    : {
+        title: 'Earn: 📝 Surveys (CPX Research)',
+        status: 'owner_todo',
+        note: `Shows "Coming soon" on the Earn tab. Needs the CPX app id in CPX_APP_ID (src/config/earn.ts), the CPX secure hash as the Worker secret CPX_SECURE_HASH (powers ${WORKER}/cpxHash), and the postback URL ${POSTBACK_URLS.cpx} in the CPX dashboard`,
+      };
+  const gamesLive = (app.offerwall && worker.offerwall !== false) || (app.bitlabs && worker.bitlabs !== false);
+  const games: TrackedFeature = gamesLive
+    ? { title: 'Earn: 🎮 Games', status: 'live', note: 'Inside the Offers and Surveys & offers walls (no separate game partner)' }
+    : { title: 'Earn: 🎮 Games', status: 'owner_todo', note: 'Games come from the Offerwall.GG and BitLabs walls: finish their credit setup above' };
+  const quizzes: TrackedFeature = {
+    title: 'Earn: ❓ Quizzes / tests',
+    status: 'owner_todo',
+    note: 'None of the current partners has a separate quiz / test wall. Pick a quiz partner if you want one; any credit a partner labels quiz shows under Quizzes / tests in 💰 Earnings',
+  };
+  return [
+    offers,
+    wall,
+    surveys,
+    games,
+    quizzes,
+    { title: 'Earn: 📅 Daily check-in, 📺 ads, 🤝 invite friends, 💸 UPI withdrawal', status: 'live' },
+  ];
+};
