@@ -1,7 +1,7 @@
 name: Deploy Firebase Hosting (/get/ + legal pages)
 
 # Publishes hosting-public/ (built by scripts/build-hosting.js: the /get/ download page, icons,
-# /privacy/ /terms/ /about/ /contact/ pages and /app-ads.txt) to https://outfit-vote-9edca.web.app when those
+# /privacy/ /terms/ /about/ /contact/ pages, /app-ads.txt, /offerwall.txt and the root page /) to https://outfit-vote-9edca.web.app when those
 # sources change on main, or by hand from the Actions tab.
 # Auth: same keyless Workload Identity Federation as firestore.yml (github-deployer has
 # roles/firebasehosting.admin), else the optional FIREBASE_SERVICE_ACCOUNT secret.
@@ -16,6 +16,7 @@ on:
       - web/public/about/**
       - web/public/contact/**
       - web/public/app-ads.txt
+      - web/public/offerwall.txt
       - hosting-public/**
       - scripts/build-hosting.js
       - src/config/links.ts
@@ -80,7 +81,7 @@ jobs:
         if: steps.wif.outcome == 'success' || steps.sa.outputs.ready == 'true'
         run: |
           sleep 10
-          for p in get/ privacy/ terms/ about/ contact/ app-ads.txt; do
+          for p in '' get/ privacy/ terms/ about/ contact/ app-ads.txt offerwall.txt; do
             curl -fsS -o /dev/null -w "$p: %{http_code}\n" "https://outfit-vote-9edca.web.app/$p"
           done
 

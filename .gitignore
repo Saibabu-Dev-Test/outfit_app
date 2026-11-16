@@ -88,6 +88,8 @@ hosting-public/terms/
 hosting-public/about/
 hosting-public/contact/
 hosting-public/app-ads.txt
+hosting-public/offerwall.txt
+hosting-public/index.html
 
 # Release signing key: only the AES-256 encrypted android/app/release-bundle.tgz.enc is committed (decrypted in CI with RELEASE_BUNDLE_PASSPHRASE)
 *.p12

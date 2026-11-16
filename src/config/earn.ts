@@ -43,9 +43,9 @@ export const CPX_APP_ID: string = 'CPX_APP_ID_PLACEHOLDER';
 // Surveys stay "coming soon" until CPX_APP_ID is filled too.
 export const CPX_HASH_ENDPOINT: string = 'https://outfit-api.babusai927.workers.dev/cpxHash';
 
-// TODO(Offerwall.GG): the offerwall link from the Offerwall.GG dashboard, with {uid} where the user
-// id goes, e.g. 'https://offerwall.gg/wall/XXXX?user_id={uid}'. Empty = "coming soon".
-export const OFFERWALL_GG_URL: string = '';
+// Offerwall.GG wall link (Offerwall.GG dashboard), {uid} is replaced by the user id in offerwallUrl().
+// Public (it is in every wall link). Empty = "coming soon".
+export const OFFERWALL_GG_URL: string = 'https://offerwall.gg/wall/ef62397c185200143c407578cd062e76?userId={uid}';
 
 // BitLabs (surveys + offers in one wall). The app/API token is PUBLIC (it is in every wall link),
 // so it is fine in git. The BitLabs Secret Key and S2S key are secrets: server only (server/earn/,
