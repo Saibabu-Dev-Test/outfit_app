@@ -3,16 +3,16 @@ import { sha256Hex, isValidUpi, normalizeUpi } from '../src/utils/sha256';
 import {
   COINS_PER_RUPEE,
   USER_SHARE,
+  BITLABS_TOKEN,
+  bitlabsGamesUrl,
   coinsToRupees,
   cpxWallUrl,
   userCoinsForPayout,
 } from '../src/config/earn';
 import {
   EarnEntry,
-  isUnlocked,
-  latestSurveyAt,
+  EMPTY_DAY,
   summarize,
-  surveyAdOwed,
   toEarnDay,
   toEarnEntry,
   withdrawCheck,
@@ -113,19 +113,13 @@ describe('ledger', () => {
   });
 });
 
-describe('daily gate + survey ad pacing', () => {
-  test('unlocks only with ad AND vote', () => {
-    expect(isUnlocked(toEarnDay({ adWatched: true }))).toBe(false);
-    expect(isUnlocked(toEarnDay({ voted: true }))).toBe(false);
-    expect(isUnlocked(toEarnDay({ adWatched: true, voted: true }))).toBe(true);
-    expect(isUnlocked(toEarnDay(undefined))).toBe(false);
+describe('daily counters (no gate)', () => {
+  test('day doc only counts check-in / ads / first vote', () => {
+    expect(toEarnDay(undefined)).toEqual(EMPTY_DAY);
+    expect(toEarnDay({ checkedIn: true, adsCount: 3.7 })).toEqual({ adWatched: false, voted: false, checkedIn: true, adsCount: 3 });
+    expect(toEarnDay({ adsCount: -2 }).adsCount).toBe(0);
   });
-  test('an ad is owed after each new completed survey', () => {
-    const list = [e({ type: 'survey', createdAt: new Date(1000) }), e({ type: 'survey', createdAt: new Date(5000), status: 'reversed' })];
-    expect(latestSurveyAt(list)).toBe(1000);
-    expect(surveyAdOwed(list, 0)).toBe(true);
-    expect(surveyAdOwed(list, 1000)).toBe(false);
-    expect(surveyAdOwed([...list, e({ type: 'survey', createdAt: new Date(2000) })], 1000)).toBe(true);
-    expect(surveyAdOwed([], 0)).toBe(false);
+  test('games card opens the BitLabs wall on its games tab', () => {
+    expect(bitlabsGamesUrl('u 1')).toBe(`https://web.bitlabs.ai/?uid=u%201&token=${BITLABS_TOKEN}&display_mode=gaming`);
   });
 });

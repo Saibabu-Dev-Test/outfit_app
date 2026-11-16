@@ -8,7 +8,8 @@ The app never holds partner secrets. `index.js` has the handlers that must run o
 - `bitlabsPostback` — BitLabs reward / reconciliation callback → `users/{uid}/earnings/bitlabs_{tx}`
   (pending, held ~5 days, user gets 65% of the USD payout × `USD_TO_INR` (83), in coins). Duplicate
   `tx` is ignored; `type=RECONCILIATION` marks the original entry `reversed`.
-- `releaseHeld` — daily job: pending → approved after the hold; app coin entries; referral credits.
+- `releaseHeld` — daily job: pending → approved after the hold; app coin entries; referral credits
+  (after the new user's first approved daily check-in on their own phone; once per new user).
 
 Hosting options: Cloud Functions v2 (needs the Firebase Blaze plan) or a free Cloudflare Worker /
 the existing GitHub Actions service account for the daily job. Secrets (`CPX_SECURE_HASH`,

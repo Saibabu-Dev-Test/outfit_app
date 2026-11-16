@@ -44,6 +44,7 @@ export const TRACKED_FEATURES: TrackedFeature[] = [
   { title: 'Astrology: free summary; full astrology, festivals and Porutham after 1 ad a day (IST)', status: 'in_review' },
   { title: 'Admin tracking: 💰 Earnings from partner credits (owner only)', status: 'in_review' },
   { title: 'Admin tracking: tap any number to open its list (owner only)', status: 'in_review' },
+  { title: 'Earn tab open to every user: no daily ad + vote gate, no ad before surveys; every card shows at once', status: 'in_review', pr: 61 },
   {
     title: 'Push notifications on phones',
     status: 'owner_todo',
@@ -102,12 +103,19 @@ export const earnFeatures = ({ app, worker = {} }: EarnConfigState): TrackedFeat
       };
   const gamesLive = (app.offerwall && worker.offerwall !== false) || (app.bitlabs && worker.bitlabs !== false);
   const games: TrackedFeature = gamesLive
-    ? { title: 'Earn: 🎮 Games', status: 'live', note: 'Inside the Offers and Surveys & offers walls (no separate game partner)' }
+    ? {
+        title: 'Earn: 🎮 Games',
+        status: 'live',
+        pr: 61,
+        note: app.bitlabs
+          ? 'Own 🎮 Games card: opens the BitLabs wall on its games tab (display_mode=gaming). Keep Games switched on for the placement in the BitLabs dashboard'
+          : 'Own 🎮 Games card: opens the Offerwall.GG wall (games are listed there)',
+      }
     : { title: 'Earn: 🎮 Games', status: 'owner_todo', note: 'Games come from the Offerwall.GG and BitLabs walls: finish their credit setup above' };
   const quizzes: TrackedFeature = {
-    title: 'Earn: ❓ Quizzes / tests',
+    title: 'Earn: 🧠 Quizzes & learning',
     status: 'owner_todo',
-    note: 'None of the current partners has a separate quiz / test wall. Pick a quiz partner if you want one; any credit a partner labels quiz shows under Quizzes / tests in 💰 Earnings',
+    note: 'Shows "Coming soon" on the Earn tab. None of the current partners gives a quiz / learn-and-earn wall link (Offerwall.GG has a quizzes category only in its server-side offers API). Pick a quiz partner, or ask us to build a quiz list from the Offerwall.GG API; any credit a partner labels quiz shows under Quizzes / tests in 💰 Earnings',
   };
   return [
     offers,
@@ -115,6 +123,6 @@ export const earnFeatures = ({ app, worker = {} }: EarnConfigState): TrackedFeat
     surveys,
     games,
     quizzes,
-    { title: 'Earn: 📅 Daily check-in, 📺 ads, 🤝 invite friends, 💸 UPI withdrawal', status: 'live' },
+    { title: 'Earn: 📅 Daily check-in, 📺 ads, 🤝 invite friends, 💸 UPI withdrawal', status: 'live', note: 'Open to every signed-in user (no daily gate). Ads are an optional card (+2 coins, 10 a day)' },
   ];
 };

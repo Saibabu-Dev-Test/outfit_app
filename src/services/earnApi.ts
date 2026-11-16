@@ -1,10 +1,11 @@
 // Earn tab data (Firestore). Pure maths lives in earnLedger.ts, numbers in config/earn.ts.
 //
-//   users/{uid}/earnDaily/{yyyy-mm-dd IST}  {adWatched, voted, checkedIn, adsCount, adSkipped, updatedAt}  owner writes
+//   users/{uid}/earnDaily/{yyyy-mm-dd IST}  {adWatched, voted, checkedIn, adsCount, updatedAt}  owner writes;
+//                                            daily counters only (no gate: every task is open to every user)
 //   users/{uid}/earnings/{id}                ledger; the app may only add small 'pending' ad/vote/checkin
 //                                            coins (ids ad_{day}_{n}, vote_{day}, checkin_{day}); survey /
 //                                            offer / referral credits and every approval come from the server
-//   users/{uid}/earnMeta/main                {surveyAdClearedAt, deviceHash, upiHash, upi, updatedAt}
+//   users/{uid}/earnMeta/main                {deviceHash, upiHash, upi, updatedAt}
 //   devices/{deviceHash}  {uid}              one account per phone (create-only)
 //   upiIds/{sha256(upi)}  {uid}              one account per UPI id (create-only)
 //   withdrawals/{id}      {uid, upi, coins, rupees, status, createdAt}  admin pays + marks paid
@@ -53,7 +54,7 @@ const credit = (type: 'ad' | 'vote' | 'checkin', coins: number, day: string) => 
   createdAt: serverTimestamp(),
 });
 
-// ── Daily gate ──
+// ── Daily counters (check-in, ads, first vote) ──
 export const subscribeEarnDay = (uid: string, day: string, cb: (d: EarnDay) => void): (() => void) => {
   try {
     return onSnapshot(
@@ -70,23 +71,15 @@ export const subscribeEarnDay = (uid: string, day: string, cb: (d: EarnDay) => v
   }
 };
 
-// A rewarded ad was watched on the Earn tab: ticks "Watch 1 ad" and adds EARN_AD_COINS (pending) for
-// the first EARN_MAX_ADS_PER_DAY ads of the day. skipped: the ad could not load twice; the gate opens
-// but no coins are added.
-export const recordEarnAd = async (uid: string, opts: { skipped?: boolean } = {}): Promise<number> => {
+// An optional rewarded ad was watched on the Earn tab: adds EARN_AD_COINS (pending) for the first
+// EARN_MAX_ADS_PER_DAY ads of the day. Returns the coins added (0 = daily cap reached).
+export const recordEarnAd = async (uid: string): Promise<number> => {
   const day = istDateKey();
   try {
     return await runTransaction(db, async tx => {
       const s = await tx.get(dayRef(uid, day));
       const d = s.exists() ? toEarnDay(s.data()) : EMPTY_DAY;
-      if (opts.skipped || d.adsCount >= EARN_MAX_ADS_PER_DAY) {
-        tx.set(
-          dayRef(uid, day),
-          { adWatched: true, ...(opts.skipped ? { adSkipped: true } : {}), updatedAt: serverTimestamp() },
-          { merge: true },
-        );
-        return 0;
-      }
+      if (d.adsCount >= EARN_MAX_ADS_PER_DAY) return 0;
       const n = d.adsCount + 1;
       tx.set(dayRef(uid, day), { adWatched: true, adsCount: n, updatedAt: serverTimestamp() }, { merge: true });
       tx.set(earnRef(uid, `ad_${day}_${n}`), credit('ad', EARN_AD_COINS, day));
@@ -118,7 +111,7 @@ export const markEarnVote = async (uid?: string | null): Promise<void> => {
   }
 };
 
-// Daily check-in (only once the gate is open). Returns the coins added (0 = already done).
+// Daily check-in, open to every signed-in user once per IST day. Returns the coins added (0 = already done).
 export const dailyCheckIn = async (uid: string): Promise<number> => {
   const day = istDateKey();
   try {
@@ -126,7 +119,6 @@ export const dailyCheckIn = async (uid: string): Promise<number> => {
       const s = await tx.get(dayRef(uid, day));
       const d = s.exists() ? toEarnDay(s.data()) : EMPTY_DAY;
       if (d.checkedIn) return 0;
-      if (!d.adWatched || !d.voted) throw new Error('Finish today\'s checklist first.');
       tx.set(dayRef(uid, day), { checkedIn: true, updatedAt: serverTimestamp() }, { merge: true });
       tx.set(earnRef(uid, `checkin_${day}`), credit('checkin', EARN_CHECKIN_COINS, day));
       return EARN_CHECKIN_COINS;
@@ -212,21 +204,19 @@ export const getMyWithdrawals = async (uid: string): Promise<Withdrawal[]> => {
   }
 };
 
-// ── Survey wall pacing: one ad after each completed survey ──
+// ── Earn meta: device + payout UPI id ──
 export interface EarnMeta {
-  surveyAdClearedAt: number;
   deviceHash: string | null;
   upi: string | null;
 }
 export const subscribeEarnMeta = (uid: string, cb: (m: EarnMeta) => void): (() => void) => {
-  const empty: EarnMeta = { surveyAdClearedAt: 0, deviceHash: null, upi: null };
+  const empty: EarnMeta = { deviceHash: null, upi: null };
   try {
     return onSnapshot(
       metaRef(uid),
       s => {
         const d: any = s.exists() ? s.data() : {};
         cb({
-          surveyAdClearedAt: typeof d.surveyAdClearedAt === 'number' ? d.surveyAdClearedAt : 0,
           deviceHash: typeof d.deviceHash === 'string' ? d.deviceHash : null,
           upi: typeof d.upi === 'string' ? d.upi : null,
         });
@@ -237,10 +227,6 @@ export const subscribeEarnMeta = (uid: string, cb: (m: EarnMeta) => void): (() =
     cb(empty);
     return () => undefined;
   }
-};
-
-export const clearSurveyAd = async (uid: string, latestSurveyMs: number): Promise<void> => {
-  await setDoc(metaRef(uid), { surveyAdClearedAt: latestSurveyMs, updatedAt: serverTimestamp() }, { merge: true });
 };
 
 // ── Anti-fraud: one account per phone, one account per UPI id ──

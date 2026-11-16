@@ -27,9 +27,11 @@ describe('earn sources in Admin tracking > Features', () => {
     expect(byTitle(f, 'Offerwall.GG').status).toBe('live');
     expect(byTitle(f, 'BitLabs').status).toBe('live');
     expect(byTitle(f, 'Games').status).toBe('live');
+    expect(byTitle(f, 'Games').note).toMatch(/display_mode=gaming/);
     expect(byTitle(f, 'CPX').status).toBe(isCpxConfigured() ? 'live' : 'owner_todo');
     if (!isCpxConfigured()) expect(byTitle(f, 'CPX').note).toMatch(/CPX_APP_ID.*CPX_SECURE_HASH/);
     expect(byTitle(f, 'Quizzes').status).toBe('owner_todo');
+    expect(byTitle(f, 'Quizzes').note).toMatch(/Coming soon/);
   });
 
   it('a missing Worker secret turns a live wall into Needs you with the exact step', () => {
@@ -57,9 +59,15 @@ describe('Earn tab keeps every earning option (names hidden, nothing removed)', 
     expect(src).toMatch(/navigation\.navigate\('EarnWall', \{ url: bitlabsWallUrl\(uid\)/);
     expect(src).toMatch(/navigation\.navigate\('EarnWall', \{ url, title: 'Offers'/);
   });
-  it('locked screen previews the options; unconfigured = Coming soon', () => {
-    expect(src).toMatch(/Unlocks after these 2 steps/);
+  it('games + quizzes cards: games open a wall, quizzes stay Coming soon (no partner link)', () => {
+    expect(src).toMatch(/🎮 Games<\/Text>/);
+    expect(src).toMatch(/onPress=\{openGames\}/);
+    expect(src).toMatch(/bitlabsGamesUrl\(uid\)/);
+    expect(src).toMatch(/🧠 Quizzes & learning<\/Text>/);
     expect(src).toMatch(/'Coming soon'/);
+  });
+  it('every card renders for every signed-in user (no locked screen)', () => {
+    expect(src).not.toMatch(/Unlocks after these 2 steps|Complete to start earning today|isUnlocked/);
   });
 });
 

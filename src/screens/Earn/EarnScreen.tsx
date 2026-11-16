@@ -1,10 +1,11 @@
-// Earn tab.
-// 1. Daily gate (resets 00:00 IST): watch 1 rewarded ad + vote on 1 outfit, ticked live from
-//    users/{uid}/earnDaily/{day}. Until both are done only the checklist shows.
-// 2. Unlocked: balance, daily check-in, Surveys (CPX Research wall, one ad after each completed
-//    survey before the next one opens), Offerwall.GG, BitLabs (surveys & offers), referral code, UPI + withdrawal.
-//    While locked, a preview lists every option (Available / Coming soon) so none looks removed.
-//    The cards stay on screen whether or not a partner is configured: unconfigured = "Coming soon".
+// Earn tab. Every signed-in user sees every earning option straight away (no daily ad / vote gate,
+// no ad before any task):
+//   balance, daily check-in, optional rewarded ad (+coins, daily cap), Surveys = CPX wall,
+//   Offers = Offerwall.GG wall, Surveys & offers = BitLabs wall, Games = BitLabs games tab
+//   (display_mode=gaming; Offerwall.GG wall if BitLabs is not set up), Quizzes & learning (Coming
+//   soon: no partner link), referral code, UPI + withdrawal.
+// A card whose partner is not set up in this build stays on screen and says "Coming soon".
+// No partner names on this screen (they are in Terms).
 // Values: config/earn.ts. Data: services/earnApi.ts. Maths: services/earnLedger.ts.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
@@ -15,12 +16,12 @@ import { colors } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
 import { showRewardedAd } from '../../native/ads';
 import {
-  COINS_PER_RUPEE,
   EARN_AD_COINS,
   EARN_CHECKIN_COINS,
+  EARN_MAX_ADS_PER_DAY,
   EARN_REFERRAL_COINS,
-  EARN_VOTE_COINS,
   MIN_WITHDRAW_RUPEES,
+  bitlabsGamesUrl,
   bitlabsWallUrl,
   cpxWallUrl,
   isBitlabsConfigured,
@@ -33,16 +34,12 @@ import {
   EarnEntry,
   EMPTY_DAY,
   Withdrawal,
-  isUnlocked,
-  latestSurveyAt,
   summarize,
-  surveyAdOwed,
   withdrawCheck,
 } from '../../services/earnLedger';
 import {
   EarnMeta,
   bindDevice,
-  clearSurveyAd,
   dailyCheckIn,
   getCpxHash,
   getMyWithdrawals,
@@ -74,23 +71,8 @@ const useIstDay = () => {
   return day;
 };
 
-const adFails: Record<string, number> = {};
-
-function Check({ done, label, cta, onPress, busy }: { done: boolean; label: string; cta: string; onPress: () => void; busy?: boolean }) {
-  return (
-    <View style={[ui.card, ui.row]}>
-      <Text style={{ fontSize: 22, marginRight: 10 }}>{done ? '✅' : '⬜'}</Text>
-      <Text style={[ui.h2, ui.flex1, { marginBottom: 0 }]}>{label}</Text>
-      {done ? (
-        <Text style={ui.good}>Done</Text>
-      ) : (
-        <TouchableOpacity style={[ui.btn, busy && ui.btnOff]} onPress={onPress} disabled={busy}>
-          {busy ? <ActivityIndicator color={colors.onPrimary} /> : <Text style={ui.btnText}>{cta}</Text>}
-        </TouchableOpacity>
-      )}
-    </View>
-  );
-}
+// Ad no-fills in a row this session (the ad card asks the user to try later)
+let adNoFill = 0;
 
 export default function EarnScreen({ navigation }: { navigation: any }) {
   const { user } = useAuth();
@@ -98,7 +80,7 @@ export default function EarnScreen({ navigation }: { navigation: any }) {
   const day = useIstDay();
   const [today, setToday] = useState<EarnDay | null>(null);
   const [entries, setEntries] = useState<EarnEntry[]>([]);
-  const [meta, setMeta] = useState<EarnMeta>({ surveyAdClearedAt: 0, deviceHash: null, upi: null });
+  const [meta, setMeta] = useState<EarnMeta>({ deviceHash: null, upi: null });
   const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([]);
   const [device, setDevice] = useState<'checking' | 'ok' | string>('checking');
   const [busy, setBusy] = useState<string | null>(null);
@@ -132,36 +114,31 @@ export default function EarnScreen({ navigation }: { navigation: any }) {
 
   const summary = useMemo(() => summarize(entries, withdrawals), [entries, withdrawals]);
   const d = today || EMPTY_DAY;
-  const unlocked = isUnlocked(d);
-  const owed = surveyAdOwed(entries, meta.surveyAdClearedAt);
+  const adsLeft = Math.max(0, EARN_MAX_ADS_PER_DAY - d.adsCount);
 
-  // ── Gate actions ──
-  const watchGateAd = async () => {
-    setBusy('gateAd');
+  // ── Actions (all open for every signed-in user) ──
+  // Optional rewarded ad: +EARN_AD_COINS (pending) for the first EARN_MAX_ADS_PER_DAY ads of the day
+  const watchAd = async () => {
+    setBusy('ad');
     try {
       const r = await showRewardedAd('earnRewarded');
       if (r === 'earned') {
+        adNoFill = 0;
         const coins = await recordEarnAd(uid);
-        if (coins) Alert.alert('Ad watched', `+${coins} coins (pending) 🪙`);
+        Alert.alert('Ad watched', coins ? `+${coins} coins (pending) 🪙` : 'Daily ad coins already collected. Come back tomorrow.');
         return;
       }
       if (r === 'closed') {
-        Alert.alert('Ad closed early', 'Watch the ad to the end to tick this off.');
+        Alert.alert('Ad closed early', 'Watch the ad to the end to get the coins.');
         return;
       }
-      adFails.gate = (adFails.gate || 0) + 1;
-      if (adFails.gate >= 2) {
-        // Nobody gets stuck on a no-fill day: tick it without coins
-        await recordEarnAd(uid, { skipped: true });
-        return;
-      }
-      Alert.alert('No ad right now', 'Could not load an ad. Please check your internet and try again in a minute.');
+      adNoFill++;
+      Alert.alert('No ad right now', adNoFill >= 2 ? 'No ads are available at the moment. Please try again later.' : 'Could not load an ad. Please check your internet and try again in a minute.');
     } finally {
       setBusy(null);
     }
   };
 
-  // ── Unlocked actions ──
   const checkIn = async () => {
     setBusy('checkin');
     try {
@@ -174,35 +151,7 @@ export default function EarnScreen({ navigation }: { navigation: any }) {
     }
   };
 
-  // One ad after each completed survey before the next survey opens
-  const payOwedAd = async () => {
-    setBusy('surveyAd');
-    try {
-      const r = await showRewardedAd('earnRewarded');
-      if (r === 'closed') {
-        Alert.alert('Ad closed early', 'Watch the ad to the end to open the next survey.');
-        return;
-      }
-      if (r === 'no_ad') {
-        adFails.survey = (adFails.survey || 0) + 1;
-        if (adFails.survey < 2) {
-          Alert.alert('No ad right now', 'Could not load an ad. Please try again in a minute.');
-          return;
-        }
-        // two no-fills: let the user continue
-      } else {
-        await recordEarnAd(uid);
-      }
-      await clearSurveyAd(uid, latestSurveyAt(entries));
-    } catch (e: any) {
-      Alert.alert('Surveys', e?.message || 'Please try again.');
-    } finally {
-      setBusy(null);
-    }
-  };
-
   const openSurveys = async () => {
-    if (owed) return payOwedAd();
     if (!isCpxConfigured()) {
       Alert.alert('Surveys', 'Surveys are coming soon. Check back in a few days.');
       return;
@@ -235,6 +184,18 @@ export default function EarnScreen({ navigation }: { navigation: any }) {
     navigation.navigate('EarnWall', { url: bitlabsWallUrl(uid), title: 'Surveys & offers', kind: 'offer' });
   };
 
+  // Games: the games tab of the surveys & offers wall; the offers wall (which also lists games) when
+  // that wall is not set up in this build
+  const gamesUrl = (): string | null => (isBitlabsConfigured() ? bitlabsGamesUrl(uid) : offerwallUrl(uid));
+  const openGames = () => {
+    const url = gamesUrl();
+    if (!url) {
+      Alert.alert('Games', 'Games are coming soon. Check back in a few days.');
+      return;
+    }
+    navigation.navigate('EarnWall', { url, title: 'Games', kind: 'offer' });
+  };
+
   const onSaveUpi = async () => {
     setBusy('upi');
     const r = await saveUpi(uid, upiInput);
@@ -262,15 +223,6 @@ export default function EarnScreen({ navigation }: { navigation: any }) {
       setBusy(null);
     }
   };
-
-  // Every earning option, neutral labels (no partner names on the Earn tab)
-  const earnOptions = [
-    { label: '📝 Surveys', ready: isCpxConfigured() },
-    { label: '🎯 Offers', ready: !!offerwallUrl(uid || 'x') },
-    { label: '📋 Surveys & offers (games too)', ready: isBitlabsConfigured() },
-    { label: '📅 Daily check-in', ready: true },
-    { label: '🤝 Invite friends', ready: true },
-  ];
 
   // ── Render ──
   const header = (
@@ -305,33 +257,6 @@ export default function EarnScreen({ navigation }: { navigation: any }) {
     );
   }
 
-  if (!unlocked) {
-    return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top']}>
-        {header}
-        <ScrollView contentContainerStyle={ui.scroll}>
-          <Text style={ui.h2}>Complete to start earning today</Text>
-          <Text style={[ui.muted, { marginBottom: 12 }]}>Resets every day at midnight (India time).</Text>
-          <Check done={d.adWatched} label="Watch 1 ad" cta="▶ Watch" onPress={watchGateAd} busy={busy === 'gateAd'} />
-          <Check done={d.voted} label="Vote on 1 outfit" cta="Go to Feed" onPress={() => navigation.navigate('Feed')} />
-          <Text style={ui.muted}>
-            You get +{EARN_AD_COINS} coins per ad and +{EARN_VOTE_COINS} for your first vote today. {COINS_PER_RUPEE} coins = ₹1.
-          </Text>
-          {/* What opens after the two steps, so every earning option is visible before unlocking */}
-          <View style={[ui.card, { marginTop: 12 }]}>
-            <Text style={ui.h2}>🔓 Unlocks after these 2 steps</Text>
-            {earnOptions.map(o => (
-              <View key={o.label} style={[ui.row, { marginTop: 6 }]}>
-                <Text style={[ui.body, ui.flex1]}>{o.label}</Text>
-                <Text style={o.ready ? ui.good : ui.muted}>{o.ready ? 'Available' : 'Coming soon'}</Text>
-              </View>
-            ))}
-          </View>
-        </ScrollView>
-      </SafeAreaView>
-    );
-  }
-
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top']}>
       {header}
@@ -358,17 +283,32 @@ export default function EarnScreen({ navigation }: { navigation: any }) {
           )}
         </View>
 
+        <View style={[ui.card, ui.row]}>
+          <View style={ui.flex1}>
+            <Text style={ui.h2}>▶️ Watch an ad</Text>
+            <Text style={ui.muted}>
+              +{EARN_AD_COINS} coins per ad · {adsLeft} of {EARN_MAX_ADS_PER_DAY} left today
+            </Text>
+          </View>
+          {adsLeft > 0 ? (
+            <TouchableOpacity style={[ui.btn, busy === 'ad' && ui.btnOff]} onPress={watchAd} disabled={!!busy}>
+              {busy === 'ad' ? <ActivityIndicator color={colors.onPrimary} /> : <Text style={ui.btnText}>Watch</Text>}
+            </TouchableOpacity>
+          ) : (
+            <Text style={ui.good}>Done today</Text>
+          )}
+        </View>
+
         <View style={ui.card}>
           <Text style={ui.h2}>📝 Surveys</Text>
           <Text style={ui.body}>
             Answer paid surveys and earn coins.
           </Text>
-          {owed ? <Text style={[ui.muted, { marginTop: 6 }]}>Survey done! Watch 1 ad to open the next survey.</Text> : null}
-          <TouchableOpacity style={[ui.btn, { marginTop: 10 }, busy === 'survey' || busy === 'surveyAd' ? ui.btnOff : null]} onPress={openSurveys} disabled={!!busy}>
-            {busy === 'survey' || busy === 'surveyAd' ? (
+          <TouchableOpacity style={[ui.btn, { marginTop: 10 }, busy === 'survey' ? ui.btnOff : null]} onPress={openSurveys} disabled={!!busy}>
+            {busy === 'survey' ? (
               <ActivityIndicator color={colors.onPrimary} />
             ) : (
-              <Text style={ui.btnText}>{owed ? '▶ Watch ad to continue' : isCpxConfigured() ? 'Open surveys' : 'Coming soon'}</Text>
+              <Text style={ui.btnText}>{isCpxConfigured() ? 'Open surveys' : 'Coming soon'}</Text>
             )}
           </TouchableOpacity>
         </View>
@@ -394,9 +334,30 @@ export default function EarnScreen({ navigation }: { navigation: any }) {
         </View>
 
         <View style={ui.card}>
+          <Text style={ui.h2}>🎮 Games</Text>
+          <Text style={ui.body}>
+            Play games and reach the goals shown to earn coins.
+          </Text>
+          <TouchableOpacity style={[ui.btn, { marginTop: 10 }]} onPress={openGames}>
+            <Text style={ui.btnText}>{gamesUrl() ? 'Play games' : 'Coming soon'}</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* No current partner gives a quiz / learning link: shown honestly as Coming soon */}
+        <View style={ui.card}>
+          <Text style={ui.h2}>🧠 Quizzes & learning</Text>
+          <Text style={ui.body}>
+            Quizzes and learn-and-earn tasks are on the way.
+          </Text>
+          <View style={[ui.btnGhost, { marginTop: 10 }]}>
+            <Text style={ui.btnGhostText}>Coming soon</Text>
+          </View>
+        </View>
+
+        <View style={ui.card}>
           <Text style={ui.h2}>🤝 Invite friends</Text>
           <Text style={ui.body}>
-            When a friend joins with your code and finishes their first Earn day, you both get {EARN_REFERRAL_COINS} coins.
+            When a friend joins with your code and does their first daily check-in, you both get {EARN_REFERRAL_COINS} coins.
           </Text>
           <View style={[ui.row, { marginTop: 8 }]}>
             <Text style={[ui.h1, ui.flex1]}>{refCode || '······'}</Text>

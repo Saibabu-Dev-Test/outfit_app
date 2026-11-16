@@ -21,8 +21,11 @@
 //                   (matched by ref=[%REF%] when configured, else tx). Always 200 OK once verified.
 //   releaseHeld     daily: pending survey/offer entries with holdUntil <= now -> 'approved';
 //                   pending ad/vote/checkin entries older than 1 day -> 'approved' (after fraud checks);
-//                   referrals: when the new user has a completed earnDaily day, credit
-//                   referral_{newUid} (100 coins) to BOTH users.
+//                   referrals: when the new user has done their first daily check-in (an approved,
+//                   non-reversed checkin_{day} entry, i.e. it passed the fraud checks above) and their
+//                   account is bound to its own phone (earnMeta/main.deviceHash set, devices/{hash}
+//                   -> newUid), credit referral_{newUid} (100 coins) to BOTH users, once (fixed doc
+//                   id). There is no daily ad/vote gate any more, so "first Earn day" is not used.
 //
 // TODO(owner): set CPX_SECURE_HASH (CPX dashboard > App > Secure hash), BITLABS_SECRET (BitLabs
 // dashboard > App > Integration > Secret Key) and OFFERWALL_GG_SECRET as

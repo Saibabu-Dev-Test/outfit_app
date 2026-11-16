@@ -77,4 +77,15 @@ describe('removed UI stays removed', () => {
     expect(src).not.toMatch(/USER_SHARE|You get \{|see Terms/);
     expect(read('src/screens/Profile/TermsScreen.tsx')).toMatch(/USER_SHARE/);
   });
+
+  it('Earn tab has no daily "watch 1 ad + vote 1 outfit" gate and no ad before any task', () => {
+    const src = read('src/screens/Earn/EarnScreen.tsx');
+    expect(src).not.toMatch(/Complete to start earning today|Unlocks after these 2 steps|Vote on 1 outfit|Watch 1 ad/);
+    expect(src).not.toMatch(/isUnlocked|surveyAdOwed|payOwedAd|Watch ad to continue|watchGateAd/);
+    const api = read('src/services/earnApi.ts');
+    expect(api).not.toMatch(/checklist|clearSurveyAd/);
+    expect(read('src/services/earnLedger.ts')).not.toMatch(/isUnlocked|surveyAdOwed/);
+    // check-in is not tied to an ad / vote in the rules either
+    expect(read('firestore.rules')).not.toMatch(/check-in only once the gate is open/);
+  });
 });
