@@ -4,7 +4,7 @@
 //   src/config/owner.ts     OWNER_EMAILS (and isOwner() in firestore.rules)
 // __tests__/apiWorker.test.ts checks they match.
 export const PROJECT_ID = 'outfit-vote-9edca';
-export const OWNER_EMAILS = ['2saibabug@gmail.com'];
+export const OWNER_EMAILS = ['2saibabug@gmail.com', 'saibabu8870@gmail.com'];
 
 // Firestore Spark plan, per day (resets at midnight Pacific)
 export const FIRESTORE_FREE = { reads: 50000, writes: 20000, deletes: 20000, storageBytes: 1024 * 1024 * 1024 };

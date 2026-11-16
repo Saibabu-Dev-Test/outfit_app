@@ -19,7 +19,7 @@ service cloud.firestore {
     function isOwner() {
       return signedIn()
         && request.auth.token.get('email_verified', false) == true
-        && request.auth.token.get('email', '') in ['2saibabug@gmail.com'];
+        && request.auth.token.get('email', '') in ['2saibabug@gmail.com', 'saibabu8870@gmail.com'];
     }
     function isAdmin() {
       return isOwner() || (signedIn()
