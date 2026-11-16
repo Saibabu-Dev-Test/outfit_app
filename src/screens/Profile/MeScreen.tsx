@@ -244,6 +244,14 @@ export default function MeScreen({ navigation }: { navigation: any }) {
             <Text style={styles.inviteCta}>Admin ›</Text>
           </TouchableOpacity>
         ) : null}
+        {isAdmin ? (
+          <TouchableOpacity style={styles.invite} onPress={() => navigation.navigate('AdminTaskPool')} activeOpacity={0.8}>
+            <Text style={styles.inviteText} numberOfLines={1}>
+              🧩 Earn: shared tasks (budget & slots)
+            </Text>
+            <Text style={styles.inviteCta}>Admin ›</Text>
+          </TouchableOpacity>
+        ) : null}
 
         {/* Earn tab ledger: totals, withdrawable vs pending, breakdown by type, recent history */}
         {uid ? <EarningsSection uid={uid} onOpenEarn={() => navigation.navigate('Earn')} /> : null}

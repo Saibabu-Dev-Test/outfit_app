@@ -35,3 +35,27 @@ https://<YOUR-FUNCTION-HOST>/bitlabsPostback?uid=[%USER:UID%]&val=[%VALUE:USD%]&
   bad hash, `500` on a storage error so BitLabs retries.
 - `USD_TO_INR` (83) is a fixed rate in `index.js`; update it by hand when the rupee moves.
 - Test with the dashboard's callback tester (Integration → Test callback).
+
+## Shared task pool (owner-funded app tasks)
+
+`taskPool.js` (exported through `makeHandlers` in `index.js`):
+
+- `taskPoolClaim` — POST, `Authorization: Bearer <Firebase ID token>`, body `{day, slotId}`. In one
+  Firestore transaction: the user has a profile + Earn set up on a phone (`earnMeta/main.deviceHash`),
+  the slot is open (or its claim expired), the user has no other live claim, is under the day's
+  per-user cap, the task is still possible today, and `paidCoins + live holds + reward <= budgetCoins`.
+  Then the slot becomes `claimed` for `claimMinutes` (default 30) and its coins are held.
+- `taskPoolComplete` — same auth/body. Checks the claim is the caller's and not expired, and that the
+  task was done after the claim (check-in: `earnDaily.checkedIn` false→true; rewarded ad: `adsCount`
+  went up; poll vote: a `vote` coin event created after the claim). Then the slot is `done`,
+  `paidCoins` grows, and `users/{uid}/earnings/pool_{day}_{slotId}` is created (`type:'pool'`,
+  `status:'pending'`, `holdUntil` +1 day so `releaseHeld` approves it).
+- `taskPoolSweep` — scheduled (every 15–30 min): expired claims of today back to `open`, stale holds
+  dropped. Claims also reopen lazily, so the pool works even before the sweep is scheduled.
+
+Money: pool rewards come from the owner's daily budget only. Ad revenue (rewarded ads included) stays
+100% owner; there is no ad revenue split. Offerwalls / surveys are not in the pool (65/35 postbacks above).
+
+Owner setup: deploy these handlers (same host as the postbacks), put the base URL in
+`src/config/earn.ts` → `TASK_POOL_ENDPOINT`, publish `firestore.rules` (merge to main), then in the app
+Me › "Earn: shared tasks" set the day's budget / claim time / per-user cap and add slots.

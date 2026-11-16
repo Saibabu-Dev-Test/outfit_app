@@ -1,12 +1,13 @@
 // Pure logic for the Earn ledger (no Firebase): entry shape, totals, breakdown, gate state.
 // Ledger docs: users/{uid}/earnings/{id}
-//   { type: ad|vote|survey|offer|checkin|referral, coins, rupees, partner, status: pending|approved|reversed,
+//   { type: ad|vote|survey|offer|checkin|referral|pool, coins, rupees, partner, status: pending|approved|reversed,
 //     createdAt, holdUntil? }
 import { COINS_PER_RUPEE, coinsToRupees } from '../config/earn';
 
-export type EarnType = 'ad' | 'vote' | 'survey' | 'offer' | 'checkin' | 'referral';
+export type EarnType = 'ad' | 'vote' | 'survey' | 'offer' | 'checkin' | 'referral' | 'pool';
 export type EarnStatus = 'pending' | 'approved' | 'reversed';
-export const EARN_TYPES: EarnType[] = ['ad', 'vote', 'survey', 'offer', 'checkin', 'referral'];
+// pool = shared task pool reward (owner-funded, server-credited; server/earn/taskPool.js)
+export const EARN_TYPES: EarnType[] = ['ad', 'vote', 'survey', 'offer', 'checkin', 'referral', 'pool'];
 
 export const EARN_TYPE_LABEL: Record<EarnType, string> = {
   ad: 'Ads watched',
@@ -15,6 +16,7 @@ export const EARN_TYPE_LABEL: Record<EarnType, string> = {
   offer: 'Offers',
   checkin: 'Check-ins',
   referral: 'Referrals',
+  pool: 'Shared tasks',
 };
 export const EARN_TYPE_ICON: Record<EarnType, string> = {
   ad: '▶️',
@@ -23,6 +25,7 @@ export const EARN_TYPE_ICON: Record<EarnType, string> = {
   offer: '🎯',
   checkin: '📅',
   referral: '🤝',
+  pool: '🧩',
 };
 
 export interface EarnEntry {

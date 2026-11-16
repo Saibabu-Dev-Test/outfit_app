@@ -1,7 +1,7 @@
 // Earn tab.
 // 1. Daily gate (resets 00:00 IST): watch 1 rewarded ad + vote on 1 outfit, ticked live from
 //    users/{uid}/earnDaily/{day}. Until both are done only the checklist shows.
-// 2. Unlocked: balance, daily check-in, Surveys (CPX Research wall, one ad after each completed
+// 2. Unlocked: balance, daily check-in, Shared tasks (owner-funded pool), Surveys (CPX Research wall, one ad after each completed
 //    survey before the next one opens), Offerwall.GG, BitLabs (surveys & offers), referral code, UPI + withdrawal.
 // Values: config/earn.ts. Data: services/earnApi.ts. Maths: services/earnLedger.ts.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -54,6 +54,7 @@ import {
 import { istDateKey, msUntilIstMidnight } from '../../utils/istDate';
 import { getMyReferralCode, shareMyReferral } from '../../utils/referralLink';
 import { countFriendsJoined } from '../../services/rewardsApi';
+import SharedTasksCard from '../../components/SharedTasksCard';
 
 // The current IST day key; changes at 00:00 IST while the screen is open
 const useIstDay = () => {
@@ -336,6 +337,9 @@ export default function EarnScreen({ navigation }: { navigation: any }) {
             </TouchableOpacity>
           )}
         </View>
+
+        {/* Shared task pool: owner-funded daily slots, first come first served (hidden until configured) */}
+        <SharedTasksCard uid={uid} day={day} earnDay={d} navigation={navigation} />
 
         <View style={ui.card}>
           <Text style={ui.h2}>📝 Surveys</Text>

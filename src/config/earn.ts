@@ -78,3 +78,30 @@ export const bitlabsWallUrl = (uid: string): string =>
   'https://web.bitlabs.ai/' +
   `?uid=${encodeURIComponent(uid)}` +
   `&token=${encodeURIComponent(BITLABS_TOKEN)}`;
+
+// ── Shared task pool (owner-funded app tasks; server/earn/taskPool.js) ──
+// The owner sets a daily coin budget and task slots in Admin › Shared tasks. Any Earn user can take
+// one open slot at a time; if it is not finished within the claim time it goes back to the pool.
+// Rewards come from the owner's budget (not from any ad revenue share; ads stay 100% owner) and are
+// written only by the server, as 'pending' ledger entries. Offerwalls / surveys are not in the pool.
+// Keep these equal to DEFAULTS / LIMITS in server/earn/taskPool.js and taskPoolConfigOk() in firestore.rules.
+export type PoolTaskType = 'checkin' | 'rewardedAd' | 'pollVote';
+export const POOL_TASK_TYPES: PoolTaskType[] = ['checkin', 'rewardedAd', 'pollVote'];
+export const POOL_TASK_LABEL: Record<PoolTaskType, string> = {
+  checkin: '📅 Daily check-in',
+  rewardedAd: '▶️ Watch 1 ad',
+  pollVote: '🗳️ Vote on a poll',
+};
+export const TASK_POOL_DEFAULT_CLAIM_MINUTES = 30;
+export const TASK_POOL_DEFAULT_USER_CAP = 3;
+export const TASK_POOL_LIMITS = {
+  claimMinutes: [5, 240] as const,
+  perUserCap: [1, 20] as const,
+  budgetCoins: [0, 1000000] as const,
+  rewardCoins: [1, 1000] as const,
+  slotsPerAdd: 50,
+};
+// TODO(owner): base https URL where taskPoolClaim / taskPoolComplete are deployed (same host as the
+// BitLabs postback), e.g. 'https://<host>'. Empty = the Shared tasks card stays hidden.
+export const TASK_POOL_ENDPOINT: string = '';
+export const isTaskPoolConfigured = (): boolean => !!TASK_POOL_ENDPOINT;
