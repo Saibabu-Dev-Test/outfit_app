@@ -1,7 +1,7 @@
-name: Deploy Firebase Hosting (/get/ + /privacy/)
+name: Deploy Firebase Hosting (/get/ + legal pages)
 
 # Publishes hosting-public/ (built by scripts/build-hosting.js: the /get/ download page, icons,
-# /privacy/ policy for the app store listing) to https://outfit-vote-9edca.web.app when those
+# /privacy/ /terms/ /about/ /contact/ pages and /app-ads.txt) to https://outfit-vote-9edca.web.app when those
 # sources change on main, or by hand from the Actions tab.
 # Auth: same keyless Workload Identity Federation as firestore.yml (github-deployer has
 # roles/firebasehosting.admin), else the optional FIREBASE_SERVICE_ACCOUNT secret.
@@ -12,6 +12,10 @@ on:
       - web/public/get/**
       - web/public/icons/**
       - web/public/privacy/**
+      - web/public/terms/**
+      - web/public/about/**
+      - web/public/contact/**
+      - web/public/app-ads.txt
       - hosting-public/**
       - scripts/build-hosting.js
       - src/config/links.ts
@@ -72,12 +76,13 @@ jobs:
         if: steps.wif.outcome == 'success' || steps.sa.outputs.ready == 'true'
         run: npx -y firebase-tools@13 deploy --only hosting --project "${{ steps.cfg.outputs.project }}" --non-interactive --force
 
-      - name: Check /privacy/ is live
+      - name: Check pages are live
         if: steps.wif.outcome == 'success' || steps.sa.outputs.ready == 'true'
         run: |
           sleep 10
-          curl -fsS -o /dev/null -w "privacy: %{http_code}\n" https://outfit-vote-9edca.web.app/privacy/
-          curl -fsS -o /dev/null -w "get: %{http_code}\n" https://outfit-vote-9edca.web.app/get/
+          for p in get/ privacy/ terms/ about/ contact/ app-ads.txt; do
+            curl -fsS -o /dev/null -w "$p: %{http_code}\n" "https://outfit-vote-9edca.web.app/$p"
+          done
 
       - name: Remove key file
         if: always()

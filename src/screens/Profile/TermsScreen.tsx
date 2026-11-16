@@ -1,12 +1,13 @@
 // Settings > 📋 Terms & About: what Outfit is, what's in it, how to use it, coins and rewards,
 // and the simple rules everyone agrees to. Plain, friendly words; numbers come from the configs.
 import React from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { borderRadius, colors, fontSize, fontWeight, spacing, themedStyles } from '../../theme';
 import { COIN_POINTS, COIN_TIERS } from '../../config/coins';
 import { LIKE_LEVELS } from '../../config/likeLevels';
 import { REWARDS, TASK_COINS } from '../../config/monthlyTasks';
+import { LEGAL_PAGES } from '../../config/links';
 import { COINS_PER_RUPEE, HOLD_DAYS_MAX, HOLD_DAYS_MIN, MIN_WITHDRAW_RUPEES, USER_SHARE } from '../../config/earn';
 
 export const TERMS_UPDATED = '15 Nov 2026';
@@ -121,6 +122,16 @@ export default function TermsScreen({ navigation }: { navigation: any }) {
             ))}
           </View>
         ))}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>🌐 Full policies online</Text>
+          <View style={styles.links}>
+            {LEGAL_PAGES.map(p => (
+              <TouchableOpacity key={p.url} onPress={() => Linking.openURL(p.url).catch(() => {})}>
+                <Text style={styles.link}>{p.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
         <Text style={styles.meta}>Last updated {TERMS_UPDATED}</Text>
       </ScrollView>
     </SafeAreaView>
@@ -144,6 +155,8 @@ const styles = themedStyles(() =>
     },
     cardTitle: { fontSize: fontSize.md, fontWeight: fontWeight.bold, color: colors.textPrimary, marginBottom: 6 },
     line: { fontSize: fontSize.sm, color: colors.textSecondary, lineHeight: 21, marginBottom: 6 },
+    links: { flexDirection: 'row', flexWrap: 'wrap', columnGap: spacing.md, rowGap: 6 },
+    link: { fontSize: fontSize.sm, color: colors.primary, fontWeight: fontWeight.bold, textDecorationLine: 'underline' },
     meta: { fontSize: fontSize.xs, color: colors.textSecondary, textAlign: 'center', marginTop: spacing.sm },
   }),
 );
