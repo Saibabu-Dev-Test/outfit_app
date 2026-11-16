@@ -7,6 +7,11 @@ import { COINS_PER_RUPEE, coinsToRupees } from '../config/earn';
 export type EarnType = 'ad' | 'vote' | 'survey' | 'offer' | 'checkin' | 'referral';
 export type EarnStatus = 'pending' | 'approved' | 'reversed';
 export const EARN_TYPES: EarnType[] = ['ad', 'vote', 'survey', 'offer', 'checkin', 'referral'];
+// AdMob policy: rewards for watching ads must not have real-world value. So only partner payouts
+// (surveys / offers) are cash and withdrawable. Ad / vote / check-in / referral coins are BONUS coins:
+// in-app only, never shown as rupees, never withdrawable.
+export const CASH_TYPES: EarnType[] = ['survey', 'offer'];
+export const isCashType = (t: EarnType): boolean => CASH_TYPES.includes(t);
 
 export const EARN_TYPE_LABEL: Record<EarnType, string> = {
   ad: 'Ads watched',
@@ -45,7 +50,8 @@ export interface Withdrawal {
 }
 
 export interface EarnSummary {
-  totalCoins: number; // approved + pending (reversed never counts)
+  bonusCoins: number; // ad / vote / check-in / referral coins (not cash, not withdrawable)
+  totalCoins: number; // CASH coins: approved + pending survey / offer (reversed never counts)
   approvedCoins: number;
   pendingCoins: number;
   withdrawnCoins: number; // paid + pending withdrawal requests
@@ -85,17 +91,23 @@ export const summarize = (entries: EarnEntry[], withdrawals: Withdrawal[] = []):
   let approved = 0;
   let pending = 0;
   let tasks = 0;
+  let bonus = 0;
   for (const e of entries) {
     if (e.status === 'reversed') continue;
     tasks++;
     byType[e.type].count++;
     byType[e.type].coins += e.coins;
+    if (!isCashType(e.type)) {
+      bonus += e.coins;
+      continue;
+    }
     if (e.status === 'approved') approved += e.coins;
     else pending += e.coins;
   }
   const withdrawn = withdrawals.filter(w => w.status !== 'rejected').reduce((s, w) => s + w.coins, 0);
   const withdrawable = Math.max(0, approved - withdrawn);
   return {
+    bonusCoins: bonus,
     totalCoins: approved + pending,
     approvedCoins: approved,
     pendingCoins: pending,
@@ -123,7 +135,9 @@ export const toEarnDay = (d: any): EarnDay => ({
   checkedIn: d?.checkedIn === true,
   adsCount: Math.max(0, Math.floor(num(d?.adsCount))),
 });
-export const isUnlocked = (d: EarnDay) => d.adWatched && d.voted;
+// Earn opens after the first outfit vote of the day. Watching an ad is optional (bonus coins only),
+// so no cash feature is ever unlocked by an ad (AdMob policy).
+export const isUnlocked = (d: EarnDay) => d.voted;
 
 // After every completed survey, one ad must play before the next survey opens.
 // surveyAdClearedAt = createdAt (ms) of the newest survey that was already "paid" with an ad.

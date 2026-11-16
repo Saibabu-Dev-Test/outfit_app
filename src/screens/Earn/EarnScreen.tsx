@@ -13,7 +13,6 @@ import { colors } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
 import { showRewardedAd } from '../../native/ads';
 import {
-  COINS_PER_RUPEE,
   EARN_AD_COINS,
   EARN_CHECKIN_COINS,
   EARN_REFERRAL_COINS,
@@ -34,7 +33,6 @@ import {
   isUnlocked,
   latestSurveyAt,
   summarize,
-  surveyAdOwed,
   withdrawCheck,
 } from '../../services/earnLedger';
 import {
@@ -131,7 +129,8 @@ export default function EarnScreen({ navigation }: { navigation: any }) {
   const summary = useMemo(() => summarize(entries, withdrawals), [entries, withdrawals]);
   const d = today || EMPTY_DAY;
   const unlocked = isUnlocked(d);
-  const owed = surveyAdOwed(entries, meta.surveyAdClearedAt);
+  // No ad is ever required to open surveys / offers (AdMob: ads must not unlock cash rewards)
+  const owed = false;
 
   // ── Gate actions ──
   const watchGateAd = async () => {
@@ -140,11 +139,11 @@ export default function EarnScreen({ navigation }: { navigation: any }) {
       const r = await showRewardedAd('earnRewarded');
       if (r === 'earned') {
         const coins = await recordEarnAd(uid);
-        if (coins) Alert.alert('Ad watched', `+${coins} coins (pending) 🪙`);
+        if (coins) Alert.alert('Ad watched', `+${coins} bonus coins 🪙`);
         return;
       }
       if (r === 'closed') {
-        Alert.alert('Ad closed early', 'Watch the ad to the end to tick this off.');
+        Alert.alert('Ad closed early', 'Watch the ad to the end to get the bonus coins.');
         return;
       }
       adFails.gate = (adFails.gate || 0) + 1;
@@ -164,7 +163,7 @@ export default function EarnScreen({ navigation }: { navigation: any }) {
     setBusy('checkin');
     try {
       const c = await dailyCheckIn(uid);
-      Alert.alert(c ? 'Checked in' : 'Already checked in', c ? `+${c} coins (pending) 🪙` : 'Come back tomorrow.');
+      Alert.alert(c ? 'Checked in' : 'Already checked in', c ? `+${c} bonus coins 🪙` : 'Come back tomorrow.');
     } catch (e: any) {
       Alert.alert('Check-in', e?.message || 'Please try again.');
     } finally {
@@ -266,7 +265,7 @@ export default function EarnScreen({ navigation }: { navigation: any }) {
     <View style={[ui.row, { paddingHorizontal: 16, paddingVertical: 10, backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border }]}>
       <Text style={[ui.h1, ui.flex1]}>Earn</Text>
       <Text style={ui.h2}>
-        🪙 {summary.totalCoins.toLocaleString('en-IN')} · {rupeesText(summary.totalCoins)}
+        🪙 {summary.bonusCoins.toLocaleString('en-IN')} · 💰 {rupeesText(summary.totalCoins)}
       </Text>
     </View>
   );
@@ -301,10 +300,11 @@ export default function EarnScreen({ navigation }: { navigation: any }) {
         <ScrollView contentContainerStyle={ui.scroll}>
           <Text style={ui.h2}>Complete to start earning today</Text>
           <Text style={[ui.muted, { marginBottom: 12 }]}>Resets every day at midnight (India time).</Text>
-          <Check done={d.adWatched} label="Watch 1 ad" cta="▶ Watch" onPress={watchGateAd} busy={busy === 'gateAd'} />
           <Check done={d.voted} label="Vote on 1 outfit" cta="Go to Feed" onPress={() => navigation.navigate('Feed')} />
+          <Text style={[ui.muted, { marginTop: 12 }]}>Optional</Text>
+          <Check done={d.adWatched} label={`Watch an ad for +${EARN_AD_COINS} bonus coins`} cta="▶ Watch" onPress={watchGateAd} busy={busy === 'gateAd'} />
           <Text style={ui.muted}>
-            You get +{EARN_AD_COINS} coins per ad and +{EARN_VOTE_COINS} for your first vote today. {COINS_PER_RUPEE} coins = ₹1.
+            You get +{EARN_VOTE_COINS} bonus coin for your first vote today. Bonus coins are for in-app rewards only and cannot be withdrawn as cash.
           </Text>
         </ScrollView>
       </SafeAreaView>
@@ -321,12 +321,15 @@ export default function EarnScreen({ navigation }: { navigation: any }) {
           <Text style={ui.muted}>
             Pending {rupeesText(summary.pendingCoins)} · {summary.tasksCompleted} tasks done
           </Text>
+          <Text style={ui.muted}>
+            Only survey and offer earnings can be withdrawn. Bonus coins ({summary.bonusCoins.toLocaleString('en-IN')}) are for in-app rewards.
+          </Text>
         </View>
 
         <View style={[ui.card, ui.row]}>
           <View style={ui.flex1}>
             <Text style={ui.h2}>📅 Daily check-in</Text>
-            <Text style={ui.muted}>+{EARN_CHECKIN_COINS} coins every day</Text>
+            <Text style={ui.muted}>+{EARN_CHECKIN_COINS} bonus coins every day</Text>
           </View>
           {d.checkedIn ? (
             <Text style={ui.good}>Done today</Text>
@@ -375,7 +378,7 @@ export default function EarnScreen({ navigation }: { navigation: any }) {
         <View style={ui.card}>
           <Text style={ui.h2}>🤝 Invite friends</Text>
           <Text style={ui.body}>
-            When a friend joins with your code and finishes their first Earn day, you both get {EARN_REFERRAL_COINS} coins.
+            When a friend joins with your code and finishes their first Earn day, you both get {EARN_REFERRAL_COINS} bonus coins.
           </Text>
           <View style={[ui.row, { marginTop: 8 }]}>
             <Text style={[ui.h1, ui.flex1]}>{refCode || '······'}</Text>

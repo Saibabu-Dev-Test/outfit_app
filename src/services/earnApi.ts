@@ -126,7 +126,7 @@ export const dailyCheckIn = async (uid: string): Promise<number> => {
       const s = await tx.get(dayRef(uid, day));
       const d = s.exists() ? toEarnDay(s.data()) : EMPTY_DAY;
       if (d.checkedIn) return 0;
-      if (!d.adWatched || !d.voted) throw new Error('Finish today\'s checklist first.');
+      if (!d.voted) throw new Error('Vote on 1 outfit first.');
       tx.set(dayRef(uid, day), { checkedIn: true, updatedAt: serverTimestamp() }, { merge: true });
       tx.set(earnRef(uid, `checkin_${day}`), credit('checkin', EARN_CHECKIN_COINS, day));
       return EARN_CHECKIN_COINS;
