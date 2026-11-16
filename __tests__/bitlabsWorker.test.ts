@@ -1,4 +1,4 @@
-// BitLabs callback on the free Cloudflare Worker (server/earn-worker). Tests stay on the pure /
+// BitLabs callback on the free Cloudflare Worker (server/worker). Tests stay on the pure /
 // injectable modules (no Workers runtime, no wrangler): WebCrypto comes from Node 22.
 const nodeCrypto = require('crypto');
 const NodeBuffer = require('buffer').Buffer;
@@ -14,9 +14,9 @@ const {
   planBitlabsCallback,
   USD_TO_INR,
   HOLD_DAYS,
-} = require('../server/earn-worker/src/bitlabs.js');
-const { handleBitlabsPostback } = require('../server/earn-worker/src/handler.js');
-const { clearTokenCache, commitBody, toValue } = require('../server/earn-worker/src/firestore.js');
+} = require('../server/worker/src/bitlabs.js');
+const { handleBitlabsPostback } = require('../server/worker/src/handler.js');
+const { clearTokenCache, commitBody, toValue } = require('../server/worker/src/firestore.js');
 const legacy = require('../server/earn/index.js');
 
 const SECRET = 'test-secret';
@@ -219,7 +219,9 @@ describe('earn-worker: bitlabsPostback handler (mock fetch)', () => {
     const errSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
     const fs = fakeFirestore({ commitStatus: 503 });
     expect(await run(fs, '/bitlabsPostback?uid=u1&val=1&tx=t5')).toEqual({ status: 500, body: 'error' });
-    expect(await run(fs, '/bitlabsPostback?uid=u1&val=1&tx=t6', { BITLABS_SECRET: SECRET })).toEqual({ status: 500, body: 'error' });
+    // No D1 and no service account: nowhere to record the credit -> 503 (BitLabs retries later)
+    expect(await run(fs, '/bitlabsPostback?uid=u1&val=1&tx=t6', { BITLABS_SECRET: SECRET })).toEqual({ status: 503, body: 'not configured' });
+    expect(await run(fs, '/bitlabsPostback?uid=u1&val=1&tx=t7', {})).toEqual({ status: 503, body: 'not configured' });
     errSpy.mockRestore();
   });
 });

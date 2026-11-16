@@ -6,11 +6,16 @@
 // batch (users.likeEvent names the liker's new coin event; firestore.rules likesReceivedOk), so a
 // like counts once per person per photo. The flip shows the coin of the owner's like level.
 // awardCoins is fire-and-forget: it never throws and never blocks the like / upload / share.
+// Firestore quota fallback (dataBackend.ts): when Firestore is out of its free daily quota the
+// event goes to D1 through the Worker (same ids and points, create-only there too) and the total
+// shown is users/{uid}.coins + the D1 coin events.
 import { doc, getDoc, increment, serverTimestamp, writeBatch } from 'firebase/firestore';
 import { auth, db } from '../config/firebaseConfig';
 import { COIN_POINTS, CoinAction, tierFor } from '../config/coins';
 import { LikeLevel, likeLevelFor, likeLevelLabel } from '../config/likeLevels';
 import { getKnownCoinTotal, setKnownCoinTotal, showCoinFlip } from './coinBus';
+import { activeBackend, isQuotaError, markFirestoreFull, noteFirestore } from './dataBackend';
+import { d1AwardCoin, d1CoinTotal } from './d1Api';
 
 const cleanId = (s: string) => String(s || '').replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 200);
 
@@ -39,8 +44,15 @@ export const loadCoinTotal = async (uid?: string | null): Promise<number | null>
   if (!id) return null;
   if (loadedFor === id && getKnownCoinTotal() !== null) return getKnownCoinTotal();
   try {
-    const snap = await getDoc(doc(db, 'users', id));
-    const n = Number((snap.data() as any)?.coins) || 0;
+    const [snap, extra] = await Promise.all([
+      getDoc(doc(db, 'users', id)).catch(async (e: any) => {
+        if (isQuotaError(e)) await markFirestoreFull();
+        throw e;
+      }),
+      d1CoinTotal().catch(() => 0),
+    ]);
+    noteFirestore(1);
+    const n = (Number((snap.data() as any)?.coins) || 0) + extra;
     loadedFor = id;
     setKnownCoinTotal(Math.max(0, n));
     return Math.max(0, n);
@@ -125,15 +137,36 @@ const doAward = async (type: CoinAction, targetId: string, like?: LikeInfo, opts
     if (withOwner) b.update(doc(db, 'users', owner), { likesReceived: increment(1), likeEvent: eventId });
     await b.commit();
   };
+  // D1 (Firestore out of quota): same event id + points, the Worker keeps it create-only
+  const viaD1 = async (): Promise<number> => {
+    try {
+      return (await d1AwardCoin(type, targetId)).added || 0;
+    } catch (e: any) {
+      console.warn('awardCoins (D1) failed:', e?.message);
+      return 0;
+    }
+  };
+  const finish = async (earned: number) => {
+    const total = before + earned;
+    if (earned) setKnownCoinTotal(total);
+    if (like) await likeFlip(earned, total);
+    else if (earned || opts?.flipCaption) plainFlip(earned, total);
+  };
+  if ((await activeBackend()) === 'd1') return finish(await viaD1());
   try {
     try {
       await commit(countForOwner);
+      noteFirestore(0, countForOwner ? 3 : 2);
     } catch (e: any) {
       // Owner count refused (rules not deployed yet / owner doc missing): still give the coins
       if (!countForOwner || (e?.code !== 'permission-denied' && e?.code !== 'not-found')) throw e;
       await commit(false);
     }
   } catch (e: any) {
+    if (isQuotaError(e)) {
+      await markFirestoreFull();
+      return finish(await viaD1());
+    }
     // permission-denied here usually means this event was already awarded (create-only)
     if (e?.code !== 'permission-denied') console.warn('awardCoins failed:', e?.code, e?.message);
     if (like) await likeFlip(0, before);

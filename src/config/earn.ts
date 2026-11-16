@@ -38,9 +38,10 @@ export const MIN_WITHDRAW_RUPEES = 50;
 // TODO(CPX): put the real CPX Research app id here (publisher dashboard > Apps). Not a secret.
 // The CPX "secure hash" key IS a secret: it lives only on the server (server/earn/), never here.
 export const CPX_APP_ID: string = 'CPX_APP_ID_PLACEHOLDER';
-// TODO(CPX): HTTPS endpoint of the server function that returns { hash } for the signed-in user
-// (server/earn/index.js -> cpxHash). Empty = surveys show "coming soon".
-export const CPX_HASH_ENDPOINT: string = '';
+// HTTPS endpoint that returns { hash } for the signed-in user: the Worker 'outfit-api'
+// (server/worker, GET|POST /cpxHash; 503 until the CPX_SECURE_HASH Worker secret is set).
+// Surveys stay "coming soon" until CPX_APP_ID is filled too.
+export const CPX_HASH_ENDPOINT: string = 'https://outfit-api.babusai927.workers.dev/cpxHash';
 
 // TODO(Offerwall.GG): the offerwall link from the Offerwall.GG dashboard, with {uid} where the user
 // id goes, e.g. 'https://offerwall.gg/wall/XXXX?user_id={uid}'. Empty = "coming soon".

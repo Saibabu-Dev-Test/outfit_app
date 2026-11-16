@@ -40,6 +40,9 @@ import { assertClean } from '../utils/profanity';
 import { getUserLite, getUsersLite } from './userCache';
 import { getMyCircles } from './circlesApi';
 import { cleanAge, myAgeFields } from '../utils/age';
+import { isD1Id } from '../config/backend';
+import { activeBackend, firestoreExhausted, isQuotaError, markFirestoreFull, noteFirestore } from './dataBackend';
+import { D1Post, d1CreatePost, d1DeletePost, d1Feed, d1GetPost, d1Vote, d1Votes } from './d1Api';
 
 export type FeedKind = 'post' | 'wardrobe';
 
@@ -110,6 +113,28 @@ const toPost = (id: string, d: any): Post => ({
   createdAt: toDate(d?.createdAt),
 });
 
+// A post saved in D1 (Firestore quota fallback, id 'd1_...'): no media docs, the ~720 px copies
+// (when sent) are shown on the card.
+export const d1ToPost = (p: D1Post): Post => {
+  const photos = (p.clear && p.clear.length === p.photos.length ? p.clear : p.photos).slice(0, MAX_POST_PHOTOS);
+  return {
+    id: p.id,
+    kind: 'post',
+    userId: String(p.userId || ''),
+    userName: p.userName || 'Outfit user',
+    userAge: cleanAge(p.userAge),
+    userAvatar: p.userAvatar || null,
+    imageData: photos[0] || '',
+    photos,
+    hasMedia: false,
+    hasClear: false,
+    caption: p.caption || '',
+    likeCount: Math.max(0, p.likeCount || 0),
+    commentCount: Math.max(0, p.commentCount || 0),
+    createdAt: p.createdAt ? new Date(p.createdAt) : null,
+  };
+};
+
 const fail = (e: any, action: string): never => {
   console.warn(`${action} failed:`, e?.code, e?.message);
   throw new Error(firestoreErrorMessage(e, action));
@@ -178,6 +203,25 @@ export const createPost = async (
   }
   const perPhotoDocs = split && total > ONE_MEDIA_DOC_CHARS;
   const shown = split ? list.map(x => x.thumb as string) : list.map(x => x.full);
+  // Firestore near / over its free daily quota: the post goes to D1 (through the Worker)
+  const toD1 = async () => {
+    const clear = list.every(x => !!x.clear && /^data:image\//.test(x.clear) && x.clear.length <= MAX_CLEAR_CHARS);
+    try {
+      const r = await d1CreatePost({
+        photos: shown,
+        clear: clear ? list.map(x => x.clear as string) : [],
+        caption: caption.trim().slice(0, 500),
+        userName: (me.name || '').trim() || 'Outfit user',
+        userAvatar: inlineAvatar(me.avatar),
+        userAge: (myAgeFields() as any)?.userAge ?? null,
+      });
+      recordTask(me.uid, 'uploaded');
+      awardCoins('upload', `post_${r.id}`);
+    } catch (e: any) {
+      throw new Error(e?.status === 413 ? 'These photos are too large together. Remove one or pick smaller photos.' : e?.message || 'Could not post. Please try again.');
+    }
+  };
+  if ((await activeBackend()) === 'd1') return toD1();
   try {
     const data: any = {
       userId: me.uid,
@@ -226,9 +270,14 @@ export const createPost = async (
       b.set(ref, data);
     }
     await b.commit();
+    noteFirestore(0, split ? (perPhotoDocs ? list.length + 2 : 3) : 1);
     recordTask(me.uid, 'uploaded'); // daily task (never throws)
     awardCoins('upload', `post_${ref.id}`); // coins (fire-and-forget)
   } catch (e: any) {
+    if (isQuotaError(e)) {
+      await markFirestoreFull();
+      return toD1();
+    }
     fail(e, 'Posting');
   }
 };
@@ -236,6 +285,14 @@ export const createPost = async (
 // Author or admin; the media doc goes in the same batch. Like docs under it are left behind
 // (harmless; no Cloud Functions on Spark).
 export const deletePost = async (postId: string): Promise<void> => {
+  if (isD1Id(postId)) {
+    try {
+      await d1DeletePost(postId);
+      return;
+    } catch (e: any) {
+      throw new Error(e?.message || 'Could not delete the post.');
+    }
+  }
   try {
     const b = writeBatch(db);
     b.delete(doc(db, POSTS, postId, 'media', MEDIA_FULL));
@@ -457,6 +514,14 @@ export const toComment = (id: string, d: any): Comment => ({
 });
 
 export const getPost = async (postId: string): Promise<Post | null> => {
+  if (isD1Id(postId)) {
+    try {
+      const p = await d1GetPost(postId);
+      return p ? d1ToPost(p) : null;
+    } catch (e: any) {
+      throw new Error(e?.message || 'Could not load the post.');
+    }
+  }
   try {
     const s = await getDoc(doc(db, POSTS, postId));
     return s.exists() ? toPost(s.id, s.data()) : null;
@@ -569,38 +634,78 @@ export interface VoteTally {
   myVote: number | null;
 }
 
-// Count per option + my vote. Never throws.
+// Count per option + my vote. Never throws. Firestore votes + votes saved in D1 while Firestore was
+// out of quota (D1 posts: D1 only). My D1 vote is the newer one when both exist.
 export const getPostVotes = async (postId: string, optionCount: number, uid?: string): Promise<VoteTally> => {
   const labels = OPTION_LABELS.slice(0, optionCount);
-  const votesCol = collection(db, POSTS, postId, 'votes');
-  try {
-    const [counts, mine] = await Promise.all([
-      Promise.all(
-        labels.map(l =>
-          getCountFromServer(query(votesCol, where('option', '==', l)))
-            .then(r => r.data().count)
-            .catch(() => 0),
+  const zero = (): VoteTally => ({ counts: labels.map(() => 0), total: 0, myVote: null });
+  const fromD1 = d1Votes(postId, labels.length).catch((e: any) => {
+    console.warn('D1 votes failed:', e?.message);
+    return zero();
+  });
+  if (isD1Id(postId)) return fromD1;
+  const fromFs = (async (): Promise<VoteTally> => {
+    if (await firestoreExhausted()) return zero();
+    const votesCol = collection(db, POSTS, postId, 'votes');
+    let quota = false;
+    const onErr = (e: any) => {
+      if (isQuotaError(e)) quota = true;
+      return null;
+    };
+    try {
+      const [counts, mine] = await Promise.all([
+        Promise.all(
+          labels.map(l =>
+            getCountFromServer(query(votesCol, where('option', '==', l)))
+              .then(r => r.data().count)
+              .catch(e => {
+                onErr(e);
+                return 0;
+              }),
+          ),
         ),
-      ),
-      uid ? getDoc(doc(votesCol, uid)).catch(() => null) : Promise.resolve(null),
-    ]);
-    const opt = mine && mine.exists() ? (mine.data() as any)?.option : null;
-    const idx = typeof opt === 'string' ? labels.indexOf(opt) : -1;
-    return { counts, total: counts.reduce((a, b) => a + b, 0), myVote: idx >= 0 ? idx : null };
-  } catch (e: any) {
-    console.warn('getPostVotes failed:', e?.code, e?.message);
-    return { counts: labels.map(() => 0), total: 0, myVote: null };
-  }
+        uid ? getDoc(doc(votesCol, uid)).catch(onErr) : Promise.resolve(null),
+      ]);
+      noteFirestore(labels.length + (uid ? 1 : 0));
+      if (quota) markFirestoreFull();
+      const opt = mine && mine.exists() ? (mine.data() as any)?.option : null;
+      const idx = typeof opt === 'string' ? labels.indexOf(opt) : -1;
+      return { counts, total: counts.reduce((a, b) => a + b, 0), myVote: idx >= 0 ? idx : null };
+    } catch (e: any) {
+      console.warn('getPostVotes failed:', e?.code, e?.message);
+      return zero();
+    }
+  })();
+  const [a, b] = await Promise.all([fromFs, fromD1]);
+  const counts = labels.map((_, i) => (a.counts[i] || 0) + (b.counts[i] || 0));
+  return { counts, total: counts.reduce((x, y) => x + y, 0), myVote: b.myVote ?? a.myVote };
 };
 
-// One doc per user: voting again replaces the old choice
+// One doc per user: voting again replaces the old choice (D1 when Firestore is out of quota)
 export const castPostVote = async (postId: string, uid: string, optionIndex: number): Promise<void> => {
   const option = OPTION_LABELS[optionIndex];
   if (!option) throw new Error('Pick a photo to vote.');
-  try {
-    await setDoc(doc(db, POSTS, postId, 'votes', uid), { option, updatedAt: serverTimestamp() });
-  } catch (e: any) {
-    fail(e, 'Voting');
+  const toD1 = async () => {
+    try {
+      await d1Vote(postId, option);
+    } catch (e: any) {
+      throw new Error(e?.message || 'Could not save your vote. Please try again.');
+    }
+  };
+  if (isD1Id(postId) || (await activeBackend()) === 'd1') {
+    await toD1();
+  } else {
+    try {
+      await setDoc(doc(db, POSTS, postId, 'votes', uid), { option, updatedAt: serverTimestamp() });
+      noteFirestore(0, 1);
+    } catch (e: any) {
+      if (isQuotaError(e)) {
+        await markFirestoreFull();
+        await toD1();
+      } else {
+        fail(e, 'Voting');
+      }
+    }
   }
   // +1 coin on my first vote on this poll (coinEvents/vote_post_<id> is create-only) + coin flip
   awardCoins('vote', `post_${postId}`);
@@ -898,7 +1003,7 @@ export const getUserLikesPage = async (
 // only circle items (indexes: posts userId ASC + createdAt DESC; wardrobe isPublic ASC + userId ASC
 // + createdAt DESC). Until those indexes are deployed each chunk falls back to one unsorted read
 // (limit 100) sorted on the phone.
-type SourceName = 'posts' | 'wardrobe';
+type SourceName = 'posts' | 'wardrobe' | 'd1';
 interface Source {
   name: SourceName;
   uids: string[]; // userId in [...] (max 30)
@@ -906,6 +1011,7 @@ interface Source {
   buffer: { id: string; data: any; at: number }[];
   done: boolean;
   fallback: boolean; // no composite index yet: one bigger unsorted read, sorted here
+  before?: number | null; // d1: createdAt (ms) of the last item read
 }
 
 const IN_MAX = 30; // Firestore 'in' limit
@@ -920,8 +1026,23 @@ const newSource = (name: SourceName, uids: string[]): Source => ({
   fallback: false,
 });
 
+// D1 posts (made while Firestore was out of quota), newest first
+const fillD1Source = async (s: Source): Promise<void> => {
+  try {
+    const r = await d1Feed({ before: s.before, limit: FEED_PAGE_SIZE, uids: s.uids });
+    r.posts.forEach(p => s.buffer.push({ id: p.id, data: p, at: p.createdAt || 0 }));
+    if (r.posts.length) s.before = r.posts[r.posts.length - 1].createdAt;
+    if (!r.hasMore) s.done = true;
+  } catch (e: any) {
+    // Worker unreachable: the feed still shows Firestore items
+    console.warn('D1 feed failed:', e?.message);
+    s.done = true;
+  }
+};
+
 const fillSource = async (s: Source): Promise<void> => {
   if (s.done || s.fallback) return;
+  if (s.name === 'd1') return fillD1Source(s);
   const base = collection(db, s.name === 'posts' ? POSTS : 'wardrobe');
   const at = (d: any) => toDate(d?.createdAt)?.getTime() || 0;
   // Global feed (no uids): every user's public wardrobe photos + all posts, newest first.
@@ -938,6 +1059,7 @@ const fillSource = async (s: Source): Promise<void> => {
       ? query(base, ...filters, orderBy('createdAt', 'desc'), startAfter(s.cursor), limit(FEED_PAGE_SIZE))
       : query(base, ...filters, orderBy('createdAt', 'desc'), limit(FEED_PAGE_SIZE));
     const snap = await getDocs(q);
+    noteFirestore(Math.max(1, snap.docs.length));
     snap.docs.forEach(d => {
       const data = d.data({ serverTimestamps: 'estimate' });
       s.buffer.push({ id: d.id, data, at: at(data) });
@@ -945,6 +1067,13 @@ const fillSource = async (s: Source): Promise<void> => {
     if (snap.docs.length) s.cursor = snap.docs[snap.docs.length - 1];
     if (snap.docs.length < FEED_PAGE_SIZE) s.done = true;
   } catch (e: any) {
+    if (isQuotaError(e)) {
+      // Firestore out of quota: this source stops, the D1 source keeps the feed going
+      console.warn(`${s.name} feed: Firestore quota reached`);
+      markFirestoreFull();
+      s.done = true;
+      return;
+    }
     // failed-precondition = composite index not deployed yet: one unsorted read, sorted here
     console.warn(`${s.name} circle feed query failed, using fallback:`, e?.code, e?.message);
     s.fallback = true;
@@ -993,17 +1122,23 @@ export class FeedLoader {
 
   private async init(): Promise<Source[]> {
     if (this.sources) return this.sources;
+    // Firestore out of quota today: only D1 (Firestore items come back after the reset)
+    const fsOff = await firestoreExhausted();
+    const offIfFull = (list: Source[]) => {
+      if (fsOff) list.forEach(x => (x.done = true));
+      return list;
+    };
     if (this.scope === 'everyone') {
       // Everyone's public looks (new users see a full feed from day one)
       this.circleMateCount = 0;
-      this.sources = [newSource('posts', []), newSource('wardrobe', [])];
+      this.sources = [...offIfFull([newSource('posts', []), newSource('wardrobe', [])]), newSource('d1', [])];
       return this.sources;
     }
     const uids = await circleMates(this.meUid);
     this.circleMateCount = Math.max(0, uids.length - 1);
     const chunks: string[][] = [];
     for (let i = 0; i < uids.length && chunks.length < MAX_CHUNKS; i += IN_MAX) chunks.push(uids.slice(i, i + IN_MAX));
-    this.sources = chunks.flatMap(c => [newSource('posts', c), newSource('wardrobe', c)]);
+    this.sources = [...offIfFull(chunks.flatMap(c => [newSource('posts', c), newSource('wardrobe', c)])), newSource('d1', uids.slice(0, 300))];
     return this.sources;
   }
 
@@ -1030,7 +1165,14 @@ export class FeedLoader {
     picked.forEach(p => {
       const uid = String(p.data?.userId || '');
       const owner = owners.get(uid);
-      if (p.src === 'posts') {
+      if (p.src === 'd1') {
+        const post = d1ToPost(p.data);
+        if (owner) {
+          post.userName = owner.name || post.userName;
+          post.userAvatar = owner.avatarUrl || post.userAvatar;
+        }
+        if (post.imageData) out.push(post);
+      } else if (p.src === 'posts') {
         const post = toPost(p.id, p.data);
         if (owner) {
           post.userName = owner.name || post.userName;

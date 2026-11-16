@@ -36,30 +36,36 @@ https://<YOUR-FUNCTION-HOST>/bitlabsPostback?uid=[%USER:UID%]&val=[%VALUE:USD%]&
 - `USD_TO_INR` (83) is a fixed rate in `index.js`; update it by hand when the rupee moves.
 - Test with the dashboard's callback tester (Integration → Test callback).
 
-## Free host: Cloudflare Worker (`server/earn-worker`)
+## Free host: Cloudflare Worker `outfit-api` (`server/worker`)
 
-`bitlabsPostback` also runs as a free Cloudflare Worker (free plan, no Blaze needed), with the same
-behaviour as the handler in `index.js`. It writes to Firestore (`outfit-vote-9edca`) through the REST
-API with a service account; server writes bypass the security rules, so `firestore.rules` stays as is.
-`.github/workflows/deploy-earn-worker.yml` deploys it on every push to `main` that touches
-`server/earn-worker/**` (or by hand from the Actions tab), and skips with a warning when the
-Cloudflare secrets are not set.
+All three postbacks run on the free Cloudflare Worker **outfit-api**
+(https://outfit-api.babusai927.workers.dev) with the D1 database **outfit-db** (free plan). Every
+verified credit is written to the D1 earn ledger (`earnings` table, server-only) and, when the
+optional Worker secret `FIREBASE_SA_JSON` is set, mirrored to Firestore
+`users/{uid}/earnings/{id}` exactly as before (REST + service-account JWT; server writes bypass the
+rules, so `firestore.rules` stays as is). The app reads both and de-duplicates by id. A daily cron
+(00:30 UTC) moves pending D1 credits past their hold to `approved`.
 
-BitLabs callback URL (replace `<account-subdomain>` with your workers.dev subdomain, shown in the
-Cloudflare dashboard → Workers & Pages, and in the deploy log):
+A handler whose secret is missing answers **503 `not configured`** (partners retry later).
+`.github/workflows/deploy-earn-worker.yml` applies D1 migrations, deploys, and pushes the Worker
+secrets that are set in the repo, on every push to `main` touching `server/worker/**`.
+
+Callback URLs to paste in the partner dashboards:
 
 ```
-https://outfit-earn.<account-subdomain>.workers.dev/bitlabsPostback?uid=[%USER:UID%]&val=[%VALUE:USD%]&tx=[%TX%]&type=[%ACTIVITY:TYPE%]&ref=[%REF%]
+BitLabs       https://outfit-api.babusai927.workers.dev/bitlabsPostback?uid=[%USER:UID%]&val=[%VALUE:USD%]&tx=[%TX%]&type=[%ACTIVITY:TYPE%]&ref=[%REF%]
+CPX Research  https://outfit-api.babusai927.workers.dev/cpxPostback?user_id={user_id}&trans_id={trans_id}&amount_local={amount_local}&status={status}&hash={secure_hash}
+Offerwall.GG  https://outfit-api.babusai927.workers.dev/offerwallPostback?user={userId}&tx={transactionId}&amount={currencyAmount}&status={status}&sig={signature}&payout={payoutUsd}&test={test}
 ```
 
-Repo secrets to add (GitHub → Settings → Secrets and variables → Actions); the workflow pushes the
-last two to the Worker as Worker secrets:
+- Offerwall.GG: set the placement currency to **8300 units per USD** (100 coins per rupee x
+  USD_TO_INR 83), so `currencyAmount` is the full payout in coins; the user gets 65% of it.
+  Signature = hex HMAC-SHA256 of `userId:transactionId:currencyAmount` (offerwall.gg/developers/postbacks).
+  `test=1` never credits; `status=reversed` / negative amount reverses the same transaction.
+- CPX: `CPX_HASH_ENDPOINT` in `src/config/earn.ts` points at `/cpxHash` on the Worker. Set the CPX
+  app currency to INR.
 
-- `CLOUDFLARE_API_TOKEN`: Cloudflare API token with the "Edit Cloudflare Workers" template.
-- `CLOUDFLARE_ACCOUNT_ID`: Cloudflare account id (dashboard sidebar).
-- `BITLABS_SECRET`: BitLabs → Integration → Secret Key.
-- `FIREBASE_SERVICE_ACCOUNT`: the whole JSON key of a Google service account in `outfit-vote-9edca`
-  with Firestore write access (e.g. role "Cloud Datastore User"), pasted as one secret.
-
-Optional Worker secret `BITLABS_CALLBACK_BASE` (set with `wrangler secret put`) pins the scheme + host
-used for the hash; not needed on workers.dev. Never commit any of these values.
+Worker secrets (repo secrets of the same name, or `npx wrangler secret put NAME` in `server/worker`;
+never commit them): `BITLABS_SECRET`, `CPX_SECURE_HASH`, `OFFERWALL_GG_SECRET`, optional
+`FIREBASE_SA_JSON` (whole JSON key of a service account in `outfit-vote-9edca` with role
+"Cloud Datastore User"), optional `BITLABS_CALLBACK_BASE`.

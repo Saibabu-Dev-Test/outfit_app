@@ -37,6 +37,7 @@ import {
 } from '../../services/adminStats';
 import { useBottomSpace } from '../../hooks/useBottomSpace';
 import AdminStoragePanel from './AdminStoragePanel';
+import { isOwnerUser } from '../../services/adminSystem';
 
 type TabKey = 'reports' | 'circles' | 'feedback' | 'stats' | 'storage';
 const TAB_KEYS: TabKey[] = ['reports', 'circles', 'feedback', 'stats', 'storage'];
@@ -378,6 +379,11 @@ export default function AdminScreen({ navigation }: { navigation: any }) {
         <Text style={styles.back}>‹</Text>
       </TouchableOpacity>
       <Text style={styles.title}>🛡️ Admin</Text>
+      {isOwnerUser() ? (
+        <TouchableOpacity onPress={() => navigation.navigate('AdminSystem')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+          <Text style={styles.rewardsLink}>🖥️ System </Text>
+        </TouchableOpacity>
+      ) : null}
       <TouchableOpacity onPress={() => navigation.navigate('AdminRewards')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
         <Text style={styles.rewardsLink}>🎁 Rewards</Text>
       </TouchableOpacity>

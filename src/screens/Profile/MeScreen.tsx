@@ -34,6 +34,7 @@ import { countFriendsJoined, isWeeklyStar, joinedWithLinkText } from '../../serv
 import { shareMyReferral } from '../../utils/referralLink';
 import useIsAdmin from '../../hooks/useIsAdmin';
 import EarningsSection from '../../components/EarningsSection';
+import { isOwnerUser } from '../../services/adminSystem';
 
 type Tab = 'astro' | 'wardrobe' | 'likes';
 
@@ -234,6 +235,14 @@ export default function MeScreen({ navigation }: { navigation: any }) {
               📊 Admin tracking: users, content, ads, features
             </Text>
             <Text style={styles.inviteCta}>Admin ›</Text>
+          </TouchableOpacity>
+        ) : null}
+        {isOwnerUser() ? (
+          <TouchableOpacity style={styles.invite} onPress={() => navigation.navigate('AdminSystem')} activeOpacity={0.8}>
+            <Text style={styles.inviteText} numberOfLines={1}>
+              🖥️ System: backends, free limits, earn, users
+            </Text>
+            <Text style={styles.inviteCta}>Owner ›</Text>
           </TouchableOpacity>
         ) : null}
         {isAdmin ? (
