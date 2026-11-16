@@ -13,3 +13,11 @@ export const APP_GET_URL = `${SHARE_BASE}/get/`;
 // Release APK names (main.yml also keeps the old app-*-release.apk names for older installs)
 export const APK_NAME = 'Outfit.apk'; // arm64-v8a (almost every phone since 2017)
 export const APK_UNIVERSAL_NAME = 'Outfit-universal.apk'; // every CPU type, bigger
+
+// Public legal pages on Hosting (web/public/<page>/, linked from Settings > Terms & About)
+export const LEGAL_PAGES: { label: string; url: string }[] = [
+  { label: 'About', url: `${SHARE_BASE}/about/` },
+  { label: 'Privacy Policy', url: `${SHARE_BASE}/privacy/` },
+  { label: 'Terms of Use', url: `${SHARE_BASE}/terms/` },
+  { label: 'Contact', url: `${SHARE_BASE}/contact/` },
+];
