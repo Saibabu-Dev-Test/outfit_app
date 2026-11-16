@@ -337,19 +337,21 @@ export default function BirthdayChatScreen({ navigation, route }: { navigation: 
     body = (
       <>
         {error ? <Text style={styles.error}>{error}</Text> : null}
-        <FlatList
-          data={rows}
-          inverted
-          keyExtractor={r => r.id}
-          renderItem={renderRow}
-          contentContainerStyle={styles.listContent}
-          keyboardShouldPersistTaps="handled"
-          ListEmptyComponent={
-            <View style={styles.emptyWrap}>
-              <Text style={styles.emptyText}>{empty}</Text>
-            </View>
-          }
-        />
+        {rows.length === 0 ? (
+          // Empty state outside the inverted list (some Android phones showed it mirrored)
+          <View style={styles.emptyWrap}>
+            <Text style={styles.emptyText}>{empty}</Text>
+          </View>
+        ) : (
+          <FlatList
+            data={rows}
+            inverted
+            keyExtractor={r => r.id}
+            renderItem={renderRow}
+            contentContainerStyle={styles.listContent}
+            keyboardShouldPersistTaps="handled"
+          />
+        )}
         {canWrite ? (
           <View>
             {replyTo ? (
@@ -430,7 +432,7 @@ const styles = themedStyles(() =>
     bigEmoji: { fontSize: 56, marginBottom: spacing.sm },
     error: { color: colors.error, fontSize: fontSize.sm, padding: spacing.sm, textAlign: 'center' },
     listContent: { padding: spacing.md, flexGrow: 1 },
-    emptyWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xxl, transform: [{ scaleY: -1 }] },
+    emptyWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xxl },
     emptyText: { color: colors.textSecondary, textAlign: 'center', fontSize: fontSize.sm },
     row: { flexDirection: 'row', marginVertical: 3, alignItems: 'flex-end' },
     rowMine: { justifyContent: 'flex-end' },
