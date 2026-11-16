@@ -373,19 +373,22 @@ export default function CircleChatScreen({ navigation, route }: { navigation: an
           </View>
         )}
         {msgError ? <Text style={styles.error}>{msgError}</Text> : null}
-        <FlatList
-          data={messages}
-          inverted
-          keyExtractor={m => m.id}
-          renderItem={renderMessage}
-          contentContainerStyle={styles.listContent}
-          keyboardShouldPersistTaps="handled"
-          ListEmptyComponent={
-            <View style={styles.emptyWrap}>
-              <Text style={styles.emptyText}>No messages yet. Say hi, share a look, or start a poll!</Text>
-            </View>
-          }
-        />
+        {messages.length === 0 ? (
+          // Empty state outside the inverted list: some Android phones flip an inverted list's
+          // empty view on both axes, which showed this text mirrored
+          <View style={styles.emptyWrap}>
+            <Text style={styles.emptyText}>No messages yet. Say hi, share a look, or start a poll!</Text>
+          </View>
+        ) : (
+          <FlatList
+            data={messages}
+            inverted
+            keyExtractor={m => m.id}
+            renderItem={renderMessage}
+            contentContainerStyle={styles.listContent}
+            keyboardShouldPersistTaps="handled"
+          />
+        )}
         {isMember && (
           <View style={styles.inputBar}>
             <TouchableOpacity style={styles.attachBtn} onPress={openAttach} disabled={sending}>
@@ -524,7 +527,7 @@ const styles = themedStyles(() => StyleSheet.create({
   readOnlyText: { fontSize: fontSize.xs, color: '#92400E', textAlign: 'center' },
   error: { color: colors.error, fontSize: fontSize.sm, padding: spacing.sm, textAlign: 'center' },
   listContent: { padding: spacing.md, flexGrow: 1 },
-  emptyWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xxl, transform: [{ scaleY: -1 }] },
+  emptyWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xxl },
   emptyText: { color: colors.textSecondary, textAlign: 'center', fontSize: fontSize.sm },
   row: { flexDirection: 'row', marginVertical: 3, alignItems: 'flex-end' },
   rowMine: { justifyContent: 'flex-end' },
