@@ -1463,6 +1463,63 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // ── Shared task pool (owner-funded app tasks; server/earn/taskPool.js, src/config/earn.ts TASK_POOL_*) ──
+    // taskPool/{day} {budgetCoins, claimMinutes, perUserCap, paidCoins, holds, updatedAt, updatedBy}
+    // Admin sets budget / claim time / per-user cap (ranges = TASK_POOL_LIMITS). paidCoins and holds
+    // are written only by the server (Admin SDK); an admin can never change them or lower the
+    // budget below what is already paid. Claims, completions and coins: server only.
+    function taskPoolConfigOk() {
+      let d = request.resource.data;
+      return d.budgetCoins is int && d.budgetCoins >= 0 && d.budgetCoins <= 1000000
+        && d.claimMinutes is int && d.claimMinutes >= 5 && d.claimMinutes <= 240
+        && d.perUserCap is int && d.perUserCap >= 1 && d.perUserCap <= 20
+        && d.updatedBy == me()
+        && d.updatedAt == request.time;
+    }
+    match /taskPool/{day} {
+      allow read: if signedIn();
+      allow create: if isAdmin()
+        && isDateKey(day)
+        && request.time < dateTs(day) + duration.value(38, 'h')
+        && request.resource.data.keys().hasOnly(['budgetCoins', 'claimMinutes', 'perUserCap', 'paidCoins', 'updatedAt', 'updatedBy'])
+        && request.resource.data.paidCoins == 0
+        && taskPoolConfigOk();
+      allow update: if isAdmin()
+        && request.time < dateTs(day) + duration.value(38, 'h')
+        && onlyChanged(['budgetCoins', 'claimMinutes', 'perUserCap', 'updatedAt', 'updatedBy'])
+        && taskPoolConfigOk()
+        && request.resource.data.budgetCoins >= resource.data.get('paidCoins', 0);
+      allow delete: if false;
+    }
+    // taskPool/{day}/slots/{slotId} {taskType, rewardCoins, status, claimedBy, claimExpiresAt, ...}
+    // Everyone signed in sees the slots. An admin adds open slots and removes open / expired ones;
+    // nobody else writes (claim / complete happen on the server).
+    match /taskPool/{day}/slots/{sid} {
+      allow read: if signedIn();
+      allow create: if isAdmin()
+        && sid.matches('^[A-Za-z0-9]{1,40}$')
+        && exists(/databases/$(db)/documents/taskPool/$(day))
+        && request.time < dateTs(day) + duration.value(38, 'h')
+        && request.resource.data.keys().hasOnly(['taskType', 'rewardCoins', 'status', 'claimedBy', 'claimExpiresAt', 'createdAt'])
+        && request.resource.data.taskType in ['checkin', 'rewardedAd', 'pollVote']
+        && request.resource.data.rewardCoins is int
+        && request.resource.data.rewardCoins >= 1
+        && request.resource.data.rewardCoins <= 1000
+        && request.resource.data.status == 'open'
+        && request.resource.data.claimedBy == null
+        && request.resource.data.claimExpiresAt == null
+        && request.resource.data.createdAt == request.time;
+      allow update: if false;
+      allow delete: if isAdmin()
+        && (resource.data.status == 'open'
+            || (resource.data.status == 'claimed' && resource.data.claimExpiresAt < request.time));
+    }
+    // taskPool/{day}/users/{uid} {claims, done, activeSlot, activeUntil}: per-user daily cap, server only
+    match /taskPool/{day}/users/{uid} {
+      allow read: if signedIn() && (me() == uid || isAdmin());
+      allow write: if false;
+    }
+
     // withdrawals/{id}: UPI payout request (pending); admin marks paid / rejected after checking the balance
     match /withdrawals/{wid} {
       allow read: if signedIn() && (resource.data.uid == me() || isAdmin());

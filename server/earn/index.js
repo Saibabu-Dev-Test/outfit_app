@@ -23,12 +23,15 @@
 //                   pending ad/vote/checkin entries older than 1 day -> 'approved' (after fraud checks);
 //                   referrals: when the new user has a completed earnDaily day, credit
 //                   referral_{newUid} (100 coins) to BOTH users.
+//   taskPoolClaim / taskPoolComplete / taskPoolSweep  shared, owner-funded daily task pool
+//                   (taskPool.js): claims and coin credits only inside a Firestore transaction.
 //
 // TODO(owner): set CPX_SECURE_HASH (CPX dashboard > App > Secure hash), BITLABS_SECRET (BitLabs
 // dashboard > App > Integration > Secret Key) and OFFERWALL_GG_SECRET as
 // secrets, deploy, then put the cpxHash URL in src/config/earn.ts (CPX_HASH_ENDPOINT) and the
 // postback URLs in the partner dashboards. Make sure CPX pays out in INR (or convert `payout`).
 const crypto = require('crypto');
+const { makeTaskPoolHandlers } = require('./taskPool');
 
 const USER_SHARE = 0.65;
 const COINS_PER_RUPEE = 100;
@@ -168,7 +171,11 @@ function makeHandlers({ admin, secrets }) {
     // TODO: approve app coin entries (ad/vote/checkin) and credit referrals as described above.
   }
 
-  return { cpxHash, cpxPostback, offerwallPostback, bitlabsPostback, releaseHeld };
+  // Shared task pool (owner-funded app tasks): taskPoolClaim / taskPoolComplete (POST, Firebase ID
+  // token) and taskPoolSweep (scheduled). See taskPool.js.
+  const pool = makeTaskPoolHandlers({ admin });
+
+  return { cpxHash, cpxPostback, offerwallPostback, bitlabsPostback, releaseHeld, ...pool };
 }
 
 module.exports = { makeHandlers, userCoins, md5, USD_TO_INR, bitlabsUserCoins, verifyBitlabsHash, bitlabsCallbackUrl };
