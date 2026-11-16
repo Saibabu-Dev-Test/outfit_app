@@ -9,7 +9,10 @@ const fs = require('fs');
 const path = require('path');
 
 // prefix: the path and anything after it is served as-is. exact: only that exact path.
+// '' exact = the root page / itself (served from hosting-public/index.html, a copy of /get/, so
+// partner site verification that reads / without following redirects sees its <head>).
 const KEEP = [
+  { p: '', kind: 'exact' },
   { p: 'get/', kind: 'prefix' },
   { p: 'icons/', kind: 'prefix' },
   { p: 'privacy', kind: 'prefix' },
@@ -19,6 +22,7 @@ const KEEP = [
   { p: 'robots.txt', kind: 'exact' },
   { p: 'sw.js', kind: 'exact' },
   { p: 'app-ads.txt', kind: 'exact' },
+  { p: 'offerwall.txt', kind: 'exact' },
 ];
 
 const esc = c => (/[.\\^$|?*+()[\]{}]/.test(c) ? '\\' + c : c);
