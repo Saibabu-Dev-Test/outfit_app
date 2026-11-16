@@ -70,6 +70,6 @@ export const adUnitId = (slot: AdSlot, opts: { test?: boolean } = {}): string =>
   (opts.test ??
     (usingTestAds() ||
       (slot === 'earnRewarded' && USE_TEST_ADS_EARN) ||
-      (slot === 'earnInterstitial' && (USE_TEST_ADS_EARN || !REAL_ADS.earnInterstitial))))
+      (slot === 'earnInterstitial' && !REAL_ADS.earnInterstitial)))
     ? TEST_ADS[slot]
     : REAL_ADS[slot];
