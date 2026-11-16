@@ -68,9 +68,15 @@ export interface SystemSnapshot {
 
 // Owner = verified Google email in OWNER_EMAILS (Worker and firestore.rules check the same)
 export const isOwnerUser = (): boolean => {
-  const u = auth?.currentUser;
-  return !!u && u.emailVerified === true && isOwnerEmail(u.email);
+  const u: any = auth?.currentUser;
+  return !!u && isOwnerEmail(u.email) && (u.emailVerified === true || googleLinked(u));
 };
+
+// A Google-linked account proves the email even when emailVerified is false
+// (happens when the account started with a phone number and Google was linked later)
+export const googleLinked = (u: any): boolean =>
+  Array.isArray(u?.providerData) &&
+  u.providerData.some((p: any) => p?.providerId === 'google.com' && isOwnerEmail(p?.email ?? u?.email));
 
 // Start of today in India time (owner's "today")
 export const istDayStart = (now: Date = new Date()): Date => {

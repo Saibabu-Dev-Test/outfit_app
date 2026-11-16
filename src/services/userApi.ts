@@ -1,3 +1,4 @@
+import { isOwnerUser } from './adminSystem';
 // Profile + daily streak in Firestore users/{uid}. Avatar is a base64 data URI in users/{uid}.avatarUrl
 import {
   doc,
@@ -162,7 +163,7 @@ export const getMyRole = async (uid?: string | null): Promise<string | null> => 
   // The owner (verified Google email) always has every admin right
   try {
     const u: any = (auth as any)?.currentUser;
-    if (u && u.uid === uid && u.emailVerified && isOwnerEmail(u.email)) return 'admin';
+    if (u && u.uid === uid && isOwnerUser()) return 'admin';
   } catch {}
   try {
     const snap = await getDoc(doc(db, 'users', uid));
