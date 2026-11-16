@@ -37,6 +37,8 @@ import { isValidUpi, normalizeUpi, sha256Hex } from '../utils/sha256';
 import { getDeviceHash } from '../native/deviceId';
 import { firestoreErrorMessage } from '../utils/firebaseErrors';
 import { EarnDay, EarnEntry, EMPTY_DAY, Withdrawal, toEarnDay, toEarnEntry } from './earnLedger';
+import { D1Earning, d1Earnings } from './d1Api';
+import { isQuotaError, markFirestoreFull } from './dataBackend';
 
 const dayRef = (uid: string, day: string) => doc(db, 'users', uid, 'earnDaily', day);
 const earnRef = (uid: string, id: string) => doc(db, 'users', uid, 'earnings', id);
@@ -136,20 +138,60 @@ export const dailyCheckIn = async (uid: string): Promise<number> => {
 };
 
 // ── Ledger ──
+// Firestore users/{uid}/earnings + the Worker's D1 ledger (partner postbacks land there; read-only
+// for the app). Same id in both (the Worker mirrors to Firestore when it has a service account):
+// the Firestore copy wins. A Firestore quota error still shows the D1 entries.
+const d1ToEntry = (e: D1Earning): EarnEntry | null =>
+  toEarnEntry(e.id, {
+    type: e.type,
+    coins: e.coins,
+    rupees: e.rupees,
+    partner: e.partner,
+    status: e.status,
+    createdAt: e.createdAt || null,
+    holdUntil: e.holdUntil || null,
+  });
+
+export const mergeEarnings = (fs: EarnEntry[], d1: EarnEntry[]): EarnEntry[] => {
+  const seen = new Set(fs.map(x => x.id));
+  const all = [...fs, ...d1.filter(x => !seen.has(x.id))];
+  const at = (x: any) => (x?.createdAt instanceof Date ? x.createdAt.getTime() : 0);
+  return all.sort((a, b) => at(b) - at(a));
+};
+
 export const subscribeEarnings = (uid: string, cb: (entries: EarnEntry[]) => void, max = 300): (() => void) => {
+  let fsList: EarnEntry[] = [];
+  let d1List: EarnEntry[] = [];
+  let alive = true;
+  const emit = () => alive && cb(mergeEarnings(fsList, d1List));
+  d1Earnings()
+    .then(list => {
+      d1List = list.map(d1ToEntry).filter((x): x is EarnEntry => !!x);
+      emit();
+    })
+    .catch(() => undefined);
+  let unsub: () => void = () => undefined;
   try {
-    return onSnapshot(
+    unsub = onSnapshot(
       query(collection(db, 'users', uid, 'earnings'), orderBy('createdAt', 'desc'), limit(max)),
-      snap => cb(snap.docs.map(d => toEarnEntry(d.id, d.data())).filter((x): x is EarnEntry => !!x)),
+      snap => {
+        fsList = snap.docs.map(d => toEarnEntry(d.id, d.data())).filter((x): x is EarnEntry => !!x);
+        emit();
+      },
       e => {
         console.warn('earnings listen failed:', e?.code, e?.message);
-        cb([]);
+        if (isQuotaError(e)) markFirestoreFull();
+        fsList = [];
+        emit();
       },
     );
   } catch {
-    cb([]);
-    return () => undefined;
+    emit();
   }
+  return () => {
+    alive = false;
+    unsub();
+  };
 };
 
 const toWithdrawal = (id: string, d: any): Withdrawal => ({

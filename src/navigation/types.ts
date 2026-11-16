@@ -18,6 +18,8 @@ export type RootStackParamList = {
   AdminRewards: undefined;
   // Earn tab: UPI withdrawal requests (admin) and the survey / offer wall in a WebView
   AdminWithdrawals: undefined;
+  // Owner only: backends, free-tier usage, Worker health, earn partners, users
+  AdminSystem: undefined;
   EarnWall: { url: string; title?: string; kind?: 'survey' | 'offer' };
   Likes: { tab?: 'activity' | 'likes' } | undefined;
   LikedBy: { kind: 'post' | 'wardrobe'; id: string };

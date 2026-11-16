@@ -24,6 +24,7 @@ import AchievementsScreen from '../screens/Profile/AchievementsScreen';
 import MonthlyTasksScreen from '../screens/Profile/MonthlyTasksScreen';
 import AdminRewardsScreen from '../screens/Admin/AdminRewardsScreen';
 import AdminWithdrawalsScreen from '../screens/Admin/AdminWithdrawalsScreen';
+import AdminSystemScreen from '../screens/Admin/AdminSystemScreen';
 import EarnWallScreen from '../screens/Earn/EarnWallScreen';
 import LikesScreen from '../screens/Profile/LikesScreen';
 import LikedByScreen from '../screens/Profile/LikedByScreen';
@@ -41,6 +42,7 @@ import SessionLockScreen from '../components/SessionLockScreen';
 import TamperScreen from '../components/TamperScreen';
 import { getVaultStatus, subscribeVault, VaultStatus } from '../native/sessionVault';
 import type { RootStackParamList } from './types';
+import { pingBackend } from '../services/dataBackend';
 
 export type { RootStackParamList } from './types';
 
@@ -63,6 +65,10 @@ let savedNavState: NavigationState | undefined;
 
 function NavigationContent() {
   const { isAuthenticated, initializing, login } = useAuth();
+  // Once per sign-in: Firestore / D1 backend status + "active today" (Worker, no Firestore write)
+  useEffect(() => {
+    if (isAuthenticated) pingBackend();
+  }, [isAuthenticated]);
   const vault = useVaultStatus();
   const { isDark } = useTheme();
   const navTheme = {
@@ -126,6 +132,7 @@ function NavigationContent() {
               <Stack.Screen name="MonthlyTasks" component={MonthlyTasksScreen} />
               <Stack.Screen name="AdminRewards" component={AdminRewardsScreen} />
               <Stack.Screen name="AdminWithdrawals" component={AdminWithdrawalsScreen} />
+              <Stack.Screen name="AdminSystem" component={AdminSystemScreen} />
               <Stack.Screen name="EarnWall" component={EarnWallScreen} />
               <Stack.Screen name="Likes" component={LikesScreen} />
               <Stack.Screen name="LikedBy" component={LikedByScreen} />

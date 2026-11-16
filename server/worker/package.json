@@ -1,0 +1,14 @@
+{
+  "name": "outfit-api-worker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Free Cloudflare Worker 'outfit-api' + D1 'outfit-db': Firestore quota fallback API and earn postbacks (deployed by .github/workflows/deploy-earn-worker.yml)",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "migrate": "wrangler d1 migrations apply outfit-db --remote",
+    "dev": "wrangler dev"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}

@@ -8,14 +8,21 @@ add their own email as a member of each service below. Never share the owner's p
 - Repo: `Saibabu-Dev-Test/outfit_app`, branch `main` (feature branch → PR → squash merge)
 - Android package: `com.saibabu.outfit`
 - Firebase project: `outfit-vote-9edca` (web: https://outfit-vote-9edca.web.app)
-- Backend for earn postbacks: Cloudflare Worker in `server/earn` (free plan)
+- Cloudflare Worker `outfit-api` (`server/worker`, free plan): https://outfit-api.babusai927.workers.dev
+  with D1 database `outfit-db` (id `3b5f3c2f-26a2-429e-8f5b-8d90c8123b3c`). It verifies the Firebase ID
+  token and serves the Firestore quota fallback (feed posts, A-F votes, coin events, read-only earn
+  ledger) plus the earn postbacks (BitLabs / CPX / Offerwall.GG). See `server/earn/README.md`.
+- Data backend fallback (`src/services/dataBackend.ts`): Firestore first; new writes move to D1 at 95%
+  of Firestore's Spark daily quota (app-counted estimate) or when Firestore answers resource-exhausted;
+  reads merge Firestore + D1 so old data still loads. Firebase Auth stays the login.
+- Owner-only Admin > System screen: backend, free-tier usage, Worker health, earn partners, users.
 
 ## How to give a developer access
 | Service | What to do | Owner login |
 |---|---|---|
 | GitHub | Repo → Settings → Collaborators → add developer's GitHub username | Saibabu-Dev-Test |
 | Firebase / Google Cloud | Firebase console → Project settings → Users and permissions → add developer email (Editor) | owner's Google account |
-| Cloudflare | Dashboard → Manage account → Members → invite developer email | bsai4790@gmail.com |
+| Cloudflare | Dashboard → Manage account → Members → invite developer email | babusai927@gmail.com (account f081d4203a6fe6483ca331182b3906e0) |
 | Google Play / Indus Appstore | Console → Users & permissions → invite developer | owner account |
 | AdMob | Settings → Users → invite | owner account |
 | Offerwalls (BitLabs, CPX, Lootably, Torox, etc.) | Usually keep owner-only; give developer only the App ID if needed | bsai4790@gmail.com / babusai927@gmail.com (CPX) |
@@ -28,10 +35,12 @@ GitHub → repo Settings → Secrets and variables → Actions. A developer with
 | `FIREBASE_SERVICE_ACCOUNT` | Deploy Firestore rules / Hosting from CI |
 | `GEMINI_API_KEY` | AI features |
 | `RELEASE_BUNDLE_PASSPHRASE` | Unlock the Android release signing bundle in CI |
-| `CLOUDFLARE_API_TOKEN` | Deploy the earn worker (to be added) |
-| `CLOUDFLARE_ACCOUNT_ID` | Deploy the earn worker (to be added) |
+| `CLOUDFLARE_API_TOKEN` | Deploy the outfit-api Worker + D1 migrations (to be added) |
+| `CLOUDFLARE_ACCOUNT_ID` | Deploy the outfit-api Worker (to be added) |
 | `BITLABS_SECRET` | Verify BitLabs postbacks (to be added) |
-| `FIREBASE_SA_JSON` | Worker writes coins to Firestore (to be added) |
+| `CPX_SECURE_HASH` | Verify CPX postbacks + cpxHash (to be added) |
+| `OFFERWALL_GG_SECRET` | Verify Offerwall.GG postbacks (to be added) |
+| `FIREBASE_SA_JSON` | Optional: Worker mirrors earn credits to Firestore (to be added) |
 
 Owner passwords are kept in the owner's own password manager (Hark Vault / Bitwarden), never in this repo.
 

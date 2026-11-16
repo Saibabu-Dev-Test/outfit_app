@@ -1,0 +1,75 @@
+name: Deploy outfit-api Worker (Cloudflare, free plan)
+
+# Deploys server/worker (Worker 'outfit-api' + D1 'outfit-db': Firestore quota fallback API and the
+# earn postbacks) to https://outfit-api.babusai927.workers.dev on the free plan.
+# Runs when the Worker changes on main, or by hand from the Actions tab (workflow_dispatch).
+#
+# Repo secrets (Settings > Secrets and variables > Actions):
+#   CLOUDFLARE_API_TOKEN   Cloudflare API token (Workers Scripts + D1 Edit)
+#   CLOUDFLARE_ACCOUNT_ID  Cloudflare account id
+#   Optional, pushed to the Worker as Worker secrets only when set (empty = left unchanged):
+#   BITLABS_SECRET, CPX_SECURE_HASH, OFFERWALL_GG_SECRET, FIREBASE_SA_JSON
+# Without CLOUDFLARE_API_TOKEN (or the account id) the job is skipped with a warning instead of failing.
+on:
+  push:
+    branches: [main]
+    paths:
+      - server/worker/**
+      - .github/workflows/deploy-earn-worker.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-outfit-api
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check Cloudflare secrets
+        id: cfg
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -z "$CF_TOKEN" ] || [ -z "$CF_ACCOUNT" ]; then
+            echo "::warning::CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID not set: outfit-api Worker NOT deployed."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        if: steps.cfg.outputs.ready == 'true'
+
+      - uses: actions/setup-node@v4
+        if: steps.cfg.outputs.ready == 'true'
+        with:
+          node-version: 22
+
+      - name: D1 migrations + deploy + Worker secrets
+        if: steps.cfg.outputs.ready == 'true'
+        working-directory: server/worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          BITLABS_SECRET: ${{ secrets.BITLABS_SECRET }}
+          CPX_SECURE_HASH: ${{ secrets.CPX_SECURE_HASH }}
+          OFFERWALL_GG_SECRET: ${{ secrets.OFFERWALL_GG_SECRET }}
+          FIREBASE_SA_JSON: ${{ secrets.FIREBASE_SA_JSON }}
+        run: |
+          npx --yes wrangler@4 d1 migrations apply outfit-db --remote
+          npx --yes wrangler@4 deploy
+          for name in BITLABS_SECRET CPX_SECURE_HASH OFFERWALL_GG_SECRET FIREBASE_SA_JSON; do
+            value="${!name}"
+            if [ -n "$value" ]; then
+              printf '%s' "$value" | npx --yes wrangler@4 secret put "$name"
+              echo "$name: set"
+            else
+              echo "::notice::$name not set in repo secrets: that handler answers 503 'not configured'."
+            fi
+          done
+          curl -fsS https://outfit-api.babusai927.workers.dev/health
