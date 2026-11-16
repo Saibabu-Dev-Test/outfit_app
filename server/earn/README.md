@@ -35,3 +35,13 @@ https://<YOUR-FUNCTION-HOST>/bitlabsPostback?uid=[%USER:UID%]&val=[%VALUE:USD%]&
   bad hash, `500` on a storage error so BitLabs retries.
 - `USD_TO_INR` (83) is a fixed rate in `index.js`; update it by hand when the rupee moves.
 - Test with the dashboard's callback tester (Integration → Test callback).
+
+## Free hosting: Cloudflare Worker (no card)
+
+`server/worker/` runs `bitlabsPostback` and the daily `releaseHeld` on Cloudflare Workers' free plan.
+`.github/workflows/earn-worker.yml` deploys it on push to main once these repo secrets exist:
+`CLOUDFLARE_API_TOKEN` (template "Edit Cloudflare Workers"), `CLOUDFLARE_ACCOUNT_ID`,
+`FIREBASE_SA_JSON` (Firebase console > Project settings > Service accounts > Generate new private key,
+whole JSON) and `BITLABS_SECRET`. Callback URL for BitLabs:
+`https://outfit-earn.<your-subdomain>.workers.dev/bitlabsPostback?uid=[%USER:UID%]&val=[%VALUE:USD%]&tx=[%TX%]&type=[%ACTIVITY:TYPE%]&ref=[%REF%]`
+Withdrawals stay manual: admin pays by UPI and marks paid in the app's admin screen.
