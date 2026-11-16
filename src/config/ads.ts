@@ -7,7 +7,7 @@
 //   app.json                                   "react-native-google-mobile-ads".android_app_id
 // A missing or malformed app id there crashes the app at launch, so never leave it empty.
 
-export type AdSlot = 'feedNative' | 'circlesBanner' | 'searchBanner' | 'pollBanner' | 'astroRewarded' | 'poruthamRewarded' | 'earnRewarded';
+export type AdSlot = 'feedNative' | 'circlesBanner' | 'searchBanner' | 'pollBanner' | 'astroRewarded' | 'poruthamRewarded' | 'earnRewarded' | 'earnInterstitial';
 
 // Real ids (AdMob > Apps > Outfit). Unit names as in the AdMob console.
 export const REAL_ADS = {
@@ -22,6 +22,10 @@ export const REAL_ADS = {
   // TODO(AdMob): make an earn_rewarded (Rewarded) unit and put it here. Until then the Earn tab
   // reuses astro_rewarded, and only when USE_TEST_ADS_EARN is false.
   earnRewarded: 'ca-app-pub-8006246175093661/8348090730',
+  // TODO(AdMob): make an earn_interstitial (Interstitial) unit and put its id here. Empty = Google
+  // TEST interstitial (no revenue, no own-click risk). Plain ad, NO reward (AdMob policy: ads must not
+  // give users anything of cash value). Shown once each time a survey / offer wall opens.
+  earnInterstitial: '',
 } as const;
 
 // Google's official test ids (Android): https://developers.google.com/admob/android/test-ads
@@ -34,6 +38,7 @@ export const TEST_ADS = {
   astroRewarded: 'ca-app-pub-3940256099942544/5224354917',
   poruthamRewarded: 'ca-app-pub-3940256099942544/5224354917',
   earnRewarded: 'ca-app-pub-3940256099942544/5224354917',
+  earnInterstitial: 'ca-app-pub-3940256099942544/1033173712',
 } as const;
 
 // true forces test ad units in release builds too (e.g. a build for testers). Normally false.
@@ -62,4 +67,9 @@ export const usingTestAds = (): boolean => FORCE_TEST_ADS || isDev;
 
 // The unit id for a slot: Google test ids in debug builds, the real ids in release builds
 export const adUnitId = (slot: AdSlot, opts: { test?: boolean } = {}): string =>
-  (opts.test ?? (usingTestAds() || (slot === 'earnRewarded' && USE_TEST_ADS_EARN))) ? TEST_ADS[slot] : REAL_ADS[slot];
+  (opts.test ??
+    (usingTestAds() ||
+      (slot === 'earnRewarded' && USE_TEST_ADS_EARN) ||
+      (slot === 'earnInterstitial' && !REAL_ADS.earnInterstitial)))
+    ? TEST_ADS[slot]
+    : REAL_ADS[slot];

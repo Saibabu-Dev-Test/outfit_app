@@ -1374,9 +1374,9 @@ service cloud.firestore {
         && request.resource.data.get('adsCount', 0) >= 0
         && request.resource.data.get('adsCount', 0) <= earnMaxAds()
         && request.resource.data.get('adsCount', 0) - (resource == null ? 0 : resource.data.get('adsCount', 0)) in [0, 1]
-        // check-in only once the gate is open
+        // check-in only once the gate is open (first vote of the day; ads are optional, AdMob policy)
         && (request.resource.data.get('checkedIn', false) == false
-            || (request.resource.data.get('adWatched', false) == true && request.resource.data.get('voted', false) == true))
+            || request.resource.data.get('voted', false) == true)
         && (resource == null
             || ((resource.data.get('adWatched', false) == false || request.resource.data.get('adWatched', false) == true)
                 && (resource.data.get('voted', false) == false || request.resource.data.get('voted', false) == true)

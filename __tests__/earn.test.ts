@@ -90,22 +90,33 @@ describe('ledger', () => {
       ],
       [{ id: 'w', coins: 5000, rupees: 50, status: 'pending', createdAt: null }],
     );
-    expect(s.approvedCoins).toBe(6503);
-    expect(s.pendingCoins).toBe(1005);
-    expect(s.totalCoins).toBe(7508);
-    expect(s.withdrawableCoins).toBe(1503);
+    // ad / vote / check-in coins are bonus coins: never cash, never withdrawable (AdMob policy)
+    expect(s.bonusCoins).toBe(8);
+    expect(s.approvedCoins).toBe(6500);
+    expect(s.pendingCoins).toBe(1000);
+    expect(s.totalCoins).toBe(7500);
+    expect(s.withdrawableCoins).toBe(1500);
     expect(s.tasksCompleted).toBe(5);
     expect(s.byType.survey).toEqual({ count: 2, coins: 7500 });
     expect(s.byType.offer.count).toBe(0);
   });
+  test('bonus coins alone are never withdrawable', () => {
+    const s = summarize([
+      e({ type: 'ad', coins: 9000, status: 'approved' }),
+      e({ type: 'referral', coins: 100, status: 'approved' }),
+    ]);
+    expect(s.bonusCoins).toBe(9100);
+    expect(s.withdrawableCoins).toBe(0);
+    expect(withdrawCheck(50, s, 50).ok).toBe(false);
+  });
   test('rejected withdrawals give the balance back', () => {
-    const s = summarize([e({ coins: 6000, status: 'approved' })], [
+    const s = summarize([e({ type: 'survey', coins: 6000, status: 'approved' })], [
       { id: 'w', coins: 5000, rupees: 50, status: 'rejected', createdAt: null },
     ]);
     expect(s.withdrawableCoins).toBe(6000);
   });
   test('withdraw check', () => {
-    const s = summarize([e({ coins: 7000, status: 'approved' })]);
+    const s = summarize([e({ type: 'survey', coins: 7000, status: 'approved' })]);
     expect(withdrawCheck(40, s, 50).ok).toBe(false);
     expect(withdrawCheck(80, s, 50).ok).toBe(false);
     expect(withdrawCheck(70, s, 50)).toEqual({ ok: true, coins: 7000 });
@@ -114,9 +125,9 @@ describe('ledger', () => {
 });
 
 describe('daily gate + survey ad pacing', () => {
-  test('unlocks only with ad AND vote', () => {
+  test('unlocks after the first vote (ads optional)', () => {
     expect(isUnlocked(toEarnDay({ adWatched: true }))).toBe(false);
-    expect(isUnlocked(toEarnDay({ voted: true }))).toBe(false);
+    expect(isUnlocked(toEarnDay({ voted: true }))).toBe(true); // ads optional (AdMob policy)
     expect(isUnlocked(toEarnDay({ adWatched: true, voted: true }))).toBe(true);
     expect(isUnlocked(toEarnDay(undefined))).toBe(false);
   });

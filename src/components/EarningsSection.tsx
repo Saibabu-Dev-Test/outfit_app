@@ -35,7 +35,7 @@ export default function EarningsSection({ uid, onOpenEarn }: { uid: string; onOp
         ) : null}
       </View>
       <Text style={ui.h1}>
-        🪙 {s.totalCoins.toLocaleString('en-IN')} · {rupeesText(s.totalCoins)}
+        💰 {rupeesText(s.totalCoins)} · 🪙 {s.bonusCoins.toLocaleString('en-IN')} bonus
       </Text>
       <Text style={ui.body}>
         Withdrawable {rupeesText(s.withdrawableCoins)} · Pending {rupeesText(s.pendingCoins)}

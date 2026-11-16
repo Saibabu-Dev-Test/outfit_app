@@ -162,6 +162,62 @@ export const showRewardedAd = (slot: RewardedSlot): Promise<RewardedResult> => {
   });
 };
 
+// One plain (non-rewarded) interstitial, e.g. when a survey / offer wall opens. Gives the user nothing
+// (AdMob policy); ad money is the owner's. Never throws, always settles: 'shown' | 'no_ad'.
+export const showInterstitialAd = (slot: 'earnInterstitial'): Promise<'shown' | 'no_ad'> => {
+  if (!allowed) allowAds();
+  const m = adsModule();
+  if (!m || !m.InterstitialAd) {
+    noteAd(slot, false, 'Ads module not available on this build');
+    return Promise.resolve('no_ad');
+  }
+  return new Promise(resolve => {
+    let done = false;
+    let shown = false;
+    const unsubs: (() => void)[] = [];
+    const finish = (r: 'shown' | 'no_ad') => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      unsubs.forEach(u => {
+        try {
+          u();
+        } catch {}
+      });
+      resolve(r);
+    };
+    const timer = setTimeout(() => {
+      if (!shown) {
+        noteAd(slot, false, 'Timed out: no ad loaded (no fill)');
+        finish('no_ad');
+      }
+    }, REWARDED_LOAD_TIMEOUT_MS);
+    try {
+      initAds().catch(() => undefined);
+      const ad = m.InterstitialAd.createForAdRequest(adUnitId(slot));
+      const on = (type: any, fn: (p?: any) => void) => {
+        const u = ad.addAdEventListener(type, fn);
+        if (typeof u === 'function') unsubs.push(u);
+      };
+      on(m.AdEventType.LOADED, () => {
+        noteAd(slot, true, 'Loaded');
+        if (done) return;
+        shown = true;
+        Promise.resolve(ad.show()).catch(() => finish('no_ad'));
+      });
+      on(m.AdEventType.CLOSED, () => finish('shown'));
+      on(m.AdEventType.ERROR, (err?: any) => {
+        noteAd(slot, false, `${err?.code || ''} ${err?.message || 'Ad error'}`.trim());
+        finish(shown ? 'shown' : 'no_ad');
+      });
+      ad.load();
+    } catch (e: any) {
+      console.warn('Interstitial ad failed:', e?.message);
+      finish('no_ad');
+    }
+  });
+};
+
 // "Watch an ad to unlock": true when the content should unlock. No ad available -> unlock anyway
 // after a short wait (users are never punished for no fill); closed early -> stays locked.
 export const watchAdToUnlock = async (slot: RewardedSlot): Promise<boolean> => {
