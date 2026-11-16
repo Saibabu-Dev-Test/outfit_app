@@ -46,6 +46,13 @@ export const TRACKED_FEATURES: TrackedFeature[] = [
   { title: 'Admin tracking: tap any number to open its list (owner only)', status: 'in_review' },
   { title: 'Earn tab open to every user: no daily ad + vote gate, no ad before surveys; every card shows at once', status: 'in_review', pr: 61 },
   {
+    title: 'Earn: 1 ad after each completed task (owner revenue, no coins)',
+    status: 'in_review',
+    pr: 61,
+    note: 'One interstitial when the user leaves a partner wall after a task was credited since it opened (or after 60 s in the wall when no credit shows yet). Never before a task, max 1 full-screen ad per 2 min. Uses Google test ads until an earn_interstitial unit is put in REAL_ADS.earnInterstitial (src/config/ads.ts) and USE_TEST_ADS_EARN is set false',
+  },
+  { title: 'Earn: 65% to users / 35% to owner (server split), noted in Terms & About', status: 'in_review', pr: 61 },
+  {
     title: 'Push notifications on phones',
     status: 'owner_todo',
     note: 'Enable the FCM API and give the deployer service account its two roles in Google Cloud',

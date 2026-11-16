@@ -7,7 +7,15 @@
 //   app.json                                   "react-native-google-mobile-ads".android_app_id
 // A missing or malformed app id there crashes the app at launch, so never leave it empty.
 
-export type AdSlot = 'feedNative' | 'circlesBanner' | 'searchBanner' | 'pollBanner' | 'astroRewarded' | 'poruthamRewarded' | 'earnRewarded';
+export type AdSlot =
+  | 'feedNative'
+  | 'circlesBanner'
+  | 'searchBanner'
+  | 'pollBanner'
+  | 'astroRewarded'
+  | 'poruthamRewarded'
+  | 'earnRewarded'
+  | 'earnInterstitial';
 
 // Real ids (AdMob > Apps > Outfit). Unit names as in the AdMob console.
 export const REAL_ADS = {
@@ -22,6 +30,10 @@ export const REAL_ADS = {
   // TODO(AdMob): make an earn_rewarded (Rewarded) unit and put it here. Until then the Earn tab
   // reuses astro_rewarded, and only when USE_TEST_ADS_EARN is false.
   earnRewarded: 'ca-app-pub-8006246175093661/8348090730',
+  // TODO(AdMob): make an earn_interstitial (Interstitial) unit and put it here. It is the one ad
+  // shown after a completed Earn task (owner revenue only, no coins). Empty = no post-task ad in
+  // release builds once USE_TEST_ADS_EARN is false (a rewarded unit can't be shown as interstitial).
+  earnInterstitial: '',
 } as const;
 
 // Google's official test ids (Android): https://developers.google.com/admob/android/test-ads
@@ -34,12 +46,13 @@ export const TEST_ADS = {
   astroRewarded: 'ca-app-pub-3940256099942544/5224354917',
   poruthamRewarded: 'ca-app-pub-3940256099942544/5224354917',
   earnRewarded: 'ca-app-pub-3940256099942544/5224354917',
+  earnInterstitial: 'ca-app-pub-3940256099942544/1033173712',
 } as const;
 
 // true forces test ad units in release builds too (e.g. a build for testers). Normally false.
 export const FORCE_TEST_ADS = false;
 
-// Earn tab (gate ad + one ad after each survey): Google TEST ads in every build while the Earn tab is
+// Earn tab (optional rewarded ad + the one interstitial after a completed task): Google TEST ads in every build while the Earn tab is
 // being tested (no own-click risk on the real account). Set false once a real earn_rewarded unit is in
 // REAL_ADS.earnRewarded.
 export const USE_TEST_ADS_EARN = true;
@@ -55,11 +68,26 @@ export const REWARDED_LOAD_TIMEOUT_MS = 15000;
 // Short wait shown before unlocking when no ad could be shown
 export const REWARDED_FALLBACK_WAIT_MS = 2500;
 
+// ── Post-task ad (Earn walls) ── one interstitial when the user leaves a partner wall after a task.
+// Owner revenue only: it never gives coins. Never shown when a wall opens (no gate before tasks).
+// At most one full-screen ad (rewarded or interstitial) per this gap.
+export const POST_TASK_AD_MIN_GAP_MS = 2 * 60 * 1000;
+// No task completion seen (postbacks not deployed / not arrived yet): show the ad only when the
+// user spent at least this long in the wall
+export const POST_TASK_AD_MIN_WALL_MS = 60 * 1000;
+// How long closing a wall may wait for the "new credit?" check and for the ad to load before the
+// user simply goes back to Earn without an ad
+export const POST_TASK_CREDIT_CHECK_MS = 2500;
+export const POST_TASK_AD_LOAD_WAIT_MS = 3000;
+// Pause before the ad appears, so the tap that closed the wall can't land on the ad
+export const POST_TASK_AD_TAP_GUARD_MS = 600;
+
 declare const __DEV__: boolean | undefined;
 const isDev = typeof __DEV__ !== 'undefined' && !!__DEV__;
 
 export const usingTestAds = (): boolean => FORCE_TEST_ADS || isDev;
 
 // The unit id for a slot: Google test ids in debug builds, the real ids in release builds
+const EARN_SLOTS: AdSlot[] = ['earnRewarded', 'earnInterstitial'];
 export const adUnitId = (slot: AdSlot, opts: { test?: boolean } = {}): string =>
-  (opts.test ?? (usingTestAds() || (slot === 'earnRewarded' && USE_TEST_ADS_EARN))) ? TEST_ADS[slot] : REAL_ADS[slot];
+  (opts.test ?? (usingTestAds() || (EARN_SLOTS.includes(slot) && USE_TEST_ADS_EARN))) ? TEST_ADS[slot] : REAL_ADS[slot];

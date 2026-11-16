@@ -11,6 +11,11 @@ export const watchAdToUnlock = async (_slot: RewardedSlot): Promise<boolean> => 
   await new Promise<void>(r => setTimeout(r, REWARDED_FALLBACK_WAIT_MS));
   return true;
 };
+export type InterstitialSlot = 'earnInterstitial';
+export type InterstitialResult = 'shown' | 'no_ad';
+export const lastFullscreenAdAt = (): number => 0;
+export const preloadInterstitial = (_slot: InterstitialSlot): void => {};
+export const showInterstitialAd = (_slot: InterstitialSlot, _waitMs: number): Promise<InterstitialResult> => Promise.resolve('no_ad');
 export const adsAllowed = (): boolean => false;
 export const allowAds = (): void => {};
 export const onAdsAllowed = (_fn: () => void): (() => void) => () => {};

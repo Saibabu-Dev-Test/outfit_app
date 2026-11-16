@@ -186,6 +186,24 @@ export const subscribeEarnings = (uid: string, cb: (entries: EarnEntry[]) => voi
   };
 };
 
+// One read of the user's ledger (Firestore + D1), newest first. Never throws: [] when both fail.
+// Used when the user leaves a partner wall, to see whether a task was credited meanwhile.
+export const fetchEarningsOnce = async (uid: string, max = 50): Promise<EarnEntry[]> => {
+  if (!uid) return [];
+  const [fs, d1] = await Promise.all([
+    getDocs(query(collection(db, 'users', uid, 'earnings'), orderBy('createdAt', 'desc'), limit(max)))
+      .then(snap => snap.docs.map(d => toEarnEntry(d.id, d.data())).filter((x): x is EarnEntry => !!x))
+      .catch((e: any) => {
+        if (isQuotaError(e)) markFirestoreFull();
+        return [] as EarnEntry[];
+      }),
+    d1Earnings()
+      .then(list => list.map(d1ToEntry).filter((x): x is EarnEntry => !!x))
+      .catch(() => [] as EarnEntry[]),
+  ]);
+  return mergeEarnings(fs, d1);
+};
+
 const toWithdrawal = (id: string, d: any): Withdrawal => ({
   id,
   coins: typeof d?.coins === 'number' ? d.coins : 0,
