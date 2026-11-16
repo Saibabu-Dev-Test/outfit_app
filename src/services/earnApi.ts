@@ -26,7 +26,6 @@ import { auth, db } from '../config/firebaseConfig';
 import {
   COINS_PER_RUPEE,
   CPX_HASH_ENDPOINT,
-  EARN_AD_COINS,
   EARN_CHECKIN_COINS,
   EARN_MAX_ADS_PER_DAY,
   EARN_VOTE_COINS,
@@ -89,8 +88,8 @@ export const recordEarnAd = async (uid: string, opts: { skipped?: boolean } = {}
       }
       const n = d.adsCount + 1;
       tx.set(dayRef(uid, day), { adWatched: true, adsCount: n, updatedAt: serverTimestamp() }, { merge: true });
-      tx.set(earnRef(uid, `ad_${day}_${n}`), credit('ad', EARN_AD_COINS, day));
-      return EARN_AD_COINS;
+      // No coins for ads (owner decision 2026-11-16, AdMob policy): ad money is 100% the owner's.
+      return 0;
     });
   } catch (e: any) {
     console.warn('recordEarnAd failed:', e?.code, e?.message);

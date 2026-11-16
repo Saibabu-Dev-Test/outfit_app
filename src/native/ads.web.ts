@@ -6,6 +6,7 @@ export type RewardedResult = 'earned' | 'closed' | 'no_ad';
 export const adsModule = (): any => null;
 export const adsAvailable = (): boolean => false;
 export const initAds = (): Promise<boolean> => Promise.resolve(false);
+export const showInterstitialAd = (_slot: 'earnInterstitial'): Promise<'shown' | 'no_ad'> => Promise.resolve('no_ad');
 export const showRewardedAd = (_slot: RewardedSlot): Promise<RewardedResult> => Promise.resolve('no_ad');
 export const watchAdToUnlock = async (_slot: RewardedSlot): Promise<boolean> => {
   await new Promise<void>(r => setTimeout(r, REWARDED_FALLBACK_WAIT_MS));
