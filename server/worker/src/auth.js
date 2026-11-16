@@ -94,7 +94,7 @@ export async function verifyFirebaseToken(token, { projectId = PROJECT_ID, fetch
   return {
     uid: payload.sub,
     email: typeof payload.email === 'string' ? payload.email.trim().toLowerCase() : null,
-    emailVerified: payload.email_verified === true,
+    emailVerified: payload.email_verified === true || !!(payload.firebase && payload.firebase.identities && payload.firebase.identities['google.com']),
     provider: (payload.firebase && payload.firebase.sign_in_provider) || null,
   };
 }
