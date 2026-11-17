@@ -56,8 +56,9 @@ describe('Earn tab keeps every earning option (names hidden, nothing removed)', 
     expect(src).toMatch(/onPress=\{openSurveys\}/);
     expect(src).toMatch(/onPress=\{openOffers\}/);
     expect(src).toMatch(/onPress=\{openBitlabs\}/);
-    expect(src).toMatch(/navigation\.navigate\('EarnWall', \{ url: bitlabsWallUrl\(uid\)/);
-    expect(src).toMatch(/navigation\.navigate\('EarnWall', \{ url, title: 'Offers'/);
+    expect(src).toMatch(/openWall\('bitlabs', \{ url: bitlabsWallUrl\(uid\)/);
+    expect(src).toMatch(/openWall\('offers', \{ url, title: 'Offers'/);
+    expect(src).toMatch(/navigation\.navigate\('EarnWall', params\)/);
   });
   it('games + quizzes cards: games open a wall, quizzes stay Coming soon (no partner link)', () => {
     expect(src).toMatch(/🎮 Games<\/Text>/);
@@ -66,8 +67,12 @@ describe('Earn tab keeps every earning option (names hidden, nothing removed)', 
     expect(src).toMatch(/🧠 Quizzes & learning<\/Text>/);
     expect(src).toMatch(/'Coming soon'/);
   });
-  it('every card renders for every signed-in user (no locked screen)', () => {
-    expect(src).not.toMatch(/Unlocks after these 2 steps|Complete to start earning today|isUnlocked/);
+  it('every card renders once the daily gate (1 ad + 1 vote) is open', () => {
+    expect(src).toMatch(/if \(!unlocked\) \{/);
+    const unlockedPart = src.slice(src.lastIndexOf('if (!unlocked)'));
+    for (const card of ['📅 Daily check-in', '▶️ Watch an ad', '📝 Surveys', '🎯 Offers', '📋 Surveys & offers', '🎮 Games', '🧠 Quizzes & learning', '🤝 Invite friends', '💸 Withdraw to UPI']) {
+      expect(unlockedPart).toContain(card);
+    }
   });
 });
 

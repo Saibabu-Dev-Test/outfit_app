@@ -1,14 +1,24 @@
-// Post-task ad (one interstitial after a completed Earn task, owner revenue only) and the 65 / 35
+// Earn task ads (one interstitial when a partner wall opens, one after a completed task; owner
+// revenue only) and the 65 / 35
 // revenue split on every partner postback.
 import {
   hasNewTaskCredit,
   isPartnerRewardMessage,
   needsCreditCheck,
   postTaskAdDecision,
+  startTaskAdDecision,
   taskCreditIds,
 } from '../src/services/postTaskAd';
 import { EarnEntry } from '../src/services/earnLedger';
-import { POST_TASK_AD_MIN_GAP_MS, POST_TASK_AD_MIN_WALL_MS, TEST_ADS, adUnitId } from '../src/config/ads';
+import {
+  AD_MIN_SPACING_MS,
+  POST_TASK_AD_MIN_GAP_MS,
+  POST_TASK_AD_MIN_WALL_MS,
+  START_TASK_AD_LOAD_WAIT_MS,
+  START_TASK_AD_MIN_GAP_MS,
+  TEST_ADS,
+  adUnitId,
+} from '../src/config/ads';
 import { USER_SHARE, OWNER_SHARE } from '../src/config/earn';
 
 declare const require: (m: string) => any;
@@ -79,16 +89,30 @@ describe('post-task ad: when it shows', () => {
     expect(postTaskAdDecision({ ...base, closedAt: T0 + 59999, completed: false })).toEqual({ show: false, reason: 'too_short' });
     expect(postTaskAdDecision({ ...base, closedAt: T0 + 60000, completed: false })).toEqual({ show: true, reason: 'time_in_wall' });
   });
-  test('frequency cap: at most one full-screen ad per 2 minutes (rewarded ads count too)', () => {
+  test('frequency cap: at most one completion ad per 2 minutes', () => {
     expect(POST_TASK_AD_MIN_GAP_MS).toBe(120000);
     const closedAt = T0 + 10 * 60000;
-    expect(postTaskAdDecision({ openedAt: T0, closedAt, lastAdAt: closedAt - 119000, completed: true }).show).toBe(false);
-    expect(postTaskAdDecision({ openedAt: T0, closedAt, lastAdAt: closedAt - 120000, completed: true }).show).toBe(true);
+    expect(postTaskAdDecision({ openedAt: T0, closedAt, lastAdAt: 0, lastPostTaskAt: closedAt - 119000, completed: true })).toEqual({ show: false, reason: 'capped' });
+    expect(postTaskAdDecision({ openedAt: T0, closedAt, lastAdAt: 0, lastPostTaskAt: closedAt - 120000, completed: true }).show).toBe(true);
+  });
+  test('never two ads back to back: any full-screen ad in the last 10 s blocks it', () => {
+    expect(AD_MIN_SPACING_MS).toBe(10000);
+    const closedAt = T0 + 90000;
+    expect(postTaskAdDecision({ openedAt: T0, closedAt, lastAdAt: closedAt - 9999, completed: true })).toEqual({ show: false, reason: 'too_soon' });
+    expect(postTaskAdDecision({ openedAt: T0, closedAt, lastAdAt: closedAt - 10000, completed: true }).show).toBe(true);
+  });
+  test('the start ad of the same task does not block its completion ad', () => {
+    // start ad closed at T0, the wall opened right after, task credited 40 s later
+    const startAdAt = T0;
+    expect(postTaskAdDecision({ openedAt: T0 + 500, closedAt: T0 + 40000, lastAdAt: startAdAt, lastPostTaskAt: 0, completed: true })).toEqual({ show: true, reason: 'completion' });
+    // and no credit seen: the 60 s rule still applies
+    expect(postTaskAdDecision({ openedAt: T0 + 500, closedAt: T0 + 61000, lastAdAt: startAdAt, completed: false }).reason).toBe('time_in_wall');
   });
   test('the ledger is read on close only when the time rule would not already decide', () => {
     expect(needsCreditCheck({ ...base, closedAt: T0 + 10000 })).toBe(true);
     expect(needsCreditCheck({ ...base, closedAt: T0 + 90000 })).toBe(false);
-    expect(needsCreditCheck({ openedAt: T0, closedAt: T0 + 10000, lastAdAt: T0 })).toBe(false);
+    expect(needsCreditCheck({ openedAt: T0, closedAt: T0 + 5000, lastAdAt: T0 })).toBe(false);
+    expect(needsCreditCheck({ openedAt: T0, closedAt: T0 + 10000, lastAdAt: 0, lastPostTaskAt: T0 })).toBe(false);
   });
   test('earn ad slots use Google test units while Earn is being tested', () => {
     expect(adUnitId('earnInterstitial')).toBe(TEST_ADS.earnInterstitial);
@@ -96,7 +120,19 @@ describe('post-task ad: when it shows', () => {
   });
 });
 
-describe('post-task ad: policy guards in the code', () => {
+describe('start ad: one interstitial when a partner wall is opened', () => {
+  test('caps: 1 per 2 min between wall opens, never within 10 s of another ad, 3 s load wait', () => {
+    expect(START_TASK_AD_MIN_GAP_MS).toBe(120000);
+    expect(START_TASK_AD_LOAD_WAIT_MS).toBe(3000);
+    expect(startTaskAdDecision({ now: T0, lastStartAt: 0, lastAdAt: 0 })).toEqual({ show: true, reason: 'start' });
+    expect(startTaskAdDecision({ now: T0, lastStartAt: T0 - 119000, lastAdAt: T0 - 60000 })).toEqual({ show: false, reason: 'capped' });
+    expect(startTaskAdDecision({ now: T0, lastStartAt: T0 - 120000, lastAdAt: T0 - 60000 }).show).toBe(true);
+    // a completion / rewarded ad just closed: no start ad straight after it
+    expect(startTaskAdDecision({ now: T0, lastStartAt: 0, lastAdAt: T0 - 5000 })).toEqual({ show: false, reason: 'too_soon' });
+  });
+});
+
+describe('task ads: policy guards in the code', () => {
   const wall = read('src/screens/Earn/EarnWallScreen.tsx');
   test('the ad runs only when the wall is being left, never when it opens', () => {
     const hook = wall.slice(wall.indexOf('function usePostTaskAd'), wall.indexOf('const Closing'));
@@ -112,11 +148,20 @@ describe('post-task ad: policy guards in the code', () => {
     expect(wall).not.toMatch(/recordEarnAd|showRewardedAd|EARN_AD_COINS/);
     expect(read('src/services/postTaskAd.ts')).not.toMatch(/recordEarnAd|coins:/);
   });
-  test('no ad gate before any task on the Earn tab', () => {
+  test('the start ad runs before each partner wall opens, and the wall opens with or without it', () => {
     const earn = read('src/screens/Earn/EarnScreen.tsx');
-    expect(earn).not.toMatch(/showInterstitialAd|postTaskAd/);
+    const runner = earn.slice(earn.indexOf('const startTaskAd'), earn.indexOf('export default function'));
+    expect(runner).toMatch(/startTaskAdDecision\(/);
+    expect(runner).toMatch(/showInterstitialAd\('earnInterstitial', START_TASK_AD_LOAD_WAIT_MS\)/);
+    expect(runner).not.toMatch(/recordEarnAd|showRewardedAd|EARN_AD_COINS/);
     const open = earn.slice(earn.indexOf('const openSurveys'), earn.indexOf('const onSaveUpi'));
-    expect(open).not.toMatch(/showRewardedAd|showInterstitialAd/);
+    // every EarnWall navigation is preceded by the start ad
+    expect(open).toMatch(/await startTaskAd\(\);\s*navigation\.navigate\('EarnWall', \{ url: cpxWallUrl/);
+    expect(open).toMatch(/await startTaskAd\(\);\s*navigation\.navigate\('EarnWall', params\)/);
+    expect(open.split("navigate('EarnWall'").length - 1).toBe(2);
+    for (const k of ["openWall('offers'", "openWall('bitlabs'", "openWall('games'"]) expect(open).toContain(k);
+    // no rewarded ad (coins) before a task
+    expect(open).not.toMatch(/showRewardedAd/);
   });
   test('the 65% note lives in Terms & About, not on Earn cards', () => {
     expect(read('src/screens/Profile/TermsScreen.tsx')).toMatch(/Coins shown in partner walls are before Outfit's share; you receive \$\{Math\.round\(USER_SHARE \* 100\)\}%/);

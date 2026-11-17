@@ -25,7 +25,7 @@
 //                   non-reversed checkin_{day} entry, i.e. it passed the fraud checks above) and their
 //                   account is bound to its own phone (earnMeta/main.deviceHash set, devices/{hash}
 //                   -> newUid), credit referral_{newUid} (100 coins) to BOTH users, once (fixed doc
-//                   id). There is no daily ad/vote gate any more, so "first Earn day" is not used.
+//                   id). A check-in is only possible once that day's ad + vote gate is open.
 //
 // TODO(owner): set CPX_SECURE_HASH (CPX dashboard > App > Secure hash), BITLABS_SECRET (BitLabs
 // dashboard > App > Integration > Secret Key) and OFFERWALL_GG_SECRET as

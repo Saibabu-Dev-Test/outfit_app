@@ -3,7 +3,8 @@
 // Leaving the wall (Done / back / header arrow) may show ONE interstitial ad before Earn comes back
 // (usePostTaskAd, rules in services/postTaskAd.ts): after a task credited since the wall opened, or
 // after >= 60 s in the wall when no completion can be seen yet. That ad is owner revenue only and
-// gives no coins. Nothing is ever shown when the wall opens.
+// gives no coins. The start ad (when a wall is opened) is shown by EarnScreen before it navigates
+// here; this screen never shows an ad when it opens.
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, BackHandler, Linking, Text, TouchableOpacity, View } from 'react-native';
 
@@ -33,7 +34,15 @@ import {
   POST_TASK_CREDIT_CHECK_MS,
 } from '../../config/ads';
 import { fetchEarningsOnce } from '../../services/earnApi';
-import { hasNewTaskCredit, isPartnerRewardMessage, needsCreditCheck, postTaskAdDecision, taskCreditIds } from '../../services/postTaskAd';
+import {
+  hasNewTaskCredit,
+  isPartnerRewardMessage,
+  lastPostTaskAdAt,
+  needsCreditCheck,
+  noteTaskAdShown,
+  postTaskAdDecision,
+  taskCreditIds,
+} from '../../services/postTaskAd';
 
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 const within = <T,>(p: Promise<T>, ms: number, fallback: T): Promise<T> =>
@@ -77,7 +86,7 @@ function usePostTaskAd(navigation: any, uid: string) {
       (async () => {
         try {
           const closedAt = Date.now();
-          const base = { openedAt: openedAt.current, closedAt, lastAdAt: lastFullscreenAdAt() };
+          const base = { openedAt: openedAt.current, closedAt, lastAdAt: lastFullscreenAdAt(), lastPostTaskAt: lastPostTaskAdAt() };
           let completed = rewardSeen.current;
           if (!completed && needsCreditCheck(base)) {
             completed = await within(
@@ -89,7 +98,8 @@ function usePostTaskAd(navigation: any, uid: string) {
           const d = postTaskAdDecision({ ...base, completed });
           if (d.show) {
             await sleep(POST_TASK_AD_TAP_GUARD_MS); // the closing tap can't land on the ad
-            await showInterstitialAd('earnInterstitial', POST_TASK_AD_LOAD_WAIT_MS); // no coins, ever
+            const r = await showInterstitialAd('earnInterstitial', POST_TASK_AD_LOAD_WAIT_MS); // no coins, ever
+            if (r === 'shown') noteTaskAdShown('completion');
           }
         } catch {
           // never keep the user in the wall because of an ad

@@ -1,4 +1,4 @@
-// Pure logic for the Earn ledger (no Firebase): entry shape, totals, breakdown, daily counters.
+// Pure logic for the Earn ledger (no Firebase): entry shape, totals, breakdown, daily gate.
 // Ledger docs: users/{uid}/earnings/{id}
 //   { type: ad|vote|survey|offer|checkin|referral, coins, rupees, partner, status: pending|approved|reversed,
 //     createdAt, holdUntil? }
@@ -109,9 +109,10 @@ export const summarize = (entries: EarnEntry[], withdrawals: Withdrawal[] = []):
   };
 };
 
-// ── Daily counters: users/{uid}/earnDaily/{yyyy-mm-dd IST} ──
-// Not a gate: every earning task is open to every signed-in user. These only stop double check-ins,
-// cap the coin-paying ads per day and pay the first vote of the day once.
+// ── Daily gate: users/{uid}/earnDaily/{yyyy-mm-dd IST} ──
+// Until the user has watched 1 ad (or two no-fills ticked it, adSkipped) and voted on 1 outfit today,
+// the Earn tab shows only those two steps. The same doc stops double check-ins, caps the coin-paying
+// ads per day and pays the first vote of the day once.
 export interface EarnDay {
   adWatched: boolean;
   voted: boolean;
@@ -125,6 +126,8 @@ export const toEarnDay = (d: any): EarnDay => ({
   checkedIn: d?.checkedIn === true,
   adsCount: Math.max(0, Math.floor(num(d?.adsCount))),
 });
+// The day's gate is open (every Earn card shows; check-in allowed) once both steps are done
+export const isUnlocked = (d: EarnDay): boolean => d.adWatched && d.voted;
 
 // Withdrawal request validity (the server checks again)
 export const withdrawCheck = (

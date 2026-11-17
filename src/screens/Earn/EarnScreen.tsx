@@ -1,9 +1,14 @@
-// Earn tab. Every signed-in user sees every earning option straight away (no daily ad / vote gate,
-// no ad before any task):
-//   balance, daily check-in, optional rewarded ad (+coins, daily cap), Surveys = CPX wall,
-//   Offers = Offerwall.GG wall, Surveys & offers = BitLabs wall, Games = BitLabs games tab
-//   (display_mode=gaming; Offerwall.GG wall if BitLabs is not set up), Quizzes & learning (Coming
-//   soon: no partner link), referral code, UPI + withdrawal.
+// Earn tab.
+// 1. Daily gate (resets 00:00 IST): watch 1 rewarded ad + vote on 1 outfit, ticked live from
+//    users/{uid}/earnDaily/{day}. Until both are done only these two steps show. Two ad no-fills in a
+//    row tick the ad step with no coins (adSkipped), so nobody gets stuck on a no-fill day.
+// 2. Unlocked: balance, daily check-in, rewarded ad (+coins, daily cap), Surveys = CPX wall,
+//    Offers = Offerwall.GG wall, Surveys & offers = BitLabs wall, Games = BitLabs games tab
+//    (display_mode=gaming; Offerwall.GG wall if BitLabs is not set up), Quizzes & learning (Coming
+//    soon: no partner link), referral code, UPI + withdrawal.
+// Opening a partner wall first shows one interstitial (start ad, owner revenue only, no coins; caps in
+// services/postTaskAd.ts); if none loads within ~3 s the wall opens anyway. The completion ad when the
+// wall is left is EarnWallScreen's.
 // A card whose partner is not set up in this build stays on screen and says "Coming soon".
 // No partner names on this screen (they are in Terms).
 // Values: config/earn.ts. Data: services/earnApi.ts. Maths: services/earnLedger.ts.
@@ -14,12 +19,16 @@ import { useFocusEffect } from '@react-navigation/native';
 import { ui } from './earnUi';
 import { colors } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
-import { showRewardedAd } from '../../native/ads';
+import { lastFullscreenAdAt, showInterstitialAd, showRewardedAd } from '../../native/ads';
+import { START_TASK_AD_LOAD_WAIT_MS } from '../../config/ads';
+import { lastStartAdAt, noteTaskAdShown, startTaskAdDecision } from '../../services/postTaskAd';
 import {
+  COINS_PER_RUPEE,
   EARN_AD_COINS,
   EARN_CHECKIN_COINS,
   EARN_MAX_ADS_PER_DAY,
   EARN_REFERRAL_COINS,
+  EARN_VOTE_COINS,
   MIN_WITHDRAW_RUPEES,
   bitlabsGamesUrl,
   bitlabsWallUrl,
@@ -34,6 +43,7 @@ import {
   EarnEntry,
   EMPTY_DAY,
   Withdrawal,
+  isUnlocked,
   summarize,
   withdrawCheck,
 } from '../../services/earnLedger';
@@ -71,8 +81,37 @@ const useIstDay = () => {
   return day;
 };
 
-// Ad no-fills in a row this session (the ad card asks the user to try later)
+// Ad no-fills in a row this session: two on the gate step tick it with no coins; on the ad card the
+// user is asked to try later
 let adNoFill = 0;
+
+function Check({ done, label, cta, onPress, busy }: { done: boolean; label: string; cta: string; onPress: () => void; busy?: boolean }) {
+  return (
+    <View style={[ui.card, ui.row]}>
+      <Text style={{ fontSize: 22, marginRight: 10 }}>{done ? '✅' : '⬜'}</Text>
+      <Text style={[ui.h2, ui.flex1, { marginBottom: 0 }]}>{label}</Text>
+      {done ? (
+        <Text style={ui.good}>Done</Text>
+      ) : (
+        <TouchableOpacity style={[ui.btn, busy && ui.btnOff]} onPress={onPress} disabled={busy}>
+          {busy ? <ActivityIndicator color={colors.onPrimary} /> : <Text style={ui.btnText}>{cta}</Text>}
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+}
+
+// Start ad: one interstitial before a partner wall opens (owner revenue only, never coins). Resolves
+// when it is closed, or after START_TASK_AD_LOAD_WAIT_MS with no ad; never throws.
+const startTaskAd = async (): Promise<void> => {
+  try {
+    if (!startTaskAdDecision({ now: Date.now(), lastStartAt: lastStartAdAt(), lastAdAt: lastFullscreenAdAt() }).show) return;
+    const r = await showInterstitialAd('earnInterstitial', START_TASK_AD_LOAD_WAIT_MS);
+    if (r === 'shown') noteTaskAdShown('start');
+  } catch {
+    // never keep the user from a task because of an ad
+  }
+};
 
 export default function EarnScreen({ navigation }: { navigation: any }) {
   const { user } = useAuth();
@@ -114,10 +153,38 @@ export default function EarnScreen({ navigation }: { navigation: any }) {
 
   const summary = useMemo(() => summarize(entries, withdrawals), [entries, withdrawals]);
   const d = today || EMPTY_DAY;
+  const unlocked = isUnlocked(d);
   const adsLeft = Math.max(0, EARN_MAX_ADS_PER_DAY - d.adsCount);
 
-  // ── Actions (all open for every signed-in user) ──
-  // Optional rewarded ad: +EARN_AD_COINS (pending) for the first EARN_MAX_ADS_PER_DAY ads of the day
+  // ── Gate action: "Watch 1 ad" (same rewarded ad, +EARN_AD_COINS) ──
+  const watchGateAd = async () => {
+    setBusy('gateAd');
+    try {
+      const r = await showRewardedAd('earnRewarded');
+      if (r === 'earned') {
+        adNoFill = 0;
+        const coins = await recordEarnAd(uid);
+        if (coins) Alert.alert('Ad watched', `+${coins} coins (pending) 🪙`);
+        return;
+      }
+      if (r === 'closed') {
+        Alert.alert('Ad closed early', 'Watch the ad to the end to tick this off.');
+        return;
+      }
+      adNoFill++;
+      if (adNoFill >= 2) {
+        // Nobody gets stuck on a no-fill day: tick it without coins
+        await recordEarnAd(uid, { skipped: true });
+        return;
+      }
+      Alert.alert('No ad right now', 'Could not load an ad. Please check your internet and try again in a minute.');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  // ── Unlocked actions ──
+  // Rewarded ad card: +EARN_AD_COINS (pending) for the first EARN_MAX_ADS_PER_DAY ads of the day
   const watchAd = async () => {
     setBusy('ad');
     try {
@@ -159,9 +226,21 @@ export default function EarnScreen({ navigation }: { navigation: any }) {
     setBusy('survey');
     try {
       const hash = await getCpxHash();
+      await startTaskAd();
       navigation.navigate('EarnWall', { url: cpxWallUrl(uid, hash), title: 'Surveys', kind: 'survey' });
     } catch (e: any) {
       Alert.alert('Surveys', e?.message || 'Please try again.');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  // Opens a partner wall after the start ad (or after ~3 s with no ad)
+  const openWall = async (key: string, params: { url: string; title: string; kind: 'survey' | 'offer' }) => {
+    setBusy(key);
+    try {
+      await startTaskAd();
+      navigation.navigate('EarnWall', params);
     } finally {
       setBusy(null);
     }
@@ -173,7 +252,7 @@ export default function EarnScreen({ navigation }: { navigation: any }) {
       Alert.alert('Offers', 'Offers are coming soon. Check back in a few days.');
       return;
     }
-    navigation.navigate('EarnWall', { url, title: 'Offers', kind: 'offer' });
+    return openWall('offers', { url, title: 'Offers', kind: 'offer' });
   };
 
   const openBitlabs = () => {
@@ -181,7 +260,7 @@ export default function EarnScreen({ navigation }: { navigation: any }) {
       Alert.alert('Surveys & offers', 'Coming soon. Check back in a few days.');
       return;
     }
-    navigation.navigate('EarnWall', { url: bitlabsWallUrl(uid), title: 'Surveys & offers', kind: 'offer' });
+    return openWall('bitlabs', { url: bitlabsWallUrl(uid), title: 'Surveys & offers', kind: 'offer' });
   };
 
   // Games: the games tab of the surveys & offers wall; the offers wall (which also lists games) when
@@ -193,7 +272,7 @@ export default function EarnScreen({ navigation }: { navigation: any }) {
       Alert.alert('Games', 'Games are coming soon. Check back in a few days.');
       return;
     }
-    navigation.navigate('EarnWall', { url, title: 'Games', kind: 'offer' });
+    return openWall('games', { url, title: 'Games', kind: 'offer' });
   };
 
   const onSaveUpi = async () => {
@@ -253,6 +332,23 @@ export default function EarnScreen({ navigation }: { navigation: any }) {
       <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top']}>
         {header}
         <ActivityIndicator style={{ marginTop: 40 }} />
+      </SafeAreaView>
+    );
+  }
+
+  if (!unlocked) {
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top']}>
+        {header}
+        <ScrollView contentContainerStyle={ui.scroll}>
+          <Text style={ui.h2}>Complete to start earning today</Text>
+          <Text style={[ui.muted, { marginBottom: 12 }]}>Resets every day at midnight (India time).</Text>
+          <Check done={d.adWatched} label="Watch 1 ad" cta="▶ Watch" onPress={watchGateAd} busy={busy === 'gateAd'} />
+          <Check done={d.voted} label="Vote on 1 outfit" cta="Go to Feed" onPress={() => navigation.navigate('Feed')} />
+          <Text style={ui.muted}>
+            You get +{EARN_AD_COINS} coins per ad and +{EARN_VOTE_COINS} for your first vote today. {COINS_PER_RUPEE} coins = ₹1.
+          </Text>
+        </ScrollView>
       </SafeAreaView>
     );
   }
@@ -318,8 +414,8 @@ export default function EarnScreen({ navigation }: { navigation: any }) {
           <Text style={ui.body}>
             Try apps and complete offers to earn coins.
           </Text>
-          <TouchableOpacity style={[ui.btn, { marginTop: 10 }]} onPress={openOffers}>
-            <Text style={ui.btnText}>{offerwallUrl(uid) ? 'Open offers' : 'Coming soon'}</Text>
+          <TouchableOpacity style={[ui.btn, { marginTop: 10 }, busy === 'offers' ? ui.btnOff : null]} onPress={openOffers} disabled={!!busy}>
+            {busy === 'offers' ? <ActivityIndicator color={colors.onPrimary} /> : <Text style={ui.btnText}>{offerwallUrl(uid) ? 'Open offers' : 'Coming soon'}</Text>}
           </TouchableOpacity>
         </View>
 
@@ -328,8 +424,8 @@ export default function EarnScreen({ navigation }: { navigation: any }) {
           <Text style={ui.body}>
             Surveys, offers and games. Earnings depend on you and the task.
           </Text>
-          <TouchableOpacity style={[ui.btn, { marginTop: 10 }]} onPress={openBitlabs}>
-            <Text style={ui.btnText}>{isBitlabsConfigured() ? 'Open' : 'Coming soon'}</Text>
+          <TouchableOpacity style={[ui.btn, { marginTop: 10 }, busy === 'bitlabs' ? ui.btnOff : null]} onPress={openBitlabs} disabled={!!busy}>
+            {busy === 'bitlabs' ? <ActivityIndicator color={colors.onPrimary} /> : <Text style={ui.btnText}>{isBitlabsConfigured() ? 'Open' : 'Coming soon'}</Text>}
           </TouchableOpacity>
         </View>
 
@@ -338,8 +434,8 @@ export default function EarnScreen({ navigation }: { navigation: any }) {
           <Text style={ui.body}>
             Play games and reach the goals shown to earn coins.
           </Text>
-          <TouchableOpacity style={[ui.btn, { marginTop: 10 }]} onPress={openGames}>
-            <Text style={ui.btnText}>{gamesUrl() ? 'Play games' : 'Coming soon'}</Text>
+          <TouchableOpacity style={[ui.btn, { marginTop: 10 }, busy === 'games' ? ui.btnOff : null]} onPress={openGames} disabled={!!busy}>
+            {busy === 'games' ? <ActivityIndicator color={colors.onPrimary} /> : <Text style={ui.btnText}>{gamesUrl() ? 'Play games' : 'Coming soon'}</Text>}
           </TouchableOpacity>
         </View>
 

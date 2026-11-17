@@ -69,7 +69,7 @@ const SECTIONS: { title: string; lines: string[] }[] = [
       'Surveys, offers and games on the Earn tab come from third-party partners. What each task pays depends on you and the partner, and is never guaranteed.',
       `You get ${Math.round(USER_SHARE * 100)}% of what the partner pays Outfit for a task you complete. Outfit keeps the remaining ${100 - Math.round(USER_SHARE * 100)}% to run the app.`,
       `Coins shown in partner walls are before Outfit's share; you receive ${Math.round(USER_SHARE * 100)}%.`,
-      'After you finish a task and leave a partner wall, Outfit may show one ad. These ads help run the app and do not give coins.',
+      'Outfit may show one ad when you open a partner wall and one after you finish a task and leave it. These ads help run the app and do not give coins.',
       `Earnings from surveys and offers stay on hold for ${HOLD_DAYS_MIN}-${HOLD_DAYS_MAX} days, then become withdrawable. A partner can cancel a completion it finds invalid during this time.`,
       `${COINS_PER_RUPEE} Earn coins = ₹1. You can withdraw to your UPI ID once you have ₹${MIN_WITHDRAW_RUPEES} or more. Every withdrawal is checked and approved by the Outfit team.`,
       'Cheating, fake answers, VPNs or multiple accounts can lead to cancelled earnings and a removed account.',

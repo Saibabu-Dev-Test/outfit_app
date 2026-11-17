@@ -13,7 +13,8 @@ import {
 export type RewardedSlot = 'astroRewarded' | 'poruthamRewarded' | 'earnRewarded';
 export type InterstitialSlot = 'earnInterstitial';
 
-// When the last full-screen ad (rewarded or interstitial) was on screen, for frequency caps
+// When the last full-screen ad (rewarded or interstitial) was on screen (set when it appears and
+// again when it closes), for frequency caps: never two ads back to back (AD_MIN_SPACING_MS)
 let lastFullscreenAt = 0;
 export const lastFullscreenAdAt = (): number => lastFullscreenAt;
 const markFullscreenShown = (): void => {
@@ -130,6 +131,7 @@ export const showRewardedAd = (slot: RewardedSlot): Promise<RewardedResult> => {
       if (done) return;
       done = true;
       clearTimeout(timer);
+      if (shown) markFullscreenShown(); // spacing counts from when the ad left the screen
       unsubs.forEach(u => {
         try {
           u();
@@ -183,9 +185,9 @@ export const watchAdToUnlock = async (slot: RewardedSlot): Promise<boolean> => {
   return false;
 };
 
-// ── Interstitial (one ad after a completed Earn task; never gives coins) ──
-// preloadInterstitial() loads it in the background while the user is in a partner wall (nothing is
-// shown); showInterstitialAd() shows it when the user leaves, waiting at most waitMs for a load.
+// ── Interstitial (Earn task ads: one when a partner wall is opened, one after a task; never gives
+// coins) ── preloadInterstitial() loads it in the background while the user is in a partner wall
+// (nothing is shown); showInterstitialAd() shows it, waiting at most waitMs for a load.
 type Inter = { slot: InterstitialSlot; ad: any; loaded: boolean; failed: boolean; waiters: (() => void)[]; unsubs: (() => void)[] };
 let inter: Inter | null = null;
 
@@ -254,6 +256,7 @@ export const showInterstitialAd = (slot: InterstitialSlot, waitMs: number): Prom
       if (done) return;
       done = true;
       clearTimeout(timer);
+      if (r === 'shown') markFullscreenShown(); // spacing counts from when the ad left the screen
       if (inter === st) dropInter(); // an interstitial shows once; the next wall preloads a fresh one
       resolve(r);
     };

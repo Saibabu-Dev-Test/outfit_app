@@ -12,6 +12,7 @@ import {
 import {
   EarnEntry,
   EMPTY_DAY,
+  isUnlocked,
   summarize,
   toEarnDay,
   toEarnEntry,
@@ -113,8 +114,15 @@ describe('ledger', () => {
   });
 });
 
-describe('daily counters (no gate)', () => {
-  test('day doc only counts check-in / ads / first vote', () => {
+describe('daily gate + counters', () => {
+  test('unlocks only with ad AND vote', () => {
+    expect(isUnlocked(toEarnDay({ adWatched: true }))).toBe(false);
+    expect(isUnlocked(toEarnDay({ voted: true }))).toBe(false);
+    expect(isUnlocked(toEarnDay({ adWatched: true, voted: true }))).toBe(true);
+    expect(isUnlocked(toEarnDay({ adWatched: true, adSkipped: true, voted: true }))).toBe(true);
+    expect(isUnlocked(toEarnDay(undefined))).toBe(false);
+  });
+  test('day doc counts check-in / ads / first vote', () => {
     expect(toEarnDay(undefined)).toEqual(EMPTY_DAY);
     expect(toEarnDay({ checkedIn: true, adsCount: 3.7 })).toEqual({ adWatched: false, voted: false, checkedIn: true, adsCount: 3 });
     expect(toEarnDay({ adsCount: -2 }).adsCount).toBe(0);

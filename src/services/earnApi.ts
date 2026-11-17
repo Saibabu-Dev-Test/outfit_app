@@ -1,7 +1,7 @@
 // Earn tab data (Firestore). Pure maths lives in earnLedger.ts, numbers in config/earn.ts.
 //
-//   users/{uid}/earnDaily/{yyyy-mm-dd IST}  {adWatched, voted, checkedIn, adsCount, updatedAt}  owner writes;
-//                                            daily counters only (no gate: every task is open to every user)
+//   users/{uid}/earnDaily/{yyyy-mm-dd IST}  {adWatched, voted, checkedIn, adsCount, adSkipped, updatedAt}  owner
+//                                            writes; daily gate: the Earn tab opens after 1 ad + 1 vote that day
 //   users/{uid}/earnings/{id}                ledger; the app may only add small 'pending' ad/vote/checkin
 //                                            coins (ids ad_{day}_{n}, vote_{day}, checkin_{day}); survey /
 //                                            offer / referral credits and every approval come from the server
@@ -37,7 +37,7 @@ import { istDateKey } from '../utils/istDate';
 import { isValidUpi, normalizeUpi, sha256Hex } from '../utils/sha256';
 import { getDeviceHash } from '../native/deviceId';
 import { firestoreErrorMessage } from '../utils/firebaseErrors';
-import { EarnDay, EarnEntry, EMPTY_DAY, Withdrawal, toEarnDay, toEarnEntry } from './earnLedger';
+import { EarnDay, EarnEntry, EMPTY_DAY, Withdrawal, isUnlocked, toEarnDay, toEarnEntry } from './earnLedger';
 import { D1Earning, d1Earnings } from './d1Api';
 import { isQuotaError, markFirestoreFull } from './dataBackend';
 
@@ -71,15 +71,23 @@ export const subscribeEarnDay = (uid: string, day: string, cb: (d: EarnDay) => v
   }
 };
 
-// An optional rewarded ad was watched on the Earn tab: adds EARN_AD_COINS (pending) for the first
-// EARN_MAX_ADS_PER_DAY ads of the day. Returns the coins added (0 = daily cap reached).
-export const recordEarnAd = async (uid: string): Promise<number> => {
+// A rewarded ad was watched on the Earn tab: ticks "Watch 1 ad" and adds EARN_AD_COINS (pending) for
+// the first EARN_MAX_ADS_PER_DAY ads of the day. skipped: the ad could not load twice; the gate step is
+// ticked (adSkipped) but no coins are added. Returns the coins added (0 = skipped / daily cap reached).
+export const recordEarnAd = async (uid: string, opts: { skipped?: boolean } = {}): Promise<number> => {
   const day = istDateKey();
   try {
     return await runTransaction(db, async tx => {
       const s = await tx.get(dayRef(uid, day));
       const d = s.exists() ? toEarnDay(s.data()) : EMPTY_DAY;
-      if (d.adsCount >= EARN_MAX_ADS_PER_DAY) return 0;
+      if (opts.skipped || d.adsCount >= EARN_MAX_ADS_PER_DAY) {
+        tx.set(
+          dayRef(uid, day),
+          { adWatched: true, ...(opts.skipped ? { adSkipped: true } : {}), updatedAt: serverTimestamp() },
+          { merge: true },
+        );
+        return 0;
+      }
       const n = d.adsCount + 1;
       tx.set(dayRef(uid, day), { adWatched: true, adsCount: n, updatedAt: serverTimestamp() }, { merge: true });
       tx.set(earnRef(uid, `ad_${day}_${n}`), credit('ad', EARN_AD_COINS, day));
@@ -111,7 +119,10 @@ export const markEarnVote = async (uid?: string | null): Promise<void> => {
   }
 };
 
-// Daily check-in, open to every signed-in user once per IST day. Returns the coins added (0 = already done).
+// Daily check-in, once per IST day, only after today's gate (1 ad + 1 vote). The gate is checked here
+// before writing (the rules check it again), so the user sees a plain message instead of a rules error.
+export const CHECKIN_GATE_MESSAGE = 'Watch 1 ad and vote on 1 outfit today first, then check in.';
+// Returns the coins added (0 = already done).
 export const dailyCheckIn = async (uid: string): Promise<number> => {
   const day = istDateKey();
   try {
@@ -119,6 +130,7 @@ export const dailyCheckIn = async (uid: string): Promise<number> => {
       const s = await tx.get(dayRef(uid, day));
       const d = s.exists() ? toEarnDay(s.data()) : EMPTY_DAY;
       if (d.checkedIn) return 0;
+      if (!isUnlocked(d)) throw new Error(CHECKIN_GATE_MESSAGE);
       tx.set(dayRef(uid, day), { checkedIn: true, updatedAt: serverTimestamp() }, { merge: true });
       tx.set(earnRef(uid, `checkin_${day}`), credit('checkin', EARN_CHECKIN_COINS, day));
       return EARN_CHECKIN_COINS;

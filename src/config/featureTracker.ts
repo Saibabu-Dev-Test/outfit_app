@@ -44,12 +44,12 @@ export const TRACKED_FEATURES: TrackedFeature[] = [
   { title: 'Astrology: free summary; full astrology, festivals and Porutham after 1 ad a day (IST)', status: 'in_review' },
   { title: 'Admin tracking: 💰 Earnings from partner credits (owner only)', status: 'in_review' },
   { title: 'Admin tracking: tap any number to open its list (owner only)', status: 'in_review' },
-  { title: 'Earn tab open to every user: no daily ad + vote gate, no ad before surveys; every card shows at once', status: 'in_review', pr: 61 },
+  { title: 'Earn tab: daily gate (watch 1 ad + vote on 1 outfit) then every card shows at once', status: 'in_review', pr: 61 },
   {
-    title: 'Earn: 1 ad after each completed task (owner revenue, no coins)',
+    title: 'Earn: 1 ad when a task starts + 1 ad after it is completed (owner revenue, no coins)',
     status: 'in_review',
     pr: 61,
-    note: 'One interstitial when the user leaves a partner wall after a task was credited since it opened (or after 60 s in the wall when no credit shows yet). Never before a task, max 1 full-screen ad per 2 min. Uses Google test ads until an earn_interstitial unit is put in REAL_ADS.earnInterstitial (src/config/ads.ts) and USE_TEST_ADS_EARN is set false',
+    note: 'Start: one interstitial before a partner wall opens (max 1 per 2 min between wall opens; wall opens anyway after 3 s with no ad). Completion: one interstitial when the user leaves a partner wall after a task was credited since it opened (or after 60 s in the wall when no credit shows yet), max 1 per 2 min. Never two ads within 10 s. Uses Google test ads until an earn_interstitial unit is put in REAL_ADS.earnInterstitial (src/config/ads.ts) and USE_TEST_ADS_EARN is set false',
   },
   { title: 'Earn: 65% to users / 35% to owner (server split), noted in Terms & About', status: 'in_review', pr: 61 },
   {
@@ -130,6 +130,6 @@ export const earnFeatures = ({ app, worker = {} }: EarnConfigState): TrackedFeat
     surveys,
     games,
     quizzes,
-    { title: 'Earn: 📅 Daily check-in, 📺 ads, 🤝 invite friends, 💸 UPI withdrawal', status: 'live', note: 'Open to every signed-in user (no daily gate). Ads are an optional card (+2 coins, 10 a day)' },
+    { title: 'Earn: 📅 Daily check-in, 📺 ads, 🤝 invite friends, 💸 UPI withdrawal', status: 'live', note: 'Opens each day after 1 ad + 1 vote (two ad no-fills tick the ad step with no coins). Check-in only after the gate. Ads +2 coins, 10 a day' },
   ];
 };
