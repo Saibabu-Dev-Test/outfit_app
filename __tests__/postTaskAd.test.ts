@@ -114,7 +114,7 @@ describe('post-task ad: when it shows', () => {
     expect(needsCreditCheck({ openedAt: T0, closedAt: T0 + 5000, lastAdAt: T0 })).toBe(false);
     expect(needsCreditCheck({ openedAt: T0, closedAt: T0 + 10000, lastAdAt: 0, lastPostTaskAt: T0 })).toBe(false);
   });
-  test('earn ad slots use Google test units while Earn is being tested', () => {
+  test('earn ad slots use Google test units in dev builds', () => {
     expect(adUnitId('earnInterstitial')).toBe(TEST_ADS.earnInterstitial);
     expect(TEST_ADS.earnInterstitial).toBe('ca-app-pub-3940256099942544/1033173712');
   });
