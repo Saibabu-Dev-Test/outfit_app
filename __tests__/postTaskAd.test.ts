@@ -188,9 +188,9 @@ describe('revenue split: users 65%, owner 35% on every partner', () => {
     expect(p.write.fields.rupees + p.write.fields.ownerRupees).toBeCloseTo(10);
   });
 
-  test('Offerwall.GG: placement amount is the full payout (8300 coins = $1) -> user 65% (5395), owner ₹29.05', async () => {
-    const sig = await hmacSha256Hex('ow', 'u1:tx1:8300');
-    const p = await planOfferwallPostback({ query: { user: 'u1', tx: 'tx1', amount: '8300', sig, payout: '1' }, secret: 'ow', now: T0 });
+  test('Offerwall.GG: placement rate 5395/USD = user 65% share, credited as is; owner ₹29.05 of ₹83', async () => {
+    const sig = await hmacSha256Hex('ow', 'u1:tx1:5395');
+    const p = await planOfferwallPostback({ query: { user: 'u1', tx: 'tx1', amount: '5395', sig, payout: '1' }, secret: 'ow', now: T0 });
     expect(p.write.fields).toMatchObject({ coins: 5395, rupees: 53.95, ownerRupees: 29.05, payoutRupees: 83 });
     expect(p.write.fields.rupees + p.write.fields.ownerRupees).toBeCloseTo(83);
   });
