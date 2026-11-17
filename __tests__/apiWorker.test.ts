@@ -165,7 +165,7 @@ describe('CPX and Offerwall.GG postbacks', () => {
     expect((await planOfferwallPostback({ query: { ...q, amount: '9999' }, secret: 'ow' })).status).toBe(403);
     expect(await planOfferwallPostback({ query: { ...q, test: '1' }, secret: 'ow' })).toEqual({ status: 200, body: 'OK' });
     const ok = await planOfferwallPostback({ query: q, secret: 'ow', now: NOW });
-    expect(ok.write).toMatchObject({ docPath: 'users/u1/earnings/offerwall_tx1', fields: { coins: 1137, partner: 'offerwall', type: 'offer', usd: 0.21 } });
+    expect(ok.write).toMatchObject({ docPath: 'users/u1/earnings/offerwall_tx1', fields: { coins: 1750, partner: 'offerwall', type: 'offer', usd: 0.21 } });
     // Aliases from their docs work too
     const alias = await planOfferwallPostback({ query: { userId: 'u1', transactionId: 'tx1', currencyAmount: '1750.2857', signature: sig }, secret: 'ow' });
     expect(alias.status).toBe(200);
@@ -382,7 +382,7 @@ describe('GET /v1/admin/earnings (owner only, real D1 ledger)', () => {
     await call(e, `/cpxPostback?user_id=userBBBB2&trans_id=t2&status=2&hash=${md5Hex('t2-sec')}`, null);
     // Offerwall.GG game 830 coins (₹8.30) today
     const sig = await hmacSha256Hex('ow', 'userAAAA1:g1:830');
-    await call(e, `/offerwallPostback?user=userAAAA1&tx=g1&amount=830&sig=${sig}&cat=game&offerName=Sea%20Battle`, null, NOW + 1000);
+    await call(e, `/offerwallPostback?user=userAAAA1&tx=g1&amount=830&sig=${sig}&payout=0.1&cat=game&offerName=Sea%20Battle`, null, NOW + 1000);
     // A row written before migration 0002 (no category / payout columns) still counts
     e.DB.raw
       .prepare("INSERT INTO earnings (uid, id, type, partner, status, coins, rupees, owner_rupees, created_at, updated_at) VALUES ('old', 'bitlabs_x', 'offer', 'bitlabs', 'approved', 130, 1.3, 0.7, ?, ?)")

@@ -6,9 +6,9 @@
 //   Offerwall.GG:  GET or POST /offerwallPostback?user={userId}&tx={transactionId}&amount={currencyAmount}
 //                  &status={status}&sig={signature}&payout={payoutUsd}&test={test}
 //                  sig = hex HMAC-SHA256("userId:transactionId:currencyAmount", OFFERWALL_GG_SECRET)
-//                  (offerwall.gg/developers/postbacks). Placement currency = coins at 8300 per USD
-//                  (100 coins per rupee x USD_TO_INR), so currencyAmount is the full payout in coins
-//                  and the user gets USER_SHARE of it. status=reversed / negative amount = reversal
+//                  (offerwall.gg/developers/postbacks). Placement currency = coins at 5395 per USD
+//                  (USER_SHARE 65% x 100 coins per rupee x USD_TO_INR 83), so currencyAmount is
+//                  already the user's 65% share in coins (what the wall shows) and is credited as is. status=reversed / negative amount = reversal
 //                  (same transactionId). test=1 never credits.
 // Every handler answers 503 'not configured' until its secret is set (wrangler secret put).
 import { COINS_PER_RUPEE, HOLD_DAYS, USD_TO_INR, USER_SHARE, safeId, timingSafeEqual, userCoins } from './bitlabs.js';
@@ -132,12 +132,16 @@ export async function planOfferwallPostback({ query, secret, now = Date.now() })
     return { status: 200, body: 'OK', write: reverseWrite(uid, `offerwall_${tx}`, 'offerwall') };
   }
   // Round the credit DOWN (Offerwall.GG: credit down, reverse whole entry)
-  const coins = Math.max(0, Math.floor(amount * USER_SHARE));
+  // currencyAmount is already the user's share (placement rate 5395/USD), shown as-is on the wall
+  const coins = Math.max(0, Math.floor(amount));
   if (!(amount > 0) || coins <= 0) {
     return { status: 200, body: 'OK' };
   }
   const usd = Number(pick(query, ['payout', 'payoutUsd']));
-  const fullRupees = amount / COINS_PER_RUPEE;
+  // Full payout (100%): from the USD payout when sent, else back out the user's 65% share
+  const fullRupees = Number.isFinite(usd) && usd > 0
+    ? round2(usd * USD_TO_INR)
+    : round2(amount / USER_SHARE / COINS_PER_RUPEE);
   return {
     status: 200,
     body: 'OK',

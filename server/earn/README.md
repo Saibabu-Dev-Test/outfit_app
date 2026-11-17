@@ -59,8 +59,8 @@ CPX Research  https://outfit-api.babusai927.workers.dev/cpxPostback?user_id={use
 Offerwall.GG  https://outfit-api.babusai927.workers.dev/offerwallPostback?user={userId}&tx={transactionId}&amount={currencyAmount}&status={status}&sig={signature}&payout={payoutUsd}&test={test}
 ```
 
-- Offerwall.GG: set the placement currency to **8300 units per USD** (100 coins per rupee x
-  USD_TO_INR 83), so `currencyAmount` is the full payout in coins; the user gets 65% of it.
+- Offerwall.GG: set the placement currency to **5395 units per USD** (65% user share x 100 coins per rupee x
+  USD_TO_INR 83), so `currencyAmount` is already the user's 65% in coins and is credited as is.
   Signature = hex HMAC-SHA256 of `userId:transactionId:currencyAmount` (offerwall.gg/developers/postbacks).
   `test=1` never credits; `status=reversed` / negative amount reverses the same transaction.
 - CPX: `CPX_HASH_ENDPOINT` in `src/config/earn.ts` points at `/cpxHash` on the Worker. Set the CPX
