@@ -80,9 +80,9 @@ describe('removed UI stays removed', () => {
 
   it('Earn tab keeps the daily "watch 1 ad + vote 1 outfit" gate; the old per-survey ad stays removed', () => {
     const src = read('src/screens/Earn/EarnScreen.tsx');
-    // until both steps are done today, only the two steps show
+    // until both steps are done today, the two steps show at the top
     expect(src).toMatch(/const unlocked = isUnlocked\(d\)/);
-    expect(src).toMatch(/if \(!unlocked\) \{[\s\S]*label="Watch 1 ad"[\s\S]*label="Vote on 1 outfit" cta="Go to Feed"/);
+    expect(src).toMatch(/\{!unlocked \? \([\s\S]*Complete to start earning today[\s\S]*label="Watch 1 ad"[\s\S]*label="Vote on 1 outfit" cta="Go to Feed"[\s\S]*\) : null\}/);
     // two no-fills tick the ad step with no coins
     expect(src).toMatch(/adNoFill >= 2\) \{[\s\S]*recordEarnAd\(uid, \{ skipped: true \}\)/);
     expect(read('src/services/earnApi.ts')).toMatch(/adSkipped: true/);
@@ -95,5 +95,29 @@ describe('removed UI stays removed', () => {
     expect(src).not.toMatch(/surveyAdOwed|payOwedAd|Watch ad to continue/);
     expect(api).not.toMatch(/clearSurveyAd/);
     expect(read('src/services/earnLedger.ts')).not.toMatch(/surveyAdOwed/);
+  });
+
+  it('Earn tab never hides the cards behind the gate: they render locked below it', () => {
+    const src = read('src/screens/Earn/EarnScreen.tsx');
+    // no early return for the locked state: one render path holds the gate and every card
+    expect(src).not.toMatch(/if \(!unlocked\) \{\s*return/);
+    const render = src.slice(src.indexOf('{!unlocked ? ('));
+    const gateEnd = render.indexOf(') : null}');
+    expect(gateEnd).toBeGreaterThan(0);
+    const cards = render.slice(gateEnd);
+    for (const card of ['Withdrawable', '📅 Daily check-in', '▶️ Watch an ad', '📝 Surveys', '🎯 Offers', '📋 Surveys & offers', '🎮 Games', '🧠 Quizzes & learning', '🤝 Invite friends', '💸 Withdraw to UPI']) {
+      expect(cards).toContain(card);
+    }
+    // locked: dimmed buttons, the hint under each card, and a tap only shows the hint
+    expect(src).toMatch(/export const GATE_HINT = 'Finish the 2 steps above to unlock'/);
+    expect(src).toMatch(/const lockNote = locked \? <Text[^>]*>🔒 \{GATE_HINT\}<\/Text> : null/);
+    expect(cards.split('{lockNote}').length - 1).toBeGreaterThanOrEqual(8);
+    expect(cards.split('locked || busy ===').length - 1).toBeGreaterThanOrEqual(8);
+    for (const fn of ['watchAd = async', 'checkIn = async', 'openSurveys = async', 'openOffers = ', 'openBitlabs = ', 'openGames = ', 'onShare = ', 'onSaveUpi = async', 'onWithdraw = async']) {
+      expect(src.slice(src.indexOf(`const ${fn}`)).split('\n')[1]).toMatch(/if \(lockedHint\(\)\) return;/);
+    }
+    expect(src).toMatch(/const lockedHint = \(\): boolean => \{\s*if \(unlocked\) return false;\s*Alert\.alert\('Locked for today', `\$\{GATE_HINT\}/);
+    // the gate's own ad step is never locked
+    expect(src.slice(src.indexOf('const watchGateAd'), src.indexOf('const watchAd'))).not.toMatch(/lockedHint/);
   });
 });

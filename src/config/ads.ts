@@ -30,10 +30,9 @@ export const REAL_ADS = {
   // TODO(AdMob): make an earn_rewarded (Rewarded) unit and put it here. Until then the Earn tab
   // reuses astro_rewarded, and only when USE_TEST_ADS_EARN is false.
   earnRewarded: 'ca-app-pub-8006246175093661/8348090730',
-  // TODO(AdMob): make an earn_interstitial (Interstitial) unit and put it here. It is the ad shown
-  // when a partner wall opens and after a completed Earn task (owner revenue only, no coins). Empty = no task ads in
-  // release builds once USE_TEST_ADS_EARN is false (a rewarded unit can't be shown as interstitial).
-  earnInterstitial: '',
+  // earn_interstitial (Interstitial): shown when a partner wall opens and after a completed Earn task
+  // (owner revenue only, no coins).
+  earnInterstitial: 'ca-app-pub-8006246175093661/2080802534',
 } as const;
 
 // Google's official test ids (Android): https://developers.google.com/admob/android/test-ads
@@ -55,7 +54,7 @@ export const FORCE_TEST_ADS = false;
 // Earn tab (rewarded ad + the interstitials when a task starts / after it is completed): Google TEST ads in every build while the Earn tab is
 // being tested (no own-click risk on the real account). Set false once a real earn_rewarded unit is in
 // REAL_ADS.earnRewarded.
-export const USE_TEST_ADS_EARN = true;
+export const USE_TEST_ADS_EARN = false;
 
 // Kill switch: false hides every ad (rewarded content then unlocks after a short wait)
 export const ADS_ENABLED = true;

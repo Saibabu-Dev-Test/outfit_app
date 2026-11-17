@@ -1,8 +1,10 @@
 // Earn tab.
 // 1. Daily gate (resets 00:00 IST): watch 1 rewarded ad + vote on 1 outfit, ticked live from
-//    users/{uid}/earnDaily/{day}. Until both are done only these two steps show. Two ad no-fills in a
-//    row tick the ad step with no coins (adSkipped), so nobody gets stuck on a no-fill day.
-// 2. Unlocked: balance, daily check-in, rewarded ad (+coins, daily cap), Surveys = CPX wall,
+//    users/{uid}/earnDaily/{day}. Until both are done the two steps show at the top and every card
+//    below stays visible but locked: buttons dimmed, "Finish the 2 steps above to unlock" under each,
+//    and a tap only shows that hint. Two ad no-fills in a row tick the ad step with no coins
+//    (adSkipped), so nobody gets stuck on a no-fill day.
+// 2. Cards (always shown; usable once unlocked): balance, daily check-in, rewarded ad (+coins, daily cap), Surveys = CPX wall,
 //    Offers = Offerwall.GG wall, Surveys & offers = BitLabs wall, Games = BitLabs games tab
 //    (display_mode=gaming; Offerwall.GG wall if BitLabs is not set up), Quizzes & learning (Coming
 //    soon: no partner link), referral code, UPI + withdrawal.
@@ -81,6 +83,8 @@ const useIstDay = () => {
   return day;
 };
 
+export const GATE_HINT = 'Finish the 2 steps above to unlock';
+
 // Ad no-fills in a row this session: two on the gate step tick it with no coins; on the ad card the
 // user is asked to try later
 let adNoFill = 0;
@@ -155,6 +159,15 @@ export default function EarnScreen({ navigation }: { navigation: any }) {
   const d = today || EMPTY_DAY;
   const unlocked = isUnlocked(d);
   const adsLeft = Math.max(0, EARN_MAX_ADS_PER_DAY - d.adsCount);
+  const locked = !unlocked;
+
+  // Cards stay visible before the gate is done; a tap on a locked card's button only shows the hint
+  const lockedHint = (): boolean => {
+    if (unlocked) return false;
+    Alert.alert('Locked for today', `${GATE_HINT}: watch 1 ad and vote on 1 outfit.`);
+    return true;
+  };
+  const lockNote = locked ? <Text style={[ui.muted, { marginTop: 6 }]}>🔒 {GATE_HINT}</Text> : null;
 
   // ── Gate action: "Watch 1 ad" (same rewarded ad, +EARN_AD_COINS) ──
   const watchGateAd = async () => {
@@ -186,6 +199,7 @@ export default function EarnScreen({ navigation }: { navigation: any }) {
   // ── Unlocked actions ──
   // Rewarded ad card: +EARN_AD_COINS (pending) for the first EARN_MAX_ADS_PER_DAY ads of the day
   const watchAd = async () => {
+    if (lockedHint()) return;
     setBusy('ad');
     try {
       const r = await showRewardedAd('earnRewarded');
@@ -207,6 +221,7 @@ export default function EarnScreen({ navigation }: { navigation: any }) {
   };
 
   const checkIn = async () => {
+    if (lockedHint()) return;
     setBusy('checkin');
     try {
       const c = await dailyCheckIn(uid);
@@ -219,6 +234,7 @@ export default function EarnScreen({ navigation }: { navigation: any }) {
   };
 
   const openSurveys = async () => {
+    if (lockedHint()) return;
     if (!isCpxConfigured()) {
       Alert.alert('Surveys', 'Surveys are coming soon. Check back in a few days.');
       return;
@@ -247,6 +263,7 @@ export default function EarnScreen({ navigation }: { navigation: any }) {
   };
 
   const openOffers = () => {
+    if (lockedHint()) return;
     const url = offerwallUrl(uid);
     if (!url) {
       Alert.alert('Offers', 'Offers are coming soon. Check back in a few days.');
@@ -256,6 +273,7 @@ export default function EarnScreen({ navigation }: { navigation: any }) {
   };
 
   const openBitlabs = () => {
+    if (lockedHint()) return;
     if (!isBitlabsConfigured()) {
       Alert.alert('Surveys & offers', 'Coming soon. Check back in a few days.');
       return;
@@ -267,6 +285,7 @@ export default function EarnScreen({ navigation }: { navigation: any }) {
   // that wall is not set up in this build
   const gamesUrl = (): string | null => (isBitlabsConfigured() ? bitlabsGamesUrl(uid) : offerwallUrl(uid));
   const openGames = () => {
+    if (lockedHint()) return;
     const url = gamesUrl();
     if (!url) {
       Alert.alert('Games', 'Games are coming soon. Check back in a few days.');
@@ -275,7 +294,13 @@ export default function EarnScreen({ navigation }: { navigation: any }) {
     return openWall('games', { url, title: 'Games', kind: 'offer' });
   };
 
+  const onShare = () => {
+    if (lockedHint()) return;
+    shareMyReferral(uid);
+  };
+
   const onSaveUpi = async () => {
+    if (lockedHint()) return;
     setBusy('upi');
     const r = await saveUpi(uid, upiInput);
     setBusy(null);
@@ -286,6 +311,7 @@ export default function EarnScreen({ navigation }: { navigation: any }) {
   };
 
   const onWithdraw = async () => {
+    if (lockedHint()) return;
     if (!meta.upi) return Alert.alert('UPI id', 'Save your UPI id first.');
     const rupees = Number(amount);
     const c = withdrawCheck(rupees, summary, MIN_WITHDRAW_RUPEES);
@@ -336,27 +362,23 @@ export default function EarnScreen({ navigation }: { navigation: any }) {
     );
   }
 
-  if (!unlocked) {
-    return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top']}>
-        {header}
-        <ScrollView contentContainerStyle={ui.scroll}>
-          <Text style={ui.h2}>Complete to start earning today</Text>
-          <Text style={[ui.muted, { marginBottom: 12 }]}>Resets every day at midnight (India time).</Text>
-          <Check done={d.adWatched} label="Watch 1 ad" cta="▶ Watch" onPress={watchGateAd} busy={busy === 'gateAd'} />
-          <Check done={d.voted} label="Vote on 1 outfit" cta="Go to Feed" onPress={() => navigation.navigate('Feed')} />
-          <Text style={ui.muted}>
-            You get +{EARN_AD_COINS} coins per ad and +{EARN_VOTE_COINS} for your first vote today. {COINS_PER_RUPEE} coins = ₹1.
-          </Text>
-        </ScrollView>
-      </SafeAreaView>
-    );
-  }
-
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top']}>
       {header}
       <ScrollView contentContainerStyle={ui.scroll} keyboardShouldPersistTaps="handled">
+        {/* Daily gate on top until done; every card below always renders */}
+        {!unlocked ? (
+          <View style={{ marginBottom: 8 }}>
+            <Text style={ui.h2}>Complete to start earning today</Text>
+            <Text style={[ui.muted, { marginBottom: 12 }]}>Resets every day at midnight (India time).</Text>
+            <Check done={d.adWatched} label="Watch 1 ad" cta="▶ Watch" onPress={watchGateAd} busy={busy === 'gateAd'} />
+            <Check done={d.voted} label="Vote on 1 outfit" cta="Go to Feed" onPress={() => navigation.navigate('Feed')} />
+            <Text style={ui.muted}>
+              You get +{EARN_AD_COINS} coins per ad and +{EARN_VOTE_COINS} for your first vote today. {COINS_PER_RUPEE} coins = ₹1.
+            </Text>
+          </View>
+        ) : null}
+
         <View style={ui.card}>
           <Text style={ui.muted}>Withdrawable</Text>
           <Text style={ui.h1}>{rupeesText(summary.withdrawableCoins)}</Text>
@@ -369,11 +391,12 @@ export default function EarnScreen({ navigation }: { navigation: any }) {
           <View style={ui.flex1}>
             <Text style={ui.h2}>📅 Daily check-in</Text>
             <Text style={ui.muted}>+{EARN_CHECKIN_COINS} coins every day</Text>
+            {lockNote}
           </View>
           {d.checkedIn ? (
             <Text style={ui.good}>Done today</Text>
           ) : (
-            <TouchableOpacity style={[ui.btn, busy === 'checkin' && ui.btnOff]} onPress={checkIn} disabled={!!busy}>
+            <TouchableOpacity style={[ui.btn, (locked || busy === 'checkin') && ui.btnOff]} onPress={checkIn} disabled={!!busy}>
               <Text style={ui.btnText}>Check in</Text>
             </TouchableOpacity>
           )}
@@ -385,9 +408,10 @@ export default function EarnScreen({ navigation }: { navigation: any }) {
             <Text style={ui.muted}>
               +{EARN_AD_COINS} coins per ad · {adsLeft} of {EARN_MAX_ADS_PER_DAY} left today
             </Text>
+            {lockNote}
           </View>
           {adsLeft > 0 ? (
-            <TouchableOpacity style={[ui.btn, busy === 'ad' && ui.btnOff]} onPress={watchAd} disabled={!!busy}>
+            <TouchableOpacity style={[ui.btn, (locked || busy === 'ad') && ui.btnOff]} onPress={watchAd} disabled={!!busy}>
               {busy === 'ad' ? <ActivityIndicator color={colors.onPrimary} /> : <Text style={ui.btnText}>Watch</Text>}
             </TouchableOpacity>
           ) : (
@@ -400,13 +424,14 @@ export default function EarnScreen({ navigation }: { navigation: any }) {
           <Text style={ui.body}>
             Answer paid surveys and earn coins.
           </Text>
-          <TouchableOpacity style={[ui.btn, { marginTop: 10 }, busy === 'survey' ? ui.btnOff : null]} onPress={openSurveys} disabled={!!busy}>
+          <TouchableOpacity style={[ui.btn, { marginTop: 10 }, locked || busy === 'survey' ? ui.btnOff : null]} onPress={openSurveys} disabled={!!busy}>
             {busy === 'survey' ? (
               <ActivityIndicator color={colors.onPrimary} />
             ) : (
               <Text style={ui.btnText}>{isCpxConfigured() ? 'Open surveys' : 'Coming soon'}</Text>
             )}
           </TouchableOpacity>
+          {lockNote}
         </View>
 
         <View style={ui.card}>
@@ -414,9 +439,10 @@ export default function EarnScreen({ navigation }: { navigation: any }) {
           <Text style={ui.body}>
             Try apps and complete offers to earn coins.
           </Text>
-          <TouchableOpacity style={[ui.btn, { marginTop: 10 }, busy === 'offers' ? ui.btnOff : null]} onPress={openOffers} disabled={!!busy}>
+          <TouchableOpacity style={[ui.btn, { marginTop: 10 }, locked || busy === 'offers' ? ui.btnOff : null]} onPress={openOffers} disabled={!!busy}>
             {busy === 'offers' ? <ActivityIndicator color={colors.onPrimary} /> : <Text style={ui.btnText}>{offerwallUrl(uid) ? 'Open offers' : 'Coming soon'}</Text>}
           </TouchableOpacity>
+          {lockNote}
         </View>
 
         <View style={ui.card}>
@@ -424,9 +450,10 @@ export default function EarnScreen({ navigation }: { navigation: any }) {
           <Text style={ui.body}>
             Surveys, offers and games. Earnings depend on you and the task.
           </Text>
-          <TouchableOpacity style={[ui.btn, { marginTop: 10 }, busy === 'bitlabs' ? ui.btnOff : null]} onPress={openBitlabs} disabled={!!busy}>
+          <TouchableOpacity style={[ui.btn, { marginTop: 10 }, locked || busy === 'bitlabs' ? ui.btnOff : null]} onPress={openBitlabs} disabled={!!busy}>
             {busy === 'bitlabs' ? <ActivityIndicator color={colors.onPrimary} /> : <Text style={ui.btnText}>{isBitlabsConfigured() ? 'Open' : 'Coming soon'}</Text>}
           </TouchableOpacity>
+          {lockNote}
         </View>
 
         <View style={ui.card}>
@@ -434,9 +461,10 @@ export default function EarnScreen({ navigation }: { navigation: any }) {
           <Text style={ui.body}>
             Play games and reach the goals shown to earn coins.
           </Text>
-          <TouchableOpacity style={[ui.btn, { marginTop: 10 }, busy === 'games' ? ui.btnOff : null]} onPress={openGames} disabled={!!busy}>
+          <TouchableOpacity style={[ui.btn, { marginTop: 10 }, locked || busy === 'games' ? ui.btnOff : null]} onPress={openGames} disabled={!!busy}>
             {busy === 'games' ? <ActivityIndicator color={colors.onPrimary} /> : <Text style={ui.btnText}>{gamesUrl() ? 'Play games' : 'Coming soon'}</Text>}
           </TouchableOpacity>
+          {lockNote}
         </View>
 
         {/* No current partner gives a quiz / learning link: shown honestly as Coming soon */}
@@ -457,11 +485,12 @@ export default function EarnScreen({ navigation }: { navigation: any }) {
           </Text>
           <View style={[ui.row, { marginTop: 8 }]}>
             <Text style={[ui.h1, ui.flex1]}>{refCode || '······'}</Text>
-            <TouchableOpacity style={ui.btn} onPress={() => shareMyReferral(uid)}>
+            <TouchableOpacity style={[ui.btn, locked && ui.btnOff]} onPress={onShare}>
               <Text style={ui.btnText}>Share</Text>
             </TouchableOpacity>
           </View>
           <Text style={ui.muted}>Friends joined: {friends}</Text>
+          {lockNote}
         </View>
 
         <View style={ui.card}>
@@ -478,7 +507,7 @@ export default function EarnScreen({ navigation }: { navigation: any }) {
             autoCapitalize="none"
             autoCorrect={false}
           />
-          <TouchableOpacity style={[ui.btnGhost, busy === 'upi' && ui.btnOff]} onPress={onSaveUpi} disabled={!!busy || !upiInput.trim()}>
+          <TouchableOpacity style={[ui.btnGhost, (locked || busy === 'upi') && ui.btnOff]} onPress={onSaveUpi} disabled={!!busy || (unlocked && !upiInput.trim())}>
             <Text style={ui.btnGhostText}>Save UPI id</Text>
           </TouchableOpacity>
           <TextInput
@@ -488,9 +517,10 @@ export default function EarnScreen({ navigation }: { navigation: any }) {
             placeholder={`Amount in ₹ (min ${MIN_WITHDRAW_RUPEES})`}
             keyboardType="number-pad"
           />
-          <TouchableOpacity style={[ui.btn, busy === 'withdraw' && ui.btnOff]} onPress={onWithdraw} disabled={!!busy}>
+          <TouchableOpacity style={[ui.btn, (locked || busy === 'withdraw') && ui.btnOff]} onPress={onWithdraw} disabled={!!busy}>
             <Text style={ui.btnText}>Request withdrawal</Text>
           </TouchableOpacity>
+          {lockNote}
         </View>
       </ScrollView>
     </SafeAreaView>

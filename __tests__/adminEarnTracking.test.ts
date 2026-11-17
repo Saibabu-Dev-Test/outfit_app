@@ -67,9 +67,11 @@ describe('Earn tab keeps every earning option (names hidden, nothing removed)', 
     expect(src).toMatch(/🧠 Quizzes & learning<\/Text>/);
     expect(src).toMatch(/'Coming soon'/);
   });
-  it('every card renders once the daily gate (1 ad + 1 vote) is open', () => {
-    expect(src).toMatch(/if \(!unlocked\) \{/);
-    const unlockedPart = src.slice(src.lastIndexOf('if (!unlocked)'));
+  it('every card renders, locked below the daily gate (1 ad + 1 vote) until it is open', () => {
+    expect(src).toMatch(/\{!unlocked \? \(/);
+    expect(src).not.toMatch(/if \(!unlocked\) \{\s*return/);
+    const gate = src.indexOf('{!unlocked ? (');
+    const unlockedPart = src.slice(src.indexOf(') : null}', gate));
     for (const card of ['📅 Daily check-in', '▶️ Watch an ad', '📝 Surveys', '🎯 Offers', '📋 Surveys & offers', '🎮 Games', '🧠 Quizzes & learning', '🤝 Invite friends', '💸 Withdraw to UPI']) {
       expect(unlockedPart).toContain(card);
     }
