@@ -8,7 +8,8 @@ The app never holds partner secrets. `index.js` has the handlers that must run o
 - `bitlabsPostback` — BitLabs reward / reconciliation callback → `users/{uid}/earnings/bitlabs_{tx}`
   (pending, held ~5 days, user gets 65% of the USD payout × `USD_TO_INR` (83), in coins). Duplicate
   `tx` is ignored; `type=RECONCILIATION` marks the original entry `reversed`.
-- `releaseHeld` — daily job: pending → approved after the hold; app coin entries; referral credits.
+- `releaseHeld` — daily job: pending → approved after the hold; app coin entries; referral credits
+  (after the new user's first approved daily check-in on their own phone; once per new user).
 
 Hosting options: Cloud Functions v2 (needs the Firebase Blaze plan) or a free Cloudflare Worker /
 the existing GitHub Actions service account for the daily job. Secrets (`CPX_SECURE_HASH`,
@@ -64,6 +65,22 @@ Offerwall.GG  https://outfit-api.babusai927.workers.dev/offerwallPostback?user={
   `test=1` never credits; `status=reversed` / negative amount reverses the same transaction.
 - CPX: `CPX_HASH_ENDPOINT` in `src/config/earn.ts` points at `/cpxHash` on the Worker. Set the CPX
   app currency to INR.
+
+Optional reporting params (owner's Admin tracking > 💰 Earnings; never used for money). Old URLs
+keep working; add these to see per-type and per-task numbers:
+
+```
+Offerwall.GG  ...&offerName={offerName}                      (task name; category = offer)
+BitLabs       offer callback:  ...&cat=offer&offer_id=[%OFFER:ID%]&offer_name=[%OFFER:NAME%]&task_name=[%OFFER:TASK:NAME%]
+              survey callback: ...&cat=survey
+              (keep every extra param BEFORE &hash=, BitLabs signs the whole URL)
+Any partner   ...&cat=game | cat=quiz | cat=survey | cat=offer  to label a whole placement
+```
+
+Category stored per credit (`category` column / Firestore field): survey | offer | game | quiz |
+receipt | other. Without a hint CPX = survey, Offerwall.GG = offer, BitLabs = unknown (the report
+falls back to the ledger type). D1 migration `0002_earnings_category.sql` adds `category`,
+`task_name`, `payout_rupees` (full partner payout ₹); older rows report rupees + owner_rupees.
 
 Worker secrets (repo secrets of the same name, or `npx wrangler secret put NAME` in `server/worker`;
 never commit them): `BITLABS_SECRET`, `CPX_SECURE_HASH`, `OFFERWALL_GG_SECRET`, optional

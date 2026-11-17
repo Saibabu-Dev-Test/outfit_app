@@ -1353,7 +1353,9 @@ service cloud.firestore {
 
     // ── Earn tab (src/config/earn.ts mirrors these numbers) ──────────────────
     // users/{uid}/earnDaily/{yyyy-mm-dd IST}: daily gate {adWatched, voted, checkedIn, adsCount, adSkipped}
-    // owner writes, only around that date, flags never go back, adsCount +1 at a time up to 10.
+    // (the Earn tab opens each day after 1 ad + 1 vote; adSkipped = two no-fills ticked the ad step with
+    // no coins). Owner writes, only around that date, flags never go back (one check-in / one vote coin a
+    // day), adsCount +1 at a time up to 10.
     function earnDayPath(uid, day) {
       return /databases/$(db)/documents/users/$(uid)/earnDaily/$(day);
     }
@@ -1375,7 +1377,7 @@ service cloud.firestore {
         && request.resource.data.get('adsCount', 0) >= 0
         && request.resource.data.get('adsCount', 0) <= earnMaxAds()
         && request.resource.data.get('adsCount', 0) - (resource == null ? 0 : resource.data.get('adsCount', 0)) in [0, 1]
-        // check-in only once the gate is open
+        // check-in only once the gate is open (ad watched AND voted that day)
         && (request.resource.data.get('checkedIn', false) == false
             || (request.resource.data.get('adWatched', false) == true && request.resource.data.get('voted', false) == true))
         && (resource == null

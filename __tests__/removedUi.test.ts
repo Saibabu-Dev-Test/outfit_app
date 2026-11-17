@@ -77,4 +77,23 @@ describe('removed UI stays removed', () => {
     expect(src).not.toMatch(/USER_SHARE|You get \{|see Terms/);
     expect(read('src/screens/Profile/TermsScreen.tsx')).toMatch(/USER_SHARE/);
   });
+
+  it('Earn tab keeps the daily "watch 1 ad + vote 1 outfit" gate; the old per-survey ad stays removed', () => {
+    const src = read('src/screens/Earn/EarnScreen.tsx');
+    // until both steps are done today, only the two steps show
+    expect(src).toMatch(/const unlocked = isUnlocked\(d\)/);
+    expect(src).toMatch(/if \(!unlocked\) \{[\s\S]*label="Watch 1 ad"[\s\S]*label="Vote on 1 outfit" cta="Go to Feed"/);
+    // two no-fills tick the ad step with no coins
+    expect(src).toMatch(/adNoFill >= 2\) \{[\s\S]*recordEarnAd\(uid, \{ skipped: true \}\)/);
+    expect(read('src/services/earnApi.ts')).toMatch(/adSkipped: true/);
+    expect(read('src/services/earnLedger.ts')).toMatch(/export const isUnlocked = \(d: EarnDay\): boolean => d\.adWatched && d\.voted/);
+    // check-in: gate checked before writing (plain message), and again in the rules
+    const api = read('src/services/earnApi.ts');
+    expect(api.slice(api.indexOf('export const dailyCheckIn'))).toMatch(/if \(!isUnlocked\(d\)\) throw new Error\(CHECKIN_GATE_MESSAGE\)/);
+    expect(read('firestore.rules')).toMatch(/check-in only once the gate is open[\s\S]*adWatched', false\) == true && request\.resource\.data\.get\('voted', false\) == true/);
+    // the old "one ad after each survey before the next one" stays removed
+    expect(src).not.toMatch(/surveyAdOwed|payOwedAd|Watch ad to continue/);
+    expect(api).not.toMatch(/clearSurveyAd/);
+    expect(read('src/services/earnLedger.ts')).not.toMatch(/surveyAdOwed/);
+  });
 });

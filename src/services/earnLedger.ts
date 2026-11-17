@@ -1,4 +1,4 @@
-// Pure logic for the Earn ledger (no Firebase): entry shape, totals, breakdown, gate state.
+// Pure logic for the Earn ledger (no Firebase): entry shape, totals, breakdown, daily gate.
 // Ledger docs: users/{uid}/earnings/{id}
 //   { type: ad|vote|survey|offer|checkin|referral, coins, rupees, partner, status: pending|approved|reversed,
 //     createdAt, holdUntil? }
@@ -110,6 +110,9 @@ export const summarize = (entries: EarnEntry[], withdrawals: Withdrawal[] = []):
 };
 
 // ── Daily gate: users/{uid}/earnDaily/{yyyy-mm-dd IST} ──
+// Until the user has watched 1 ad (or two no-fills ticked it, adSkipped) and voted on 1 outfit today,
+// the Earn tab shows only those two steps. The same doc stops double check-ins, caps the coin-paying
+// ads per day and pays the first vote of the day once.
 export interface EarnDay {
   adWatched: boolean;
   voted: boolean;
@@ -123,18 +126,8 @@ export const toEarnDay = (d: any): EarnDay => ({
   checkedIn: d?.checkedIn === true,
   adsCount: Math.max(0, Math.floor(num(d?.adsCount))),
 });
-export const isUnlocked = (d: EarnDay) => d.adWatched && d.voted;
-
-// After every completed survey, one ad must play before the next survey opens.
-// surveyAdClearedAt = createdAt (ms) of the newest survey that was already "paid" with an ad.
-export const surveyAdOwed = (entries: EarnEntry[], surveyAdClearedAt: number): boolean => {
-  const newest = latestSurveyAt(entries);
-  return newest > surveyAdClearedAt;
-};
-export const latestSurveyAt = (entries: EarnEntry[]): number =>
-  entries
-    .filter(e => e.type === 'survey' && e.status !== 'reversed')
-    .reduce((m, e) => Math.max(m, e.createdAt ? e.createdAt.getTime() : 0), 0);
+// The day's gate is open (every Earn card shows; check-in allowed) once both steps are done
+export const isUnlocked = (d: EarnDay): boolean => d.adWatched && d.voted;
 
 // Withdrawal request validity (the server checks again)
 export const withdrawCheck = (

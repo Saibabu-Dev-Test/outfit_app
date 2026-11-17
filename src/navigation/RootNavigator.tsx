@@ -25,6 +25,7 @@ import MonthlyTasksScreen from '../screens/Profile/MonthlyTasksScreen';
 import AdminRewardsScreen from '../screens/Admin/AdminRewardsScreen';
 import AdminWithdrawalsScreen from '../screens/Admin/AdminWithdrawalsScreen';
 import AdminSystemScreen from '../screens/Admin/AdminSystemScreen';
+import AdminListScreen from '../screens/Admin/AdminListScreen';
 import EarnWallScreen from '../screens/Earn/EarnWallScreen';
 import LikesScreen from '../screens/Profile/LikesScreen';
 import LikedByScreen from '../screens/Profile/LikedByScreen';
@@ -133,6 +134,7 @@ function NavigationContent() {
               <Stack.Screen name="AdminRewards" component={AdminRewardsScreen} />
               <Stack.Screen name="AdminWithdrawals" component={AdminWithdrawalsScreen} />
               <Stack.Screen name="AdminSystem" component={AdminSystemScreen} />
+              <Stack.Screen name="AdminList" component={AdminListScreen} />
               <Stack.Screen name="EarnWall" component={EarnWallScreen} />
               <Stack.Screen name="Likes" component={LikesScreen} />
               <Stack.Screen name="LikedBy" component={LikedByScreen} />

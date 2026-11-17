@@ -62,6 +62,7 @@ const ROUTES = [
   ['POST', /^\/v1\/coins$/, api.postCoin],
   ['GET', /^\/v1\/earnings$/, api.getEarnings],
   ['GET', /^\/v1\/admin\/system$/, api.getAdminSystem],
+  ['GET', /^\/v1\/admin\/earnings$/, api.getAdminEarnings],
 ];
 
 export async function handleRequest(request, env, ctx, { fetchImpl = fetch, now = Date.now() } = {}) {

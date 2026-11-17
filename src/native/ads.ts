@@ -11,6 +11,15 @@ import {
 } from '../config/ads';
 
 export type RewardedSlot = 'astroRewarded' | 'poruthamRewarded' | 'earnRewarded';
+export type InterstitialSlot = 'earnInterstitial';
+
+// When the last full-screen ad (rewarded or interstitial) was on screen (set when it appears and
+// again when it closes), for frequency caps: never two ads back to back (AD_MIN_SPACING_MS)
+let lastFullscreenAt = 0;
+export const lastFullscreenAdAt = (): number => lastFullscreenAt;
+const markFullscreenShown = (): void => {
+  lastFullscreenAt = Date.now();
+};
 
 // Last ad outcome per slot, for the Admin screen ("Ads status"): why ads are not showing
 export interface AdStatus { slot: string; ok: boolean; message: string; at: number }
@@ -122,6 +131,7 @@ export const showRewardedAd = (slot: RewardedSlot): Promise<RewardedResult> => {
       if (done) return;
       done = true;
       clearTimeout(timer);
+      if (shown) markFullscreenShown(); // spacing counts from when the ad left the screen
       unsubs.forEach(u => {
         try {
           u();
@@ -144,6 +154,7 @@ export const showRewardedAd = (slot: RewardedSlot): Promise<RewardedResult> => {
         noteAd(slot, true, 'Loaded');
         if (done) return;
         shown = true;
+        markFullscreenShown();
         Promise.resolve(ad.show()).catch(() => finish('no_ad'));
       });
       on(m.RewardedAdEventType.EARNED_REWARD, () => {
@@ -172,4 +183,99 @@ export const watchAdToUnlock = async (slot: RewardedSlot): Promise<boolean> => {
     return true;
   }
   return false;
+};
+
+// ── Interstitial (Earn task ads: one when a partner wall is opened, one after a task; never gives
+// coins) ── preloadInterstitial() loads it in the background while the user is in a partner wall
+// (nothing is shown); showInterstitialAd() shows it, waiting at most waitMs for a load.
+type Inter = { slot: InterstitialSlot; ad: any; loaded: boolean; failed: boolean; waiters: (() => void)[]; unsubs: (() => void)[] };
+let inter: Inter | null = null;
+
+const dropInter = () => {
+  inter?.unsubs.forEach(u => {
+    try {
+      u();
+    } catch {}
+  });
+  inter = null;
+};
+
+export const preloadInterstitial = (slot: InterstitialSlot): void => {
+  if (inter && inter.slot === slot && !inter.failed) return;
+  dropInter();
+  const m = adsModule();
+  const unit = adUnitId(slot);
+  if (!m || !m.InterstitialAd || !unit) {
+    noteAd(slot, false, !unit ? 'No ad unit id for this build' : 'Ads module not available on this build');
+    return;
+  }
+  try {
+    initAds().catch(() => undefined);
+    const ad = m.InterstitialAd.createForAdRequest(unit);
+    const st: Inter = { slot, ad, loaded: false, failed: false, waiters: [], unsubs: [] };
+    const wake = () => {
+      const w = st.waiters;
+      st.waiters = [];
+      w.forEach(fn => fn());
+    };
+    const on = (type: any, fn: (p?: any) => void) => {
+      const u = ad.addAdEventListener(type, fn);
+      if (typeof u === 'function') st.unsubs.push(u);
+    };
+    on(m.AdEventType.LOADED, () => {
+      st.loaded = true;
+      noteAd(slot, true, 'Loaded');
+      wake();
+    });
+    on(m.AdEventType.ERROR, (err?: any) => {
+      st.failed = true;
+      noteAd(slot, false, `${err?.code || ''} ${err?.message || 'Ad error'}`.trim());
+      wake();
+    });
+    inter = st;
+    ad.load();
+  } catch (e: any) {
+    console.warn('Interstitial load failed:', e?.message);
+    dropInter();
+  }
+};
+
+export type InterstitialResult = 'shown' | 'no_ad';
+
+// Shows the (pre)loaded interstitial. Never throws, always settles: 'shown' after the user closes
+// it, 'no_ad' when nothing loaded within waitMs (the caller just carries on).
+export const showInterstitialAd = (slot: InterstitialSlot, waitMs: number): Promise<InterstitialResult> => {
+  if (!allowed) allowAds();
+  if (!inter || inter.slot !== slot || inter.failed) preloadInterstitial(slot);
+  const st = inter;
+  const m = adsModule();
+  if (!st || !m) return Promise.resolve('no_ad');
+  return new Promise<InterstitialResult>(resolve => {
+    let done = false;
+    const finish = (r: InterstitialResult) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      if (r === 'shown') markFullscreenShown(); // spacing counts from when the ad left the screen
+      if (inter === st) dropInter(); // an interstitial shows once; the next wall preloads a fresh one
+      resolve(r);
+    };
+    const timer = setTimeout(() => finish('no_ad'), waitMs);
+    const go = () => {
+      if (done) return;
+      if (!st.loaded || st.failed) return finish('no_ad');
+      clearTimeout(timer); // shown: wait for the user to close it
+      try {
+        const u1 = st.ad.addAdEventListener(m.AdEventType.CLOSED, () => finish('shown'));
+        const u2 = st.ad.addAdEventListener(m.AdEventType.ERROR, () => finish('no_ad'));
+        [u1, u2].forEach(u => typeof u === 'function' && st.unsubs.push(u));
+        markFullscreenShown();
+        Promise.resolve(st.ad.show()).catch(() => finish('no_ad'));
+      } catch {
+        finish('no_ad');
+      }
+    };
+    if (st.loaded || st.failed) go();
+    else st.waiters.push(go);
+  });
 };

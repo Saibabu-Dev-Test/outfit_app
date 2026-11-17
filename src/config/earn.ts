@@ -79,3 +79,12 @@ export const bitlabsWallUrl = (uid: string): string =>
   'https://web.bitlabs.ai/' +
   `?uid=${encodeURIComponent(uid)}` +
   `&token=${encodeURIComponent(BITLABS_TOKEN)}`;
+
+// BitLabs wall opened on its games tab (display_mode=gaming, documented opening parameter:
+// developer.bitlabs.ai/docs/iframeweb-integration > Other parameters). Games must be switched on for
+// the placement in the BitLabs dashboard (Games and Offers settings).
+export const bitlabsGamesUrl = (uid: string): string => `${bitlabsWallUrl(uid)}&display_mode=gaming`;
+
+// Quizzes & learning: none of the current partners gives a quiz / learn-and-earn wall link, so the
+// Earn tab shows it as "Coming soon". (Offerwall.GG lists a "quizzes" category only through its
+// server-side offers API, which needs the secret key, not as a wall link.)

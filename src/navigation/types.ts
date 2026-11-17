@@ -1,3 +1,5 @@
+import type { AdminListKind } from '../services/adminLists';
+
 // Screens pushed over the tabs (full screen, no tab bar)
 export type RootStackParamList = {
   Auth: undefined;
@@ -20,6 +22,8 @@ export type RootStackParamList = {
   AdminWithdrawals: undefined;
   // Owner only: backends, free-tier usage, Worker health, earn partners, users
   AdminSystem: undefined;
+  // Owner only: the list behind a number on Admin tracking
+  AdminList: { kind: AdminListKind };
   EarnWall: { url: string; title?: string; kind?: 'survey' | 'offer' };
   Likes: { tab?: 'activity' | 'likes' } | undefined;
   LikedBy: { kind: 'post' | 'wardrobe'; id: string };
