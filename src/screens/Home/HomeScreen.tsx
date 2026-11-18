@@ -24,7 +24,7 @@ import { doc, setDoc, serverTimestamp, collection, query, where, getDocs } from 
 import { db } from '../../config/firebaseConfig';
 import { getUserProfile, recordDailyLogin, saveUserProfile } from '../../services/userApi';
 import { compactMyClearCopies, hasUploadedToday } from '../../services/wardrobeApi';
-import { getTodayVaaraColour, getRashiLuckyColour, getTodayLuckyMessage } from '../../utils/panchangam';
+import { getTodayVaaraColour, getTodayLuckyMessage } from '../../utils/panchangam';
 import { localDateKey, greetingForNow } from '../../utils/date';
 import { useDayKey } from '../../hooks/useDayKey';
 import { markColourVoted } from '../../native/notifications';
@@ -36,6 +36,9 @@ import NameWithAge from '../../components/NameWithAge';
 import { ageFromDobIST, isValidDob } from '../../utils/age';
 import BirthdaysCard from '../../components/BirthdaysCard';
 import FunctionPlanCard from '../../components/FunctionPlanCard';
+import DailyAstroExtras from '../../components/DailyAstroExtras';
+import WeatherCard from '../../components/WeatherCard';
+import { useHomePlace } from '../../hooks/useHomePlace';
 import {
   checkWeeklyStars,
   getDay,
@@ -207,7 +210,8 @@ export default function HomeScreen() {
   const dayKey = useDayKey();
   const vaara = getTodayVaaraColour();
   const luckyMessage = getTodayLuckyMessage();
-  const lucky = getRashiLuckyColour(user?.rashi);
+  // Place for today's Rahu kalam + the weather card (device location if allowed, else Hyderabad)
+  const homePlace = useHomePlace();
   // The results box never takes more than ~55% of the screen; it scrolls inside itself
   const { height: windowHeight } = useWindowDimensions();
   const voteBoxMaxHeight = Math.max(260, Math.round(windowHeight * 0.55));
@@ -565,16 +569,25 @@ export default function HomeScreen() {
             {vaara.weekday} · {vaara.vaara} · ruled by {vaara.graha}
           </Text>
           <Text style={styles.panchangWhy}>{vaara.why}</Text>
-          {lucky ? (
-            <Text style={styles.panchangLucky}>
-              Your rashi ({lucky.rashi}) lord is {lucky.lord}: lucky colour {lucky.colour}.
-            </Text>
-          ) : null}
+          {/* Daily rashi colour: today's Moon rashi counted from the user's janma rashi (changes as the Moon moves) */}
+          <DailyAstroExtras part="rashi" profile={user} place={homePlace.place} />
           <View style={styles.motivationBox}>
             <Text style={styles.motivationText}>✨ {luckyMessage}</Text>
           </View>
           <Text style={styles.panchangNote}>Traditional Panchangam guidance (weekday ruling planet)</Text>
+          {/* Good day to buy? (tithi, nakshatra, Chandrashtama) + today's Rahu kalam */}
+          <DailyAstroExtras part="buy" profile={user} place={homePlace.place} />
         </View>
+
+        {/* Weather & climate today: alerts, age precautions, go out today? */}
+        <WeatherCard
+          place={homePlace.place}
+          askNeeded={homePlace.askNeeded}
+          busy={homePlace.busy}
+          onAllow={homePlace.requestLocation}
+          onNotNow={homePlace.dismissAsk}
+          dob={user?.dob}
+        />
 
         {/* 🎂 Birthdays today + next 7 days (opt-in), wishes, and the birthday circle on my birthday */}
         {user?.id ? <FunctionPlanCard uid={String(user.id)} /> : null}

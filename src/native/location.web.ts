@@ -6,7 +6,8 @@ export interface LatLng {
 export type LocationFailReason = 'denied' | 'blocked' | 'off' | 'error';
 export type LocationResult = { ok: true; coords: LatLng } | { ok: false; message: string; reason: LocationFailReason };
 
-export const getApproxLocation = (): Promise<LocationResult> =>
+// `rationale` is used by the Android dialog only (the browser shows its own prompt)
+export const getApproxLocation = (_rationale?: { title: string; message: string; allow?: string; notNow?: string }): Promise<LocationResult> =>
   new Promise(resolve => {
     const geo: any = (globalThis as any).navigator?.geolocation;
     if (!geo) {

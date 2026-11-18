@@ -14,7 +14,8 @@ const Native: { getApproxLocation?: () => Promise<{ lat: number; lng: number }> 
   NativeModules.OutfitLocation;
 
 // Asks the permission if needed, then reads an approximate fix. Never throws.
-export const getApproxLocation = async (): Promise<LocationResult> => {
+// `rationale` replaces the permission dialog text (Home weather card); Circles keeps the default.
+export const getApproxLocation = async (rationale?: { title: string; message: string; allow?: string; notNow?: string }): Promise<LocationResult> => {
   if (Platform.OS !== 'android' || !Native?.getApproxLocation) {
     return { ok: false, message: 'Location needs the latest app.', reason: 'error' };
   }
@@ -22,10 +23,10 @@ export const getApproxLocation = async (): Promise<LocationResult> => {
     const perm = PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION;
     if (!(await PermissionsAndroid.check(perm))) {
       const r = await PermissionsAndroid.request(perm, {
-        title: 'Find circles near you',
-        message: 'Outfit uses your approximate location (about 100 m) to show public circles within 3 km.',
-        buttonPositive: 'Allow',
-        buttonNegative: 'Not now',
+        title: rationale?.title || 'Find circles near you',
+        message: rationale?.message || 'Outfit uses your approximate location (about 100 m) to show public circles within 3 km.',
+        buttonPositive: rationale?.allow || 'Allow',
+        buttonNegative: rationale?.notNow || 'Not now',
       });
       if (r !== PermissionsAndroid.RESULTS.GRANTED) {
         const blocked = r === PermissionsAndroid.RESULTS.NEVER_ASK_AGAIN;
