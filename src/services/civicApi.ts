@@ -2,7 +2,9 @@
 // (item keys, district slug) are tested in __tests__/civicWorker.test.ts.
 import { workerFetch } from './workerApi';
 
-export type CivicKind = 'govt' | 'hosp';
+// gcmp = neutral previous vs present government comparison (state code or 'IN' for the centre)
+export type CivicKind = 'govt' | 'hosp' | 'gcmp';
+export const CENTRE_CODE = 'IN';
 export type HospVariant = 'govt' | 'private';
 
 export interface CivicPerson {
@@ -45,11 +47,51 @@ export interface Hospital {
   mapUrl?: string;
   stars?: number | null; // old rows only; not shown (no AI ratings)
   note: string;
+  // v2 (Worker CIVIC_SCHEMA.hosp = 2); missing / empty = no public source stated it
+  timings?: string;
+  specialFor?: string[]; // diseases / treatments a public source says it is a centre for
+  facilities?: string[];
+  doctors?: HospitalDoctor[]; // only doctors publicly listed, each with its source page
+  sources?: string[];
+}
+
+export interface HospitalDoctor {
+  name: string;
+  speciality: string;
+  qualification: string;
+  experience: string;
+  source: string;
 }
 
 export interface HospData {
   asOf?: string;
   hospitals: Hospital[];
+}
+
+// Previous vs present government (facts only, every point with source URL + date, no verdict)
+export type CompareArea = 'schemes' | 'budget' | 'projects' | 'started' | 'stopped';
+export const COMPARE_AREAS: CompareArea[] = ['schemes', 'budget', 'projects', 'started', 'stopped'];
+
+export interface CompareFact {
+  text: string;
+  source: string;
+  date: string;
+}
+
+export interface CompareGovt {
+  label: string;
+  head: string;
+  party: string;
+  from: string;
+  to: string;
+  source: string;
+}
+
+export interface CompareData {
+  asOf?: string;
+  previous: CompareGovt;
+  present: CompareGovt;
+  rows: { area: CompareArea; topic: string; previous: CompareFact | null; present: CompareFact | null }[];
 }
 
 export type TrCode = 'te' | 'hi';
@@ -124,6 +166,10 @@ export const getGovtData = (state: string, district?: string) =>
 
 export const getHospData = (state: string, variant: HospVariant, district?: string) =>
   workerFetch<CivicDataResponse<HospData>>(`/v1/civic/data?${q({ kind: 'hosp', state, district: districtSlug(district), variant })}`);
+
+// state = a state code, or CENTRE_CODE ('IN') for the Union Government
+export const getCompareData = (state: string) =>
+  workerFetch<CivicDataResponse<CompareData>>(`/v1/civic/data?${q({ kind: 'gcmp', state, district: '', variant: '' })}`);
 
 // On demand: research this place now (no data yet) or translate it into lang (te | hi). Slow
 // (Gemini with Google Search), so a long timeout; the screen shows "collecting" meanwhile.

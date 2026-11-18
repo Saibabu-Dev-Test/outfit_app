@@ -89,7 +89,52 @@ export type CivicKey =
   | 'party'
   | 'legalTitle'
   | 'aiTranslated'
-  | 'open';
+  | 'open'
+  | 'compareTitle'
+  | 'compareNote'
+  | 'compareShow'
+  | 'centre'
+  | 'previousGovt'
+  | 'presentGovt'
+  | 'areaBudget'
+  | 'areaProjects'
+  | 'areaStarted'
+  | 'areaStopped'
+  | 'notListed'
+  | 'date'
+  | 'allHosp'
+  | 'publicNA'
+  | 'timings'
+  | 'emergency24'
+  | 'specialities'
+  | 'specialFor'
+  | 'doctors'
+  | 'experience'
+  | 'facilities'
+  | 'whereToGo'
+  | 'whereHint'
+  | 'matches'
+  | 'noMatch'
+  | 'sortFacts'
+  | 'factsNote'
+  | 'offenceGuide'
+  | 'allSections'
+  | 'searchOffence'
+  | 'bnsNote'
+  | 'jail'
+  | 'fine'
+  | 'bailable'
+  | 'nonBailable'
+  | 'dependsMain'
+  | 'cogYes'
+  | 'cogNo'
+  | 'cogCond'
+  | 'howToComplain'
+  | 'cases'
+  | 'officialText'
+  | 'translationNote'
+  | 'address'
+  | 'phone';
 
 export const CIVIC_LABELS: Record<AppLanguage, Record<CivicKey, string>> = {
   English: {
@@ -181,6 +226,51 @@ export const CIVIC_LABELS: Record<AppLanguage, Record<CivicKey, string>> = {
     legalTitle: 'Legal title',
     aiTranslated: 'Plain-language text is AI-written; the official legal text prevails.',
     open: 'Open',
+    compareTitle: 'Previous vs present government',
+    compareNote: 'Facts only, side by side. Every point shows its source and date. No verdict or opinion: read and decide yourself.',
+    compareShow: 'Show comparison',
+    centre: 'Centre (India)',
+    previousGovt: 'Previous government',
+    presentGovt: 'Present government',
+    areaBudget: 'Budget',
+    areaProjects: 'Major projects',
+    areaStarted: 'Schemes started',
+    areaStopped: 'Schemes stopped / merged / renamed',
+    notListed: 'No matching item with a public source',
+    date: 'Date',
+    allHosp: 'All',
+    publicNA: 'Public info not available',
+    timings: 'Timings',
+    emergency24: '24x7 emergency',
+    specialities: 'Specialities',
+    specialFor: 'Known for (as stated in public sources)',
+    doctors: 'Specialist doctors (publicly listed)',
+    experience: 'Experience',
+    facilities: 'Facilities',
+    whereToGo: 'Where to go for…',
+    whereHint: 'Disease or speciality, e.g. heart, kidney, cancer, eye, delivery',
+    matches: 'Matches',
+    noMatch: 'No hospital in this list states this in public sources. Try another word.',
+    sortFacts: 'Most specialities + facilities first',
+    factsNote: 'Only a count of specialities and facilities listed in public sources. Not a rating or opinion.',
+    offenceGuide: 'Offence guide (BNS 2023)',
+    allSections: 'All sections',
+    searchOffence: 'Search an offence: theft, cheating, 318, IPC 420…',
+    bnsNote: 'The Bharatiya Nyaya Sanhita (BNS), 2023 replaced the IPC from 1 July 2024. Police and court procedure: Bharatiya Nagarik Suraksha Sanhita (BNSS), 2023.',
+    jail: 'Jail',
+    fine: 'Fine',
+    bailable: 'Bailable: bail is a right',
+    nonBailable: 'Non-bailable: the court decides bail',
+    dependsMain: 'Depends on the main offence',
+    cogYes: 'Cognizable: police must register an FIR and can arrest without warrant',
+    cogNo: 'Non-cognizable: police need a Magistrate\'s order to investigate',
+    cogCond: 'Cognizable only in the case the law states (see the official text)',
+    howToComplain: 'How to file a police complaint',
+    cases: 'Cases in the law',
+    officialText: 'Official text',
+    translationNote: 'Telugu / Hindi lines are translations to help you; the official English text of the law prevails.',
+    address: 'Address',
+    phone: 'Phone',
   },
   Telugu: {
     govtTitle: '🏛️ ప్రభుత్వం',
@@ -271,6 +361,51 @@ export const CIVIC_LABELS: Record<AppLanguage, Record<CivicKey, string>> = {
     legalTitle: 'చట్టపరమైన శీర్షిక',
     aiTranslated: 'తెలుగు వివరణ AI రాసింది; అధికారిక చట్ట పాఠమే చెల్లుతుంది.',
     open: 'తెరవండి',
+    compareTitle: 'గత ప్రభుత్వం vs ప్రస్తుత ప్రభుత్వం',
+    compareNote: 'కేవలం వాస్తవాలు, పక్కపక్కనే. ప్రతి అంశానికి మూలం, తేదీ చూపిస్తాం. ఏది మంచిదో తీర్పు లేదా అభిప్రాయం లేదు: చదివి మీరే నిర్ణయించుకోండి.',
+    compareShow: 'పోలిక చూపించు',
+    centre: 'కేంద్రం (భారత్)',
+    previousGovt: 'గత ప్రభుత్వం',
+    presentGovt: 'ప్రస్తుత ప్రభుత్వం',
+    areaBudget: 'బడ్జెట్',
+    areaProjects: 'ప్రధాన ప్రాజెక్టులు',
+    areaStarted: 'ప్రారంభించిన పథకాలు',
+    areaStopped: 'నిలిపివేసిన / విలీనం / పేరు మార్చిన పథకాలు',
+    notListed: 'పబ్లిక్ మూలంతో సరిపోలే అంశం లేదు',
+    date: 'తేదీ',
+    allHosp: 'అన్నీ',
+    publicNA: 'పబ్లిక్ సమాచారం అందుబాటులో లేదు',
+    timings: 'సమయాలు',
+    emergency24: '24x7 అత్యవసర సేవ',
+    specialities: 'స్పెషాలిటీలు',
+    specialFor: 'దీనికి ప్రత్యేకం (పబ్లిక్ మూలాల ప్రకారం)',
+    doctors: 'స్పెషలిస్ట్ డాక్టర్లు (పబ్లిక్‌గా ప్రకటించినవారు)',
+    experience: 'అనుభవం',
+    facilities: 'సౌకర్యాలు',
+    whereToGo: 'ఈ సమస్యకు ఎక్కడికి వెళ్లాలి…',
+    whereHint: 'వ్యాధి లేదా స్పెషాలిటీ, ఉదా. గుండె, కిడ్నీ, క్యాన్సర్, కన్ను, ప్రసవం',
+    matches: 'సరిపోలింది',
+    noMatch: 'ఈ జాబితాలో ఏ ఆసుపత్రి పబ్లిక్ మూలాల్లో దీన్ని పేర్కొనలేదు. మరో పదం ప్రయత్నించండి.',
+    sortFacts: 'ఎక్కువ స్పెషాలిటీలు + సౌకర్యాలు ముందు',
+    factsNote: 'పబ్లిక్ మూలాల్లో ఉన్న స్పెషాలిటీలు, సౌకర్యాల సంఖ్య మాత్రమే. ఇది రేటింగ్ లేదా అభిప్రాయం కాదు.',
+    offenceGuide: 'నేరాల గైడ్ (BNS 2023)',
+    allSections: 'అన్ని సెక్షన్లు',
+    searchOffence: 'నేరం వెతకండి: దొంగతనం, మోసం, 318, IPC 420…',
+    bnsNote: 'భారతీయ న్యాయ సంహిత (BNS), 2023 జూలై 1, 2024 నుంచి IPC స్థానంలో వచ్చింది. పోలీసు, కోర్టు విధానం: భారతీయ నాగరిక సురక్షా సంహిత (BNSS), 2023.',
+    jail: 'జైలు',
+    fine: 'జరిమానా',
+    bailable: 'బెయిలబుల్: బెయిల్ హక్కుగా వస్తుంది',
+    nonBailable: 'నాన్-బెయిలబుల్: బెయిల్ కోర్టు నిర్ణయిస్తుంది',
+    dependsMain: 'ప్రధాన నేరాన్ని బట్టి ఉంటుంది',
+    cogYes: 'కాగ్నిజబుల్: పోలీసులు FIR నమోదు చేయాలి, వారెంట్ లేకుండా అరెస్టు చేయవచ్చు',
+    cogNo: 'నాన్-కాగ్నిజబుల్: దర్యాప్తుకు మేజిస్ట్రేట్ ఆదేశం కావాలి',
+    cogCond: 'చట్టం చెప్పిన సందర్భంలో మాత్రమే కాగ్నిజబుల్ (అధికారిక పాఠం చూడండి)',
+    howToComplain: 'పోలీసు ఫిర్యాదు ఎలా చేయాలి',
+    cases: 'చట్టంలోని సందర్భాలు',
+    officialText: 'అధికారిక పాఠం',
+    translationNote: 'తెలుగు / హిందీ పంక్తులు మీకు సహాయం కోసం చేసిన అనువాదాలు; చట్టం అధికారిక ఇంగ్లీష్ పాఠమే చెల్లుతుంది.',
+    address: 'చిరునామా',
+    phone: 'ఫోన్',
   },
   Hindi: {
     govtTitle: '🏛️ सरकार',
@@ -361,6 +496,51 @@ export const CIVIC_LABELS: Record<AppLanguage, Record<CivicKey, string>> = {
     legalTitle: 'कानूनी शीर्षक',
     aiTranslated: 'हिंदी विवरण AI ने लिखा है; आधिकारिक कानूनी पाठ ही मान्य है।',
     open: 'खोलें',
+    compareTitle: 'पिछली सरकार बनाम मौजूदा सरकार',
+    compareNote: 'केवल तथ्य, आमने-सामने। हर बिंदु के साथ उसका स्रोत और तारीख़। कोई फ़ैसला या राय नहीं: पढ़कर ख़ुद तय करें।',
+    compareShow: 'तुलना दिखाएँ',
+    centre: 'केंद्र (भारत)',
+    previousGovt: 'पिछली सरकार',
+    presentGovt: 'मौजूदा सरकार',
+    areaBudget: 'बजट',
+    areaProjects: 'बड़ी परियोजनाएँ',
+    areaStarted: 'शुरू की गई योजनाएँ',
+    areaStopped: 'बंद / विलय / नाम बदली गई योजनाएँ',
+    notListed: 'सार्वजनिक स्रोत के साथ कोई मिलता-जुलता बिंदु नहीं',
+    date: 'तारीख़',
+    allHosp: 'सभी',
+    publicNA: 'सार्वजनिक जानकारी उपलब्ध नहीं',
+    timings: 'समय',
+    emergency24: '24x7 आपातकालीन सेवा',
+    specialities: 'स्पेशलिटी',
+    specialFor: 'इसके लिए विशेष (सार्वजनिक स्रोतों के अनुसार)',
+    doctors: 'विशेषज्ञ डॉक्टर (सार्वजनिक सूची में)',
+    experience: 'अनुभव',
+    facilities: 'सुविधाएँ',
+    whereToGo: 'किसके लिए कहाँ जाएँ…',
+    whereHint: 'बीमारी या स्पेशलिटी, जैसे दिल, किडनी, कैंसर, आँख, प्रसव',
+    matches: 'मेल खाता है',
+    noMatch: 'इस सूची में किसी अस्पताल ने सार्वजनिक स्रोतों में यह नहीं बताया। कोई दूसरा शब्द आज़माएँ।',
+    sortFacts: 'ज़्यादा स्पेशलिटी + सुविधाएँ पहले',
+    factsNote: 'सार्वजनिक स्रोतों में दी गई स्पेशलिटी और सुविधाओं की गिनती भर। यह रेटिंग या राय नहीं है।',
+    offenceGuide: 'अपराध गाइड (BNS 2023)',
+    allSections: 'सभी धाराएँ',
+    searchOffence: 'अपराध खोजें: चोरी, धोखाधड़ी, 318, IPC 420…',
+    bnsNote: 'भारतीय न्याय संहिता (BNS), 2023 ने 1 जुलाई 2024 से IPC की जगह ली। पुलिस और अदालत की प्रक्रिया: भारतीय नागरिक सुरक्षा संहिता (BNSS), 2023।',
+    jail: 'जेल',
+    fine: 'जुर्माना',
+    bailable: 'ज़मानती: ज़मानत अधिकार है',
+    nonBailable: 'गैर-ज़मानती: ज़मानत अदालत तय करती है',
+    dependsMain: 'मुख्य अपराध पर निर्भर',
+    cogYes: 'संज्ञेय: पुलिस को FIR दर्ज करनी होगी, बिना वारंट गिरफ़्तारी कर सकती है',
+    cogNo: 'असंज्ञेय: जाँच के लिए मजिस्ट्रेट का आदेश चाहिए',
+    cogCond: 'सिर्फ़ क़ानून में बताई स्थिति में संज्ञेय (आधिकारिक पाठ देखें)',
+    howToComplain: 'पुलिस शिकायत कैसे करें',
+    cases: 'क़ानून में स्थितियाँ',
+    officialText: 'आधिकारिक पाठ',
+    translationNote: 'तेलुगु / हिंदी पंक्तियाँ आपकी मदद के लिए अनुवाद हैं; क़ानून का आधिकारिक अंग्रेज़ी पाठ ही मान्य है।',
+    address: 'पता',
+    phone: 'फ़ोन',
   },
 };
 
