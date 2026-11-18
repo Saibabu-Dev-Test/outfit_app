@@ -21,4 +21,4 @@ export const OPTION_LABELS = ['A', 'B', 'C', 'D', 'E', 'F'];
 // Per call from one phone (app batches its own Firestore op counts)
 export const MAX_USAGE_PER_CALL = 5000;
 
-export const WORKER_VERSION = '1.1.0'; // 1.1.0: /v1/admin/earnings + earn category / task name / payout (migration 0002)
+export const WORKER_VERSION = '1.2.0'; // 1.2.0: civic tabs (/v1/civic, migration 0003, 2-hourly research cron). 1.1.0: /v1/admin/earnings + earn category / task name / payout (migration 0002)
