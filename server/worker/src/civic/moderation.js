@@ -22,11 +22,15 @@ const norm = s =>
     .replace(/[$5]/g, 's')
     .replace(/(.)\1{2,}/g, '$1$1');
 
+// Repeated letters squeezed to one ("fuuuck" -> "fuck", "kutta" -> "kuta") on both sides
+const single = s => s.replace(/(.)\1+/gu, '$1');
+const WORDS1 = WORDS.map(single);
+
 export function hasProfanity(text) {
   const t = norm(text);
-  const tokens = t.split(/[^\p{L}\p{M}]+/u).filter(Boolean);
-  const squashed = t.replace(/[^\p{L}\p{M}]+/gu, '');
-  return WORDS.some(w => tokens.includes(w) || (w.length >= 6 && squashed.includes(w)));
+  const tokens = t.split(/[^\p{L}\p{M}]+/u).filter(Boolean).map(single);
+  const squashed = single(t.replace(/[^\p{L}\p{M}]+/gu, ''));
+  return WORDS1.some(w => tokens.includes(w) || (w.length >= 6 && squashed.includes(w)));
 }
 
 // Strip links and phone numbers (privacy / spam) and collapse whitespace
