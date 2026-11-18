@@ -68,6 +68,7 @@ const ROUTES = [
   ['GET', /^\/v1\/admin\/system$/, api.getAdminSystem],
   ['GET', /^\/v1\/admin\/earnings$/, api.getAdminEarnings],
   ['GET', /^\/v1\/civic\/data$/, civic.getCivicData],
+  ['POST', /^\/v1\/civic\/research$/, civic.postCivicResearch],
   ['GET', /^\/v1\/civic\/reviews$/, civic.getCivicReviews],
   ['POST', /^\/v1\/civic\/reviews$/, civic.postCivicReview],
   ['POST', /^\/v1\/civic\/reports$/, civic.postCivicReport],
@@ -156,7 +157,7 @@ export async function handleRequest(request, env, ctx, { fetchImpl = fetch, now 
   const m = route[1].exec(path);
   try {
     const body = await readBody(request);
-    const out = await route[2]({ db, user, env, url, body, now, fetchImpl, id: m && m[1] ? decodeURIComponent(m[1]) : '' });
+    const out = await route[2]({ db, user, env, url, body, now, fetchImpl, ctx, id: m && m[1] ? decodeURIComponent(m[1]) : '' });
     return done(json(200, out));
   } catch (e) {
     if (e instanceof api.HttpError) {

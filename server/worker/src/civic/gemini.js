@@ -43,8 +43,9 @@ export function parseJsonLoose(text) {
 /**
  * generate(env, { prompt, system, grounded, json, maxTokens }, { fetchImpl })
  * -> { ok: true, text, model, sources } | { ok: false, error }
+ * jsonOut: ask for a JSON answer (translation calls; ignored when grounded)
  */
-export async function geminiGenerate(env, { prompt, system = '', grounded = false, maxTokens = 2048, temperature = 0.2 } = {}, { fetchImpl = fetch } = {}) {
+export async function geminiGenerate(env, { prompt, system = '', grounded = false, maxTokens = 2048, temperature = 0.2, jsonOut = false } = {}, { fetchImpl = fetch } = {}) {
   if (!isGeminiConfigured(env)) {
     return { ok: false, error: 'not configured' };
   }
@@ -57,6 +58,9 @@ export async function geminiGenerate(env, { prompt, system = '', grounded = fals
   }
   if (grounded) {
     body.tools = [{ google_search: {} }];
+  } else if (jsonOut) {
+    // JSON mode only without tools (grounding + JSON mode is not supported together)
+    body.generationConfig.responseMimeType = 'application/json';
   }
   let lastError = 'no model answered';
   for (const model of GEMINI_MODELS) {

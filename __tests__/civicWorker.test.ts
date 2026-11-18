@@ -104,11 +104,19 @@ const GEMINI_GOVT = {
 };
 
 const makeFetch = (gemini: any = GEMINI_HOSP, status = 200) =>
-  jest.fn(async (url: string) => {
+  jest.fn(async (url: string, init?: any) => {
     if (url === JWKS_URL) {
       return { ok: true, status: 200, headers: { get: () => 'public, max-age=3600' }, json: async () => ({ keys: [jwk] }) };
     }
     if (url.includes('generativelanguage.googleapis.com')) {
+      const sent = JSON.parse((init && init.body) || '{}');
+      const prompt = sent?.contents?.[0]?.parts?.[0]?.text || '';
+      if (status === 200 && prompt.startsWith('Translate the text values')) {
+        const j = JSON.parse(prompt.slice(prompt.lastIndexOf('\n') + 1));
+        if (j.overview !== undefined) j.overview = `TR ${j.overview}`;
+        if (Array.isArray(j.hospitals)) j.hospitals = j.hospitals.map((h: any) => ({ ...h, name: `TR ${h.name}` }));
+        return { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: JSON.stringify(j) }] } }] }) };
+      }
       return { ok: status === 200, status, json: async () => gemini };
     }
     throw new Error('unexpected fetch ' + url);
@@ -209,26 +217,29 @@ describe('civic routes', () => {
     expect((await call(e, 'GET', '/v1/civic/data?kind=hosp&state=TG&variant=other')).status).toBe(400);
   });
 
-  it('state miss -> none; district miss -> queued pending; category alias works', async () => {
+  it('state / district miss -> queued pending; category alias works', async () => {
     const e = env();
     const a = await call(e, 'GET', '/v1/civic/data?kind=govt&state=TG');
-    expect(a.json).toMatchObject({ status: 'none', data: null, aiConfigured: false });
+    expect(a.json).toMatchObject({ status: 'pending', data: null, aiConfigured: false, sources: [] });
     const b = await call(e, 'GET', '/v1/civic/data?category=hosp-govt&state=TG&district=Hyderabad');
     expect(b.json).toMatchObject({ kind: 'hosp', variant: 'govt', district: 'hyderabad', status: 'pending' });
     const c = await call(e, 'GET', '/v1/civic/data?category=hosp-govt&state=TG&district=hyderabad');
     expect(c.json.status).toBe('pending');
   });
 
-  it('serves stored data without the owner-only sources', async () => {
+  it('serves stored data with its https sources, no AI stars, map link', async () => {
     const e = env({ GEMINI_API_KEY: 'k' });
     const db = new Db(e.DB);
     expect(await research.researchOne(db, e, { kind: 'hosp', state: 'TG', variant: 'govt' }, { fetchImpl: makeFetch(), now: NOW })).toMatchObject({ ok: true });
     const r = await call(e, 'GET', '/v1/civic/data?kind=hosp&state=TG&variant=govt');
     expect(r.json.status).toBe('ok');
     expect(r.json.data.hospitals).toHaveLength(1); // duplicate slug dropped
-    expect(r.json.data.hospitals[0]).toMatchObject({ name: 'NIMS', slug: 'nims', emergency24x7: true, stars: 4.2 });
-    expect(r.json.aiStars).toBe(4.2);
-    expect(JSON.stringify(r.json)).not.toMatch(/sources/);
+    expect(r.json.data.hospitals[0]).toMatchObject({ name: 'NIMS', slug: 'nims', emergency24x7: true, phone: '040-23489000' });
+    expect(r.json.data.hospitals[0].stars).toBeUndefined();
+    expect(r.json.data.hospitals[0].mapUrl).toMatch(/^https:\/\/www\.google\.com\/maps\/search\/\?api=1&query=NIMS/);
+    expect(r.json.aiStars).toBeNull();
+    expect(r.json.sources).toEqual([{ url: 'https://nims.edu.in', title: 'NIMS' }]);
+    expect(r.json.i18n).toEqual({ te: null, hi: null });
   });
 
   it('reviews: upsert one per user, profanity 422, stars 1-5, rate limit', async () => {
@@ -283,7 +294,7 @@ describe('civic routes', () => {
     expect((await call(e, 'POST', '/v1/admin/civic/review', { body: { item, uid: 'user1', hidden: true } })).status).toBe(403);
     expect((await call(e, 'POST', '/v1/admin/civic/refresh', { body: { kind: 'govt', state: 'KA' } })).status).toBe(403);
     const snap = await call(e, 'GET', '/v1/admin/civic', { tok: OWNER() });
-    expect(snap.json).toMatchObject({ aiConfigured: false, aiToday: 0, aiDailyMax: research.CIVIC_DAILY_MAX });
+    expect(snap.json).toMatchObject({ aiConfigured: false, aiToday: 0, aiDailyMax: research.CIVIC_DAILY_MAX, trToday: 0 });
     expect(snap.json.recent).toHaveLength(1);
     await call(e, 'POST', '/v1/admin/civic/review', { tok: OWNER(), body: { item, uid: 'user1', hidden: true } });
     expect((await call(e, 'GET', `/v1/civic/reviews?item=${item}`, { tok: USER2() })).json.count).toBe(0);
@@ -297,6 +308,69 @@ describe('civic routes', () => {
     expect(g.json.data.overview).toBe('Telangana state services.');
     expect(g.json.data.departments[0].website).toBe(''); // non-https dropped
     expect(g.json.aiStars).toBeNull();
+    // owner refresh also translates into Telugu + Hindi
+    expect(g.json.i18n.te.overview).toBe('TR Telangana state services.');
+    expect(g.json.i18n.hi.overview).toBe('TR Telangana state services.');
+  });
+});
+
+describe('on-demand research', () => {
+  it('no key -> ai_off; research now; then translate the asked language; locked + capped', async () => {
+    const e0 = env();
+    const off = await call(e0, 'POST', '/v1/civic/research', { body: { kind: 'hosp', state: 'AP', district: 'Kurnool', variant: 'govt', lang: 'te' } });
+    expect(off.json).toMatchObject({ ok: false, status: 'ai_off' });
+
+    const e = env({ GEMINI_API_KEY: 'k' });
+    const body = { kind: 'hosp', state: 'AP', district: 'Kurnool', variant: 'govt', lang: 'te' };
+    const pend = await call(e, 'GET', '/v1/civic/data?kind=hosp&state=AP&district=Kurnool&variant=govt');
+    expect(pend.json.status).toBe('pending');
+    const r1 = await call(e, 'POST', '/v1/civic/research', { body });
+    expect(r1.json).toMatchObject({ ok: true, status: 'ok', did: 'research', district: 'kurnool' });
+    const d1 = await call(e, 'GET', '/v1/civic/data?kind=hosp&state=AP&district=kurnool&variant=govt');
+    expect(d1.json.status).toBe('ok');
+    expect(d1.json.i18n.te).toBeNull();
+    const r2 = await call(e, 'POST', '/v1/civic/research', { body });
+    expect(r2.json).toMatchObject({ ok: true, did: 'translate', lang: 'te' });
+    const d2 = await call(e, 'GET', '/v1/civic/data?kind=hosp&state=AP&district=kurnool&variant=govt');
+    expect(d2.json.i18n.te.hospitals[0].name).toBe('TR NIMS');
+    expect(d2.json.i18n.te.hospitals[0].phone).toBe('040-23489000');
+    const r3 = await call(e, 'POST', '/v1/civic/research', { body });
+    expect(r3.json.did).toBe('nothing');
+
+    // lock: a run started a moment ago blocks a second one
+    e.DB.raw.prepare("INSERT INTO civic_data (kind, state, district, variant, status, updated_at, running_at) VALUES ('govt','AP','kurnool','','pending',?,?)").run(NOW, NOW - 1000);
+    const f = makeFetch(GEMINI_GOVT);
+    const locked = await call(e, 'POST', '/v1/civic/research', { body: { kind: 'govt', state: 'AP', district: 'kurnool' }, fetchImpl: f });
+    expect(locked.json.status).toBe('running');
+    expect((await call(e, 'GET', '/v1/civic/data?kind=govt&state=AP&district=kurnool', { fetchImpl: f })).json).toMatchObject({ status: 'pending', running: true });
+
+    // per-user cap
+    const e2 = env({ GEMINI_API_KEY: 'k' });
+    e2.DB.raw.prepare('INSERT INTO usage (day, key, n) VALUES (?, ?, ?)').run('2026-11-18', 'civic_od:user1', routes.MAX_RESEARCH_PER_USER_DAY);
+    expect((await call(e2, 'POST', '/v1/civic/research', { body })).status).toBe(429);
+  });
+
+  it('govt cleaner keeps leaders, MPs / MLAs, offices, grievance, election; drops bad urls / letters in phones', () => {
+    const g = research.cleanGovt({
+      overview: 'Kurnool district.',
+      state: { governor: 'G', chiefMinister: { name: 'CM', party: 'P' }, deputyCMs: [{ name: 'D', party: 'Q', role: 'Panchayat Raj' }], ministers: [{ name: 'M', portfolio: 'Health' }, { party: 'x' }] },
+      district: { collector: 'C', sp: 'S', mps: [{ name: 'MP1', constituency: 'Kurnool', party: 'P' }], mlas: [{ name: 'L1', constituency: 'Kurnool', party: 'P' }] },
+      offices: [{ name: 'Collectorate', phone: '08518-abc277305', website: 'http://x' }],
+      schemes: [{ name: 'PM-JAY', level: 'Central' }, { name: 'Pension' }],
+      grievance: [{ name: 'CPGRAMS', website: 'https://pgportal.gov.in' }],
+      election: { voterHelpline: '1950', ceoWebsite: 'https://ceoandhra.nic.in' },
+    });
+    expect(g.leaders.chiefMinister).toEqual({ name: 'CM', party: 'P', role: '' });
+    expect(g.leaders.ministers).toEqual([{ name: 'M', party: '', role: 'Health' }]);
+    expect(g.district.mlas[0]).toEqual({ name: 'L1', constituency: 'Kurnool', party: 'P' });
+    expect(g.offices[0]).toMatchObject({ phone: '', website: '' }); // letters in a phone: dropped, not repaired
+    expect(g.schemes.map((x: any) => x.level)).toEqual(['central', 'state']);
+    expect(g.election).toMatchObject({ voterHelpline: '1950', ceoWebsite: 'https://ceoandhra.nic.in' });
+    const p = research.researchPrompt('govt', '', STATES[0], 'kurnool');
+    expect(p).toMatch(/Collector/);
+    expect(p).toMatch(/MLAs/);
+    expect(p).toMatch(/Never invent phone numbers/);
+    expect(research.researchPrompt('hosp', 'govt', STATES[0], 'kurnool')).toMatch(/Dr NTR Vaidya Seva/);
   });
 });
 
@@ -322,14 +396,15 @@ describe('research cron', () => {
     const e = env({ GEMINI_API_KEY: 'k' });
     const f = makeFetch();
     await handleScheduled({ cron: CIVIC_CRON }, e, null, { fetchImpl: f, now: NOW });
-    expect(f).toHaveBeenCalledTimes(research.CIVIC_PER_RUN);
     const rows = e.DB.raw.prepare('SELECT COUNT(*) AS n FROM civic_data').get();
     expect(Number(rows.n)).toBe(research.CIVIC_PER_RUN);
+    const used = e.DB.raw.prepare("SELECT key, n FROM usage WHERE key IN ('civic_ai','civic_tr')").all();
+    expect(used.find((u: any) => u.key === 'civic_ai').n).toBe(research.CIVIC_PER_RUN);
 
     const db = new Db(e.DB);
-    const r = await research.runCivicResearch(db, e, { fetchImpl: f, now: NOW, perRun: 100, dailyMax: research.CIVIC_PER_RUN + 2 });
+    const r = await research.runCivicResearch(db, e, { fetchImpl: f, now: NOW, perRun: 100, dailyMax: research.CIVIC_PER_RUN + 2, translate: false });
     expect(r.ran).toBe(2);
-    expect((await research.runCivicResearch(db, e, { fetchImpl: f, now: NOW, dailyMax: research.CIVIC_PER_RUN + 2 })).skipped).toBe('daily cap reached');
+    expect((await research.runCivicResearch(db, e, { fetchImpl: f, now: NOW, dailyMax: research.CIVIC_PER_RUN + 2, translate: false })).skipped).toBe('daily cap reached');
   });
 
   it('failed research keeps the last good data', async () => {

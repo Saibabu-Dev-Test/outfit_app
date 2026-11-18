@@ -1,7 +1,10 @@
 // Civic tab routes (Govt / Hospitals). All need a verified Firebase ID token (index.js); the uid
 // always comes from the token.
-//   GET  /v1/civic/data?kind=govt|hosp&state=TG&district=&variant=   stored AI summary (no sources)
-//        (also ?category=govt|hosp-govt|hosp-private). A district never researched is queued.
+//   GET  /v1/civic/data?kind=govt|hosp&state=TG&district=&variant=   stored AI summary + its public
+//        source URLs + Telugu / Hindi copies (i18n) (also ?category=govt|hosp-govt|hosp-private).
+//        A place never researched is queued (status 'pending').
+//   POST /v1/civic/research {kind, state, district, variant, lang}   on demand: research the place
+//        now if it has no data, else translate the missing language (te|hi). Capped per user + per day.
 //   GET  /v1/civic/reviews?item=&limit=     visible reviews + average + my review
 //   POST /v1/civic/reviews {item, stars, body, photo?, userName?}  one per user per item (upsert)
 //   POST /v1/civic/reports {item, author, reason}                  one per reporter per review
@@ -15,13 +18,14 @@ import { utcDay } from '../days.js';
 import { stateByCode } from './states.js';
 import { cleanReviewText, hasProfanity } from './moderation.js';
 import { isGeminiConfigured } from './gemini.js';
-import { CIVIC_DAILY_MAX, CIVIC_MAX_PENDING, KINDS, researchOne } from './research.js';
+import { CIVIC_DAILY_MAX, CIVIC_LOCK_MS, CIVIC_MAX_PENDING, CIVIC_TR_DAILY_MAX, KINDS, TR_LANGS, researchNow, researchOne } from './research.js';
 
 export const MAX_REVIEWS_PER_DAY = 20; // per user (new or edited)
 export const MAX_REPORTS_PER_DAY = 30; // per user
 export const AUTO_HIDE_REPORTS = 5; // hidden until the owner looks
 export const MAX_REVIEW_CHARS = 1000;
 export const MAX_PHOTO_CHARS = 400000;
+export const MAX_RESEARCH_PER_USER_DAY = 12; // on-demand research / translate calls per user
 
 const DISTRICT_RE = /^[a-z0-9-]{0,40}$/;
 const ITEM_RE = /^(govt|hosp):([A-Z]{2})((?::[a-z0-9-]{1,40}){0,3})$/;
@@ -67,25 +71,62 @@ const parseJson = (v, dflt) => {
   }
 };
 
+const cleanSources = v =>
+  (Array.isArray(v) ? v : [])
+    .filter(x => x && typeof x.url === 'string' && /^https:\/\//.test(x.url))
+    .slice(0, 12)
+    .map(x => ({ url: x.url, title: typeof x.title === 'string' ? x.title.slice(0, 120) : '' }));
+
 export async function getCivicData({ db, env, url, now }) {
   const t = parseTarget(url.searchParams);
-  const row = await db.first('SELECT data, ai_stars, status, updated_at FROM civic_data WHERE kind = ? AND state = ? AND district = ? AND variant = ?', t.kind, t.state, t.district, t.variant);
+  const row = await db.first(
+    'SELECT data, sources, i18n, status, updated_at, running_at FROM civic_data WHERE kind = ? AND state = ? AND district = ? AND variant = ?',
+    t.kind, t.state, t.district, t.variant,
+  );
   let queued = false;
-  if (!row && t.district) {
+  if (!row) {
     const pend = await db.first("SELECT COUNT(*) AS n FROM civic_data WHERE status = 'pending'");
     if ((Number(pend && pend.n) || 0) < CIVIC_MAX_PENDING) {
       await db.run("INSERT OR IGNORE INTO civic_data (kind, state, district, variant, status, updated_at) VALUES (?, ?, ?, ?, 'pending', ?)", t.kind, t.state, t.district, t.variant, now);
       queued = true;
     }
   }
+  const data = row ? parseJson(row.data, null) : null;
+  const running = !!(row && row.running_at && now - Number(row.running_at) < CIVIC_LOCK_MS);
+  const i18n = row ? parseJson(row.i18n, {}) : {};
   return {
     ...t,
-    data: row ? parseJson(row.data, null) : null,
-    aiStars: row && row.ai_stars !== null && row.ai_stars !== undefined ? Number(row.ai_stars) : null,
-    status: row ? row.status : queued ? 'pending' : 'none',
-    updatedAt: row ? Number(row.updated_at) || 0 : 0,
+    data,
+    i18n: { te: i18n.te || null, hi: i18n.hi || null },
+    sources: data ? cleanSources(parseJson(row.sources, [])) : [],
+    aiStars: null, // no AI ratings (neutral information only)
+    status: row ? (running && !data ? 'pending' : row.status) : queued ? 'pending' : 'none',
+    running,
+    updatedAt: row && data ? Number(row.updated_at) || 0 : 0,
     aiConfigured: isGeminiConfigured(env),
   };
+}
+
+export async function postCivicResearch({ db, env, user, body, now, fetchImpl, ctx }) {
+  const p = new URLSearchParams();
+  ['kind', 'state', 'district', 'variant'].forEach(k => p.set(k, str(body && body[k], 60)));
+  const t = parseTarget(p);
+  const lang = TR_LANGS[str(body && body.lang, 4)] ? str(body && body.lang, 4) : '';
+  const day = utcDay(now);
+  const rk = `civic_od:${user.uid}`.slice(0, 160);
+  if (!isOwner(user) && (await usageFor(db, day, [rk]))[rk] >= MAX_RESEARCH_PER_USER_DAY) {
+    throw new HttpError(429, 'try again later today');
+  }
+  const run = researchNow(db, env, t, lang, { fetchImpl: fetchImpl || fetch, now });
+  if (ctx && ctx.waitUntil) {
+    // keeps the run (and its save) going a little if the phone gives up waiting
+    ctx.waitUntil(run.catch(() => undefined));
+  }
+  const r = await run;
+  if (r.did === 'research' || r.did === 'translate') {
+    await db.run('INSERT INTO usage (day, key, n) VALUES (?, ?, 1) ON CONFLICT (day, key) DO UPDATE SET n = n + 1', day, rk);
+  }
+  return { ...t, lang, ...r };
 }
 
 const rowToReview = (r, mine = false) => ({
@@ -214,6 +255,8 @@ export async function getAdminCivic({ db, user, env, now }) {
     aiConfigured: isGeminiConfigured(env),
     aiToday: (await usageFor(db, utcDay(now), ['civic_ai'])).civic_ai,
     aiDailyMax: CIVIC_DAILY_MAX,
+    trToday: (await usageFor(db, utcDay(now), ['civic_tr'])).civic_tr,
+    trDailyMax: CIVIC_TR_DAILY_MAX,
     data: status.map(r => ({ kind: r.kind, status: r.status, count: Number(r.n) || 0, oldest: Number(r.oldest) || 0 })),
     errors: errors.map(r => ({ kind: r.kind, state: r.state, district: r.district, variant: r.variant, error: r.error, updatedAt: Number(r.updated_at) || 0 })),
     reported: reported.map(full),
@@ -246,7 +289,7 @@ export async function postAdminCivicRefresh({ db, user, env, body, now, fetchImp
   const p = new URLSearchParams();
   ['kind', 'state', 'district', 'variant'].forEach(k => p.set(k, str(body && body[k], 60)));
   const t = parseTarget(p);
-  const r = await researchOne(db, env, t, { fetchImpl: fetchImpl || fetch, now });
+  const r = await researchOne(db, env, t, { fetchImpl: fetchImpl || fetch, now, translate: true });
   return { ...t, ...r };
 }
 
