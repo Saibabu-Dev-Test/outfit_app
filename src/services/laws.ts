@@ -130,9 +130,12 @@ export const searchLaws = (query: string, act: ActId | 'ALL' = 'ALL', max = 200)
     if (!words.every(w => hay.includes(w))) continue;
     let score = 0;
     const secNorm = norm(s.section);
-    if (secNorm === q || secNorm.split(' ')[0] === q) score += 100;
-    if (secNorm.startsWith(q)) score += 40;
-    if (s.oldRef && norm(s.oldRef).split(' ').includes(q.replace(/^ipc /, ''))) score += 60;
+    // "318" matches 318, 318(1), 318(4)...; "ipc 420" is an old-law lookup, so old refs win there
+    const base = secNorm.split(/[ (]/)[0];
+    const ipcQuery = /^ipc /.test(q);
+    if (!ipcQuery && (secNorm === q || base === q)) score += 100;
+    if (!ipcQuery && secNorm.startsWith(q)) score += 40;
+    if (s.oldRef && norm(s.oldRef).split(' ').includes(q.replace(/^ipc /, ''))) score += ipcQuery ? 150 : 60;
     if (norm(s.title).includes(q)) score += 20;
     if (s.meaning) score += 5;
     scored.push({ s, score });
