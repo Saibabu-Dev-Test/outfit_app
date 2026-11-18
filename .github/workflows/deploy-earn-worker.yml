@@ -8,7 +8,7 @@ name: Deploy outfit-api Worker (Cloudflare, free plan)
 #   CLOUDFLARE_API_TOKEN   Cloudflare API token (Workers Scripts + D1 Edit)
 #   CLOUDFLARE_ACCOUNT_ID  Cloudflare account id
 #   Optional, pushed to the Worker as Worker secrets only when set (empty = left unchanged):
-#   BITLABS_SECRET, CPX_SECURE_HASH, OFFERWALL_GG_SECRET, FIREBASE_SA_JSON
+#   BITLABS_SECRET, CPX_SECURE_HASH, OFFERWALL_GG_SECRET, FIREBASE_SA_JSON, GEMINI_API_KEY
 # Without CLOUDFLARE_API_TOKEN (or the account id) the job is skipped with a warning instead of failing.
 on:
   push:
@@ -60,10 +60,11 @@ jobs:
           CPX_SECURE_HASH: ${{ secrets.CPX_SECURE_HASH }}
           OFFERWALL_GG_SECRET: ${{ secrets.OFFERWALL_GG_SECRET }}
           FIREBASE_SA_JSON: ${{ secrets.FIREBASE_SA_JSON }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           npx --yes wrangler@4 d1 migrations apply outfit-db --remote
           npx --yes wrangler@4 deploy
-          for name in BITLABS_SECRET CPX_SECURE_HASH OFFERWALL_GG_SECRET FIREBASE_SA_JSON; do
+          for name in BITLABS_SECRET CPX_SECURE_HASH OFFERWALL_GG_SECRET FIREBASE_SA_JSON GEMINI_API_KEY; do
             value="${!name}"
             if [ -n "$value" ]; then
               printf '%s' "$value" | npx --yes wrangler@4 secret put "$name"
