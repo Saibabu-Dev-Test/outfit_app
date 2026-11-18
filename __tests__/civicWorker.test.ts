@@ -440,7 +440,8 @@ describe('Hospital AI prompt (app)', () => {
     expect(sys).toMatch(/108/);
     expect(sys).toMatch(/112/);
     expect(sys).toMatch(/verify with the hospital/i);
-    expect(sys).toMatch(/1\. NIMS; type: Govt; address: Punjagutta; phone: 040; 24x7 emergency: yes; specialities: Cardiology; public rating: 4.2\/5/);
+    expect(sys).toMatch(/1\. NIMS; type: Govt; address: Punjagutta; phone: 040; 24x7 emergency: yes; specialities: Cardiology$/m);
+    expect(sys).not.toMatch(/rating/); // no AI / public ratings fed to the AI
     expect(withSafetyLine('Go to NIMS.', 'Telugu')).toMatch(/108[\s\S]*112/);
     expect(withSafetyLine('Call 108 or 112.', 'English')).toBe('Call 108 or 112.');
   });

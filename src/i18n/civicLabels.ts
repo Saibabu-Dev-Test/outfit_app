@@ -54,6 +54,41 @@ export type CivicKey =
   | 'verify'
   | 'error'
   | 'aiInfoNote'
+  | 'leaders'
+  | 'governor'
+  | 'cm'
+  | 'deputyCm'
+  | 'ministers'
+  | 'districtOfficials'
+  | 'hq'
+  | 'collector'
+  | 'sp'
+  | 'commissioner'
+  | 'mps'
+  | 'mlas'
+  | 'offices'
+  | 'stateScheme'
+  | 'centralScheme'
+  | 'eligibility'
+  | 'benefit'
+  | 'howApply'
+  | 'grievance'
+  | 'election'
+  | 'lastAssembly'
+  | 'lastLokSabha'
+  | 'nextElection'
+  | 'voterHelpline'
+  | 'sources'
+  | 'outdated'
+  | 'collecting'
+  | 'translating'
+  | 'serverUpdate'
+  | 'map'
+  | 'schemesAccepted'
+  | 'asOf'
+  | 'party'
+  | 'legalTitle'
+  | 'aiTranslated'
   | 'open';
 
 export const CIVIC_LABELS: Record<AppLanguage, Record<CivicKey, string>> = {
@@ -110,6 +145,41 @@ export const CIVIC_LABELS: Record<AppLanguage, Record<CivicKey, string>> = {
     verify: 'Please verify with the hospital before you go.',
     error: 'Could not load. Pull down to try again.',
     aiInfoNote: 'Collected by AI from public sources. It may be out of date: check the official website.',
+    leaders: 'State leaders',
+    governor: 'Governor',
+    cm: 'Chief Minister',
+    deputyCm: 'Deputy Chief Minister',
+    ministers: 'Ministers',
+    districtOfficials: 'District officials & representatives',
+    hq: 'District headquarters',
+    collector: 'District Collector',
+    sp: 'Superintendent of Police (SP)',
+    commissioner: 'Commissioner of Police',
+    mps: 'Members of Parliament (MP)',
+    mlas: 'MLAs',
+    offices: 'Government offices',
+    stateScheme: 'State scheme',
+    centralScheme: 'Central scheme',
+    eligibility: 'Who can get it',
+    benefit: 'Benefit',
+    howApply: 'How to apply',
+    grievance: 'Complaints & grievances',
+    election: 'Elections',
+    lastAssembly: 'Last Assembly election',
+    lastLokSabha: 'Last Lok Sabha election',
+    nextElection: 'Next elections',
+    voterHelpline: 'Voter helpline',
+    sources: 'Sources',
+    outdated: 'Info may be outdated. Verify on the official site.',
+    collecting: 'Collecting info for this place, check back in a few minutes.',
+    translating: 'Translation is being prepared; English is shown for now.',
+    serverUpdate: 'Server update pending. Pull down to try again later.',
+    map: 'Map',
+    schemesAccepted: 'Schemes accepted',
+    asOf: 'As of',
+    party: 'Party',
+    legalTitle: 'Legal title',
+    aiTranslated: 'Plain-language text is AI-written; the official legal text prevails.',
     open: 'Open',
   },
   Telugu: {
@@ -165,6 +235,41 @@ export const CIVIC_LABELS: Record<AppLanguage, Record<CivicKey, string>> = {
     verify: 'వెళ్లే ముందు ఆసుపత్రితో నిర్ధారించుకోండి.',
     error: 'లోడ్ కాలేదు. మళ్లీ ప్రయత్నించడానికి కిందికి లాగండి.',
     aiInfoNote: 'పబ్లిక్ మూలాల నుండి AI సేకరించింది. పాతది కావచ్చు: అధికారిక వెబ్‌సైట్ చూడండి.',
+    leaders: 'రాష్ట్ర నాయకులు',
+    governor: 'గవర్నర్',
+    cm: 'ముఖ్యమంత్రి',
+    deputyCm: 'ఉప ముఖ్యమంత్రి',
+    ministers: 'మంత్రులు',
+    districtOfficials: 'జిల్లా అధికారులు, ప్రజాప్రతినిధులు',
+    hq: 'జిల్లా కేంద్రం',
+    collector: 'జిల్లా కలెక్టర్',
+    sp: 'పోలీసు సూపరింటెండెంట్ (SP)',
+    commissioner: 'పోలీసు కమిషనర్',
+    mps: 'పార్లమెంటు సభ్యులు (MP)',
+    mlas: 'శాసనసభ్యులు (MLA)',
+    offices: 'ప్రభుత్వ కార్యాలయాలు',
+    stateScheme: 'రాష్ట్ర పథకం',
+    centralScheme: 'కేంద్ర పథకం',
+    eligibility: 'ఎవరికి వర్తిస్తుంది',
+    benefit: 'లాభం',
+    howApply: 'ఎలా దరఖాస్తు చేయాలి',
+    grievance: 'ఫిర్యాదులు',
+    election: 'ఎన్నికలు',
+    lastAssembly: 'గత అసెంబ్లీ ఎన్నికలు',
+    lastLokSabha: 'గత లోక్‌సభ ఎన్నికలు',
+    nextElection: 'తదుపరి ఎన్నికలు',
+    voterHelpline: 'ఓటర్ హెల్ప్‌లైన్',
+    sources: 'మూలాలు',
+    outdated: 'సమాచారం పాతది కావచ్చు. అధికారిక సైట్‌లో నిర్ధారించుకోండి.',
+    collecting: 'ఈ ప్రాంతం సమాచారం సేకరిస్తున్నాం, కొన్ని నిమిషాల్లో మళ్లీ చూడండి.',
+    translating: 'తెలుగు అనువాదం సిద్ధమవుతోంది; ప్రస్తుతం ఇంగ్లీష్ చూపిస్తున్నాం.',
+    serverUpdate: 'సర్వర్ అప్‌డేట్ పెండింగ్‌లో ఉంది. కాసేపటి తర్వాత కిందికి లాగి మళ్లీ ప్రయత్నించండి.',
+    map: 'మ్యాప్',
+    schemesAccepted: 'అంగీకరించే పథకాలు',
+    asOf: 'నాటికి',
+    party: 'పార్టీ',
+    legalTitle: 'చట్టపరమైన శీర్షిక',
+    aiTranslated: 'తెలుగు వివరణ AI రాసింది; అధికారిక చట్ట పాఠమే చెల్లుతుంది.',
     open: 'తెరవండి',
   },
   Hindi: {
@@ -220,6 +325,41 @@ export const CIVIC_LABELS: Record<AppLanguage, Record<CivicKey, string>> = {
     verify: 'जाने से पहले अस्पताल से पुष्टि करें।',
     error: 'लोड नहीं हुआ। दोबारा कोशिश के लिए नीचे खींचें।',
     aiInfoNote: 'AI ने सार्वजनिक स्रोतों से इकट्ठा किया। पुराना हो सकता है: आधिकारिक वेबसाइट देखें।',
+    leaders: 'राज्य के नेता',
+    governor: 'राज्यपाल',
+    cm: 'मुख्यमंत्री',
+    deputyCm: 'उपमुख्यमंत्री',
+    ministers: 'मंत्री',
+    districtOfficials: 'ज़िले के अधिकारी और जनप्रतिनिधि',
+    hq: 'ज़िला मुख्यालय',
+    collector: 'ज़िला कलेक्टर',
+    sp: 'पुलिस अधीक्षक (SP)',
+    commissioner: 'पुलिस आयुक्त',
+    mps: 'सांसद (MP)',
+    mlas: 'विधायक (MLA)',
+    offices: 'सरकारी दफ़्तर',
+    stateScheme: 'राज्य योजना',
+    centralScheme: 'केंद्र योजना',
+    eligibility: 'किसे मिलेगा',
+    benefit: 'लाभ',
+    howApply: 'आवेदन कैसे करें',
+    grievance: 'शिकायत और समाधान',
+    election: 'चुनाव',
+    lastAssembly: 'पिछला विधानसभा चुनाव',
+    lastLokSabha: 'पिछला लोकसभा चुनाव',
+    nextElection: 'अगले चुनाव',
+    voterHelpline: 'मतदाता हेल्पलाइन',
+    sources: 'स्रोत',
+    outdated: 'जानकारी पुरानी हो सकती है। आधिकारिक साइट पर जाँचें।',
+    collecting: 'इस जगह की जानकारी इकट्ठा हो रही है, कुछ मिनट बाद देखें।',
+    translating: 'हिंदी अनुवाद तैयार हो रहा है; अभी अंग्रेज़ी दिखा रहे हैं।',
+    serverUpdate: 'सर्वर अपडेट बाकी है। थोड़ी देर बाद नीचे खींचकर दोबारा कोशिश करें।',
+    map: 'नक्शा',
+    schemesAccepted: 'स्वीकृत योजनाएँ',
+    asOf: 'तक',
+    party: 'पार्टी',
+    legalTitle: 'कानूनी शीर्षक',
+    aiTranslated: 'हिंदी विवरण AI ने लिखा है; आधिकारिक कानूनी पाठ ही मान्य है।',
     open: 'खोलें',
   },
 };

@@ -28,7 +28,6 @@ export const hospitalFacts = (place: string, list: Hospital[]): string =>
         `24x7 emergency: ${h.emergency24x7 ? 'yes' : 'not confirmed'}`,
         h.specialities.length ? `specialities: ${h.specialities.join(', ')}` : '',
         h.schemes.length ? `schemes accepted: ${h.schemes.join(', ')}` : '',
-        h.stars !== null ? `public rating: ${h.stars}/5` : '',
         h.note ? `note: ${h.note}` : '',
       ]
         .filter(Boolean)

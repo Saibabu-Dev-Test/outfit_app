@@ -191,3 +191,51 @@ export function ReviewsBox({ lang, item, userName, myUid }: { lang: AppLanguage;
     </View>
   );
 }
+
+// Status line for a civic place: collecting / translating / server update / error (bilingual)
+export function CivicStatus({ lang, phase, hasData, aiConfigured, errorText }: { lang: AppLanguage; phase: string; hasData: boolean; aiConfigured: boolean; errorText?: string }) {
+  const both = (k: Parameters<typeof civicText>[1]) => (lang === 'English' ? civicText('English', k) : `${civicText(lang, k)}\n${civicText('English', k)}`);
+  if (phase === 'loading' && !hasData) return <ActivityIndicator color={colors.primary} style={{ marginVertical: 12 }} />;
+  if (phase === 'serverOld') return <View style={ui.card}><Text style={ui.body}>⏳ {both('serverUpdate')}</Text></View>;
+  if (phase === 'error')
+    return (
+      <View style={ui.card}>
+        <Text style={ui.bad}>{both('error')}</Text>
+        {errorText ? <Text style={ui.muted}>{errorText}</Text> : null}
+      </View>
+    );
+  if (phase === 'collecting')
+    return (
+      <View style={ui.card}>
+        <ActivityIndicator color={colors.primary} />
+        <Text style={[ui.body, { marginTop: 8, textAlign: 'center' }]}>🔎 {both('collecting')}</Text>
+      </View>
+    );
+  if (!hasData && phase === 'ready') return <View style={ui.card}><Text style={ui.body}>{both(aiConfigured ? 'noData' : 'aiOff')}</Text></View>;
+  if (phase === 'translating' && lang !== 'English') return <Text style={[ui.muted, { marginBottom: 8 }]}>🌐 {civicText(lang, 'translating')}</Text>;
+  return null;
+}
+
+// Public web pages the research used + "as of" + verify note
+export function SourcesBox({ lang, sources, updatedAt, asOf }: { lang: AppLanguage; sources?: { url: string; title: string }[]; updatedAt: number; asOf?: string }) {
+  const both = (k: Parameters<typeof civicText>[1]) => (lang === 'English' ? civicText('English', k) : `${civicText(lang, k)} · ${civicText('English', k)}`);
+  const host = (u: string) => u.replace(/^https:\/\//, '').split('/')[0];
+  return (
+    <View style={ui.card}>
+      <Text style={ui.h2}>📚 {both('sources')}</Text>
+      <Text style={ui.muted}>
+        {civicText(lang, 'updated')}: {fmtDate(updatedAt)}
+        {asOf ? ` · ${civicText(lang, 'asOf')} ${asOf}` : ''}
+      </Text>
+      <Text style={[ui.body, { marginTop: 4 }]}>⚠️ {civicText(lang, 'outdated')}</Text>
+      {lang !== 'English' ? <Text style={ui.muted}>{civicText('English', 'outdated')}</Text> : null}
+      {(sources || []).map((s, i) => (
+        <TouchableOpacity key={`${s.url}${i}`} onPress={() => openLink(s.url)} style={{ marginTop: 6 }}>
+          <Text style={[ui.muted, { color: colors.primary }]} numberOfLines={2}>
+            🔗 {s.title || host(s.url)}
+          </Text>
+        </TouchableOpacity>
+      ))}
+    </View>
+  );
+}

@@ -5,10 +5,28 @@ import { workerFetch } from './workerApi';
 export type CivicKind = 'govt' | 'hosp';
 export type HospVariant = 'govt' | 'private';
 
+export interface CivicPerson {
+  name: string;
+  party: string;
+  role: string; // portfolios
+}
+
+export interface CivicRep {
+  name: string;
+  constituency: string;
+  party: string;
+}
+
 export interface GovtData {
+  asOf?: string;
   overview: string;
+  leaders?: { governor: string; chiefMinister: CivicPerson; deputyCMs: CivicPerson[]; ministers: CivicPerson[] };
+  district?: { headquarters: string; collector: string; sp: string; policeCommissioner: string; mps: CivicRep[]; mlas: CivicRep[] };
+  offices?: { name: string; what: string; address: string; phone: string; website: string }[];
+  schemes: { name: string; level?: 'state' | 'central'; who: string; benefit: string; apply: string; website: string }[];
+  grievance?: { name: string; how: string; phone: string; website: string }[];
+  election?: { lastAssembly: string; lastLokSabha: string; next: string; voterHelpline: string; ceoWebsite: string };
   departments: { name: string; what: string; website: string; helpline: string }[];
-  schemes: { name: string; who: string; benefit: string; apply: string; website: string }[];
   services: { name: string; how: string; website: string }[];
   helplines: { name: string; number: string }[];
 }
@@ -24,13 +42,17 @@ export interface Hospital {
   specialities: string[];
   schemes: string[];
   website: string;
-  stars: number | null;
+  mapUrl?: string;
+  stars?: number | null; // old rows only; not shown (no AI ratings)
   note: string;
 }
 
 export interface HospData {
+  asOf?: string;
   hospitals: Hospital[];
 }
+
+export type TrCode = 'te' | 'hi';
 
 export interface CivicDataResponse<T> {
   kind: CivicKind;
@@ -38,10 +60,20 @@ export interface CivicDataResponse<T> {
   district: string;
   variant: string;
   data: T | null;
+  i18n?: { te: T | null; hi: T | null };
+  sources?: { url: string; title: string }[];
   aiStars: number | null;
   status: 'ok' | 'error' | 'pending' | 'none';
+  running?: boolean;
   updatedAt: number;
   aiConfigured: boolean;
+}
+
+export interface CivicResearchResponse {
+  ok: boolean;
+  status: 'ok' | 'error' | 'pending' | 'running' | 'ai_off';
+  did?: 'research' | 'translate' | 'nothing' | 'already running';
+  error?: string;
 }
 
 export interface CivicReview {
@@ -93,6 +125,15 @@ export const getGovtData = (state: string, district?: string) =>
 export const getHospData = (state: string, variant: HospVariant, district?: string) =>
   workerFetch<CivicDataResponse<HospData>>(`/v1/civic/data?${q({ kind: 'hosp', state, district: districtSlug(district), variant })}`);
 
+// On demand: research this place now (no data yet) or translate it into lang (te | hi). Slow
+// (Gemini with Google Search), so a long timeout; the screen shows "collecting" meanwhile.
+export const researchCivic = (kind: CivicKind, state: string, district: string | undefined, variant: string, lang?: TrCode | null) =>
+  workerFetch<CivicResearchResponse>('/v1/civic/research', {
+    method: 'POST',
+    body: { kind, state, district: districtSlug(district), variant, lang: lang || '' },
+    timeoutMs: 150000,
+  });
+
 export const getReviews = (item: string, limit = 20) => workerFetch<CivicReviewsResponse>(`/v1/civic/reviews?${q({ item, limit: String(limit) })}`);
 
 export const postReview = (item: string, stars: number, body: string, userName?: string, photo?: string | null) =>
@@ -106,6 +147,8 @@ export interface AdminCivic {
   aiConfigured: boolean;
   aiToday: number;
   aiDailyMax: number;
+  trToday?: number;
+  trDailyMax?: number;
   data: { kind: string; status: string; count: number; oldest: number }[];
   errors: { kind: string; state: string; district: string; variant: string; error: string; updatedAt: number }[];
   reported: CivicReview[];
