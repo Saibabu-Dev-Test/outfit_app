@@ -163,7 +163,7 @@ async function main() {
     } catch (e) {
       failed += batch.length;
       console.log(`batch ${i / size + 1} failed: ${e.message}`);
-      if (/http 40[013]/.test(e.message)) break; // bad key / request: stop
+      if (/http 40[0-3]/.test(e.message)) break; // bad key / billing (402) / request: stop
     }
     // save after every batch so a timeout keeps the progress
     ['en', 'te', 'hi'].forEach(l => writeMap(l, maps[l]));

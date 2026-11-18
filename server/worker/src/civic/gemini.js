@@ -80,8 +80,9 @@ export async function geminiGenerate(env, { prompt, system = '', grounded = fals
       continue;
     }
     if (!res.ok) {
-      // 400/401/403: bad key or bad request; another model will not help
-      return { ok: false, error: `http ${res.status}` };
+      // 400/401/402/403: bad key, billing (402 = AI Studio prepaid credits used up) or bad
+      // request; another model will not help
+      return { ok: false, error: res.status === 402 ? 'gemini billing: prepaid credits depleted (http 402)' : `http ${res.status}` };
     }
     let data;
     try {
