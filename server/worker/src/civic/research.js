@@ -1,4 +1,4 @@
-// Civic AI research (Govt + Hospitals). Google-Search-grounded Gemini answers are cleaned to a
+// Civic AI research (Govt + Hospitals + previous vs present government comparison). Google-Search-grounded Gemini answers are cleaned to a
 // fixed JSON shape and stored as ONE row per (kind, state, district, variant) in civic_data, with
 // the grounding source URLs (shown in the app) and a Telugu + Hindi copy in civic_data.i18n
 // (migration 0004). Neutral facts only: no AI ratings, no opinions.
@@ -7,8 +7,12 @@
 //   CIVIC_PER_RUN items per cron run, CIVIC_DAILY_MAX researched items per UTC day (usage key
 //   'civic_ai'), CIVIC_TR_DAILY_MAX translations per day ('civic_tr').
 // Order: districts users asked for (status 'pending') -> state rows never researched ->
-// stalest rows older than CIVIC_REFRESH_MS -> rows in error older than CIVIC_RETRY_MS.
-import { STATES, stateByCode } from './states.js';
+// rows saved with an older data shape (CIVIC_SCHEMA, migration 0005) -> stalest rows older than
+// CIVIC_REFRESH_MS -> rows in error older than CIVIC_RETRY_MS.
+// Kind 'gcmp' = neutral "previous vs present government" comparison per state + centre ('IN'):
+// schemes, budgets, major projects, schemes started / stopped, side by side; every point needs its
+// own https source URL + date or it is dropped; evaluative words are dropped; no verdict field exists.
+import { CENTRE, STATES, placeByCode } from './states.js';
 import { geminiGenerate, isGeminiConfigured, parseJsonLoose } from './gemini.js';
 import { addUsage, usageFor } from '../db.js';
 import { utcDay } from '../days.js';
@@ -20,7 +24,10 @@ export const CIVIC_REFRESH_MS = 7 * 24 * 3600 * 1000;
 export const CIVIC_RETRY_MS = 20 * 60 * 1000;
 export const CIVIC_LOCK_MS = 3 * 60 * 1000;
 export const CIVIC_MAX_PENDING = 200;
-export const KINDS = { govt: [''], hosp: ['govt', 'private'] };
+export const KINDS = { govt: [''], hosp: ['govt', 'private'], gcmp: [''] };
+// Data-shape version per kind (civic_data.schema_v). hosp 2 = timings, specialFor, doctors,
+// facilities, per-hospital sources. Older rows are re-researched by the cron (data kept until then).
+export const CIVIC_SCHEMA = { govt: 1, hosp: 2, gcmp: 1 };
 export const TR_LANGS = { te: 'Telugu', hi: 'Hindi' };
 
 const s = (v, max = 200) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, max) : typeof v === 'number' ? String(v) : '');
@@ -126,13 +133,63 @@ export function cleanHosp(raw, where = '') {
         website: url(x.website),
         mapUrl: name ? mapLink(name, address, where) : '',
         note: s(x.note, 300),
+        // v2 fields: empty = no public source stated it (the app shows "Public info not available")
+        timings: s(x.timings, 200),
+        specialFor: arr(x.specialFor, 12).map(v => s(v, 80)).filter(Boolean),
+        facilities: arr(x.facilities, 20).map(v => s(v, 80)).filter(Boolean),
+        // Only doctors a public page lists, with that page as source; experience only as published
+        doctors: arr(x.doctors, 15)
+          .map(d => ({
+            name: s(obj(d).name, 100),
+            speciality: s(obj(d).speciality, 80),
+            qualification: s(obj(d).qualification, 120),
+            experience: /\d/.test(s(obj(d).experience, 40)) ? s(obj(d).experience, 40) : '',
+            source: url(obj(d).source),
+          }))
+          .filter(d => d.name && d.source),
+        sources: [...new Set(arr(x.sources, 5).map(url).filter(Boolean))],
       };
     })
     .filter(h => h.name && h.slug && !seen.has(h.slug) && seen.add(h.slug));
   return { asOf: s(o.asOf, 40), hospitals };
 }
 
-const placeName = (state, district) => `${district ? `${district.replace(/-/g, ' ')} district, ` : ''}${state.name}, India`;
+// ── Previous vs present government (kind 'gcmp') ──
+export const CMP_AREAS = ['schemes', 'budget', 'projects', 'started', 'stopped'];
+const DATE_RE = /^\d{4}(-\d{2}(-\d{2})?)?$/;
+const date = v => {
+  const d = s(v, 10);
+  return DATE_RE.test(d) ? d : '';
+};
+// Evaluative / verdict words: a point using them is dropped (facts only, no opinion)
+export const OPINION_RE =
+  /\b(best|better|worse|worst|superior|inferior|excellent|outstanding|failed|failure|failures|corrupt|corruption|scam|praised|criticised|criticized|landmark|historic|visionary|betray(?:ed|al)?|mismanag\w*|incompetent|winner|loser)\b/i;
+const cmpFact = v => {
+  const o = obj(v);
+  const text = s(o.text, 400);
+  const source = url(o.source);
+  const d = date(o.date);
+  return text && source && d && !OPINION_RE.test(text) ? { text, source, date: d } : null;
+};
+const cmpGovt = v => {
+  const o = obj(v);
+  return { label: s(o.label, 140), head: s(o.head, 100), party: s(o.party, 160), from: date(o.from), to: date(o.to), source: url(o.source) };
+};
+
+export function cleanCompare(raw) {
+  const o = obj(raw);
+  const rows = arr(o.rows, 60)
+    .map(r => {
+      const x = obj(r);
+      const area = s(x.area, 20).toLowerCase();
+      return { area: CMP_AREAS.includes(area) ? area : '', topic: s(x.topic, 140), previous: cmpFact(x.previous), present: cmpFact(x.present) };
+    })
+    .filter(r => r.area && r.topic && !OPINION_RE.test(r.topic) && (r.previous || r.present));
+  return { asOf: s(o.asOf, 40), previous: cmpGovt(o.previous), present: cmpGovt(o.present), rows };
+}
+
+const placeName = (state, district) =>
+  state.type === 'centre' ? 'the Union Government of India (the Centre)' : `${district ? `${district.replace(/-/g, ' ')} district, ` : ''}${state.name}, India`;
 
 const STATE_SCHEMES = {
   AP: 'Dr NTR Vaidya Seva (Aarogyasri AP)',
@@ -142,6 +199,20 @@ const STATE_SCHEMES = {
 export function researchPrompt(kind, variant, state, district) {
   const where = placeName(state, district);
   const today = new Date().toISOString().slice(0, 10);
+  if (kind === 'gcmp') {
+    const who = state.type === 'centre' ? 'the Union Government of India (Prime Minister and Union Cabinet)' : `the ${state.name} state government (Chief Minister and cabinet)`;
+    return [
+      `Today is ${today}. Using Google Search, build a NEUTRAL side-by-side factual comparison of the PREVIOUS and the PRESENT term of ${who}.`,
+      'Previous = the government (term) immediately before the present one. If the same party / leader continued, compare the previous term with the current term.',
+      'STRICT RULES: facts only. No opinion, no verdict, no "which is better / best", no praise or criticism, no adjectives like best, failed, historic, corrupt. Do not say who did better.',
+      'Every point MUST have its own public source URL (prefer .gov.in / .nic.in, budget documents, PIB, official gazettes, state finance department, reputed news reports of official figures) and the date (YYYY-MM-DD, or YYYY-MM / YYYY) of that source or event. If you cannot give a source URL and a date for a point, leave that side null.',
+      'Areas: "schemes" (major welfare schemes and their benefit amounts), "budget" (total budget size, key allocations e.g. health, education, agriculture, with year), "projects" (major infrastructure projects: name, cost, status), "started" (schemes / programmes started by that government), "stopped" (schemes stopped, merged or renamed by the government that followed, with the official reason only if officially stated).',
+      'Put matching items on the same row (same topic) so they can be read side by side; an item with no counterpart has the other side null. Up to 40 rows.',
+      'Reply with ONLY this JSON (no markdown):',
+      '{"asOf":"YYYY-MM","previous":{"label":"e.g. 2019-2024 government","head":"CM / PM name","party":"party or alliance","from":"YYYY-MM","to":"YYYY-MM","source":"https://"},"present":{"label":"","head":"","party":"","from":"YYYY-MM","to":"","source":"https://"},',
+      '"rows":[{"area":"schemes|budget|projects|started|stopped","topic":"short neutral topic, e.g. Old-age pension amount","previous":{"text":"fact","source":"https://","date":"YYYY-MM-DD"},"present":{"text":"fact","source":"https://","date":"YYYY-MM-DD"}}]}',
+    ].join('\n');
+  }
   if (kind === 'govt') {
     return [
       `Today is ${today}. Using Google Search, collect current, factual public information for ${where}.`,
@@ -171,7 +242,12 @@ export function researchPrompt(kind, variant, state, district) {
     'Facts only from public sources (official hospital sites, government empanelment lists, NHA / state scheme portals, district sites).',
     'If you are not sure of a value, leave it empty "" (phone especially: NEVER invent or guess a phone number). No medical advice, no ratings.',
     `schemes = only schemes the hospital is confirmed empanelled in: ${stateScheme}PM-JAY / Ayushman Bharat, CGHS, ESI.`,
-    'Reply with ONLY this JSON (no markdown): {"asOf":"YYYY-MM","hospitals":[{"name":"","type":"e.g. Government General Hospital / Private multi-speciality","district":"","address":"","phone":"","emergency24x7":true,"specialities":[""],"schemes":[""],"website":"https://","note":"one neutral line (beds, medical college, etc.)"}]}',
+    'timings = OPD / visiting timings exactly as the hospital or an official page publishes them, else "". emergency24x7 = true only if a source says 24x7 emergency / casualty.',
+    'specialFor = diseases / conditions / treatments a public source states this hospital is a centre for (e.g. "kidney transplant", "cancer care", "cardiac surgery"), else [].',
+    'facilities = facilities a public source lists (e.g. ICU, NICU, dialysis, blood bank, CT, MRI, cath lab, trauma care), else [].',
+    'doctors = ONLY specialist doctors named on the hospital\'s own website or an official list, each with "source" = that page URL; "experience" only if that page states it (e.g. "15 years"), else "". Never invent a doctor. If none are publicly listed, [].',
+    'sources = up to 3 https pages you used for this hospital.',
+    'Reply with ONLY this JSON (no markdown): {"asOf":"YYYY-MM","hospitals":[{"name":"","type":"e.g. Government General Hospital / Private multi-speciality","district":"","address":"","phone":"","timings":"","emergency24x7":true,"specialities":[""],"specialFor":[""],"facilities":[""],"doctors":[{"name":"","speciality":"","qualification":"","experience":"","source":"https://"}],"schemes":[""],"website":"https://","sources":["https://"],"note":"one neutral line (beds, medical college, etc.)"}]}',
   ].join('\n');
 }
 
@@ -180,7 +256,7 @@ export function translatePrompt(kind, data, langName) {
   return [
     `Translate the text values of this JSON into simple, everyday ${langName} (native script).`,
     'Keep EXACTLY the same JSON keys, nesting, array order and array lengths. Transliterate names of people and places into the script.',
-    'Do NOT translate or change: URLs, phone numbers, "level", "slug", booleans, numbers. Keep scheme / portal acronyms readable (e.g. "PM-JAY (ఆయుష్మాన్ భారత్)").',
+    'Do NOT translate or change: URLs, phone numbers, dates, "level", "slug", "area", "source", "sources", "date", "from", "to", booleans, numbers. Keep scheme / portal acronyms readable (e.g. "PM-JAY (ఆయుష్మాన్ భారత్)").',
     'Do not add or remove facts. Reply with ONLY the JSON.',
     JSON.stringify(data),
   ].join('\n');
@@ -194,9 +270,32 @@ const parseJsonCol = (v, dflt) => {
   }
 };
 
+// Fields a translation must never change (URLs, phones, dates, keys): copied back from the English
+// data by position before the translated copy is cleaned (hospitals + comparison)
+const FIXED_KEYS = new Set(['source', 'sources', 'date', 'from', 'to', 'area', 'website', 'phone', 'mapUrl', 'slug', 'emergency24x7']);
+export function keepFixed(en, tr) {
+  if (Array.isArray(en)) {
+    return Array.isArray(tr) && tr.length === en.length ? en.map((v, i) => keepFixed(v, tr[i])) : tr;
+  }
+  if (en && typeof en === 'object') {
+    if (!tr || typeof tr !== 'object' || Array.isArray(tr)) {
+      return tr;
+    }
+    const out = { ...tr };
+    Object.keys(en).forEach(k => {
+      out[k] = FIXED_KEYS.has(k) ? en[k] : keepFixed(en[k], tr[k]);
+    });
+    return out;
+  }
+  return tr;
+}
+
+const cleanFor = (kind, parsed, where = '') => (kind === 'govt' ? cleanGovt(parsed) : kind === 'gcmp' ? cleanCompare(parsed) : cleanHosp(parsed, where));
+
 const isEmpty = (kind, data) =>
   !data ||
   (kind === 'hosp' && !data.hospitals.length) ||
+  (kind === 'gcmp' && !data.rows.length) ||
   (kind === 'govt' && !data.overview && !data.departments.length && !data.leaders.chiefMinister.name && !data.schemes.length);
 
 const lockRow = async (db, t, now) => {
@@ -231,7 +330,7 @@ export async function translateOne(db, env, t, lang, { fetchImpl = fetch, now = 
     return { ok: false, error: r.error };
   }
   const parsed = parseJsonLoose(r.text);
-  const tr = parsed ? (t.kind === 'govt' ? cleanGovt(parsed) : cleanHosp(parsed)) : null;
+  const tr = parsed ? cleanFor(t.kind, t.kind === 'govt' ? parsed : keepFixed(data, parsed)) : null;
   if (isEmpty(t.kind, tr)) {
     return { ok: false, error: 'unreadable translation' };
   }
@@ -244,8 +343,8 @@ export async function translateOne(db, env, t, lang, { fetchImpl = fetch, now = 
 
 // Research one target in English (grounded). opts.translate: also translate into te + hi after.
 export async function researchOne(db, env, { kind, state, district = '', variant = '' }, { fetchImpl = fetch, now = Date.now(), translate = false } = {}) {
-  const st = stateByCode(state);
-  if (!st || !KINDS[kind] || !KINDS[kind].includes(variant)) {
+  const st = placeByCode(state, kind);
+  if (!st || !KINDS[kind] || !KINDS[kind].includes(variant) || (kind === 'gcmp' && district)) {
     return { ok: false, error: 'bad target' };
   }
   const t = { kind, state, district, variant };
@@ -256,7 +355,7 @@ export async function researchOne(db, env, { kind, state, district = '', variant
   let error = r.ok ? '' : r.error;
   if (r.ok) {
     const parsed = parseJsonLoose(r.text);
-    data = parsed ? (kind === 'govt' ? cleanGovt(parsed) : cleanHosp(parsed, where)) : null;
+    data = parsed ? cleanFor(kind, parsed, where) : null;
     if (isEmpty(kind, data)) {
       data = null;
       error = 'empty or unreadable answer';
@@ -265,11 +364,12 @@ export async function researchOne(db, env, { kind, state, district = '', variant
   if (data) {
     // New English data: old translations no longer match, so they are dropped (re-translated next)
     await db.run(
-      `INSERT INTO civic_data (kind, state, district, variant, data, sources, ai_stars, status, error, model, updated_at, i18n)
-       VALUES (?, ?, ?, ?, ?, ?, NULL, 'ok', NULL, ?, ?, NULL)
+      `INSERT INTO civic_data (kind, state, district, variant, data, sources, ai_stars, status, error, model, updated_at, i18n, schema_v)
+       VALUES (?, ?, ?, ?, ?, ?, NULL, 'ok', NULL, ?, ?, NULL, ?)
        ON CONFLICT (kind, state, district, variant) DO UPDATE SET data = excluded.data, sources = excluded.sources,
-         ai_stars = NULL, status = 'ok', error = NULL, model = excluded.model, updated_at = excluded.updated_at, i18n = NULL`,
-      kind, state, district, variant, JSON.stringify(data), JSON.stringify(r.sources || []), r.model, now,
+         ai_stars = NULL, status = 'ok', error = NULL, model = excluded.model, updated_at = excluded.updated_at, i18n = NULL,
+         schema_v = excluded.schema_v`,
+      kind, state, district, variant, JSON.stringify(data), JSON.stringify(r.sources || []), r.model, now, CIVIC_SCHEMA[kind] || 1,
     );
     const out = { ok: true, model: r.model };
     if (translate) {
@@ -348,6 +448,14 @@ export function pickTargets(rows, now, n) {
       }),
     ),
   );
+  // The centre's comparison (after all states)
+  if (!byKey.has(key('gcmp', CENTRE.code, '', ''))) {
+    missing.push({ kind: 'gcmp', state: CENTRE.code, district: '', variant: '' });
+  }
+  // Rows saved with an older data shape (e.g. hospitals before v2): re-research, oldest first
+  const outdated = rows
+    .filter(r => r.status === 'ok' && free(r) && KINDS[r.kind] && Number(r.schema_v || 1) < (CIVIC_SCHEMA[r.kind] || 1))
+    .sort((a, b) => Number(a.updated_at) - Number(b.updated_at));
   const stale = rows
     .filter(
       r =>
@@ -356,7 +464,13 @@ export function pickTargets(rows, now, n) {
     )
     .sort((a, b) => Number(a.updated_at) - Number(b.updated_at));
   const pick = r => ({ kind: r.kind, state: r.state, district: r.district || '', variant: r.variant || '' });
-  return [...pending.map(pick), ...missing, ...stale.map(pick)].slice(0, Math.max(0, n));
+  const seen = new Set();
+  return [...pending.map(pick), ...missing, ...outdated.map(pick), ...stale.map(pick)]
+    .filter(t => {
+      const k = key(t.kind, t.state, t.district, t.variant);
+      return !seen.has(k) && seen.add(k);
+    })
+    .slice(0, Math.max(0, n));
 }
 
 export async function runCivicResearch(db, env, { fetchImpl = fetch, now = Date.now(), perRun = CIVIC_PER_RUN, dailyMax = CIVIC_DAILY_MAX, translate = true } = {}) {
@@ -367,7 +481,7 @@ export async function runCivicResearch(db, env, { fetchImpl = fetch, now = Date.
   const n = Math.min(perRun, dailyMax - used.civic_ai);
   const results = [];
   if (n > 0) {
-    const rows = await db.all('SELECT kind, state, district, variant, status, updated_at, running_at FROM civic_data');
+    const rows = await db.all('SELECT kind, state, district, variant, status, updated_at, running_at, schema_v FROM civic_data');
     const targets = pickTargets(rows, now, n);
     for (const t of targets) {
       const tr = translate && used.civic_tr + results.length * 2 < CIVIC_TR_DAILY_MAX;

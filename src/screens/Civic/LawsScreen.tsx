@@ -3,6 +3,10 @@
 // "Whom to contact" shows the national helplines (tap to call). Guidance only, not legal advice.
 // Each section shows a plain-language title first (app language + English), the legal title smaller,
 // and a simple explanation (data/laws/plain.*.ts, AI-written; the official text prevails).
+// "Offence guide (BNS 2023)" mode: common offences with a simple title + explanation in the app
+// language AND English (hand-written static data), the official BNSS First Schedule rows (section,
+// punishment, cognizable, bailable, court, old IPC), a simple jail range / fine line, and how to
+// file a police complaint under the BNSS. Searchable in EN / TE / HI, by section or old IPC number.
 import React, { useMemo, useState } from 'react';
 import { FlatList, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -16,6 +20,111 @@ import { LawSection, plainTitle, searchLaws } from '../../services/laws';
 import { trCode } from './useCivicData';
 import { Bi } from './bi';
 import { callNumber, openLink } from './civicParts';
+import { OFFENCE_CATEGORIES, OffenceCategory } from '../../data/laws/offenceGuide';
+import {
+  Flag,
+  GuideLang,
+  OffenceGuideItem,
+  bailableFlag,
+  categoryLabel,
+  cognizableFlag,
+  complaintSteps,
+  entryFlag,
+  searchOffences,
+  simplePunishment,
+} from '../../services/offenceGuide';
+
+const cogKey = (f: Flag | 'mixed') => (f === 'yes' ? 'cogYes' : f === 'no' ? 'cogNo' : f === 'cond' ? 'cogCond' : 'dependsMain');
+const bailKey = (f: Flag | 'mixed') => (f === 'yes' ? 'bailable' : f === 'no' ? 'nonBailable' : 'dependsMain');
+
+function BiLines({ en, tr, style }: { en: string[]; tr?: string[] | null; style?: any }) {
+  return (
+    <View>
+      {en.map((line, i) => (
+        <Bi key={`${line}${i}`} en={line} tr={tr ? tr[i] : undefined} style={style} />
+      ))}
+    </View>
+  );
+}
+
+function OffenceCard({ e, lang, open, onToggle }: { e: OffenceGuideItem; lang: ReturnType<typeof useAppLanguage>; open: boolean; onToggle: () => void }) {
+  const T = (k: Parameters<typeof civicText>[1]) => civicText(lang, k);
+  const L = (k: Parameters<typeof civicText>[1]) => (lang === 'English' ? civicText('English', k) : `${civicText(lang, k)} · ${civicText('English', k)}`);
+  const code = trCode(lang);
+  const gl: GuideLang | null = code;
+  const secs = [...new Set(e.rows.map(r => r.section.replace(/\(.*$/, '')))].join(', ');
+  const ipc = [...new Set(e.rows.map(r => (r.oldRef || '').replace(/^IPC /, '')).filter(Boolean).join(', ').split(', '))].filter(Boolean).join(', ');
+  const cog = entryFlag(e.rows, r => cognizableFlag(r.cognizable));
+  const bail = entryFlag(e.rows, r => bailableFlag(r.bailable));
+  const steps = complaintSteps(cog === 'mixed' ? 'depends' : cog);
+  return (
+    <TouchableOpacity style={ui.card} activeOpacity={0.8} onPress={onToggle}>
+      <Bi en={e.t.en} tr={gl ? e.t[gl] : undefined} style={ui.h2} />
+      <Text style={[ui.muted, { fontSize: 12 }]}>
+        BNS {secs}
+        {ipc ? ` · ${T('oldLaw')}: IPC ${ipc}` : ''}
+      </Text>
+      <View style={{ marginTop: 4 }}>
+        <Bi en={e.x.en} tr={gl ? e.x[gl] : undefined} lines={open ? undefined : 3} />
+      </View>
+      <Text style={[ui.muted, { marginTop: 4 }]}>
+        🚓 {T(cogKey(cog))}
+        {'\n'}🔓 {T(bailKey(bail))}
+      </Text>
+      {open ? (
+        <View style={{ marginTop: 8 }}>
+          <Text style={ui.h2}>📜 {L('cases')}</Text>
+          {e.rows.map(r => (
+            <View key={r.id} style={{ marginTop: 10, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 6 }}>
+              <Text style={[ui.body, { fontWeight: '700' }]}>BNS {r.section}</Text>
+              <Text style={ui.body}>{r.summary}</Text>
+              <View style={{ marginTop: 4 }}>
+                <Text style={ui.muted}>⚖️ {L('punishment')}</Text>
+                <BiLines en={simplePunishment(r.punishment, 'en')} tr={gl ? simplePunishment(r.punishment, gl) : null} style={[ui.body, { fontWeight: '700' }]} />
+                <Text style={[ui.muted, { fontSize: 12 }]}>{T('officialText')}: {r.punishment}</Text>
+              </View>
+              {r.cognizable ? (
+                <View style={{ marginTop: 4 }}>
+                  <Bi en={`🚓 ${civicText('English', cogKey(cognizableFlag(r.cognizable)))}`} tr={lang !== 'English' ? `🚓 ${T(cogKey(cognizableFlag(r.cognizable)))}` : undefined} />
+                  <Text style={[ui.muted, { fontSize: 12 }]}>{T('officialText')}: {r.cognizable}</Text>
+                </View>
+              ) : null}
+              {r.bailable ? (
+                <View style={{ marginTop: 4 }}>
+                  <Bi en={`🔓 ${civicText('English', bailKey(bailableFlag(r.bailable)))}`} tr={lang !== 'English' ? `🔓 ${T(bailKey(bailableFlag(r.bailable)))}` : undefined} />
+                  <Text style={[ui.muted, { fontSize: 12 }]}>{T('officialText')}: {r.bailable}</Text>
+                </View>
+              ) : null}
+              {r.court ? <Text style={ui.muted}>🏛️ {T('court')}: {r.court}</Text> : null}
+              {r.oldRef ? <Text style={ui.muted}>{T('oldLaw')}: {r.oldRef}</Text> : null}
+            </View>
+          ))}
+          <View style={{ marginTop: 12 }}>
+            <Text style={ui.h2}>📝 {L('howToComplain')}</Text>
+            {steps.map((st, i) => (
+              <View key={`${st.ref}${i}`} style={{ marginTop: 6 }}>
+                <Bi prefix={`${i + 1}. `} en={st.t.en} tr={gl ? `${st.t[gl]}` : undefined} />
+                <Text style={[ui.muted, { fontSize: 12 }]}>{st.ref}</Text>
+              </View>
+            ))}
+          </View>
+          {lang !== 'English' ? <Text style={[ui.muted, { marginTop: 8 }]}>🌐 {T('translationNote')}</Text> : null}
+          <View style={{ marginTop: 8 }}>
+            {[
+              ['BNS 2023', e.sources.bns],
+              ['BNSS 2023', e.sources.bnss],
+              ['BNSS First Schedule (NCRB)', e.sources.schedule],
+            ].map(([label, url]) => (
+              <TouchableOpacity key={url} onPress={() => openLink(url)}>
+                <Text style={[ui.body, { color: colors.primary }]}>🔗 {T('source')}: {label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+      ) : null}
+    </TouchableOpacity>
+  );
+}
 
 function SectionCard({ s, lang, open, onToggle }: { s: LawSection; lang: ReturnType<typeof useAppLanguage>; open: boolean; onToggle: () => void }) {
   const T = (k: Parameters<typeof civicText>[1]) => civicText(lang, k);
@@ -73,6 +182,11 @@ export default function LawsScreen() {
   const [openId, setOpenId] = useState<string | null>(null);
   const [showContacts, setShowContacts] = useState(false);
   const results = useMemo(() => searchLaws(query, act, 100), [query, act]);
+  const [mode, setMode] = useState<'sections' | 'guide'>('sections');
+  const [gQuery, setGQuery] = useState('');
+  const [gCat, setGCat] = useState<OffenceCategory | 'ALL'>('ALL');
+  const guide = useMemo(() => searchOffences(gQuery, gCat), [gQuery, gCat]);
+  const gl: GuideLang = trCode(lang) || 'en';
 
   const header = (
     <View>
@@ -114,6 +228,50 @@ export default function LawsScreen() {
           </View>
         ) : null}
       </TouchableOpacity>
+      <View style={[ui.row, { marginBottom: 8, flexWrap: 'wrap' }]}>
+        {(['guide', 'sections'] as const).map(m => (
+          <TouchableOpacity key={m} style={[ui.chip, mode === m && ui.chipOn]} onPress={() => setMode(m)}>
+            <Text style={[ui.chipText, mode === m && ui.chipTextOn]}>{m === 'guide' ? `⚖️ ${T('offenceGuide')}` : `📜 ${T('allSections')}`}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+    </View>
+  );
+
+  const guideHeader = (
+    <View>
+      {header}
+      <View style={ui.card}>
+        <Bi en={civicText('English', 'bnsNote')} tr={lang !== 'English' ? T('bnsNote') : undefined} />
+      </View>
+      <TextInput
+        style={ui.input}
+        value={gQuery}
+        onChangeText={setGQuery}
+        placeholder={T('searchOffence')}
+        placeholderTextColor={colors.textMuted}
+        autoCorrect={false}
+        returnKeyType="search"
+      />
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
+        {(['ALL', ...(Object.keys(OFFENCE_CATEGORIES) as OffenceCategory[])] as (OffenceCategory | 'ALL')[]).map(c => {
+          const on = c === gCat;
+          return (
+            <TouchableOpacity key={c} style={[ui.chip, on && ui.chipOn]} onPress={() => setGCat(c)}>
+              <Text style={[ui.chipText, on && ui.chipTextOn]}>{c === 'ALL' ? T('allActs') : categoryLabel(c, gl)}</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+      <Text style={[ui.muted, { marginBottom: 8 }]}>
+        {guide.length} {T('results')}
+      </Text>
+    </View>
+  );
+
+  const sectionsHeader = (
+    <View>
+      {header}
       <TextInput
         style={ui.input}
         value={query}
@@ -141,15 +299,27 @@ export default function LawsScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top']}>
-      <FlatList
-        data={results}
-        keyExtractor={s => s.id}
-        contentContainerStyle={ui.scroll}
-        keyboardShouldPersistTaps="handled"
-        ListHeaderComponent={header}
-        initialNumToRender={12}
-        renderItem={({ item }) => <SectionCard s={item} lang={lang} open={openId === item.id} onToggle={() => setOpenId(openId === item.id ? null : item.id)} />}
-      />
+      {mode === 'guide' ? (
+        <FlatList
+          data={guide}
+          keyExtractor={e => `g-${e.id}`}
+          contentContainerStyle={ui.scroll}
+          keyboardShouldPersistTaps="handled"
+          ListHeaderComponent={guideHeader}
+          initialNumToRender={10}
+          renderItem={({ item }) => <OffenceCard e={item} lang={lang} open={openId === `g-${item.id}`} onToggle={() => setOpenId(openId === `g-${item.id}` ? null : `g-${item.id}`)} />}
+        />
+      ) : (
+        <FlatList
+          data={results}
+          keyExtractor={s => s.id}
+          contentContainerStyle={ui.scroll}
+          keyboardShouldPersistTaps="handled"
+          ListHeaderComponent={sectionsHeader}
+          initialNumToRender={12}
+          renderItem={({ item }) => <SectionCard s={item} lang={lang} open={openId === item.id} onToggle={() => setOpenId(openId === item.id ? null : item.id)} />}
+        />
+      )}
     </SafeAreaView>
   );
 }

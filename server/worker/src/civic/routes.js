@@ -1,8 +1,10 @@
-// Civic tab routes (Govt / Hospitals). All need a verified Firebase ID token (index.js); the uid
+// Civic tab routes (Govt / Hospitals / previous vs present government comparison). All need a verified Firebase ID token (index.js); the uid
 // always comes from the token.
 //   GET  /v1/civic/data?kind=govt|hosp&state=TG&district=&variant=   stored AI summary + its public
 //        source URLs + Telugu / Hindi copies (i18n) (also ?category=govt|hosp-govt|hosp-private).
 //        A place never researched is queued (status 'pending').
+//        kind=gcmp: neutral previous vs present government comparison, state-level only (district
+//        must be empty); state may also be 'IN' (the centre). No reviews for it (facts only).
 //   POST /v1/civic/research {kind, state, district, variant, lang}   on demand: research the place
 //        now if it has no data, else translate the missing language (te|hi). Capped per user + per day.
 //   GET  /v1/civic/reviews?item=&limit=     visible reviews + average + my review
@@ -15,7 +17,7 @@ import { HttpError } from '../api.js';
 import { isOwner } from '../auth.js';
 import { usageFor } from '../db.js';
 import { utcDay } from '../days.js';
-import { stateByCode } from './states.js';
+import { placeByCode, stateByCode } from './states.js';
 import { cleanReviewText, hasProfanity } from './moderation.js';
 import { isGeminiConfigured } from './gemini.js';
 import { CIVIC_DAILY_MAX, CIVIC_LOCK_MS, CIVIC_MAX_PENDING, CIVIC_TR_DAILY_MAX, KINDS, TR_LANGS, researchNow, researchOne } from './research.js';
@@ -57,7 +59,7 @@ export function parseTarget(p) {
   }
   const state = str(p.get('state'), 4).toUpperCase();
   const district = normDistrict(p.get('district'));
-  if (!KINDS[kind] || !KINDS[kind].includes(variant || '') || !stateByCode(state) || !DISTRICT_RE.test(district)) {
+  if (!KINDS[kind] || !KINDS[kind].includes(variant || '') || !placeByCode(state, kind) || !DISTRICT_RE.test(district) || (kind === 'gcmp' && district)) {
     throw new HttpError(400, 'bad kind / state / district / variant');
   }
   return { kind, state, district, variant: variant || '' };

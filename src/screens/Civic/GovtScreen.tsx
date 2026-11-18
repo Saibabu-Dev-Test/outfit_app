@@ -5,6 +5,8 @@
 // and helplines. Researched by Gemini with Google Search on the Worker (civic_data in D1), with the
 // source links and an "as of" date. Every item in the app language (Telugu / Hindi) AND English.
 // Neutral information only: no AI ratings. A place not researched yet is researched on demand.
+// "Previous vs present government" (GovtCompareBox): neutral side-by-side facts per state / centre,
+// every point with its source + date, no verdict.
 import React from 'react';
 import { RefreshControl, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -19,6 +21,7 @@ import { CivicPerson, CivicRep, GovtData, civicItem, getGovtData } from '../../s
 import { CivicStatus, PlacePicker, ReviewsBox, SourcesBox, callNumber, openLink, useCivicPlace } from './civicParts';
 import { Bi, biLabel } from './bi';
 import { useCivicData } from './useCivicData';
+import GovtCompareBox from './GovtCompareBox';
 
 const Links = ({ phone, website, lang }: { phone?: string; website?: string; lang: ReturnType<typeof useAppLanguage> }) =>
   phone || website ? (
@@ -90,6 +93,7 @@ export default function GovtScreen() {
         </View>
         <PlacePicker lang={lang} place={place} onChange={setPlace} />
         {place.state ? <CivicStatus lang={lang} phase={phase} hasData={!!d} aiConfigured={!!res?.aiConfigured} errorText={errorText} /> : null}
+        {place.state ? <GovtCompareBox lang={lang} state={place.state} /> : null}
         {d ? (
           <>
             {d.overview ? (
