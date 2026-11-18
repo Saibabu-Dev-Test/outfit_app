@@ -22,6 +22,8 @@ export type RootStackParamList = {
   AdminWithdrawals: undefined;
   // Owner only: backends, free-tier usage, Worker health, earn partners, users
   AdminSystem: undefined;
+  // Owner only: Govt / Hospitals tabs moderation (reviews, AI research status, refresh)
+  AdminCivic: undefined;
   // Owner only: the list behind a number on Admin tracking
   AdminList: { kind: AdminListKind };
   EarnWall: { url: string; title?: string; kind?: 'survey' | 'offer' };

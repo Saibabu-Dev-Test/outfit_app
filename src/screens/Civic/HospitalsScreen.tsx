@@ -7,7 +7,9 @@ import { ActivityIndicator, Alert, RefreshControl, ScrollView, Text, TextInput, 
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ui } from '../Earn/earnUi';
 import { colors } from '../../theme';
+import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../../context/AuthContext';
+import { isOwnerUser } from '../../services/adminSystem';
 import { useAppLanguage } from '../../i18n/appLanguage';
 import { civicText } from '../../i18n/civicLabels';
 import { stateByCodeApp } from './stateName';
@@ -53,6 +55,7 @@ export default function HospitalsScreen() {
   const lang = useAppLanguage();
   const T = (k: Parameters<typeof civicText>[1]) => civicText(lang, k);
   const { user } = useAuth();
+  const navigation = useNavigation<any>();
   const [place, setPlace] = useCivicPlace();
   const [variant, setVariant] = useState<HospVariant>('govt');
   const [res, setRes] = useState<CivicDataResponse<HospData> | null>(null);
@@ -107,7 +110,14 @@ export default function HospitalsScreen() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top']}>
       <ScrollView contentContainerStyle={ui.scroll} keyboardShouldPersistTaps="handled" refreshControl={<RefreshControl refreshing={loading} onRefresh={load} />}>
-        <Text style={[ui.h1, { marginBottom: 8 }]}>{T('hospTitle')}</Text>
+        <View style={[ui.row, { marginBottom: 8 }]}>
+          <Text style={[ui.h1, ui.flex1]}>{T('hospTitle')}</Text>
+          {isOwnerUser() ? (
+            <TouchableOpacity onPress={() => navigation.navigate('AdminCivic')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+              <Text style={ui.muted}>🛡️ Moderate</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
         <View style={[ui.card, { borderColor: '#C62828' }]}>
           <Text style={ui.bad}>🚑 {T('emergencyLine')}</Text>
           <View style={[ui.row, { marginTop: 8 }]}>
