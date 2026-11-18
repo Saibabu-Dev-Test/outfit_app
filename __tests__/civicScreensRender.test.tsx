@@ -114,6 +114,9 @@ const mount = async (el: React.ReactElement) => {
 
 const flush = () => ReactTestRenderer.act(async () => new Promise<void>(res => setTimeout(() => res(), 0)));
 
+// First test cold-loads the large BNS offence data; CI runners are slower than local.
+jest.setTimeout(30000);
+
 describe('civic screens render', () => {
   beforeEach(async () => {
     await AsyncStorage.setItem('outfit.civic.place', JSON.stringify({ state: 'AP', district: '' }));
