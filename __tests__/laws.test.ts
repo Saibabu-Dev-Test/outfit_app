@@ -62,3 +62,29 @@ describe('searchLaws', () => {
     expect(typeof limitationFor('Imprisonment for 7 years')).toBe('string');
   });
 });
+
+describe('plain-language layer (plain.en/te/hi.ts)', () => {
+  const { PLAIN_EN } = require('../src/data/laws/plain.en');
+  const { PLAIN_TE } = require('../src/data/laws/plain.te');
+  const { PLAIN_HI } = require('../src/data/laws/plain.hi');
+  const laws = require('../src/services/laws');
+
+  it('every generated key is a real section id, with a title', () => {
+    const ids = new Set(laws.allSections().map((s: any) => s.id));
+    [PLAIN_EN, PLAIN_TE, PLAIN_HI].forEach((m: any) =>
+      Object.entries(m).forEach(([id, v]: [string, any]) => {
+        expect(ids.has(id)).toBe(true);
+        expect(String(v.t).trim()).not.toBe('');
+      }),
+    );
+  });
+
+  it('plainTitle falls back to the legal title; ids are unique', () => {
+    const all = laws.allSections();
+    expect(new Set(all.map((s: any) => s.id)).size).toBe(all.length);
+    const s = all[0];
+    expect(laws.plainTitle({ ...s, plain: undefined }, 'te')).toBe(s.title);
+    expect(laws.plainTitle({ ...s, plain: { en: { t: 'Plain', x: '' } } }, 'te')).toBe('Plain');
+    expect(laws.plainTitle({ ...s, plain: { en: { t: 'Plain', x: '' }, te: { t: 'తెలుగు', x: '' } } }, 'te')).toBe('తెలుగు');
+  });
+});

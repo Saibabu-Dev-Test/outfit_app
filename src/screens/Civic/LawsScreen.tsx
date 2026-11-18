@@ -1,6 +1,8 @@
 // Laws tab: search Indian law sections by word, section number ("318", "318(4)") or old IPC number
 // ("ipc 420", "420"), offline from src/data/laws via services/laws.ts. Disclaimer always on top;
 // "Whom to contact" shows the national helplines (tap to call). Guidance only, not legal advice.
+// Each section shows a plain-language title first (app language + English), the legal title smaller,
+// and a simple explanation (data/laws/plain.*.ts, AI-written; the official text prevails).
 import React, { useMemo, useState } from 'react';
 import { FlatList, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -10,29 +12,44 @@ import { useAppLanguage } from '../../i18n/appLanguage';
 import { civicText } from '../../i18n/civicLabels';
 import { ACTS, ActId, LAW_DISCLAIMER } from '../../data/laws/acts';
 import { DEPT_CONTACTS, HELPLINES } from '../../data/laws/contacts';
-import { LawSection, searchLaws } from '../../services/laws';
+import { LawSection, plainTitle, searchLaws } from '../../services/laws';
+import { trCode } from './useCivicData';
+import { Bi } from './bi';
 import { callNumber, openLink } from './civicParts';
 
 function SectionCard({ s, lang, open, onToggle }: { s: LawSection; lang: ReturnType<typeof useAppLanguage>; open: boolean; onToggle: () => void }) {
   const T = (k: Parameters<typeof civicText>[1]) => civicText(lang, k);
+  const code = trCode(lang);
+  const local = code && s.plain ? s.plain[code] : undefined;
+  const enPlain = s.plain?.en;
+  const enTitle = plainTitle(s, 'en');
   return (
     <TouchableOpacity style={ui.card} activeOpacity={0.8} onPress={onToggle}>
-      <Text style={ui.h2}>
-        {s.act} {s.section} · {s.title}
+      <Bi en={enTitle} tr={local?.t} style={ui.h2} />
+      <Text style={[ui.muted, { fontSize: 12 }]}>
+        {s.act} {s.section}
+        {enTitle !== s.title ? ` · ${T('legalTitle')}: ${s.title}` : ''}
       </Text>
       {s.oldRef ? (
-        <Text style={ui.muted}>
+        <Text style={[ui.muted, { fontSize: 12 }]}>
           {T('oldLaw')}: {s.oldRef}
         </Text>
       ) : null}
-      <Text style={ui.body} numberOfLines={open ? undefined : 2}>
-        {s.summary}
-      </Text>
+      <View style={{ marginTop: 4 }}>
+        <Bi en={enPlain?.x || s.summary} tr={local?.x} lines={open ? undefined : 3} />
+      </View>
       {open ? (
         <View style={{ marginTop: 8 }}>
           {s.meaning ? <Text style={ui.body}>💡 {T('meaning')}: {s.meaning}</Text> : null}
           {s.examples && s.examples.length ? <Text style={ui.body}>📝 {T('examples')}: {s.examples.join(' • ')}</Text> : null}
-          {s.punishment ? <Text style={ui.body}>⚖️ {T('punishment')}: {s.punishment}</Text> : null}
+          {enPlain?.x && s.summary ? <Text style={[ui.muted, { marginBottom: 4 }]}>📜 {s.summary}</Text> : null}
+          {local?.p ? <Text style={ui.body}>⚖️ {T('punishment')}: {local.p}</Text> : null}
+          {s.punishment ? (
+            <Text style={local?.p ? ui.muted : ui.body}>
+              {local?.p ? '' : `⚖️ ${T('punishment')}: `}
+              {s.punishment}
+            </Text>
+          ) : null}
           {s.cognizable ? <Text style={ui.body}>🚓 {T('cognizable')}: {s.cognizable}</Text> : null}
           {s.bailable ? <Text style={ui.body}>🔓 {T('bail')}: {s.bailable}</Text> : null}
           {s.court ? <Text style={ui.body}>🏛️ {T('court')}: {s.court}</Text> : null}
@@ -63,6 +80,8 @@ export default function LawsScreen() {
       <View style={[ui.card, { borderColor: '#F5A623' }]}>
         <Text style={ui.h2}>⚠️ {T('disclaimer')}</Text>
         <Text style={ui.body}>{LAW_DISCLAIMER}</Text>
+        <Text style={[ui.muted, { marginTop: 4 }]}>🤖 {T('aiTranslated')}</Text>
+        {lang !== 'English' ? <Text style={ui.muted}>{civicText('English', 'aiTranslated')}</Text> : null}
       </View>
       <TouchableOpacity style={ui.card} onPress={() => setShowContacts(v => !v)} activeOpacity={0.8}>
         <Text style={ui.h2}>📞 {T('whomToContact')} {showContacts ? '▴' : '▾'}</Text>
