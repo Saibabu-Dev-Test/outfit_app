@@ -8,7 +8,7 @@
 //   GET  /cpxHash                    CPX secure_hash for the signed-in user
 //   cron '30 0 * * *' (daily)        pending earn credits past their hold -> approved (D1)
 //   /v1/civic/..., /v1/admin/civic   Govt / Hospitals tabs (civic/routes.js)
-//   cron '15 */2 * * *'              capped Gemini research for the civic tabs (civic/research.js)
+//   cron '*/20 * * * *'              capped Gemini research for the civic tabs (civic/research.js)
 // Secrets (wrangler secret put, never in git): BITLABS_SECRET, CPX_SECURE_HASH, OFFERWALL_GG_SECRET,
 // FIREBASE_SA_JSON, GEMINI_API_KEY (civic research; missing = civic AI off, routes still work). A handler whose secret is missing answers 503 'not configured'.
 import { handleBitlabsPostback, handleCpxPostback, handleOfferwallPostback } from './handler.js';
@@ -18,6 +18,7 @@ import { cpxHashFor, releaseHeld } from './earn.js';
 import * as api from './api.js';
 import * as civic from './civic/routes.js';
 import { runCivicResearch } from './civic/research.js';
+import { postCivicAsk, postCivicTranslate } from './civic/ask.js';
 import { PROJECT_ID, WORKER_VERSION } from './config.js';
 
 const CORS = {
@@ -69,6 +70,8 @@ const ROUTES = [
   ['GET', /^\/v1\/admin\/earnings$/, api.getAdminEarnings],
   ['GET', /^\/v1\/civic\/data$/, civic.getCivicData],
   ['POST', /^\/v1\/civic\/research$/, civic.postCivicResearch],
+  ['POST', /^\/v1\/civic\/ask$/, postCivicAsk],
+  ['POST', /^\/v1\/civic\/translate$/, postCivicTranslate],
   ['GET', /^\/v1\/civic\/reviews$/, civic.getCivicReviews],
   ['POST', /^\/v1\/civic\/reviews$/, civic.postCivicReview],
   ['POST', /^\/v1\/civic\/reports$/, civic.postCivicReport],
@@ -168,9 +171,9 @@ export async function handleRequest(request, env, ctx, { fetchImpl = fetch, now 
   }
 }
 
-export const CIVIC_CRON = '15 */2 * * *';
+export const CIVIC_CRON = '*/20 * * * *';
 
-// '15 */2 * * *' = civic research only. Every other cron (the daily '30 0 * * *') keeps the
+// CIVIC_CRON (every 20 minutes) = civic research only (prefill, capped by civicCaps). Every other cron (the daily '30 0 * * *') keeps the
 // original releaseHeld behaviour exactly as before.
 export async function handleScheduled(event, env, ctx, { fetchImpl = fetch, now = Date.now() } = {}) {
   if (!env.DB) {

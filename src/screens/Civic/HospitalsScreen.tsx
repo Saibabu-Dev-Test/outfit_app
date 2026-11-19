@@ -4,13 +4,16 @@
 // each item in the app language (Telugu / Hindi) AND English, people's reviews per hospital, and
 // "Hospital AI" that answers ONLY from the stored list (services/hospitalAi.ts). 108 / 112 always on
 // top; the AI never diagnoses and always says to verify with the hospital.
+// Fast: the saved list shows instantly (useCivicData cache: address, phone, timings, map link,
+// 24x7, schemes), each card in the app language with an English toggle; Hospital AI runs on the
+// Worker from the same stored list(s) in the app language + English (services/civicAi.ts).
 // Filter Government / Private / All, "Where to go for…" disease / speciality search over the loaded
 // public data (services/hospitalSearch.ts), and an optional facts-only order by the count of listed
 // specialities + facilities (never a rating). Per hospital: timings, 24x7, specialities, what it is
 // publicly stated to be special for, publicly listed specialist doctors (+ experience), facilities,
 // schemes, map link, source URLs; anything no public source states shows "Public info not available".
 import React, { useState } from 'react';
-import { Alert, RefreshControl, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { RefreshControl, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ui } from '../Earn/earnUi';
 import { colors } from '../../theme';
@@ -23,9 +26,13 @@ import { stateByCodeApp } from './stateName';
 import { HospData, HospVariant, Hospital, civicItem, getHospData } from '../../services/civicApi';
 import { factsCount, searchHospitals, sortByFacts } from '../../services/hospitalSearch';
 import { askHospitalAi, hospitalAiAvailable } from '../../services/hospitalAi';
-import { AiLanguage, AiTurn } from '../../services/aiStylist';
+import { AI_LANGUAGES, AiLanguage } from '../../services/aiStylist';
+import { askHospitals } from '../../services/civicAi';
+import { useCivicLabels } from '../../services/civicI18n';
+import { WorkerError } from '../../services/workerApi';
+import { CivicAskBox, Turn } from './civicAiParts';
 import { CivicStatus, PlacePicker, ReviewsBox, SourcesBox, callNumber, openLink, useCivicPlace } from './civicParts';
-import { Bi, biLabel } from './bi';
+import { Bi, CivicCard, biLabel } from './bi';
 import { useCivicData } from './useCivicData';
 
 type HospFilter = HospVariant | 'all';
@@ -66,7 +73,7 @@ function HospitalCard({
   const host = (u: string) => u.replace(/^https:\/\//, '').split('/')[0];
   const n = factsCount(h);
   return (
-    <View style={ui.card}>
+    <CivicCard lang={lang} hasTranslation={!!t}>
       <TouchableOpacity onPress={() => setOpen(v => !v)} activeOpacity={0.8}>
         <Bi en={h.name} tr={t?.name} style={ui.h2} />
         {kindLabel ? <Text style={[ui.muted, { fontSize: 12 }]}>🏷️ {kindLabel}</Text> : null}
@@ -154,7 +161,7 @@ function HospitalCard({
         ) : null}
       </View>
       {open ? <ReviewsBox lang={lang} item={item} userName={userName} myUid={myUid} /> : null}
-    </View>
+    </CivicCard>
   );
 }
 
@@ -167,28 +174,19 @@ export default function HospitalsScreen() {
   const [variant, setVariant] = useState<HospFilter>('govt');
   const [where, setWhere] = useState('');
   const [byFacts, setByFacts] = useState(false);
-  const [question, setQuestion] = useState('');
-  const [answer, setAnswer] = useState('');
-  const [asking, setAsking] = useState(false);
-  const [history, setHistory] = useState<AiTurn[]>([]);
+  useCivicLabels(lang);
   // One loader per kind; a loader whose kind is filtered out gets state '' (no request at all)
   const useGovt = variant === 'govt' || variant === 'all';
   const usePriv = variant === 'private' || variant === 'all';
-  const gov = useCivicData<HospData>('hosp', useGovt ? place.state : '', place.district, 'govt', lang, () => getHospData(place.state, 'govt', place.district));
-  const priv = useCivicData<HospData>('hosp', usePriv ? place.state : '', place.district, 'private', lang, () =>
-    getHospData(place.state, 'private', place.district),
+  const gov = useCivicData<HospData>('hosp', useGovt ? place.state : '', place.district, 'govt', lang, c => getHospData(place.state, 'govt', place.district, c));
+  const priv = useCivicData<HospData>('hosp', usePriv ? place.state : '', place.district, 'private', lang, c =>
+    getHospData(place.state, 'private', place.district, c),
   );
   const active = [...(useGovt ? [{ v: 'govt' as HospVariant, d: gov }] : []), ...(usePriv ? [{ v: 'private' as HospVariant, d: priv }] : [])];
   const refresh = () => active.forEach(a => a.d.refresh());
   const phase = active.some(a => a.d.phase === 'loading') ? 'loading' : active[0]?.d.phase;
   const anyRes = active.some(a => !!a.d.res);
   const placeKey = `${place.state}|${place.district}|${variant}`;
-  const [lastKey, setLastKey] = useState(placeKey);
-  if (lastKey !== placeKey) {
-    setLastKey(placeKey);
-    setAnswer('');
-    setHistory([]);
-  }
 
   const rows = active.flatMap(a => {
     const hs = a.d.res?.data?.hospitals || [];
@@ -198,25 +196,23 @@ export default function HospitalsScreen() {
   const list = rows.map(r => r.h);
   const found = where.trim() ? searchHospitals(list, where).map(m => ({ ...rows[list.indexOf(m.h)], matched: m.matched })) : rows.map(r => ({ ...r, matched: [] as string[] }));
   const shown = byFacts ? sortByFacts(found) : found;
-  const aiLang: AiLanguage = lang;
+  const workerAi = active.some(a => !!a.d.res?.aiConfigured);
+  // Old app path (on-phone key, English / Telugu / Hindi) only when the Worker has no /v1/civic/ask yet
+  const oldAiLang = (AI_LANGUAGES as string[]).includes(lang) ? (lang as AiLanguage) : null;
 
-  const ask = async () => {
-    const q = question.trim();
-    if (!q || !user?.id || !list.length) return;
-    setAsking(true);
+  const ask = async (q: string, history: Turn[]) => {
+    const variants = active.map(a => a.v);
     try {
-      const placeLabel = `${place.district ? `${place.district}, ` : ''}${stateByCodeApp(place.state)} (${
-        variant === 'govt' ? 'government' : variant === 'private' ? 'private' : 'government and private'
-      } hospitals)`;
-      const turns: AiTurn[] = [...history, { role: 'user' as const, text: q }].slice(-6);
-      const a = await askHospitalAi(user.id, placeLabel, list, turns, aiLang);
-      setAnswer(a);
-      setHistory([...turns, { role: 'model' as const, text: a }].slice(-6));
-      setQuestion('');
-    } catch (e: any) {
-      Alert.alert(T('askHospAi'), e?.message || T('error'));
-    } finally {
-      setAsking(false);
+      return await askHospitals(place.state, place.district, variants, q, lang, history);
+    } catch (e) {
+      if (e instanceof WorkerError && e.status === 404 && /not found/.test(e.message) && oldAiLang && user?.id && hospitalAiAvailable()) {
+        const placeLabel = `${place.district ? `${place.district}, ` : ''}${stateByCodeApp(place.state)} (${
+          variant === 'govt' ? 'government' : variant === 'private' ? 'private' : 'government and private'
+        } hospitals)`;
+        const a = await askHospitalAi(user.id, placeLabel, list, [...history, { role: 'user' as const, text: q }].slice(-6), oldAiLang);
+        return { answer: a, en: '' };
+      }
+      throw e;
     }
   };
 
@@ -262,6 +258,8 @@ export default function HospitalsScreen() {
                   hasData={(a.d.res?.data?.hospitals || []).length > 0}
                   aiConfigured={!!a.d.res?.aiConfigured}
                   errorText={a.d.errorText}
+                  aiNote={a.d.aiNote}
+                  fromCache={a.d.fromCache}
                 />
               </View>
             ))
@@ -288,26 +286,12 @@ export default function HospitalsScreen() {
         ) : null}
         {list.length ? (
           <>
-            <Text style={[ui.muted, { marginBottom: 8 }]}>⚠️ {T('verify')}{lang !== 'English' ? `\n${civicText('English', 'verify')}` : ''}</Text>
-            {hospitalAiAvailable() ? (
-              <View style={ui.card}>
-                <Text style={ui.h2}>🤖 {T('askHospAi')}</Text>
-                <Text style={ui.muted}>{T('hospAiNote')}</Text>
-                <TextInput
-                  style={ui.input}
-                  value={question}
-                  onChangeText={setQuestion}
-                  placeholder={T('askHospHint')}
-                  placeholderTextColor={colors.textMuted}
-                  maxLength={300}
-                  onSubmitEditing={ask}
-                  returnKeyType="send"
-                />
-                <TouchableOpacity style={[ui.btn, (asking || !question.trim()) && ui.btnOff]} disabled={asking || !question.trim()} onPress={ask}>
-                  <Text style={ui.btnText}>{asking ? '…' : T('ask')}</Text>
-                </TouchableOpacity>
-                {answer ? <Text style={[ui.body, { marginTop: 10 }]}>{answer}</Text> : null}
-              </View>
+            <Text style={[ui.muted, { marginBottom: 8 }]}>
+              ⚠️ {T('verify')}
+              {lang !== 'English' && T('verify') !== civicText('English', 'verify') ? `\n${civicText('English', 'verify')}` : ''}
+            </Text>
+            {workerAi || hospitalAiAvailable() ? (
+              <CivicAskBox key={placeKey} lang={lang} title={T('askHospAi')} note={T('hospAiNote')} hint={T('askHospHint')} onAsk={ask} />
             ) : null}
             {shown.map(r => (
               <HospitalCard

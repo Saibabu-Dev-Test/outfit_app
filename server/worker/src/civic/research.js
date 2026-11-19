@@ -1,14 +1,21 @@
 // Civic AI research (Govt + Hospitals + previous vs present government comparison). Google-Search-grounded Gemini answers are cleaned to a
 // fixed JSON shape and stored as ONE row per (kind, state, district, variant) in civic_data, with
-// the grounding source URLs (shown in the app) and a Telugu + Hindi copy in civic_data.i18n
-// (migration 0004). Neutral facts only: no AI ratings, no opinions.
-// Run by the `15 */2 * * *` cron AND on demand (POST /v1/civic/research) with hard caps so the free
-// Gemini tier and D1 stay safe:
-//   CIVIC_PER_RUN items per cron run, CIVIC_DAILY_MAX researched items per UTC day (usage key
-//   'civic_ai'), CIVIC_TR_DAILY_MAX translations per day ('civic_tr').
-// Order: districts users asked for (status 'pending') -> state rows never researched ->
-// rows saved with an older data shape (CIVIC_SCHEMA, migration 0005) -> stalest rows older than
-// CIVIC_REFRESH_MS -> rows in error older than CIVIC_RETRY_MS.
+// the grounding source URLs (shown in the app). Translations (11 Indian languages, TR_LANGS) are
+// stored one row per language in civic_i18n (migration 0006; old Telugu / Hindi copies in
+// civic_data.i18n are still read). Neutral facts only: no AI ratings, no opinions.
+// Speed: a Govt place is researched as 3 smaller grounded calls in parallel, and each part is
+// translated into the asked language as soon as it arrives (research + translation together),
+// translation itself split into small parallel chunks. Fast Flash-Lite models, a per-call timeout.
+// Run by the civic cron (CIVIC_CRON in index.js) AND on demand (POST /v1/civic/research) with hard
+// caps so the free Gemini tier and D1 stay safe (civicCaps: defaults below, each can be overridden
+// by a Worker var of the same name, e.g. CIVIC_DAILY_MAX = "200" in wrangler.toml [vars]):
+//   CIVIC_PER_RUN places per cron run, CIVIC_DAILY_MAX grounded research calls per UTC day (usage
+//   key 'civic_ai'), CIVIC_TR_DAILY_MAX translation calls per day ('civic_tr'), CIVIC_ASK_DAILY_MAX
+//   "Ask AI" / "Explain simply" calls per day ('civic_ask', routes.js).
+// Order: districts users asked for (status 'pending') -> state rows never researched -> the
+// districts of the app's bundled cities (districts.js, prefill) -> rows saved with an older data
+// shape (CIVIC_SCHEMA, migration 0005) -> stalest rows older than CIVIC_REFRESH_MS -> rows in
+// error older than CIVIC_RETRY_MS.
 // Kind 'gcmp' = neutral "previous vs present government" comparison per state + centre ('IN'):
 // schemes, budgets, major projects, schemes started / stopped, side by side; every point needs its
 // own https source URL + date or it is dropped; evaluative words are dropped; no verdict field exists.
@@ -16,19 +23,53 @@ import { CENTRE, STATES, placeByCode } from './states.js';
 import { geminiGenerate, isGeminiConfigured, parseJsonLoose } from './gemini.js';
 import { addUsage, usageFor } from '../db.js';
 import { utcDay } from '../days.js';
+import { SEED_DISTRICTS } from './districts.js';
 
-export const CIVIC_PER_RUN = 2;
-export const CIVIC_DAILY_MAX = 40;
-export const CIVIC_TR_DAILY_MAX = 120;
+// Free-tier budget (Gemini free tier, Nov 2026: Flash-Lite about 10 requests / minute and 500 / day
+// per model and project; grounded search is the scarce part). Calls, not places: a Govt place is 3
+// grounded calls, a hospital list or comparison 1.
+export const CIVIC_PER_RUN = 3; // places per cron run (run one after another, ~5 calls a burst)
+export const CIVIC_DAILY_MAX = 150; // grounded research calls per UTC day
+export const CIVIC_TR_DAILY_MAX = 300; // translation calls per UTC day
+export const CIVIC_ASK_DAILY_MAX = 300; // Ask AI / Explain simply calls per UTC day (all users)
 export const CIVIC_REFRESH_MS = 7 * 24 * 3600 * 1000;
 export const CIVIC_RETRY_MS = 20 * 60 * 1000;
 export const CIVIC_LOCK_MS = 3 * 60 * 1000;
 export const CIVIC_MAX_PENDING = 200;
+// Languages the cron translates ahead of time (others are translated the first time someone asks)
+export const CIVIC_CRON_LANGS = ['te', 'hi'];
+// Translation chunk: arrays longer than this are split, each chunk one small parallel call
+export const TR_CHUNK = 6;
 export const KINDS = { govt: [''], hosp: ['govt', 'private'], gcmp: [''] };
 // Data-shape version per kind (civic_data.schema_v). hosp 2 = timings, specialFor, doctors,
 // facilities, per-hospital sources. Older rows are re-researched by the cron (data kept until then).
 export const CIVIC_SCHEMA = { govt: 1, hosp: 2, gcmp: 1 };
-export const TR_LANGS = { te: 'Telugu', hi: 'Hindi' };
+// App language codes (src/i18n/appLanguage.ts) -> name used in prompts. English is the stored data.
+export const TR_LANGS = {
+  te: 'Telugu',
+  hi: 'Hindi',
+  ta: 'Tamil',
+  kn: 'Kannada',
+  ml: 'Malayalam',
+  mr: 'Marathi',
+  bn: 'Bengali',
+  gu: 'Gujarati',
+  pa: 'Punjabi (Gurmukhi script)',
+  or: 'Odia',
+  ur: 'Urdu',
+};
+
+// Caps with optional Worker var overrides (whole numbers only; anything else keeps the default)
+const capVar = (env, name, dflt, max) => {
+  const n = Math.floor(Number(env && env[name]));
+  return Number.isFinite(n) && n >= 0 && String(env[name]).trim() !== '' ? Math.min(n, max) : dflt;
+};
+export const civicCaps = env => ({
+  perRun: capVar(env, 'CIVIC_PER_RUN', CIVIC_PER_RUN, 8),
+  dailyMax: capVar(env, 'CIVIC_DAILY_MAX', CIVIC_DAILY_MAX, 1500),
+  trDailyMax: capVar(env, 'CIVIC_TR_DAILY_MAX', CIVIC_TR_DAILY_MAX, 3000),
+  askDailyMax: capVar(env, 'CIVIC_ASK_DAILY_MAX', CIVIC_ASK_DAILY_MAX, 3000),
+});
 
 const s = (v, max = 200) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, max) : typeof v === 'number' ? String(v) : '');
 const url = v => (typeof v === 'string' && /^https:\/\/[^\s"'<>]{3,300}$/.test(v.trim()) ? v.trim() : '');
@@ -251,6 +292,63 @@ export function researchPrompt(kind, variant, state, district) {
   ].join('\n');
 }
 
+// Govt research split into 3 smaller grounded calls run in parallel (faster than one big answer).
+// raw = keys of the model's JSON that part owns; keys = cleaned (cleanGovt) keys it fills.
+export const GOVT_PARTS = [
+  {
+    raw: ['asOf', 'overview', 'state', 'district', 'election'],
+    keys: ['asOf', 'overview', 'leaders', 'district', 'election'],
+    ask: (district) => [
+      'Collect: a short neutral overview, the state leaders (Governor, Chief Minister, Deputy CMs, ministers with portfolios), elections, and',
+      district
+        ? `the ${district.replace(/-/g, ' ')} district: District Collector, Superintendent of Police (or Commissioner of Police if a commissionerate), the Lok Sabha MP(s) whose constituency covers the district, and ALL MLAs of assembly constituencies in the district.`
+        : 'district fields may stay empty (state-level summary).',
+      'Reply with ONLY this JSON (no markdown):',
+      '{"asOf":"YYYY-MM","overview":"3-4 neutral sentences about the place (district HQ, population, main languages)",',
+      '"state":{"governor":"","chiefMinister":{"name":"","party":""},"deputyCMs":[{"name":"","party":"","role":"portfolios"}],"ministers":[{"name":"","party":"","role":"portfolios"}]},',
+      '"district":{"headquarters":"","collector":"","sp":"","policeCommissioner":"","mps":[{"name":"","constituency":"","party":""}],"mlas":[{"name":"","constituency":"","party":""}]},',
+      '"election":{"lastAssembly":"year + result in one neutral line","lastLokSabha":"year + one neutral line","next":"when the next elections are due","voterHelpline":"1950","ceoWebsite":"https://"}}',
+    ],
+  },
+  {
+    raw: ['offices', 'schemes', 'grievance'],
+    keys: ['offices', 'schemes', 'grievance'],
+    ask: () => [
+      'Collect: government offices people visit here (Collectorate, SP office, DMHO, RTO, municipal corporation), the major state AND central welfare schemes people here use (health, pensions, farmers, housing, education, women, food) with eligibility and how to apply, and grievance channels (CM helpline / state grievance portal as it exists in this state now, CPGRAMS pgportal.gov.in, district grievance day).',
+      'Reply with ONLY this JSON (no markdown):',
+      '{"offices":[{"name":"","what":"","address":"","phone":"","website":"https://"}],',
+      '"schemes":[{"name":"","level":"state|central","who":"eligibility","benefit":"","apply":"how to apply (office / portal / app)","website":"https://"}],',
+      '"grievance":[{"name":"","how":"","phone":"","website":"https://"}]}',
+    ],
+  },
+  {
+    raw: ['departments', 'services', 'helplines'],
+    keys: ['departments', 'services', 'helplines'],
+    ask: () => [
+      'Collect: the main government departments (what each does, website, helpline), common citizen services (certificates, land records, ration card etc.: how to get them, website), and helpline numbers.',
+      'Reply with ONLY this JSON (no markdown):',
+      '{"departments":[{"name":"","what":"","website":"https://","helpline":""}],"services":[{"name":"","how":"","website":"https://"}],"helplines":[{"name":"","number":""}]}',
+    ],
+  },
+];
+
+export function researchPrompts(kind, variant, state, district) {
+  if (kind !== 'govt') {
+    return [researchPrompt(kind, variant, state, district)];
+  }
+  const where = placeName(state, district);
+  const today = new Date().toISOString().slice(0, 10);
+  return GOVT_PARTS.map(part =>
+    [
+      `Today is ${today}. Using Google Search, collect current, factual public information for ${where}.`,
+      'Neutral facts only: no opinions, no praise or criticism, no ratings. Party names only as plain facts next to each elected person.',
+      'Prefer official sources (.gov.in, .nic.in, state portals, district NIC sites, ECI). Use the CURRENT office holders as of today.',
+      'If you are not sure of a value (a name, a phone number, a website), leave it empty "" instead of guessing. Never invent phone numbers.',
+      ...part.ask(district),
+    ].join('\n'),
+  );
+}
+
 // Text fields the translation keeps (everything else comes from the English row)
 export function translatePrompt(kind, data, langName) {
   return [
@@ -290,6 +388,107 @@ export function keepFixed(en, tr) {
   return tr;
 }
 
+// Never translated: copied from English (all kinds, incl. Govt numbers / portals / scheme level)
+const ALIGN_FIXED = new Set([...FIXED_KEYS, 'level', 'number', 'helpline', 'voterHelpline', 'ceoWebsite', 'asOf']);
+
+/**
+ * The translated copy in EXACTLY the English shape (pure: tested): same keys, same array lengths;
+ * text from the translation (cleaned, length-capped) or '' where the translation has none (the app
+ * then shows the English text); URLs, phones, dates, numbers, booleans always from English.
+ */
+export function alignTranslation(en, tr) {
+  if (Array.isArray(en)) {
+    const t = Array.isArray(tr) ? tr : [];
+    return en.map((v, i) => alignTranslation(v, t[i]));
+  }
+  if (en && typeof en === 'object') {
+    const t = tr && typeof tr === 'object' && !Array.isArray(tr) ? tr : {};
+    const out = {};
+    Object.keys(en).forEach(k => {
+      out[k] = ALIGN_FIXED.has(k) ? en[k] : alignTranslation(en[k], t[k]);
+    });
+    return out;
+  }
+  if (typeof en === 'string') {
+    if (!en.trim() || typeof tr !== 'string') {
+      return '';
+    }
+    return s(tr, Math.min(2000, Math.max(80, en.length * 3)));
+  }
+  return en;
+}
+
+// How many non-empty translatable strings a copy has (fixed fields like URLs / phones not counted;
+// 0 = nothing to translate / nothing usable)
+export const textCount = v =>
+  Array.isArray(v)
+    ? v.reduce((n, x) => n + textCount(x), 0)
+    : v && typeof v === 'object'
+    ? Object.entries(v).reduce((n, [k, x]) => n + (ALIGN_FIXED.has(k) ? 0 : textCount(x)), 0)
+    : typeof v === 'string' && v.trim()
+    ? 1
+    : 0;
+
+// Small chunks for parallel translation calls (pure: tested). Arrays longer than `size` are split
+// into slices; everything else rides in the first chunk. mergeParts() puts them back in order.
+export function splitForTranslation(data, size = TR_CHUNK) {
+  const misc = {};
+  const parts = [];
+  Object.entries(obj(data)).forEach(([k, v]) => {
+    if (Array.isArray(v) && v.length > size) {
+      for (let i = 0; i < v.length; i += size) {
+        parts.push({ [k]: v.slice(i, i + size) });
+      }
+    } else {
+      misc[k] = v;
+    }
+  });
+  return Object.keys(misc).length ? [misc, ...parts] : parts;
+}
+
+export function mergeParts(parts) {
+  const out = {};
+  parts.forEach(p =>
+    Object.entries(obj(p)).forEach(([k, v]) => {
+      if (Array.isArray(v)) {
+        out[k] = (Array.isArray(out[k]) ? out[k] : []).concat(v);
+      } else if (out[k] === undefined) {
+        out[k] = v;
+      }
+    }),
+  );
+  return out;
+}
+
+// Translate English civic data into one language: small chunks in parallel, each aligned to its
+// English chunk. -> { ok, data, calls, model } | { ok: false, error, code, calls }
+export async function translateData(env, kind, data, lang, { fetchImpl = fetch } = {}) {
+  if (!TR_LANGS[lang]) {
+    return { ok: false, error: 'bad lang', calls: 0 };
+  }
+  if (!textCount(data)) {
+    // Nothing to translate (e.g. a Govt part with empty lists): no call
+    return { ok: true, data: alignTranslation(data, {}), calls: 0 };
+  }
+  const chunks = splitForTranslation(data).filter(c => textCount(c) > 0);
+  const results = await Promise.all(
+    chunks.map(async chunk => {
+      const r = await geminiGenerate(env, { prompt: translatePrompt(kind, chunk, TR_LANGS[lang]), jsonOut: true, maxTokens: 8000, temperature: 0.1 }, { fetchImpl });
+      const parsed = r.ok ? parseJsonLoose(r.text) : null;
+      return { r, tr: parsed ? alignTranslation(chunk, parsed) : null };
+    }),
+  );
+  const bad = results.find(x => !x.tr);
+  if (bad) {
+    return { ok: false, error: bad.r.ok ? 'unreadable translation' : bad.r.error, code: bad.r.code, calls: chunks.length };
+  }
+  const tr = alignTranslation(data, mergeParts(results.map(x => x.tr)));
+  if (!textCount(tr)) {
+    return { ok: false, error: 'unreadable translation', calls: chunks.length };
+  }
+  return { ok: true, data: tr, calls: chunks.length, model: results[0] && results[0].r.model };
+}
+
 const cleanFor = (kind, parsed, where = '') => (kind === 'govt' ? cleanGovt(parsed) : kind === 'gcmp' ? cleanCompare(parsed) : cleanHosp(parsed, where));
 
 const isEmpty = (kind, data) =>
@@ -298,70 +497,133 @@ const isEmpty = (kind, data) =>
   (kind === 'gcmp' && !data.rows.length) ||
   (kind === 'govt' && !data.overview && !data.departments.length && !data.leaders.chiefMinister.name && !data.schemes.length);
 
+const where4 = 'kind = ? AND state = ? AND district = ? AND variant = ?';
+const binds4 = t => [t.kind, t.state, t.district, t.variant];
+
 const lockRow = async (db, t, now) => {
   // Insert a placeholder (pending) if needed, then take the lock only when free or stale
   await db.run(
     "INSERT OR IGNORE INTO civic_data (kind, state, district, variant, status, updated_at) VALUES (?, ?, ?, ?, 'pending', ?)",
     t.kind, t.state, t.district, t.variant, now,
   );
-  const r = await db.run(
-    'UPDATE civic_data SET running_at = ? WHERE kind = ? AND state = ? AND district = ? AND variant = ? AND (running_at IS NULL OR running_at < ?)',
-    now, t.kind, t.state, t.district, t.variant, now - CIVIC_LOCK_MS,
-  );
+  const r = await db.run(`UPDATE civic_data SET running_at = ? WHERE ${where4} AND (running_at IS NULL OR running_at < ?)`, now, ...binds4(t), now - CIVIC_LOCK_MS);
   return Number((r && r.meta && (r.meta.changes ?? r.meta.rows_written)) || 0) > 0;
 };
 
-const unlock = (db, t) =>
-  db.run('UPDATE civic_data SET running_at = NULL WHERE kind = ? AND state = ? AND district = ? AND variant = ?', t.kind, t.state, t.district, t.variant);
+const unlock = (db, t) => db.run(`UPDATE civic_data SET running_at = NULL WHERE ${where4}`, ...binds4(t));
 
-// Translate the stored English data of one row into one language (te | hi) and save it in i18n
+const saveTranslation = (db, t, lang, data, now) =>
+  db.run(
+    `INSERT INTO civic_i18n (kind, state, district, variant, lang, data, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT (kind, state, district, variant, lang) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at`,
+    ...binds4(t), lang, JSON.stringify(data), now,
+  );
+
+// Translated copies of one row: civic_i18n first, the old civic_data.i18n column (te / hi) after.
+export async function readI18n(db, t, langs, oldCol = null) {
+  const want = [...new Set(langs.filter(l => TR_LANGS[l]))];
+  const out = {};
+  if (!want.length) {
+    return out;
+  }
+  const rows = await db.all(`SELECT lang, data FROM civic_i18n WHERE ${where4} AND lang IN (${want.map(() => '?').join(',')})`, ...binds4(t), ...want);
+  rows.forEach(r => {
+    const d = parseJsonCol(r.data, null);
+    if (d) {
+      out[r.lang] = d;
+    }
+  });
+  const old = parseJsonCol(oldCol, {});
+  want.forEach(l => {
+    if (!out[l] && old[l]) {
+      out[l] = old[l];
+    }
+  });
+  return out;
+}
+
+// Translate the stored English data of one row into one language and save it (civic_i18n)
 export async function translateOne(db, env, t, lang, { fetchImpl = fetch, now = Date.now() } = {}) {
   if (!TR_LANGS[lang]) {
     return { ok: false, error: 'bad lang' };
   }
-  const row = await db.first('SELECT data, i18n FROM civic_data WHERE kind = ? AND state = ? AND district = ? AND variant = ?', t.kind, t.state, t.district, t.variant);
+  const row = await db.first(`SELECT data FROM civic_data WHERE ${where4}`, ...binds4(t));
   const data = row ? parseJsonCol(row.data, null) : null;
   if (!data) {
     return { ok: false, error: 'no data yet' };
   }
-  const r = await geminiGenerate(env, { prompt: translatePrompt(t.kind, data, TR_LANGS[lang]), jsonOut: true, maxTokens: 24000, temperature: 0.1 }, { fetchImpl });
-  await addUsage(db, utcDay(now), 'civic_tr', 1);
+  const r = await translateData(env, t.kind, data, lang, { fetchImpl });
+  if (r.calls) {
+    await addUsage(db, utcDay(now), 'civic_tr', r.calls);
+  }
   if (!r.ok) {
-    return { ok: false, error: r.error };
+    return { ok: false, error: r.error, code: r.code };
   }
-  const parsed = parseJsonLoose(r.text);
-  const tr = parsed ? cleanFor(t.kind, t.kind === 'govt' ? parsed : keepFixed(data, parsed)) : null;
-  if (isEmpty(t.kind, tr)) {
-    return { ok: false, error: 'unreadable translation' };
-  }
-  // Re-read so a parallel translation of the other language is not lost
-  const cur = await db.first('SELECT i18n FROM civic_data WHERE kind = ? AND state = ? AND district = ? AND variant = ?', t.kind, t.state, t.district, t.variant);
-  const i18n = { ...parseJsonCol(cur && cur.i18n, {}), [lang]: tr };
-  await db.run('UPDATE civic_data SET i18n = ? WHERE kind = ? AND state = ? AND district = ? AND variant = ?', JSON.stringify(i18n), t.kind, t.state, t.district, t.variant);
+  await saveTranslation(db, t, lang, r.data, now);
   return { ok: true, lang, model: r.model };
 }
 
-// Research one target in English (grounded). opts.translate: also translate into te + hi after.
-export async function researchOne(db, env, { kind, state, district = '', variant = '' }, { fetchImpl = fetch, now = Date.now(), translate = false } = {}) {
+/**
+ * Research one target in English (grounded; Govt = 3 parallel parts). opts.langs: languages to
+ * translate into TOGETHER with the research (each part is translated the moment it arrives).
+ * opts.translate (legacy): true = the cron languages (CIVIC_CRON_LANGS).
+ */
+export async function researchOne(db, env, { kind, state, district = '', variant = '' }, { fetchImpl = fetch, now = Date.now(), translate = false, langs = null } = {}) {
   const st = placeByCode(state, kind);
   if (!st || !KINDS[kind] || !KINDS[kind].includes(variant) || (kind === 'gcmp' && district)) {
     return { ok: false, error: 'bad target' };
   }
   const t = { kind, state, district, variant };
   const where = placeName(st, district);
-  const r = await geminiGenerate(env, { prompt: researchPrompt(kind, variant, st, district), grounded: true, maxTokens: 16000 }, { fetchImpl });
-  await addUsage(db, utcDay(now), 'civic_ai', 1);
-  let data = null;
-  let error = r.ok ? '' : r.error;
-  if (r.ok) {
-    const parsed = parseJsonLoose(r.text);
-    data = parsed ? cleanFor(kind, parsed, where) : null;
-    if (isEmpty(kind, data)) {
-      data = null;
-      error = 'empty or unreadable answer';
-    }
+  const toLangs = [...new Set((langs || (translate ? CIVIC_CRON_LANGS : [])).filter(l => TR_LANGS[l]))];
+  const prompts = researchPrompts(kind, variant, st, district);
+  let trCalls = 0;
+  const parts = await Promise.all(
+    prompts.map(async (prompt, i) => {
+      const r = await geminiGenerate(env, { prompt, grounded: true, maxTokens: kind === 'govt' ? 8000 : 16000 }, { fetchImpl });
+      const parsed = r.ok ? parseJsonLoose(r.text) : null;
+      const gp = kind === 'govt' ? GOVT_PARTS[i] : null;
+      const raw = parsed && gp ? Object.fromEntries(gp.raw.filter(k => k in obj(parsed)).map(k => [k, parsed[k]])) : parsed;
+      const tr = {};
+      if (raw && toLangs.length) {
+        const clean = cleanFor(kind, raw, where);
+        const en = gp ? Object.fromEntries(gp.keys.map(k => [k, clean[k]])) : clean;
+        await Promise.all(
+          toLangs.map(async lang => {
+            const x = await translateData(env, kind, en, lang, { fetchImpl });
+            trCalls += x.calls || 0;
+            if (x.ok) {
+              tr[lang] = x.data;
+            }
+          }),
+        );
+      }
+      return { r, raw, tr };
+    }),
+  );
+  const day = utcDay(now);
+  await addUsage(db, day, 'civic_ai', prompts.length);
+  if (trCalls) {
+    await addUsage(db, day, 'civic_tr', trCalls);
+  }
+  const okParts = parts.filter(p => p.raw);
+  let data = okParts.length ? cleanFor(kind, kind === 'govt' ? Object.assign({}, ...okParts.map(p => p.raw)) : okParts[0].raw, where) : null;
+  const failed = parts.find(p => !p.r.ok) || parts.find(p => !p.raw);
+  let error = '';
+  if (isEmpty(kind, data)) {
+    data = null;
+    error = failed ? (failed.r.ok ? 'empty or unreadable answer' : failed.r.error) : 'empty or unreadable answer';
   }
   if (data) {
+    const sources = [];
+    parts.forEach(p =>
+      ((p.r.ok && p.r.sources) || []).forEach(x => {
+        if (!sources.some(y => y.url === x.url) && sources.length < 12) {
+          sources.push(x);
+        }
+      }),
+    );
+    const model = (okParts[0] && okParts[0].r.model) || '';
     // New English data: old translations no longer match, so they are dropped (re-translated next)
     await db.run(
       `INSERT INTO civic_data (kind, state, district, variant, data, sources, ai_stars, status, error, model, updated_at, i18n, schema_v)
@@ -369,14 +631,16 @@ export async function researchOne(db, env, { kind, state, district = '', variant
        ON CONFLICT (kind, state, district, variant) DO UPDATE SET data = excluded.data, sources = excluded.sources,
          ai_stars = NULL, status = 'ok', error = NULL, model = excluded.model, updated_at = excluded.updated_at, i18n = NULL,
          schema_v = excluded.schema_v`,
-      kind, state, district, variant, JSON.stringify(data), JSON.stringify(r.sources || []), r.model, now, CIVIC_SCHEMA[kind] || 1,
+      kind, state, district, variant, JSON.stringify(data), JSON.stringify(sources), model, now, CIVIC_SCHEMA[kind] || 1,
     );
-    const out = { ok: true, model: r.model };
-    if (translate) {
-      out.translated = [];
-      for (const lang of Object.keys(TR_LANGS)) {
-        const tr = await translateOne(db, env, t, lang, { fetchImpl, now });
-        if (tr.ok) {
+    await db.run(`DELETE FROM civic_i18n WHERE ${where4}`, ...binds4(t));
+    const out = { ok: true, model, translated: [] };
+    for (const lang of toLangs) {
+      // Every part that has data must have its translation, else that language waits for a retry
+      if (okParts.every(p => p.tr[lang])) {
+        const merged = alignTranslation(data, Object.assign({}, ...okParts.map(p => p.tr[lang])));
+        if (textCount(merged)) {
+          await saveTranslation(db, t, lang, merged, now);
           out.translated.push(lang);
         }
       }
@@ -390,19 +654,21 @@ export async function researchOne(db, env, { kind, state, district = '', variant
        error = excluded.error, updated_at = CASE WHEN civic_data.data IS NULL THEN excluded.updated_at ELSE civic_data.updated_at END`,
     kind, state, district, variant, String(error).slice(0, 300), now,
   );
-  return { ok: false, error };
+  return { ok: false, error, code: failed && failed.r.code };
 }
 
-// On demand (a user opened a place): research it now if it has no data, else translate the missing
-// language. Locked per row (one run at a time) and inside the same daily caps as the cron.
+// On demand (a user opened a place): research it now (with the user's language in the same run) if
+// it has no data, else translate the missing language. Locked per row (one run at a time) and inside
+// the same daily caps as the cron.
 export async function researchNow(db, env, t, lang, { fetchImpl = fetch, now = Date.now() } = {}) {
   if (!isGeminiConfigured(env)) {
-    return { ok: false, status: 'ai_off', error: 'GEMINI_API_KEY not set' };
+    return { ok: false, status: 'ai_off', error: 'GEMINI_API_KEY not set', code: 'config' };
   }
-  const row = await db.first('SELECT data, i18n, status, updated_at, running_at FROM civic_data WHERE kind = ? AND state = ? AND district = ? AND variant = ?', t.kind, t.state, t.district, t.variant);
+  const caps = civicCaps(env);
+  const row = await db.first(`SELECT data, i18n, status, updated_at, running_at FROM civic_data WHERE ${where4}`, ...binds4(t));
   const hasData = !!(row && row.data);
-  const i18n = parseJsonCol(row && row.i18n, {});
-  const needTr = hasData && TR_LANGS[lang] && !i18n[lang];
+  const have = hasData && TR_LANGS[lang] ? await readI18n(db, t, [lang], row.i18n) : {};
+  const needTr = hasData && !!TR_LANGS[lang] && !have[lang];
   if (hasData && !needTr) {
     return { ok: true, status: 'ok', did: 'nothing' };
   }
@@ -411,18 +677,20 @@ export async function researchNow(db, env, t, lang, { fetchImpl = fetch, now = D
   }
   const day = utcDay(now);
   const used = await usageFor(db, day, ['civic_ai', 'civic_tr']);
-  if (!hasData && used.civic_ai >= CIVIC_DAILY_MAX) {
-    return { ok: false, status: 'pending', error: 'daily cap reached' };
+  const calls = t.kind === 'govt' ? GOVT_PARTS.length : 1;
+  if (!hasData && used.civic_ai + calls > caps.dailyMax) {
+    return { ok: false, status: 'pending', error: 'daily cap reached', code: 'cap' };
   }
-  if (needTr && used.civic_tr >= CIVIC_TR_DAILY_MAX) {
-    return { ok: false, status: 'ok', error: 'daily translation cap reached' };
+  if (needTr && used.civic_tr >= caps.trDailyMax) {
+    return { ok: false, status: 'ok', error: 'daily translation cap reached', code: 'cap' };
   }
   if (!(await lockRow(db, t, now))) {
     return { ok: true, status: 'running', did: 'already running' };
   }
   try {
     if (!hasData) {
-      const r = await researchOne(db, env, t, { fetchImpl, now });
+      const withLang = TR_LANGS[lang] && used.civic_tr < caps.trDailyMax ? [lang] : [];
+      const r = await researchOne(db, env, t, { fetchImpl, now, langs: withLang });
       return { ...r, status: r.ok ? 'ok' : 'error', did: 'research' };
     }
     const r = await translateOne(db, env, t, lang, { fetchImpl, now });
@@ -433,7 +701,7 @@ export async function researchNow(db, env, t, lang, { fetchImpl = fetch, now = D
 }
 
 // Which targets the next run should research, best first (pure: tested)
-export function pickTargets(rows, now, n) {
+export function pickTargets(rows, now, n, seeds = SEED_DISTRICTS) {
   const key = (k, st, d, v) => `${k}|${st}|${d}|${v}`;
   const byKey = new Map(rows.map(r => [key(r.kind, r.state, r.district || '', r.variant || ''), r]));
   const free = r => !r.running_at || now - Number(r.running_at) > CIVIC_LOCK_MS;
@@ -452,6 +720,20 @@ export function pickTargets(rows, now, n) {
   if (!byKey.has(key('gcmp', CENTRE.code, '', ''))) {
     missing.push({ kind: 'gcmp', state: CENTRE.code, district: '', variant: '' });
   }
+  // Prefill: districts of the app's bundled cities (Govt + both hospital lists), state by state
+  STATES.forEach(st =>
+    ((seeds && seeds[st.code]) || []).forEach(district =>
+      [
+        ['govt', ''],
+        ['hosp', 'govt'],
+        ['hosp', 'private'],
+      ].forEach(([kind, variant]) => {
+        if (!byKey.has(key(kind, st.code, district, variant))) {
+          missing.push({ kind, state: st.code, district, variant });
+        }
+      }),
+    ),
+  );
   // Rows saved with an older data shape (e.g. hospitals before v2): re-research, oldest first
   const outdated = rows
     .filter(r => r.status === 'ok' && free(r) && KINDS[r.kind] && Number(r.schema_v || 1) < (CIVIC_SCHEMA[r.kind] || 1))
@@ -473,40 +755,57 @@ export function pickTargets(rows, now, n) {
     .slice(0, Math.max(0, n));
 }
 
-export async function runCivicResearch(db, env, { fetchImpl = fetch, now = Date.now(), perRun = CIVIC_PER_RUN, dailyMax = CIVIC_DAILY_MAX, translate = true } = {}) {
+const callsFor = t => (t.kind === 'govt' ? GOVT_PARTS.length : 1);
+
+export async function runCivicResearch(db, env, { fetchImpl = fetch, now = Date.now(), perRun, dailyMax, translate = true } = {}) {
   if (!isGeminiConfigured(env)) {
     return { ran: 0, skipped: 'GEMINI_API_KEY not set' };
   }
-  const used = await usageFor(db, utcDay(now), ['civic_ai', 'civic_tr']);
-  const n = Math.min(perRun, dailyMax - used.civic_ai);
+  const caps = civicCaps(env);
+  const maxCalls = dailyMax === undefined ? caps.dailyMax : dailyMax;
+  const places = perRun === undefined ? caps.perRun : perRun;
+  const day = utcDay(now);
+  const used = await usageFor(db, day, ['civic_ai', 'civic_tr']);
+  let aiLeft = maxCalls - used.civic_ai;
   const results = [];
-  if (n > 0) {
+  if (aiLeft > 0 && places > 0) {
     const rows = await db.all('SELECT kind, state, district, variant, status, updated_at, running_at, schema_v FROM civic_data');
-    const targets = pickTargets(rows, now, n);
+    const targets = pickTargets(rows, now, places);
+    // One place after another (each place's own calls run in parallel): stays under the per-minute limit
     for (const t of targets) {
-      const tr = translate && used.civic_tr + results.length * 2 < CIVIC_TR_DAILY_MAX;
+      if (callsFor(t) > aiLeft) {
+        break;
+      }
+      aiLeft -= callsFor(t);
+      const trUsed = (await usageFor(db, day, ['civic_tr'])).civic_tr;
+      const tr = translate && trUsed < caps.trDailyMax;
       results.push({ ...t, ...(await researchOne(db, env, t, { fetchImpl, now, translate: tr })) });
     }
   }
-  // Rows with English data but no translation yet (e.g. researched on demand): one per run
+  // Rows with English data but no cron-language copy yet (e.g. researched on demand): one per run
   if (translate) {
-    const left = await usageFor(db, utcDay(now), ['civic_tr']);
-    if (left.civic_tr < CIVIC_TR_DAILY_MAX) {
-      const rows = await db.all("SELECT kind, state, district, variant, i18n FROM civic_data WHERE status = 'ok' AND data IS NOT NULL ORDER BY updated_at DESC LIMIT 50");
-      const todo = rows.find(r => {
-        const i = parseJsonCol(r.i18n, {});
-        return !i.te || !i.hi;
-      });
-      if (todo) {
-        const i = parseJsonCol(todo.i18n, {});
-        const lang = !i.te ? 'te' : 'hi';
-        const t = { kind: todo.kind, state: todo.state, district: todo.district || '', variant: todo.variant || '' };
-        results.push({ ...t, translate: lang, ...(await translateOne(db, env, t, lang, { fetchImpl, now })) });
+    const left = await usageFor(db, day, ['civic_tr']);
+    if (left.civic_tr < caps.trDailyMax) {
+      const rows = await db.all("SELECT kind, state, district, variant, i18n FROM civic_data WHERE status = 'ok' AND data IS NOT NULL ORDER BY updated_at DESC LIMIT 30");
+      const marks = CIVIC_CRON_LANGS.map(() => '?').join(',');
+      const done = new Set(
+        (await db.all(`SELECT kind, state, district, variant, lang FROM civic_i18n WHERE lang IN (${marks})`, ...CIVIC_CRON_LANGS)).map(
+          x => `${x.kind}|${x.state}|${x.district || ''}|${x.variant || ''}|${x.lang}`,
+        ),
+      );
+      for (const r of rows) {
+        const t = { kind: r.kind, state: r.state, district: r.district || '', variant: r.variant || '' };
+        const old = parseJsonCol(r.i18n, {});
+        const lang = CIVIC_CRON_LANGS.find(l => !old[l] && !done.has(`${t.kind}|${t.state}|${t.district}|${t.variant}|${l}`));
+        if (lang) {
+          results.push({ ...t, translate: lang, ...(await translateOne(db, env, t, lang, { fetchImpl, now })) });
+          break;
+        }
       }
     }
   }
   if (!results.length) {
-    return { ran: 0, skipped: n <= 0 ? 'daily cap reached' : 'nothing to do' };
+    return { ran: 0, skipped: aiLeft <= 0 ? 'daily cap reached' : 'nothing to do' };
   }
   return { ran: results.length, results };
 }

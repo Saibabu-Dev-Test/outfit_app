@@ -166,8 +166,8 @@ describe('shared civic constants', () => {
 
   it('wrangler keeps the daily cron and adds the civic cron; no secret values', () => {
     const toml = fsMod.readFileSync(pathMod.join(ROOT, 'server/worker/wrangler.toml'), 'utf8');
-    expect(toml).toMatch(/crons = \["30 0 \* \* \*", "15 \*\/2 \* \* \*"\]/);
-    expect(CIVIC_CRON).toBe('15 */2 * * *');
+    expect(toml).toMatch(/crons = \["30 0 \* \* \*", "\*\/20 \* \* \* \*"\]/);
+    expect(CIVIC_CRON).toBe('*/20 * * * *');
     expect(toml).not.toMatch(/GEMINI_API_KEY\s*=|AIza/);
   });
 });
@@ -190,7 +190,7 @@ describe('moderation + gemini helpers', () => {
 
   it('missing key -> graceful not configured, no fetch', async () => {
     const f = makeFetch();
-    expect(await geminiGenerate({}, { prompt: 'x' }, { fetchImpl: f })).toEqual({ ok: false, error: 'not configured' });
+    expect(await geminiGenerate({}, { prompt: 'x' }, { fetchImpl: f })).toEqual({ ok: false, error: 'not configured', code: 'config' });
     expect(f).not.toHaveBeenCalled();
   });
 
@@ -326,14 +326,19 @@ describe('on-demand research', () => {
     expect(pend.json.status).toBe('pending');
     const r1 = await call(e, 'POST', '/v1/civic/research', { body });
     expect(r1.json).toMatchObject({ ok: true, status: 'ok', did: 'research', district: 'kurnool' });
+    // the asked language is translated in the same run as the research
+    expect(r1.json.translated).toEqual(['te']);
     const d1 = await call(e, 'GET', '/v1/civic/data?kind=hosp&state=AP&district=kurnool&variant=govt');
     expect(d1.json.status).toBe('ok');
-    expect(d1.json.i18n.te).toBeNull();
-    const r2 = await call(e, 'POST', '/v1/civic/research', { body });
-    expect(r2.json).toMatchObject({ ok: true, did: 'translate', lang: 'te' });
-    const d2 = await call(e, 'GET', '/v1/civic/data?kind=hosp&state=AP&district=kurnool&variant=govt');
-    expect(d2.json.i18n.te.hospitals[0].name).toBe('TR NIMS');
-    expect(d2.json.i18n.te.hospitals[0].phone).toBe('040-23489000');
+    expect(d1.json.i18n.te.hospitals[0].name).toBe('TR NIMS');
+    expect(d1.json.i18n.te.hospitals[0].phone).toBe('040-23489000');
+    expect(d1.json.i18n.hi).toBeNull();
+    // another app language (Tamil) is translated on request and served with ?lang=ta
+    const r2 = await call(e, 'POST', '/v1/civic/research', { body: { ...body, lang: 'ta' } });
+    expect(r2.json).toMatchObject({ ok: true, did: 'translate', lang: 'ta' });
+    const d2 = await call(e, 'GET', '/v1/civic/data?kind=hosp&state=AP&district=kurnool&variant=govt&lang=ta');
+    expect(d2.json.i18n.ta.hospitals[0].name).toBe('TR NIMS');
+    expect(d2.json.i18n.ta.hospitals[0].mapUrl).toBe(d2.json.data.hospitals[0].mapUrl);
     const r3 = await call(e, 'POST', '/v1/civic/research', { body });
     expect(r3.json.did).toBe('nothing');
 
@@ -380,7 +385,7 @@ describe('research cron', () => {
       { kind: 'govt', state: 'TG', district: 'hyderabad', variant: '', status: 'pending', updated_at: NOW },
       { kind: 'govt', state: 'AP', district: '', variant: '', status: 'ok', updated_at: NOW - research.CIVIC_REFRESH_MS - 1 },
     ];
-    const t = research.pickTargets(rows, NOW, 200);
+    const t = research.pickTargets(rows, NOW, 200, {});
     expect(t[0]).toEqual({ kind: 'govt', state: 'TG', district: 'hyderabad', variant: '' });
     expect(t[1]).toEqual({ kind: 'hosp', state: 'AP', district: '', variant: 'govt' }); // AP govt row exists
     expect(t[t.length - 1]).toEqual({ kind: 'govt', state: 'AP', district: '', variant: '' });
@@ -399,13 +404,19 @@ describe('research cron', () => {
     await handleScheduled({ cron: CIVIC_CRON }, e, null, { fetchImpl: f, now: NOW });
     const rows = e.DB.raw.prepare('SELECT COUNT(*) AS n FROM civic_data').get();
     expect(Number(rows.n)).toBe(research.CIVIC_PER_RUN);
+    // AP govt (3 parallel grounded parts) + AP govt hospitals + AP private hospitals
     const used = e.DB.raw.prepare("SELECT key, n FROM usage WHERE key IN ('civic_ai','civic_tr')").all();
-    expect(used.find((u: any) => u.key === 'civic_ai').n).toBe(research.CIVIC_PER_RUN);
+    expect(used.find((u: any) => u.key === 'civic_ai').n).toBe(5);
+    // te + hi translated together with the research (cron languages)
+    const i18n = e.DB.raw.prepare("SELECT lang FROM civic_i18n WHERE kind='hosp' AND state='AP' AND variant='govt' ORDER BY lang").all();
+    expect(i18n.map((x: any) => x.lang)).toEqual(['hi', 'te']);
 
     const db = new Db(e.DB);
-    const r = await research.runCivicResearch(db, e, { fetchImpl: f, now: NOW, perRun: 100, dailyMax: research.CIVIC_PER_RUN + 2, translate: false });
-    expect(r.ran).toBe(2);
-    expect((await research.runCivicResearch(db, e, { fetchImpl: f, now: NOW, dailyMax: research.CIVIC_PER_RUN + 2, translate: false })).skipped).toBe('daily cap reached');
+    // 2 calls left today: AP comparison (1 call) fits, AR govt (3 calls) does not
+    const r = await research.runCivicResearch(db, e, { fetchImpl: f, now: NOW, perRun: 100, dailyMax: 7, translate: false });
+    expect(r.ran).toBe(1);
+    expect(r.results[0]).toMatchObject({ kind: 'gcmp', state: 'AP' });
+    expect((await research.runCivicResearch(db, e, { fetchImpl: f, now: NOW, dailyMax: 6, translate: false })).skipped).toBe('daily cap reached');
   });
 
   it('failed research keeps the last good data', async () => {
@@ -585,24 +596,27 @@ describe('hospitals v2 fields (public-source only)', () => {
     const old = e.DB.raw.prepare("SELECT schema_v, data FROM civic_data WHERE kind='hosp' AND state='TG'").get();
     expect(Number(old.schema_v)).toBe(1);
     const rows = e.DB.raw.prepare('SELECT * FROM civic_data').all();
-    const t = research.pickTargets(rows, NOW, 500);
-    const at = t.findIndex((x: any) => x.kind === 'hosp' && x.state === 'TG' && x.variant === 'govt');
+    const t = research.pickTargets(rows, NOW, 2000);
+    const at = t.findIndex((x: any) => x.kind === 'hosp' && x.state === 'TG' && x.variant === 'govt' && !x.district);
     expect(at).toBe(t.length - 1); // outdated comes after all missing rows
-    expect(t.filter((x: any) => x.kind === 'hosp' && x.state === 'TG' && x.variant === 'govt')).toHaveLength(1);
+    expect(t.filter((x: any) => x.kind === 'hosp' && x.state === 'TG' && x.variant === 'govt' && !x.district)).toHaveLength(1);
     // fresh v2 row is not outdated
     const db = new Db(e.DB);
     await research.researchOne(db, e, { kind: 'hosp', state: 'TG', variant: 'govt' }, { fetchImpl: makeFetch(), now: NOW });
     const nw = e.DB.raw.prepare("SELECT schema_v FROM civic_data WHERE kind='hosp' AND state='TG' AND variant='govt'").get();
     expect(Number(nw.schema_v)).toBe(2);
-    const t2 = research.pickTargets(e.DB.raw.prepare('SELECT * FROM civic_data').all(), NOW, 500);
-    expect(t2.some((x: any) => x.kind === 'hosp' && x.state === 'TG' && x.variant === 'govt')).toBe(false);
+    const t2 = research.pickTargets(e.DB.raw.prepare('SELECT * FROM civic_data').all(), NOW, 2000);
+    expect(t2.some((x: any) => x.kind === 'hosp' && x.state === 'TG' && x.variant === 'govt' && !x.district)).toBe(false);
   });
 
-  it('daily caps and the free-tier model list are unchanged', () => {
-    expect(research.CIVIC_PER_RUN).toBe(2);
-    expect(research.CIVIC_DAILY_MAX).toBe(40);
-    expect(research.CIVIC_TR_DAILY_MAX).toBe(120);
+  it('free-tier caps (overridable by Worker vars) and the fastest-first free model list', () => {
+    expect(research.CIVIC_PER_RUN).toBe(3);
+    expect(research.CIVIC_DAILY_MAX).toBe(150);
+    expect(research.CIVIC_TR_DAILY_MAX).toBe(300);
+    expect(research.civicCaps({})).toEqual({ perRun: 3, dailyMax: 150, trDailyMax: 300, askDailyMax: 300 });
+    expect(research.civicCaps({ CIVIC_DAILY_MAX: '200', CIVIC_PER_RUN: 'x', CIVIC_TR_DAILY_MAX: '' })).toMatchObject({ dailyMax: 200, perRun: 3, trDailyMax: 300 });
+    expect(research.civicCaps({ CIVIC_PER_RUN: '99' }).perRun).toBe(8);
     const { GEMINI_MODELS } = require('../server/worker/src/civic/gemini.js');
-    expect(GEMINI_MODELS).toEqual(['gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-flash-latest', 'gemini-3.1-flash-lite']);
+    expect(GEMINI_MODELS).toEqual(['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-3.6-flash', 'gemini-flash-latest', 'gemini-3.8-flash']);
   });
 });

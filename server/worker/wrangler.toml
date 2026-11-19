@@ -1,13 +1,14 @@
 # Cloudflare Worker 'outfit-api' (free plan) + D1 database 'outfit-db' (free: 5M rows read/day,
 # 100k rows written/day, 5 GB). Only free features: one module worker on workers.dev, one D1
-# database, two cron triggers (daily earn + 2-hourly capped civic research). Deployed by .github/workflows/deploy-earn-worker.yml or by hand:
+# database, two cron triggers (daily earn + capped civic research every 20 minutes). Deployed by .github/workflows/deploy-earn-worker.yml or by hand:
 #   cd server/worker && npx wrangler d1 migrations apply outfit-db --remote && npx wrangler deploy
 # Secrets (wrangler secret put NAME, never written here; missing = that handler answers 503):
 #   BITLABS_SECRET        BitLabs dashboard > App > Integration > Secret Key
 #   CPX_SECURE_HASH       CPX Research dashboard > App > Secure hash
 #   OFFERWALL_GG_SECRET   Offerwall.GG placement > Integration > Secret key
 #   FIREBASE_SA_JSON      optional: Google service account JSON (Firestore mirror of earn credits)
-#   GEMINI_API_KEY        optional: Google AI Studio key for civic research (Govt / Hospitals tabs)
+#   GEMINI_API_KEY        optional: Google AI Studio FREE-tier key (project without billing) for civic
+#                         research, translation and Ask AI (Govt / Laws / Hospitals tabs)
 #   BITLABS_CALLBACK_BASE optional: exact https://host BitLabs calls, to pin scheme + host
 name = "outfit-api"
 main = "src/index.js"
@@ -24,5 +25,7 @@ database_id = "3b5f3c2f-26a2-429e-8f5b-8d90c8123b3c"
 migrations_dir = "migrations"
 
 [triggers]
-# "30 0 * * *" = daily earn releaseHeld (unchanged); "15 */2 * * *" = civic research (capped)
-crons = ["30 0 * * *", "15 */2 * * *"]
+# "30 0 * * *" = daily earn releaseHeld (unchanged); "*/20 * * * *" = civic research prefill (capped
+# by civicCaps in src/civic/research.js; optional [vars] CIVIC_PER_RUN / CIVIC_DAILY_MAX /
+# CIVIC_TR_DAILY_MAX / CIVIC_ASK_DAILY_MAX override the defaults, whole numbers as strings)
+crons = ["30 0 * * *", "*/20 * * * *"]

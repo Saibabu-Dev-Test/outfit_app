@@ -1,5 +1,8 @@
-// Govt / Laws / Hospitals tabs labels, in Settings > App language (English by default, Telugu, Hindi).
-import { AppLanguage } from './appLanguage';
+// Govt / Laws / Hospitals tabs labels, in Settings > App language. Static copies in English, Telugu and
+// Hindi; the other app languages (Tamil, Kannada, ...) use an AI translation of the English labels,
+// cached on the Worker (POST /v1/civic/translate) and on the phone (services/civicI18n.ts), and show
+// English until it arrives.
+import { AppLanguage, StaticLanguage } from './appLanguage';
 
 export type CivicKey =
   | 'govtTitle'
@@ -134,9 +137,18 @@ export type CivicKey =
   | 'officialText'
   | 'translationNote'
   | 'address'
-  | 'phone';
+  | 'phone'
+  | 'englishToggle'
+  | 'aiBusy'
+  | 'aiQuota'
+  | 'aiLimit'
+  | 'askLaws'
+  | 'askLawsHint'
+  | 'lawsAiNote'
+  | 'explainSimply'
+  | 'showingSaved';
 
-export const CIVIC_LABELS: Record<AppLanguage, Record<CivicKey, string>> = {
+export const CIVIC_LABELS: Record<StaticLanguage, Record<CivicKey, string>> = {
   English: {
     govtTitle: '🏛️ Govt',
     lawsTitle: '⚖️ Laws',
@@ -271,6 +283,15 @@ export const CIVIC_LABELS: Record<AppLanguage, Record<CivicKey, string>> = {
     translationNote: 'Telugu / Hindi lines are translations to help you; the official English text of the law prevails.',
     address: 'Address',
     phone: 'Phone',
+    englishToggle: 'English',
+    aiBusy: 'AI is busy right now (free limit). Saved info is shown; please try again in a few minutes.',
+    aiQuota: 'AI is paused for today (free AI limit used up). Saved info still works.',
+    aiLimit: "You've used today's AI questions. Please come back tomorrow.",
+    askLaws: 'Ask about laws',
+    askLawsHint: 'e.g. Someone cheated me online. Which law applies?',
+    lawsAiNote: 'Answers only from the law sections in this app, in simple words. Not legal advice.',
+    explainSimply: 'Explain simply',
+    showingSaved: 'Showing saved info · updating…',
   },
   Telugu: {
     govtTitle: '🏛️ ప్రభుత్వం',
@@ -406,6 +427,15 @@ export const CIVIC_LABELS: Record<AppLanguage, Record<CivicKey, string>> = {
     translationNote: 'తెలుగు / హిందీ పంక్తులు మీకు సహాయం కోసం చేసిన అనువాదాలు; చట్టం అధికారిక ఇంగ్లీష్ పాఠమే చెల్లుతుంది.',
     address: 'చిరునామా',
     phone: 'ఫోన్',
+    englishToggle: 'English',
+    aiBusy: 'AI ఇప్పుడు బిజీగా ఉంది (ఉచిత పరిమితి). సేవ్ చేసిన సమాచారం చూపిస్తున్నాం; కొన్ని నిమిషాల తర్వాత మళ్ళీ ప్రయత్నించండి.',
+    aiQuota: 'ఈ రోజుకు AI ఆగింది (ఉచిత AI పరిమితి పూర్తయింది). సేవ్ చేసిన సమాచారం పనిచేస్తుంది.',
+    aiLimit: 'ఈ రోజు AI ప్రశ్నలు పూర్తయ్యాయి. రేపు మళ్ళీ రండి.',
+    askLaws: 'చట్టాల గురించి అడగండి',
+    askLawsHint: 'ఉదా. ఆన్‌లైన్‌లో నన్ను మోసం చేశారు. ఏ చట్టం వర్తిస్తుంది?',
+    lawsAiNote: 'ఈ యాప్‌లోని చట్ట సెక్షన్ల నుండి మాత్రమే, సులభమైన మాటల్లో సమాధానం. ఇది న్యాయ సలహా కాదు.',
+    explainSimply: 'సులభంగా వివరించండి',
+    showingSaved: 'సేవ్ చేసిన సమాచారం · అప్‌డేట్ అవుతోంది…',
   },
   Hindi: {
     govtTitle: '🏛️ सरकार',
@@ -541,8 +571,30 @@ export const CIVIC_LABELS: Record<AppLanguage, Record<CivicKey, string>> = {
     translationNote: 'तेलुगु / हिंदी पंक्तियाँ आपकी मदद के लिए अनुवाद हैं; क़ानून का आधिकारिक अंग्रेज़ी पाठ ही मान्य है।',
     address: 'पता',
     phone: 'फ़ोन',
+    englishToggle: 'English',
+    aiBusy: 'AI अभी व्यस्त है (मुफ़्त सीमा)। सहेजी गई जानकारी दिखाई जा रही है; कुछ मिनट बाद फिर कोशिश करें।',
+    aiQuota: 'आज के लिए AI रुका है (मुफ़्त AI सीमा खत्म)। सहेजी गई जानकारी काम करती है।',
+    aiLimit: 'आज के AI सवाल पूरे हो गए। कल फिर आइए।',
+    askLaws: 'क़ानून के बारे में पूछें',
+    askLawsHint: 'जैसे: किसी ने मुझसे ऑनलाइन धोखा किया। कौन सा क़ानून लागू होगा?',
+    lawsAiNote: 'जवाब सिर्फ़ इस ऐप के क़ानूनी सेक्शन से, आसान शब्दों में। यह कानूनी सलाह नहीं है।',
+    explainSimply: 'आसान भाषा में समझाएँ',
+    showingSaved: 'सहेजी गई जानकारी · अपडेट हो रहा है…',
   },
 };
 
+// AI-translated label packs for app languages without static labels (services/civicI18n.ts)
+const aiPacks: Partial<Record<AppLanguage, Partial<Record<CivicKey, string>>>> = {};
+
+export const hasStaticLabels = (lang: AppLanguage): lang is StaticLanguage => lang === 'English' || lang === 'Telugu' || lang === 'Hindi';
+
+export const setAiLabels = (lang: AppLanguage, pack: Partial<Record<CivicKey, string>>): void => {
+  if (hasStaticLabels(lang)) return;
+  aiPacks[lang] = { ...(aiPacks[lang] || {}), ...pack };
+};
+
+export const aiLabelCount = (lang: AppLanguage): number => Object.keys(aiPacks[lang] || {}).length;
+
+// Static label, else the AI pack, else English
 export const civicText = (lang: AppLanguage, key: CivicKey): string =>
-  (CIVIC_LABELS[lang] && CIVIC_LABELS[lang][key]) || CIVIC_LABELS.English[key];
+  (hasStaticLabels(lang) ? CIVIC_LABELS[lang][key] : aiPacks[lang]?.[key]) || CIVIC_LABELS.English[key];
