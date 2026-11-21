@@ -106,7 +106,9 @@ export interface CivicDataResponse<T> {
   i18n?: Partial<Record<TrCode, T | null>>;
   sources?: { url: string; title: string }[];
   aiStars: number | null;
-  status: 'ok' | 'error' | 'pending' | 'none';
+  // 'partial' = a Govt place's first research is still running: data holds the parts finished so far
+  // (poll for the rest). 'translating' = English only for the asked language, its copy is on the way.
+  status: 'ok' | 'error' | 'pending' | 'none' | 'partial' | 'translating';
   running?: boolean;
   updatedAt: number;
   // Ask AI / Explain simply / translation work (any provider of the Worker's AI fallback chain)
@@ -122,7 +124,8 @@ export type CivicAiCode = 'quota' | 'billing' | 'cap' | 'timeout' | 'config' | '
 export interface CivicResearchResponse {
   ok: boolean;
   // 'paused' = every Gemini key is out of free quota: research paused, the saved info stays
-  status: 'ok' | 'error' | 'pending' | 'running' | 'ai_off' | 'paused';
+  // 'translating' = translation started in the background (English shows meanwhile; poll for it)
+  status: 'ok' | 'error' | 'pending' | 'running' | 'ai_off' | 'paused' | 'translating';
   paused?: boolean;
   did?: 'research' | 'translate' | 'nothing' | 'already running';
   error?: string;

@@ -613,7 +613,7 @@ describe('hospitals v2 fields (public-source only)', () => {
     expect(research.CIVIC_PER_RUN).toBe(3);
     expect(research.CIVIC_DAILY_MAX).toBe(150);
     expect(research.CIVIC_TR_DAILY_MAX).toBe(300);
-    expect(research.civicCaps({})).toEqual({ perRun: 3, dailyMax: 150, trDailyMax: 300, askDailyMax: 300 });
+    expect(research.civicCaps({})).toEqual({ perRun: 3, dailyMax: 150, trDailyMax: 300, askDailyMax: 300, trPerRun: 5 });
     expect(research.civicCaps({ CIVIC_DAILY_MAX: '200', CIVIC_PER_RUN: 'x', CIVIC_TR_DAILY_MAX: '' })).toMatchObject({ dailyMax: 200, perRun: 3, trDailyMax: 300 });
     expect(research.civicCaps({ CIVIC_PER_RUN: '99' }).perRun).toBe(8);
     const { GEMINI_MODELS } = require('../server/worker/src/civic/gemini.js');

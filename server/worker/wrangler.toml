@@ -36,6 +36,6 @@ binding = "AI"
 
 [triggers]
 # "30 0 * * *" = daily earn releaseHeld (unchanged); "*/20 * * * *" = civic research prefill (capped
-# by civicCaps in src/civic/research.js; optional [vars] CIVIC_PER_RUN / CIVIC_DAILY_MAX /
+# by civicCaps in src/civic/research.js; optional [vars] CIVIC_PER_RUN / CIVIC_TR_PER_RUN / CIVIC_DAILY_MAX /
 # CIVIC_TR_DAILY_MAX / CIVIC_ASK_DAILY_MAX override the defaults, whole numbers as strings)
 crons = ["30 0 * * *", "*/20 * * * *"]

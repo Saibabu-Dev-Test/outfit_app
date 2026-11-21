@@ -227,6 +227,15 @@ export function CivicStatus({
       <View style={ui.card}>
         <Text style={ui.bad}>{both('error')}</Text>
         {errorText ? <Text style={ui.muted}>{errorText}</Text> : null}
+        {note}
+      </View>
+    );
+  // Some parts (Govt) already on screen: a small line instead of the big spinner card
+  if (phase === 'collecting' && hasData)
+    return (
+      <View style={[ui.row, { marginBottom: 8 }]}>
+        <ActivityIndicator size="small" color={colors.primary} />
+        <Text style={[ui.muted, ui.flex1, { marginLeft: 8 }]}>🔎 {both('collecting')}</Text>
       </View>
     );
   if (phase === 'collecting')
