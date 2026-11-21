@@ -10,7 +10,7 @@
 //   /v1/civic/..., /v1/admin/civic   Govt / Hospitals tabs (civic/routes.js)
 //   cron '*/20 * * * *'              capped Gemini research for the civic tabs (civic/research.js)
 // Secrets (wrangler secret put, never in git): BITLABS_SECRET, CPX_SECURE_HASH, OFFERWALL_GG_SECRET,
-// FIREBASE_SA_JSON, GEMINI_API_KEY (civic research; missing = civic AI off, routes still work). A handler whose secret is missing answers 503 'not configured'.
+// FIREBASE_SA_JSON, GEMINI_API_KEY (+ optional GEMINI_API_KEY_2.._5, GROQ_API_KEY: civic AI fallback chain with the Workers AI binding AI last, civic/llm.js; no Gemini key = no new research, routes still work). A handler whose secret is missing answers 503 'not configured'.
 import { handleBitlabsPostback, handleCpxPostback, handleOfferwallPostback } from './handler.js';
 import { AuthError, bearer, verifyFirebaseToken } from './auth.js';
 import { Db } from './db.js';

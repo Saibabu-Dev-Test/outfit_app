@@ -109,7 +109,10 @@ export interface CivicDataResponse<T> {
   status: 'ok' | 'error' | 'pending' | 'none';
   running?: boolean;
   updatedAt: number;
+  // Ask AI / Explain simply / translation work (any provider of the Worker's AI fallback chain)
   aiConfigured: boolean;
+  // Research of a new place works (grounded Gemini). Older Workers do not send it: use aiConfigured.
+  researchConfigured?: boolean;
 }
 
 // Short reason when an AI step failed: quota (free-tier limit, 429), billing (402), cap (daily cap),
@@ -118,7 +121,9 @@ export type CivicAiCode = 'quota' | 'billing' | 'cap' | 'timeout' | 'config' | '
 
 export interface CivicResearchResponse {
   ok: boolean;
-  status: 'ok' | 'error' | 'pending' | 'running' | 'ai_off';
+  // 'paused' = every Gemini key is out of free quota: research paused, the saved info stays
+  status: 'ok' | 'error' | 'pending' | 'running' | 'ai_off' | 'paused';
+  paused?: boolean;
   did?: 'research' | 'translate' | 'nothing' | 'already running';
   error?: string;
   code?: CivicAiCode;
@@ -240,8 +245,17 @@ export const reportReview = (item: string, author: string, reason = '') =>
   workerFetch<{ ok: boolean; alreadyReported: boolean }>('/v1/civic/reports', { method: 'POST', body: { item, author, reason } });
 
 // ── Owner only (Worker checks the verified owner email too) ──
+// AI fallback chain state on the Worker (no key values): Gemini keys -> Groq -> Workers AI
+export interface AiProviders {
+  order: string[];
+  gemini: { keys: number; ready: number; keyState: { key: number; ready: boolean; coolingUntil: number }[] };
+  groq: { configured: boolean; coolingUntil: number };
+  workersAi: { configured: boolean; model: string; coolingUntil: number };
+}
+
 export interface AdminCivic {
   aiConfigured: boolean;
+  aiProviders?: AiProviders;
   aiToday: number;
   aiDailyMax: number;
   trToday?: number;

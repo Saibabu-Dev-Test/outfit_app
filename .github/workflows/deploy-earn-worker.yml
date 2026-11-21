@@ -9,6 +9,10 @@ name: Deploy outfit-api Worker (Cloudflare, free plan)
 #   CLOUDFLARE_ACCOUNT_ID  Cloudflare account id
 #   Optional, pushed to the Worker as Worker secrets only when set (empty = left unchanged):
 #   BITLABS_SECRET, CPX_SECURE_HASH, OFFERWALL_GG_SECRET, FIREBASE_SA_JSON, GEMINI_API_KEY
+#   AI fallback chain (server/worker/src/civic/llm.js), all optional:
+#   GEMINI_API_KEY_2 .. GEMINI_API_KEY_5  more free-tier Gemini keys (other Google projects), used in turn
+#   GROQ_API_KEY                          Groq free-tier key (after the Gemini keys, before Workers AI)
+#   Workers AI (the last fallback) is the [ai] binding in wrangler.toml: nothing to set on the free plan.
 # Without CLOUDFLARE_API_TOKEN (or the account id) the job is skipped with a warning instead of failing.
 on:
   push:
@@ -61,6 +65,11 @@ jobs:
           OFFERWALL_GG_SECRET: ${{ secrets.OFFERWALL_GG_SECRET }}
           FIREBASE_SA_JSON: ${{ secrets.FIREBASE_SA_JSON }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_API_KEY_2: ${{ secrets.GEMINI_API_KEY_2 }}
+          GEMINI_API_KEY_3: ${{ secrets.GEMINI_API_KEY_3 }}
+          GEMINI_API_KEY_4: ${{ secrets.GEMINI_API_KEY_4 }}
+          GEMINI_API_KEY_5: ${{ secrets.GEMINI_API_KEY_5 }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         run: |
           npx --yes wrangler@4 d1 migrations apply outfit-db --remote
           npx --yes wrangler@4 deploy
@@ -71,6 +80,16 @@ jobs:
               echo "$name: set"
             else
               echo "::notice::$name not set in repo secrets: that handler answers 503 'not configured'."
+            fi
+          done
+          # Optional AI fallback keys: pushed only when set (empty = the Worker's copy is left unchanged)
+          for name in GEMINI_API_KEY_2 GEMINI_API_KEY_3 GEMINI_API_KEY_4 GEMINI_API_KEY_5 GROQ_API_KEY; do
+            value="${!name}"
+            if [ -n "$value" ]; then
+              printf '%s' "$value" | npx --yes wrangler@4 secret put "$name"
+              echo "$name: set"
+            else
+              echo "$name: not set (optional AI fallback key, skipped)"
             fi
           done
           curl -fsS https://outfit-api.babusai927.workers.dev/health

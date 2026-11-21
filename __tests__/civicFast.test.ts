@@ -273,13 +273,30 @@ describe('research: Govt in 3 parallel parts + translation in the same run', () 
     expect(Number(e.DB.raw.prepare('SELECT COUNT(*) AS n FROM civic_i18n').get().n)).toBe(0);
   });
 
-  it('on-demand research reports the free-tier reason (quota / billing)', async () => {
+  it('on-demand research out of Gemini quota = paused (saved row kept), with the free-tier reason', async () => {
     const e = env({ GEMINI_API_KEY: 'k' });
     const r = await call(e, 'POST', '/v1/civic/research', { body: { kind: 'hosp', state: 'TG', variant: 'govt', lang: 'ta' }, fetchImpl: makeFetch({ status: 402 }).f });
-    expect(r.json).toMatchObject({ ok: false, status: 'error', code: 'billing' });
+    expect(r.json).toMatchObject({ ok: false, status: 'paused', code: 'billing', error: research.RESEARCH_PAUSED });
+    // nothing written as an error: the row is not marked failed, so it is retried after the reset
+    expect(e.DB.raw.prepare("SELECT COUNT(*) AS n FROM civic_data WHERE status = 'error'").get().n).toBe(0);
+    // next call: the key is cooling down, so no request at all
+    const again = makeFetch();
+    const r1 = await call(e, 'POST', '/v1/civic/research', { body: { kind: 'hosp', state: 'TG', variant: 'govt' }, fetchImpl: again.f });
+    expect(r1.json).toMatchObject({ ok: false, status: 'paused', code: 'quota' });
+    expect(again.calls).toHaveLength(0);
     const e2 = env({ GEMINI_API_KEY: 'k' });
     const r2 = await call(e2, 'POST', '/v1/civic/research', { body: { kind: 'hosp', state: 'TG', variant: 'govt' }, fetchImpl: makeFetch({ status: 429 }).f });
     expect(r2.json).toMatchObject({ ok: false, code: 'quota' });
+  });
+
+  it('data route: aiConfigured = any provider (Workers AI alone counts), researchConfigured = Gemini key', async () => {
+    const onlyCf = env({ AI: { run: jest.fn() } });
+    const g = await call(onlyCf, 'GET', '/v1/civic/data?kind=hosp&state=TG&variant=govt');
+    expect(g.json).toMatchObject({ aiConfigured: true, researchConfigured: false });
+    const r = await call(onlyCf, 'POST', '/v1/civic/research', { body: { kind: 'hosp', state: 'TG', variant: 'govt' } });
+    expect(r.json).toMatchObject({ ok: false, status: 'ai_off', code: 'config' });
+    const withKey = await call(env({ GEMINI_API_KEY: 'k' }), 'GET', '/v1/civic/data?kind=hosp&state=TG&variant=govt');
+    expect(withKey.json).toMatchObject({ aiConfigured: true, researchConfigured: true });
   });
 
   it('prefill: bundled-city districts come after missing states, before stale rows; file is up to date', () => {
@@ -359,6 +376,7 @@ describe('Ask AI (Worker)', () => {
     expect(calls[0].body.systemInstruction.parts[0].text).toMatch(/1\. GGH Kurnool; address: Kurnool; phone: 08518-1/);
     expect(calls[0].body.systemInstruction.parts[0].text).toMatch(/Never diagnose/);
     expect((await call(e, 'POST', '/v1/civic/ask', { body, fetchImpl: makeFetch({ status: 429 }).f })).json).toEqual({ error: 'ai_busy' });
+    e.DB.raw.exec('DELETE FROM ai_cooldown'); // the 429 cooled every model; start the 402 case fresh
     const q = await call(e, 'POST', '/v1/civic/ask', { body, fetchImpl: makeFetch({ status: 402 }).f });
     expect(q).toEqual({ status: 503, json: { error: 'ai_quota' } });
     e.DB.raw.prepare('INSERT OR REPLACE INTO usage (day, key, n) VALUES (?, ?, ?)').run('2026-11-18', 'civic_ask:user1', ask.MAX_ASK_PER_USER_DAY);

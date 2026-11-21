@@ -2,11 +2,12 @@
 // (civic_data in D1, researched with Google Search: address, phone only when found, specialities,
 // 24x7 emergency, Aarogyasri / Dr NTR Vaidya Seva / PM-JAY empanelment, website, map link, sources),
 // each item in the app language (Telugu / Hindi) AND English, people's reviews per hospital, and
-// "Hospital AI" that answers ONLY from the stored list (services/hospitalAi.ts). 108 / 112 always on
+// "Hospital AI" that answers ONLY from the stored list (on the Worker, civic/ask.js). 108 / 112 always on
 // top; the AI never diagnoses and always says to verify with the hospital.
 // Fast: the saved list shows instantly (useCivicData cache: address, phone, timings, map link,
 // 24x7, schemes), each card in the app language with an English toggle; Hospital AI runs on the
-// Worker from the same stored list(s) in the app language + English (services/civicAi.ts).
+// Worker from the same stored list(s) in the app language + English (services/civicAi.ts), through the
+// Worker's AI fallback chain (Gemini keys -> Groq -> Workers AI). No on-phone AI key is used here.
 // Filter Government / Private / All, "Where to go for…" disease / speciality search over the loaded
 // public data (services/hospitalSearch.ts), and an optional facts-only order by the count of listed
 // specialities + facilities (never a rating). Per hospital: timings, 24x7, specialities, what it is
@@ -22,14 +23,10 @@ import { useAuth } from '../../context/AuthContext';
 import { isOwnerUser } from '../../services/adminSystem';
 import { useAppLanguage } from '../../i18n/appLanguage';
 import { civicText } from '../../i18n/civicLabels';
-import { stateByCodeApp } from './stateName';
 import { HospData, HospVariant, Hospital, civicItem, getHospData } from '../../services/civicApi';
 import { factsCount, searchHospitals, sortByFacts } from '../../services/hospitalSearch';
-import { askHospitalAi, hospitalAiAvailable } from '../../services/hospitalAi';
-import { AI_LANGUAGES, AiLanguage } from '../../services/aiStylist';
 import { askHospitals } from '../../services/civicAi';
 import { useCivicLabels } from '../../services/civicI18n';
-import { WorkerError } from '../../services/workerApi';
 import { CivicAskBox, Turn } from './civicAiParts';
 import { CivicStatus, PlacePicker, ReviewsBox, SourcesBox, callNumber, openLink, useCivicPlace } from './civicParts';
 import { Bi, CivicCard, biLabel } from './bi';
@@ -197,24 +194,9 @@ export default function HospitalsScreen() {
   const found = where.trim() ? searchHospitals(list, where).map(m => ({ ...rows[list.indexOf(m.h)], matched: m.matched })) : rows.map(r => ({ ...r, matched: [] as string[] }));
   const shown = byFacts ? sortByFacts(found) : found;
   const workerAi = active.some(a => !!a.d.res?.aiConfigured);
-  // Old app path (on-phone key, English / Telugu / Hindi) only when the Worker has no /v1/civic/ask yet
-  const oldAiLang = (AI_LANGUAGES as string[]).includes(lang) ? (lang as AiLanguage) : null;
 
-  const ask = async (q: string, history: Turn[]) => {
-    const variants = active.map(a => a.v);
-    try {
-      return await askHospitals(place.state, place.district, variants, q, lang, history);
-    } catch (e) {
-      if (e instanceof WorkerError && e.status === 404 && /not found/.test(e.message) && oldAiLang && user?.id && hospitalAiAvailable()) {
-        const placeLabel = `${place.district ? `${place.district}, ` : ''}${stateByCodeApp(place.state)} (${
-          variant === 'govt' ? 'government' : variant === 'private' ? 'private' : 'government and private'
-        } hospitals)`;
-        const a = await askHospitalAi(user.id, placeLabel, list, [...history, { role: 'user' as const, text: q }].slice(-6), oldAiLang);
-        return { answer: a, en: '' };
-      }
-      throw e;
-    }
-  };
+  // Hospital AI runs only on the Worker (its AI fallback chain); no on-phone AI key
+  const ask = (q: string, history: Turn[]) => askHospitals(place.state, place.district, active.map(a => a.v), q, lang, history);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top']}>
@@ -256,7 +238,7 @@ export default function HospitalsScreen() {
                   lang={lang}
                   phase={a.d.phase}
                   hasData={(a.d.res?.data?.hospitals || []).length > 0}
-                  aiConfigured={!!a.d.res?.aiConfigured}
+                  aiConfigured={!!(a.d.res?.researchConfigured ?? a.d.res?.aiConfigured)}
                   errorText={a.d.errorText}
                   aiNote={a.d.aiNote}
                   fromCache={a.d.fromCache}
@@ -290,7 +272,7 @@ export default function HospitalsScreen() {
               ⚠️ {T('verify')}
               {lang !== 'English' && T('verify') !== civicText('English', 'verify') ? `\n${civicText('English', 'verify')}` : ''}
             </Text>
-            {workerAi || hospitalAiAvailable() ? (
+            {workerAi ? (
               <CivicAskBox key={placeKey} lang={lang} title={T('askHospAi')} note={T('hospAiNote')} hint={T('askHospHint')} onAsk={ask} />
             ) : null}
             {shown.map(r => (

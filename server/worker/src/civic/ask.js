@@ -9,18 +9,22 @@
 //        Reply in the user's language AND English (split on EN_MARK), always ending with the safety
 //        line (safety.js: not legal advice / 108-112 / verify with the office). Fast Flash-Lite, no
 //        grounding (the facts are already stored). Capped per user and per day (free tier).
+//        Runs through the AI fallback chain (llm.js): every Gemini key, then Groq (optional), then
+//        Workers AI, so answers keep coming when the free Gemini limit is used up.
 //   POST /v1/civic/translate {ns, lang, items: {key: englishText}}
 //        Translations of app text that has no static copy in that language (civic labels, laws
 //        plain text, offence guide). Cached forever per (ns, lang, md5 of the English text), so a
-//        user can only ever get the translation of the text itself; only missing ones call Gemini.
-// Errors the app shows clearly: 429 'ai_busy' (free-tier limit / daily cap), 503 'ai_quota'
-// (402: prepaid credits used up), 503 'ai_off' (no key).
+//        user can only ever get the translation of the text itself; only missing ones call the AI
+//        (same fallback chain).
+// Errors the app shows clearly, only when EVERY provider failed: 429 'ai_busy' (free-tier limits /
+// daily cap), 503 'ai_quota' (402: prepaid credits used up), 503 'ai_off' (no provider at all).
 import { HttpError } from '../api.js';
 import { isOwner } from '../auth.js';
 import { addUsage, usageFor } from '../db.js';
 import { utcDay } from '../days.js';
 import { md5Hex } from '../md5.js';
-import { geminiGenerate, isGeminiConfigured, parseJsonLoose } from './gemini.js';
+import { parseJsonLoose } from './gemini.js';
+import { aiGenerate, isAiConfigured } from './llm.js';
 import { TR_LANGS, civicCaps } from './research.js';
 import { placeByCode } from './states.js';
 import { SAFETY } from './safety.js';
@@ -224,7 +228,7 @@ export async function postCivicAsk({ db, env, user, body, now, fetchImpl }) {
       return { topic, lang, answer: hit.answer, en: hit.en || '', cached: true };
     }
   }
-  if (!isGeminiConfigured(env)) {
+  if (!isAiConfigured(env)) {
     throw new HttpError(503, 'ai_off');
   }
   const day = utcDay(now);
@@ -240,10 +244,10 @@ export async function postCivicAsk({ db, env, user, body, now, fetchImpl }) {
     question ||
     `Explain the "${str(body && body.focus, 20)}" information above simply: for each item, who can get it, what they get and how to apply (or how to use it), in short points.`;
   const convo = history.length ? `Earlier in this chat:\n${history.map(t => `${t.role === 'model' ? 'AI' : 'User'}: ${t.text}`).join('\n')}\n\n` : '';
-  const r = await geminiGenerate(
+  const r = await aiGenerate(
     env,
     { system: askSystem(topic, lang, facts), prompt: `${convo}User question: ${ask}`, maxTokens: 1500, temperature: 0.2 },
-    { fetchImpl: fetchImpl || fetch },
+    { fetchImpl: fetchImpl || fetch, now },
   );
   await db.batch([
     db.stmt('INSERT INTO usage (day, key, n) VALUES (?, ?, 1) ON CONFLICT (day, key) DO UPDATE SET n = n + 1', day, 'civic_ask'),
@@ -262,7 +266,7 @@ export async function postCivicAsk({ db, env, user, body, now, fetchImpl }) {
       lang, cacheH, JSON.stringify({ answer, en: enAnswer }), now,
     );
   }
-  return { topic, lang, answer, en: enAnswer, model: r.model, cached: false };
+  return { topic, lang, answer, en: enAnswer, model: r.model, provider: r.provider || 'gemini', cached: false };
 }
 
 export function translateTextsPrompt(langNameText, items) {
@@ -317,7 +321,7 @@ export async function postCivicTranslate({ db, env, user, body, now, fetchImpl }
     }
   });
   const missing = keys.filter(k => !out[k]);
-  if (!missing.length || !isGeminiConfigured(env)) {
+  if (!missing.length || !isAiConfigured(env)) {
     return { ns, lang, items: out, missing };
   }
   const day = utcDay(now);
@@ -332,10 +336,10 @@ export async function postCivicTranslate({ db, env, user, body, now, fetchImpl }
   }
   const results = await Promise.all(
     chunks.map(ks =>
-      geminiGenerate(
+      aiGenerate(
         env,
         { prompt: translateTextsPrompt(TR_LANGS[lang], Object.fromEntries(ks.map(k => [k, items[k]]))), jsonOut: true, maxTokens: 8000, temperature: 0.1 },
-        { fetchImpl: fetchImpl || fetch },
+        { fetchImpl: fetchImpl || fetch, now },
       ),
     ),
   );

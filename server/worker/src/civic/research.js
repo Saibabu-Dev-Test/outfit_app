@@ -19,8 +19,13 @@
 // Kind 'gcmp' = neutral "previous vs present government" comparison per state + centre ('IN'):
 // schemes, budgets, major projects, schemes started / stopped, side by side; every point needs its
 // own https source URL + date or it is dropped; evaluative words are dropped; no verdict field exists.
+// AI fallback (llm.js): grounded research uses Gemini only (every key in turn). When every key is
+// used up the stored data is kept as it is and the run reports status 'paused' (RESEARCH_PAUSED)
+// instead of asking an ungrounded model, which would invent facts. Translation of stored data goes
+// through the whole chain (Gemini keys -> Groq -> Workers AI), so it keeps working.
 import { CENTRE, STATES, placeByCode } from './states.js';
-import { geminiGenerate, isGeminiConfigured, parseJsonLoose } from './gemini.js';
+import { geminiReady, isGeminiConfigured, parseJsonLoose } from './gemini.js';
+import { aiGenerate, isAiConfigured } from './llm.js';
 import { addUsage, usageFor } from '../db.js';
 import { utcDay } from '../days.js';
 import { SEED_DISTRICTS } from './districts.js';
@@ -36,6 +41,9 @@ export const CIVIC_REFRESH_MS = 7 * 24 * 3600 * 1000;
 export const CIVIC_RETRY_MS = 20 * 60 * 1000;
 export const CIVIC_LOCK_MS = 3 * 60 * 1000;
 export const CIVIC_MAX_PENDING = 200;
+export const RESEARCH_PAUSED = 'research paused, showing saved info';
+// Grounded research failed because every Gemini key is out of free quota (not a data problem)
+const isExhausted = code => code === 'quota' || code === 'billing';
 // Languages the cron translates ahead of time (others are translated the first time someone asks)
 export const CIVIC_CRON_LANGS = ['te', 'hi'];
 // Translation chunk: arrays longer than this are split, each chunk one small parallel call
@@ -462,7 +470,7 @@ export function mergeParts(parts) {
 
 // Translate English civic data into one language: small chunks in parallel, each aligned to its
 // English chunk. -> { ok, data, calls, model } | { ok: false, error, code, calls }
-export async function translateData(env, kind, data, lang, { fetchImpl = fetch } = {}) {
+export async function translateData(env, kind, data, lang, { fetchImpl = fetch, now } = {}) {
   if (!TR_LANGS[lang]) {
     return { ok: false, error: 'bad lang', calls: 0 };
   }
@@ -473,7 +481,7 @@ export async function translateData(env, kind, data, lang, { fetchImpl = fetch }
   const chunks = splitForTranslation(data).filter(c => textCount(c) > 0);
   const results = await Promise.all(
     chunks.map(async chunk => {
-      const r = await geminiGenerate(env, { prompt: translatePrompt(kind, chunk, TR_LANGS[lang]), jsonOut: true, maxTokens: 8000, temperature: 0.1 }, { fetchImpl });
+      const r = await aiGenerate(env, { prompt: translatePrompt(kind, chunk, TR_LANGS[lang]), jsonOut: true, maxTokens: 8000, temperature: 0.1 }, { fetchImpl, now });
       const parsed = r.ok ? parseJsonLoose(r.text) : null;
       return { r, tr: parsed ? alignTranslation(chunk, parsed) : null };
     }),
@@ -552,7 +560,7 @@ export async function translateOne(db, env, t, lang, { fetchImpl = fetch, now = 
   if (!data) {
     return { ok: false, error: 'no data yet' };
   }
-  const r = await translateData(env, t.kind, data, lang, { fetchImpl });
+  const r = await translateData(env, t.kind, data, lang, { fetchImpl, now });
   if (r.calls) {
     await addUsage(db, utcDay(now), 'civic_tr', r.calls);
   }
@@ -580,7 +588,7 @@ export async function researchOne(db, env, { kind, state, district = '', variant
   let trCalls = 0;
   const parts = await Promise.all(
     prompts.map(async (prompt, i) => {
-      const r = await geminiGenerate(env, { prompt, grounded: true, maxTokens: kind === 'govt' ? 8000 : 16000 }, { fetchImpl });
+      const r = await aiGenerate(env, { prompt, grounded: true, maxTokens: kind === 'govt' ? 8000 : 16000 }, { fetchImpl, now });
       const parsed = r.ok ? parseJsonLoose(r.text) : null;
       const gp = kind === 'govt' ? GOVT_PARTS[i] : null;
       const raw = parsed && gp ? Object.fromEntries(gp.raw.filter(k => k in obj(parsed)).map(k => [k, parsed[k]])) : parsed;
@@ -590,7 +598,7 @@ export async function researchOne(db, env, { kind, state, district = '', variant
         const en = gp ? Object.fromEntries(gp.keys.map(k => [k, clean[k]])) : clean;
         await Promise.all(
           toLangs.map(async lang => {
-            const x = await translateData(env, kind, en, lang, { fetchImpl });
+            const x = await translateData(env, kind, en, lang, { fetchImpl, now });
             trCalls += x.calls || 0;
             if (x.ok) {
               tr[lang] = x.data;
@@ -613,6 +621,11 @@ export async function researchOne(db, env, { kind, state, district = '', variant
   if (isEmpty(kind, data)) {
     data = null;
     error = failed ? (failed.r.ok ? 'empty or unreadable answer' : failed.r.error) : 'empty or unreadable answer';
+    if (failed && !failed.r.ok && isExhausted(failed.r.code) && parts.every(p => !p.r.ok)) {
+      // Every Gemini key is out of free quota: keep the row exactly as it is (saved data, or still
+      // 'pending' so the cron picks it up after the reset) and never fall back to invented data
+      return { ok: false, status: 'paused', paused: true, error: RESEARCH_PAUSED, code: failed.r.code };
+    }
   }
   if (data) {
     const sources = [];
@@ -661,8 +674,8 @@ export async function researchOne(db, env, { kind, state, district = '', variant
 // it has no data, else translate the missing language. Locked per row (one run at a time) and inside
 // the same daily caps as the cron.
 export async function researchNow(db, env, t, lang, { fetchImpl = fetch, now = Date.now() } = {}) {
-  if (!isGeminiConfigured(env)) {
-    return { ok: false, status: 'ai_off', error: 'GEMINI_API_KEY not set', code: 'config' };
+  if (!isAiConfigured(env)) {
+    return { ok: false, status: 'ai_off', error: 'no AI provider set (GEMINI_API_KEY)', code: 'config' };
   }
   const caps = civicCaps(env);
   const row = await db.first(`SELECT data, i18n, status, updated_at, running_at FROM civic_data WHERE ${where4}`, ...binds4(t));
@@ -671,6 +684,14 @@ export async function researchNow(db, env, t, lang, { fetchImpl = fetch, now = D
   const needTr = hasData && !!TR_LANGS[lang] && !have[lang];
   if (hasData && !needTr) {
     return { ok: true, status: 'ok', did: 'nothing' };
+  }
+  if (!hasData && !isGeminiConfigured(env)) {
+    // Research needs grounded Gemini; translation alone works on the other providers
+    return { ok: false, status: 'ai_off', error: 'GEMINI_API_KEY not set', code: 'config' };
+  }
+  if (!hasData && !(await geminiReady(env, { now }))) {
+    // Every key is cooling down: nothing to call, the saved info (if any) stays on screen
+    return { ok: false, status: 'paused', paused: true, error: RESEARCH_PAUSED, code: 'quota' };
   }
   if (row && row.status === 'error' && !hasData && now - Number(row.updated_at) < CIVIC_RETRY_MS) {
     return { ok: false, status: 'error', error: 'research failed recently, retrying later' };
@@ -691,7 +712,7 @@ export async function researchNow(db, env, t, lang, { fetchImpl = fetch, now = D
     if (!hasData) {
       const withLang = TR_LANGS[lang] && used.civic_tr < caps.trDailyMax ? [lang] : [];
       const r = await researchOne(db, env, t, { fetchImpl, now, langs: withLang });
-      return { ...r, status: r.ok ? 'ok' : 'error', did: 'research' };
+      return { ...r, status: r.ok ? 'ok' : r.status || 'error', did: 'research' };
     }
     const r = await translateOne(db, env, t, lang, { fetchImpl, now });
     return { ...r, status: 'ok', did: 'translate' };
@@ -758,17 +779,20 @@ export function pickTargets(rows, now, n, seeds = SEED_DISTRICTS) {
 const callsFor = t => (t.kind === 'govt' ? GOVT_PARTS.length : 1);
 
 export async function runCivicResearch(db, env, { fetchImpl = fetch, now = Date.now(), perRun, dailyMax, translate = true } = {}) {
-  if (!isGeminiConfigured(env)) {
+  if (!isAiConfigured(env)) {
     return { ran: 0, skipped: 'GEMINI_API_KEY not set' };
   }
   const caps = civicCaps(env);
+  // Grounded research only while some Gemini key has quota; translations run on any provider
+  const canResearch = isGeminiConfigured(env) && (await geminiReady(env, { now }));
+  let paused = isGeminiConfigured(env) && !canResearch;
   const maxCalls = dailyMax === undefined ? caps.dailyMax : dailyMax;
   const places = perRun === undefined ? caps.perRun : perRun;
   const day = utcDay(now);
   const used = await usageFor(db, day, ['civic_ai', 'civic_tr']);
   let aiLeft = maxCalls - used.civic_ai;
   const results = [];
-  if (aiLeft > 0 && places > 0) {
+  if (canResearch && aiLeft > 0 && places > 0) {
     const rows = await db.all('SELECT kind, state, district, variant, status, updated_at, running_at, schema_v FROM civic_data');
     const targets = pickTargets(rows, now, places);
     // One place after another (each place's own calls run in parallel): stays under the per-minute limit
@@ -779,7 +803,13 @@ export async function runCivicResearch(db, env, { fetchImpl = fetch, now = Date.
       aiLeft -= callsFor(t);
       const trUsed = (await usageFor(db, day, ['civic_tr'])).civic_tr;
       const tr = translate && trUsed < caps.trDailyMax;
-      results.push({ ...t, ...(await researchOne(db, env, t, { fetchImpl, now, translate: tr })) });
+      const r = await researchOne(db, env, t, { fetchImpl, now, translate: tr });
+      results.push({ ...t, ...r });
+      if (r.paused) {
+        // Keys ran out mid-run: stop researching until they reset (saved data stays as it is)
+        paused = true;
+        break;
+      }
     }
   }
   // Rows with English data but no cron-language copy yet (e.g. researched on demand): one per run
@@ -805,7 +835,7 @@ export async function runCivicResearch(db, env, { fetchImpl = fetch, now = Date.
     }
   }
   if (!results.length) {
-    return { ran: 0, skipped: aiLeft <= 0 ? 'daily cap reached' : 'nothing to do' };
+    return { ran: 0, skipped: paused ? RESEARCH_PAUSED : aiLeft <= 0 ? 'daily cap reached' : 'nothing to do' };
   }
-  return { ran: results.length, results };
+  return { ran: results.length, results, ...(paused ? { paused: true } : {}) };
 }

@@ -100,7 +100,7 @@ export default function GovtScreen() {
           ) : null}
         </View>
         <PlacePicker lang={lang} place={place} onChange={setPlace} />
-        {place.state ? <CivicStatus lang={lang} phase={phase} hasData={!!d} aiConfigured={!!res?.aiConfigured} errorText={errorText} aiNote={aiNote} fromCache={fromCache} /> : null}
+        {place.state ? <CivicStatus lang={lang} phase={phase} hasData={!!d} aiConfigured={!!(res?.researchConfigured ?? res?.aiConfigured)} errorText={errorText} aiNote={aiNote} fromCache={fromCache} /> : null}
         {place.state ? <GovtCompareBox lang={lang} state={place.state} /> : null}
         {d ? (
           <>

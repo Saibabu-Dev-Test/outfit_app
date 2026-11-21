@@ -10,7 +10,7 @@ import { ui } from '../Earn/earnUi';
 import { colors } from '../../theme';
 import { isOwnerUser } from '../../services/adminSystem';
 import { INDIA_STATES } from '../../constants/indiaStates';
-import { AdminCivic, CivicKind, CivicReview, getAdminCivic, refreshCivic, setReviewHidden } from '../../services/civicApi';
+import { AdminCivic, AiProviders, CivicKind, CivicReview, getAdminCivic, refreshCivic, setReviewHidden } from '../../services/civicApi';
 import { fmtDate } from '../Civic/civicParts';
 
 const TARGETS: { label: string; kind: CivicKind; variant: string }[] = [
@@ -34,6 +34,15 @@ function ReviewRow({ r, onToggle }: { r: CivicReview; onToggle: (r: CivicReview)
     </View>
   );
 }
+
+
+// AI fallback chain on the Worker, one line: "Gemini 2/3 keys ready · Groq ready · Workers AI ready"
+export const providersLine = (p: AiProviders): string =>
+  [
+    `Gemini ${p.gemini.ready}/${p.gemini.keys} key${p.gemini.keys === 1 ? '' : 's'} ready`,
+    `Groq ${!p.groq.configured ? 'not set' : p.groq.coolingUntil ? 'cooling down' : 'ready'}`,
+    `Workers AI ${!p.workersAi.configured ? 'off' : p.workersAi.coolingUntil ? 'cooling down' : 'ready'}`,
+  ].join(' · ');
 
 export default function AdminCivicScreen({ navigation }: { navigation: any }) {
   const owner = isOwnerUser();
@@ -104,6 +113,7 @@ export default function AdminCivicScreen({ navigation }: { navigation: any }) {
             <Text style={ui.body}>
               Today: {snap.aiToday} / {snap.aiDailyMax}
             </Text>
+            {snap.aiProviders ? <Text style={ui.muted}>{providersLine(snap.aiProviders)}</Text> : null}
             {snap.data.map(d => (
               <Text key={`${d.kind}${d.status}`} style={ui.muted}>
                 {d.kind} · {d.status}: {d.count} (oldest {fmtDate(d.oldest)})

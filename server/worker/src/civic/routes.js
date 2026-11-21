@@ -9,7 +9,8 @@
 //   POST /v1/civic/research {kind, state, district, variant, lang}   on demand: research the place
 //        now (translated into lang in the same run) if it has no data, else translate the missing
 //        language (any TR_LANGS code). Capped per user + per day. `code` on failure: quota | billing |
-//        cap | timeout | config (the app shows a clear message).
+//        cap | timeout | config (the app shows a clear message). status 'paused' = every Gemini key
+//        is out of free quota: research paused, the saved info is kept and shown.
 //   POST /v1/civic/ask, /v1/civic/translate   civic AI answers + cached AI translations (ask.js)
 //   GET  /v1/civic/reviews?item=&limit=     visible reviews + average + my review
 //   POST /v1/civic/reviews {item, stars, body, photo?, userName?}  one per user per item (upsert)
@@ -24,6 +25,7 @@ import { utcDay } from '../days.js';
 import { placeByCode, stateByCode } from './states.js';
 import { cleanReviewText, hasProfanity } from './moderation.js';
 import { isGeminiConfigured } from './gemini.js';
+import { aiProviderStatus, isAiConfigured } from './llm.js';
 import { CIVIC_LOCK_MS, CIVIC_MAX_PENDING, KINDS, TR_LANGS, civicCaps, readI18n, researchNow, researchOne } from './research.js';
 
 export const MAX_REVIEWS_PER_DAY = 20; // per user (new or edited)
@@ -110,7 +112,10 @@ export async function getCivicData({ db, env, url, now }) {
     status: row ? (running && !data ? 'pending' : row.status) : queued ? 'pending' : 'none',
     running,
     updatedAt: row && data ? Number(row.updated_at) || 0 : 0,
-    aiConfigured: isGeminiConfigured(env),
+    // aiConfigured: Ask AI / Explain simply / translation work (any provider in the fallback chain);
+    // researchConfigured: grounded research of new places works (needs a Gemini key)
+    aiConfigured: isAiConfigured(env),
+    researchConfigured: isGeminiConfigured(env),
   };
 }
 
@@ -260,6 +265,7 @@ export async function getAdminCivic({ db, user, env, now }) {
   const full = r => ({ ...rowToReview(r, true), reportCount: Number(r.report_count) || 0 });
   return {
     aiConfigured: isGeminiConfigured(env),
+    aiProviders: await aiProviderStatus(env, { now }),
     aiToday: (await usageFor(db, utcDay(now), ['civic_ai'])).civic_ai,
     aiDailyMax: civicCaps(env).dailyMax,
     trToday: (await usageFor(db, utcDay(now), ['civic_tr'])).civic_tr,

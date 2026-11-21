@@ -94,7 +94,7 @@ export default function GovtCompareBox({ lang, state }: { lang: AppLanguage; sta
               </TouchableOpacity>
             ))}
           </View>
-          <CivicStatus lang={lang} phase={phase} hasData={!!d} aiConfigured={!!res?.aiConfigured} errorText={errorText} aiNote={aiNote} fromCache={fromCache} />
+          <CivicStatus lang={lang} phase={phase} hasData={!!d} aiConfigured={!!(res?.researchConfigured ?? res?.aiConfigured)} errorText={errorText} aiNote={aiNote} fromCache={fromCache} />
           {d ? (
             <View>
               <View style={[ui.row, { alignItems: 'flex-start', marginBottom: 6 }]}>

@@ -1,12 +1,10 @@
-// Hospitals tab > "Hospital AI": answers ONLY from the hospital list the Worker stored in D1 (the
-// list on screen), on the same free Gemini setup as the AI stylist (askStylist with its own system
-// prompt, like astrologyAi.ts). Counts toward the stylist's daily AI limit. Never diagnoses, never
-// gives medical advice, always says to verify with the hospital, always shows 108 / 112.
-import { isAiConfigured } from '../config/ai';
-import { AiLanguage, AiTurn, askStylist, isAiPaused } from './aiStylist';
+// Hospitals tab > "Hospital AI": pure helpers only (facts block, system prompt, safety line). The
+// answers themselves come from the Worker (POST /v1/civic/ask, server/worker/src/civic/ask.js) through
+// its AI fallback chain (Gemini keys -> Groq -> Workers AI); the app never calls an AI with an
+// on-phone key for this. Never diagnoses, never gives medical advice, always says to verify with the
+// hospital, always shows 108 / 112.
+import type { AiLanguage } from './aiStylist';
 import type { Hospital } from './civicApi';
-
-export const hospitalAiAvailable = (): boolean => isAiConfigured() && !isAiPaused();
 
 export const EMERGENCY_LINE: Record<AiLanguage, string> = {
   English: '🚑 Emergency: call 108 (ambulance) or 112. Please verify every detail with the hospital.',
@@ -53,9 +51,4 @@ export const hospitalSystem = (lang: AiLanguage, facts: string): string =>
 export const withSafetyLine = (text: string, lang: AiLanguage): string => {
   const t = (text || '').trim();
   return /108/.test(t) && /112/.test(t) ? t : `${t}\n\n${EMERGENCY_LINE[lang]}`;
-};
-
-export const askHospitalAi = async (uid: string, place: string, list: Hospital[], history: AiTurn[], lang: AiLanguage): Promise<string> => {
-  const { text } = await askStylist(uid, history, { language: lang, system: hospitalSystem(lang, hospitalFacts(place, list)) });
-  return withSafetyLine(text, lang);
 };

@@ -146,7 +146,8 @@ export type CivicKey =
   | 'askLawsHint'
   | 'lawsAiNote'
   | 'explainSimply'
-  | 'showingSaved';
+  | 'showingSaved'
+  | 'researchPaused';
 
 export const CIVIC_LABELS: Record<StaticLanguage, Record<CivicKey, string>> = {
   English: {
@@ -292,6 +293,7 @@ export const CIVIC_LABELS: Record<StaticLanguage, Record<CivicKey, string>> = {
     lawsAiNote: 'Answers only from the law sections in this app, in simple words. Not legal advice.',
     explainSimply: 'Explain simply',
     showingSaved: 'Showing saved info · updating…',
+    researchPaused: 'Research paused (free AI limit used up), showing saved info.',
   },
   Telugu: {
     govtTitle: '🏛️ ప్రభుత్వం',
@@ -436,6 +438,7 @@ export const CIVIC_LABELS: Record<StaticLanguage, Record<CivicKey, string>> = {
     lawsAiNote: 'ఈ యాప్‌లోని చట్ట సెక్షన్ల నుండి మాత్రమే, సులభమైన మాటల్లో సమాధానం. ఇది న్యాయ సలహా కాదు.',
     explainSimply: 'సులభంగా వివరించండి',
     showingSaved: 'సేవ్ చేసిన సమాచారం · అప్‌డేట్ అవుతోంది…',
+    researchPaused: 'పరిశోధన ఆగింది (ఉచిత AI పరిమితి పూర్తయింది), సేవ్ చేసిన సమాచారం చూపిస్తున్నాం.',
   },
   Hindi: {
     govtTitle: '🏛️ सरकार',
@@ -580,6 +583,7 @@ export const CIVIC_LABELS: Record<StaticLanguage, Record<CivicKey, string>> = {
     lawsAiNote: 'जवाब सिर्फ़ इस ऐप के क़ानूनी सेक्शन से, आसान शब्दों में। यह कानूनी सलाह नहीं है।',
     explainSimply: 'आसान भाषा में समझाएँ',
     showingSaved: 'सहेजी गई जानकारी · अपडेट हो रहा है…',
+    researchPaused: 'रिसर्च रुकी है (मुफ़्त AI सीमा खत्म), सहेजी गई जानकारी दिखाई जा रही है।',
   },
 };
 

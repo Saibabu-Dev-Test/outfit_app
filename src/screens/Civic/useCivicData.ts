@@ -5,7 +5,8 @@
 //     language in the same run; data present but the language missing = translation on demand.
 // While a run is going it polls every POLL_MS for a short window (MAX_POLLS). Never loops: each
 // place + language is requested at most once per screen visit. AI failures (free-tier limit, credits
-// used up) give a clear message while saved / cached info stays on screen.
+// used up) give a clear message while saved / cached info stays on screen. Status 'paused' (every
+// Worker Gemini key out of free quota) = "research paused, showing saved info": no retry, no poll.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppLanguage, langCode } from '../../i18n/appLanguage';
 import type { CivicKey } from '../../i18n/civicLabels';
@@ -86,11 +87,14 @@ export function useCivicData<T>(
           timer.current = setTimeout(() => load(true), POLL_MS);
         }
       };
-      const note = (out: { ok: boolean; code?: any; error?: string }) => {
-        if (!out.ok && out.code) setAiNote(aiErrorKey(null, out.code));
+      const note = (out: { ok: boolean; status?: string; code?: any; error?: string }) => {
+        if (out.status === 'paused') setAiNote('researchPaused');
+        else if (!out.ok && out.code) setAiNote(aiErrorKey(null, out.code));
       };
+      // Research of a new place needs grounded Gemini on the Worker; older Workers only send aiConfigured
+      const canResearch = r.researchConfigured ?? r.aiConfigured;
       if (!r.data) {
-        if (!r.aiConfigured) {
+        if (!canResearch) {
           setPhase('ready');
           return;
         }
@@ -106,6 +110,12 @@ export function useCivicData<T>(
             note(out);
             if (out.did === 'research' && out.ok) {
               load(true);
+              return;
+            }
+            if (out.status === 'paused') {
+              // Out of free quota: show what is saved (cache / nothing yet) and stop polling
+              if (timer.current) clearTimeout(timer.current);
+              setPhase('ready');
               return;
             }
           } catch (e) {
@@ -132,7 +142,7 @@ export function useCivicData<T>(
               load(true);
               return;
             }
-            if (!out.ok && out.code) {
+            if (!out.ok && (out.code || out.status === 'paused')) {
               setPhase('ready'); // English shows; the note says why
               return;
             }
