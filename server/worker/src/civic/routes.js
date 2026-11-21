@@ -3,7 +3,10 @@
 //   GET  /v1/civic/data?kind=govt|hosp&state=TG&district=&variant=&lang=ta   stored AI summary + its
 //        public source URLs + translated copies in i18n: te, hi and the asked lang (any TR_LANGS
 //        code) (also ?category=govt|hosp-govt|hosp-private). One fast D1 read (+1 for i18n).
-//        A place never researched is queued (status 'pending').
+//        A place never researched is queued (status 'pending'). status 'partial' = a Govt place's first
+//        research is still running and the parts shown are the ones finished so far (poll for the rest).
+//        Asked lang missing (English only): its translation starts in the background and the English
+//        copy is returned at once with status 'translating' (poll; the copy arrives in i18n[lang]).
 //        kind=gcmp: neutral previous vs present government comparison, state-level only (district
 //        must be empty); state may also be 'IN' (the centre). No reviews for it (facts only).
 //   POST /v1/civic/research {kind, state, district, variant, lang}   on demand: research the place
@@ -26,7 +29,7 @@ import { placeByCode, stateByCode } from './states.js';
 import { cleanReviewText, hasProfanity } from './moderation.js';
 import { isGeminiConfigured } from './gemini.js';
 import { aiProviderStatus, isAiConfigured } from './llm.js';
-import { CIVIC_LOCK_MS, CIVIC_MAX_PENDING, KINDS, TR_LANGS, civicCaps, readI18n, researchNow, researchOne } from './research.js';
+import { CIVIC_LOCK_MS, CIVIC_MAX_PENDING, KINDS, TR_LANGS, civicCaps, readI18n, researchNow, researchOne, startTranslate } from './research.js';
 
 export const MAX_REVIEWS_PER_DAY = 20; // per user (new or edited)
 export const MAX_REPORTS_PER_DAY = 30; // per user
@@ -85,7 +88,7 @@ const cleanSources = v =>
     .slice(0, 12)
     .map(x => ({ url: x.url, title: typeof x.title === 'string' ? x.title.slice(0, 120) : '' }));
 
-export async function getCivicData({ db, env, url, now }) {
+export async function getCivicData({ db, env, url, now, fetchImpl, ctx }) {
   const t = parseTarget(url.searchParams);
   const lang = TR_LANGS[str(url.searchParams.get('lang'), 4)] ? str(url.searchParams.get('lang'), 4) : '';
   const row = await db.first(
@@ -103,13 +106,23 @@ export async function getCivicData({ db, env, url, now }) {
   const data = row ? parseJson(row.data, null) : null;
   const running = !!(row && row.running_at && now - Number(row.running_at) < CIVIC_LOCK_MS);
   const i18n = data ? await readI18n(db, t, ['te', 'hi', ...(lang ? [lang] : [])], row.i18n) : {};
+  // English only for the asked language: start its translation in the background (never blocks)
+  let translating = false;
+  if (data && lang && !i18n[lang] && row.status === 'ok' && isAiConfigured(env)) {
+    if (running) {
+      translating = true;
+    } else if (ctx && ctx.waitUntil) {
+      const k = await startTranslate(db, env, t, lang, { fetchImpl: fetchImpl || fetch, now, waitUntil: job => ctx.waitUntil(job) });
+      translating = !!k.started;
+    }
+  }
   return {
     ...t,
     data,
     i18n: { te: i18n.te || null, hi: i18n.hi || null, ...(lang ? { [lang]: i18n[lang] || null } : {}) },
     sources: data ? cleanSources(parseJson(row.sources, [])) : [],
     aiStars: null, // no AI ratings (neutral information only)
-    status: row ? (running && !data ? 'pending' : row.status) : queued ? 'pending' : 'none',
+    status: row ? (running && !data ? 'pending' : translating ? 'translating' : row.status) : queued ? 'pending' : 'none',
     running,
     updatedAt: row && data ? Number(row.updated_at) || 0 : 0,
     // aiConfigured: Ask AI / Explain simply / translation work (any provider in the fallback chain);
@@ -129,7 +142,8 @@ export async function postCivicResearch({ db, env, user, body, now, fetchImpl, c
   if (!isOwner(user) && (await usageFor(db, day, [rk]))[rk] >= MAX_RESEARCH_PER_USER_DAY) {
     throw new HttpError(429, 'try again later today');
   }
-  const run = researchNow(db, env, t, lang, { fetchImpl: fetchImpl || fetch, now });
+  const waitUntil = ctx && ctx.waitUntil ? job => ctx.waitUntil(job) : null;
+  const run = researchNow(db, env, t, lang, { fetchImpl: fetchImpl || fetch, now, waitUntil });
   if (ctx && ctx.waitUntil) {
     // keeps the run (and its save) going a little if the phone gives up waiting
     ctx.waitUntil(run.catch(() => undefined));

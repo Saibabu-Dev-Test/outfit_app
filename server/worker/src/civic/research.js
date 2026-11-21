@@ -6,10 +6,15 @@
 // Speed: a Govt place is researched as 3 smaller grounded calls in parallel, and each part is
 // translated into the asked language as soon as it arrives (research + translation together),
 // translation itself split into small parallel chunks. Fast Flash-Lite models, a per-call timeout.
+// Progressive Govt: on a place's first research each finished part is saved at once (status
+// 'partial', with its translations) so the app shows it while the other parts are still running.
+// Translation never blocks a request: a missing language is started in the background
+// (startTranslate + ctx.waitUntil) and the English copy is served meanwhile (status 'translating').
 // Run by the civic cron (CIVIC_CRON in index.js) AND on demand (POST /v1/civic/research) with hard
 // caps so the free Gemini tier and D1 stay safe (civicCaps: defaults below, each can be overridden
 // by a Worker var of the same name, e.g. CIVIC_DAILY_MAX = "200" in wrangler.toml [vars]):
-//   CIVIC_PER_RUN places per cron run, CIVIC_DAILY_MAX grounded research calls per UTC day (usage
+//   CIVIC_PER_RUN places per cron run, CIVIC_TR_PER_RUN missing te / hi copies translated per cron
+//   run (seed districts first), CIVIC_DAILY_MAX grounded research calls per UTC day (usage
 //   key 'civic_ai'), CIVIC_TR_DAILY_MAX translation calls per day ('civic_tr'), CIVIC_ASK_DAILY_MAX
 //   "Ask AI" / "Explain simply" calls per day ('civic_ask', routes.js).
 // Order: districts users asked for (status 'pending') -> state rows never researched -> the
@@ -37,6 +42,8 @@ export const CIVIC_PER_RUN = 3; // places per cron run (run one after another, ~
 export const CIVIC_DAILY_MAX = 150; // grounded research calls per UTC day
 export const CIVIC_TR_DAILY_MAX = 300; // translation calls per UTC day
 export const CIVIC_ASK_DAILY_MAX = 300; // Ask AI / Explain simply calls per UTC day (all users)
+export const CIVIC_TR_PER_RUN = 5; // missing te / hi copies translated per cron run (one after another)
+export const CIVIC_TR_ROW_TRIES = 3; // translation attempts per row + language per UTC day (no retry loops)
 export const CIVIC_REFRESH_MS = 7 * 24 * 3600 * 1000;
 export const CIVIC_RETRY_MS = 20 * 60 * 1000;
 export const CIVIC_LOCK_MS = 3 * 60 * 1000;
@@ -77,6 +84,7 @@ export const civicCaps = env => ({
   dailyMax: capVar(env, 'CIVIC_DAILY_MAX', CIVIC_DAILY_MAX, 1500),
   trDailyMax: capVar(env, 'CIVIC_TR_DAILY_MAX', CIVIC_TR_DAILY_MAX, 3000),
   askDailyMax: capVar(env, 'CIVIC_ASK_DAILY_MAX', CIVIC_ASK_DAILY_MAX, 3000),
+  trPerRun: capVar(env, 'CIVIC_TR_PER_RUN', CIVIC_TR_PER_RUN, 20),
 });
 
 const s = (v, max = 200) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, max) : typeof v === 'number' ? String(v) : '');
@@ -571,6 +579,47 @@ export async function translateOne(db, env, t, lang, { fetchImpl = fetch, now = 
   return { ok: true, lang, model: r.model };
 }
 
+const trTriesKey = (t, lang) => `civic_trk:${t.kind}|${t.state}|${t.district}|${t.variant}|${lang}`.slice(0, 160);
+
+/**
+ * Start translating one row's English data into one language, inside the daily translation cap,
+ * at most CIVIC_TR_ROW_TRIES attempts per row + language per day, one run per row (lock).
+ * opts.waitUntil (ctx.waitUntil): run in the background and answer at once with
+ * { ok: true, status: 'translating', did: 'translate', started: true }; without it the translation is
+ * awaited ({ ok, ..., did: 'translate' }). A refusal (cap, tries, no provider) has no `did`.
+ */
+export async function startTranslate(db, env, t, lang, { fetchImpl = fetch, now = Date.now(), waitUntil = null } = {}) {
+  if (!TR_LANGS[lang] || !isAiConfigured(env)) {
+    return { ok: false, status: 'ok', error: 'translation not available', code: 'config' };
+  }
+  const caps = civicCaps(env);
+  const day = utcDay(now);
+  const tk = trTriesKey(t, lang);
+  const used = await usageFor(db, day, ['civic_tr', tk]);
+  if (used.civic_tr >= caps.trDailyMax) {
+    return { ok: false, status: 'ok', error: 'daily translation cap reached', code: 'cap' };
+  }
+  if (used[tk] >= CIVIC_TR_ROW_TRIES) {
+    return { ok: false, status: 'ok', error: 'translation tried too often today', code: 'cap' };
+  }
+  if (!(await lockRow(db, t, now))) {
+    return { ok: true, status: 'running', did: 'already running' };
+  }
+  await addUsage(db, day, tk, 1);
+  const job = (async () => {
+    try {
+      return await translateOne(db, env, t, lang, { fetchImpl, now });
+    } finally {
+      await unlock(db, t);
+    }
+  })();
+  if (waitUntil) {
+    waitUntil(job.catch(() => undefined));
+    return { ok: true, status: 'translating', did: 'translate', started: true, lang };
+  }
+  return { ...(await job), status: 'ok', did: 'translate' };
+}
+
 /**
  * Research one target in English (grounded; Govt = 3 parallel parts). opts.langs: languages to
  * translate into TOGETHER with the research (each part is translated the moment it arrives).
@@ -586,6 +635,39 @@ export async function researchOne(db, env, { kind, state, district = '', variant
   const toLangs = [...new Set((langs || (translate ? CIVIC_CRON_LANGS : [])).filter(l => TR_LANGS[l]))];
   const prompts = researchPrompts(kind, variant, st, district);
   let trCalls = 0;
+  // Progressive Govt: first research of a place (no data saved yet) saves each finished part at once
+  const before = kind === 'govt' ? await db.first(`SELECT data FROM civic_data WHERE ${where4}`, ...binds4(t)) : null;
+  const progressive = kind === 'govt' && !(before && before.data);
+  const done = [];
+  let saving = Promise.resolve();
+  const savePartial = () => {
+    const okDone = done.filter(p => p.raw);
+    const partial = cleanGovt(Object.assign({}, ...okDone.map(p => p.raw)));
+    if (!okDone.length || isEmpty(kind, partial)) {
+      return;
+    }
+    const sources = [];
+    okDone.forEach(p => ((p.r.ok && p.r.sources) || []).forEach(x => !sources.some(y => y.url === x.url) && sources.length < 12 && sources.push(x)));
+    const trs = toLangs
+      .filter(lang => okDone.every(p => p.tr[lang]))
+      .map(lang => [lang, alignTranslation(partial, Object.assign({}, ...okDone.map(p => p.tr[lang])))])
+      .filter(([, d]) => textCount(d));
+    saving = saving
+      .then(async () => {
+        await db.run(
+          `INSERT INTO civic_data (kind, state, district, variant, data, sources, ai_stars, status, error, model, updated_at, i18n, schema_v)
+           VALUES (?, ?, ?, ?, ?, ?, NULL, 'partial', NULL, ?, ?, NULL, ?)
+           ON CONFLICT (kind, state, district, variant) DO UPDATE SET data = excluded.data, sources = excluded.sources,
+             status = 'partial', error = NULL, model = excluded.model, updated_at = excluded.updated_at, schema_v = excluded.schema_v
+           WHERE civic_data.data IS NULL OR civic_data.status = 'partial'`,
+          kind, state, district, variant, JSON.stringify(partial), JSON.stringify(sources), (okDone[0].r && okDone[0].r.model) || '', now, CIVIC_SCHEMA[kind] || 1,
+        );
+        for (const [lang, d] of trs) {
+          await saveTranslation(db, t, lang, d, now);
+        }
+      })
+      .catch(() => undefined);
+  };
   const parts = await Promise.all(
     prompts.map(async (prompt, i) => {
       const r = await aiGenerate(env, { prompt, grounded: true, maxTokens: kind === 'govt' ? 8000 : 16000 }, { fetchImpl, now });
@@ -606,9 +688,17 @@ export async function researchOne(db, env, { kind, state, district = '', variant
           }),
         );
       }
-      return { r, raw, tr };
+      const part = { r, raw, tr };
+      if (progressive && prompts.length > 1) {
+        done.push(part);
+        if (done.length < prompts.length) {
+          savePartial();
+        }
+      }
+      return part;
     }),
   );
+  await saving;
   const day = utcDay(now);
   await addUsage(db, day, 'civic_ai', prompts.length);
   if (trCalls) {
@@ -673,13 +763,14 @@ export async function researchOne(db, env, { kind, state, district = '', variant
 // On demand (a user opened a place): research it now (with the user's language in the same run) if
 // it has no data, else translate the missing language. Locked per row (one run at a time) and inside
 // the same daily caps as the cron.
-export async function researchNow(db, env, t, lang, { fetchImpl = fetch, now = Date.now() } = {}) {
+export async function researchNow(db, env, t, lang, { fetchImpl = fetch, now = Date.now(), waitUntil = null } = {}) {
   if (!isAiConfigured(env)) {
     return { ok: false, status: 'ai_off', error: 'no AI provider set (GEMINI_API_KEY)', code: 'config' };
   }
   const caps = civicCaps(env);
   const row = await db.first(`SELECT data, i18n, status, updated_at, running_at FROM civic_data WHERE ${where4}`, ...binds4(t));
-  const hasData = !!(row && row.data);
+  // A 'partial' Govt row (some parts saved, run still going or cut off) still needs its research
+  const hasData = !!(row && row.data) && row.status !== 'partial';
   const have = hasData && TR_LANGS[lang] ? await readI18n(db, t, [lang], row.i18n) : {};
   const needTr = hasData && !!TR_LANGS[lang] && !have[lang];
   if (hasData && !needTr) {
@@ -702,20 +793,17 @@ export async function researchNow(db, env, t, lang, { fetchImpl = fetch, now = D
   if (!hasData && used.civic_ai + calls > caps.dailyMax) {
     return { ok: false, status: 'pending', error: 'daily cap reached', code: 'cap' };
   }
-  if (needTr && used.civic_tr >= caps.trDailyMax) {
-    return { ok: false, status: 'ok', error: 'daily translation cap reached', code: 'cap' };
+  if (needTr) {
+    // Translation only: started in the background when the request can wait (English shows meanwhile)
+    return startTranslate(db, env, t, lang, { fetchImpl, now, waitUntil });
   }
   if (!(await lockRow(db, t, now))) {
     return { ok: true, status: 'running', did: 'already running' };
   }
   try {
-    if (!hasData) {
-      const withLang = TR_LANGS[lang] && used.civic_tr < caps.trDailyMax ? [lang] : [];
-      const r = await researchOne(db, env, t, { fetchImpl, now, langs: withLang });
-      return { ...r, status: r.ok ? 'ok' : r.status || 'error', did: 'research' };
-    }
-    const r = await translateOne(db, env, t, lang, { fetchImpl, now });
-    return { ...r, status: 'ok', did: 'translate' };
+    const withLang = TR_LANGS[lang] && used.civic_tr < caps.trDailyMax ? [lang] : [];
+    const r = await researchOne(db, env, t, { fetchImpl, now, langs: withLang });
+    return { ...r, status: r.ok ? 'ok' : r.status || 'error', did: 'research' };
   } finally {
     await unlock(db, t);
   }
@@ -763,7 +851,8 @@ export function pickTargets(rows, now, n, seeds = SEED_DISTRICTS) {
     .filter(
       r =>
         free(r) &&
-        ((r.status === 'ok' && now - Number(r.updated_at) > CIVIC_REFRESH_MS) || (r.status === 'error' && now - Number(r.updated_at) > CIVIC_RETRY_MS)),
+        ((r.status === 'ok' && now - Number(r.updated_at) > CIVIC_REFRESH_MS) ||
+          ((r.status === 'error' || r.status === 'partial') && now - Number(r.updated_at) > CIVIC_RETRY_MS)),
     )
     .sort((a, b) => Number(a.updated_at) - Number(b.updated_at));
   const pick = r => ({ kind: r.kind, state: r.state, district: r.district || '', variant: r.variant || '' });
@@ -812,30 +901,65 @@ export async function runCivicResearch(db, env, { fetchImpl = fetch, now = Date.
       }
     }
   }
-  // Rows with English data but no cron-language copy yet (e.g. researched on demand): one per run
+  // Rows with English data but no te / hi copy yet (researched on demand, or a translation that
+  // failed): up to caps.trPerRun per run, one after another. Order: rows researched in the last day
+  // (someone just opened them), then the state-level rows and the bundled-city (seed) districts,
+  // then the rest, newest first.
   if (translate) {
-    const left = await usageFor(db, day, ['civic_tr']);
-    if (left.civic_tr < caps.trDailyMax) {
-      const rows = await db.all("SELECT kind, state, district, variant, i18n FROM civic_data WHERE status = 'ok' AND data IS NOT NULL ORDER BY updated_at DESC LIMIT 30");
-      const marks = CIVIC_CRON_LANGS.map(() => '?').join(',');
-      const done = new Set(
-        (await db.all(`SELECT kind, state, district, variant, lang FROM civic_i18n WHERE lang IN (${marks})`, ...CIVIC_CRON_LANGS)).map(
-          x => `${x.kind}|${x.state}|${x.district || ''}|${x.variant || ''}|${x.lang}`,
-        ),
-      );
-      for (const r of rows) {
-        const t = { kind: r.kind, state: r.state, district: r.district || '', variant: r.variant || '' };
-        const old = parseJsonCol(r.i18n, {});
-        const lang = CIVIC_CRON_LANGS.find(l => !old[l] && !done.has(`${t.kind}|${t.state}|${t.district}|${t.variant}|${l}`));
-        if (lang) {
-          results.push({ ...t, translate: lang, ...(await translateOne(db, env, t, lang, { fetchImpl, now })) });
-          break;
-        }
+    const backlog = await translationBacklog(db, now);
+    let left = caps.trPerRun;
+    for (const job of backlog) {
+      if (left <= 0) {
+        break;
       }
+      const r = await startTranslate(db, env, job.t, job.lang, { fetchImpl, now });
+      if (!r.did && r.code === 'cap' && /daily/.test(r.error || '')) {
+        break; // daily translation cap reached
+      }
+      if (r.did !== 'translate') {
+        continue; // locked by a research run, or tried too often today: next row
+      }
+      left -= 1;
+      results.push({ ...job.t, translate: job.lang, ...r });
     }
   }
   if (!results.length) {
     return { ran: 0, skipped: paused ? RESEARCH_PAUSED : aiLeft <= 0 ? 'daily cap reached' : 'nothing to do' };
   }
   return { ran: results.length, results, ...(paused ? { paused: true } : {}) };
+}
+
+// Missing cron-language (te / hi) copies of rows with English data, best first (see runCivicResearch)
+export async function translationBacklog(db, now, seeds = SEED_DISTRICTS) {
+  const rows = await db.all("SELECT kind, state, district, variant, i18n, updated_at FROM civic_data WHERE status = 'ok' AND data IS NOT NULL LIMIT 2000");
+  if (!rows.length) {
+    return [];
+  }
+  const marks = CIVIC_CRON_LANGS.map(() => '?').join(',');
+  const have = new Set(
+    (await db.all(`SELECT kind, state, district, variant, lang FROM civic_i18n WHERE lang IN (${marks})`, ...CIVIC_CRON_LANGS)).map(
+      x => `${x.kind}|${x.state}|${x.district || ''}|${x.variant || ''}|${x.lang}`,
+    ),
+  );
+  const rank = r => {
+    if (now - Number(r.updated_at) < 24 * 3600 * 1000) {
+      return 0;
+    }
+    const d = r.district || '';
+    return !d || ((seeds && seeds[r.state]) || []).includes(d) ? 1 : 2;
+  };
+  const jobs = [];
+  rows
+    .map(r => ({ r, k: rank(r) }))
+    .sort((a, b) => a.k - b.k || Number(b.r.updated_at) - Number(a.r.updated_at))
+    .forEach(({ r }) => {
+      const t = { kind: r.kind, state: r.state, district: r.district || '', variant: r.variant || '' };
+      const old = parseJsonCol(r.i18n, {});
+      CIVIC_CRON_LANGS.forEach(lang => {
+        if (!old[lang] && !have.has(`${t.kind}|${t.state}|${t.district}|${t.variant}|${lang}`)) {
+          jobs.push({ t, lang });
+        }
+      });
+    });
+  return jobs;
 }

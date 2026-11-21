@@ -472,3 +472,123 @@ describe('app: languages, cache, law context, messages', () => {
     expect(fromStore(store, { a: 'Ask', b: 'New', c: 'X' })).toEqual({ have: { a: 'கேள்' }, missing: ['b', 'c'] });
   });
 });
+
+describe('faster translation + progressive Govt (Worker)', () => {
+  const waitFor = async (check: () => boolean) => {
+    for (let i = 0; i < 400 && !check(); i++) await new Promise<void>(r => setTimeout(() => r(), 5));
+    expect(check()).toBe(true);
+  };
+
+  it('Govt first visit: each finished part is saved at once (partial) and served; the full row replaces it', async () => {
+    const e = env({ GEMINI_API_KEY: 'k' });
+    const db = new Db(e.DB);
+    const { f } = makeFetch();
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>(r => (release = r));
+    const slow = jest.fn(async (url: string, init?: any) => {
+      if (init && /main government departments/.test(init.body)) await gate;
+      return f(url, init);
+    });
+    const t = { kind: 'govt', state: 'AP', district: 'kurnool', variant: '' };
+    const run = research.researchOne(db, e, t, { fetchImpl: slow, now: NOW, langs: ['ta'] });
+    const row = () => e.DB.raw.prepare("SELECT status, data FROM civic_data WHERE kind='govt' AND state='AP' AND district='kurnool'").get();
+    // 2 of 3 parts done: saved as partial with what they found (+ its Tamil copy)
+    await waitFor(() => {
+      const r = row();
+      return !!(r && r.status === 'partial' && JSON.parse(r.data).offices.length && JSON.parse(r.data).overview);
+    });
+    const g = await call(e, 'GET', '/v1/civic/data?kind=govt&state=AP&district=kurnool&lang=ta', { fetchImpl: slow });
+    expect(g.json.status).toBe('partial');
+    expect(g.json.data.overview).toBe('Kurnool district.');
+    expect(g.json.data.departments).toEqual([]);
+    expect(g.json.i18n.ta.overview).toBe('TA Kurnool district.');
+    release();
+    expect(await run).toMatchObject({ ok: true, translated: ['ta'] });
+    expect(row().status).toBe('ok');
+    expect(JSON.parse(row().data).departments[0].name).toBe('Health');
+    // a refresh of a place with data is not progressive (the saved row stays until the new one is done)
+    await research.researchOne(db, e, t, { fetchImpl: makeFetch().f, now: NOW + 1 });
+    expect(row().status).toBe('ok');
+  });
+
+  it('a partial row left behind is researched again (on demand + cron), not treated as done', async () => {
+    const e = env({ GEMINI_API_KEY: 'k' });
+    e.DB.raw
+      .prepare("INSERT INTO civic_data (kind, state, district, variant, data, status, updated_at) VALUES ('govt','AP','kurnool','',?,'partial',?)")
+      .run(JSON.stringify(research.cleanGovt({ overview: 'Half.' })), NOW - research.CIVIC_RETRY_MS - 1);
+    expect(research.pickTargets(e.DB.raw.prepare('SELECT * FROM civic_data').all(), NOW, 5000, {}).some((x: any) => x.district === 'kurnool')).toBe(true);
+    const r = await call(e, 'POST', '/v1/civic/research', { body: { kind: 'govt', state: 'AP', district: 'kurnool' } });
+    expect(r.json).toMatchObject({ ok: true, did: 'research' });
+    expect(e.DB.raw.prepare("SELECT status FROM civic_data WHERE kind='govt' AND district='kurnool'").get().status).toBe('ok');
+  });
+
+  it('asked language missing: English returned at once (status translating), copy saved in the background', async () => {
+    const e = env({ GEMINI_API_KEY: 'k' });
+    const db = new Db(e.DB);
+    await research.researchOne(db, e, { kind: 'hosp', state: 'AP', district: 'kurnool', variant: 'govt' }, { fetchImpl: makeFetch().f, now: NOW });
+    const handlers: Promise<any>[] = [];
+    const quick = await research.researchNow(db, e, { kind: 'hosp', state: 'AP', district: 'kurnool', variant: 'govt' }, 'ml', {
+      fetchImpl: makeFetch().f,
+      now: NOW,
+      waitUntil: (p: Promise<any>) => handlers.push(p),
+    });
+    expect(quick).toMatchObject({ ok: true, status: 'translating', did: 'translate', lang: 'ml' });
+    await Promise.all(handlers);
+    const g0 = await call(e, 'GET', '/v1/civic/data?kind=hosp&state=AP&district=kurnool&variant=govt&lang=ml');
+    expect(g0.json.status).toBe('ok');
+    expect(g0.json.i18n.ml.hospitals[0].name).toBe('TA GGH Kurnool');
+    // GET alone starts the missing language (no POST needed)
+    const g1 = await call(e, 'GET', '/v1/civic/data?kind=hosp&state=AP&district=kurnool&variant=govt&lang=kn');
+    expect(g1.json).toMatchObject({ status: 'translating' });
+    expect(g1.json.data.hospitals[0].name).toBe('GGH Kurnool');
+    expect(g1.json.i18n.kn).toBeNull();
+    const g2 = await call(e, 'GET', '/v1/civic/data?kind=hosp&state=AP&district=kurnool&variant=govt&lang=kn');
+    expect(g2.json.status).toBe('ok');
+    expect(g2.json.i18n.kn.hospitals[0].name).toBe('TA GGH Kurnool');
+  });
+
+  it('a failing translation is tried at most CIVIC_TR_ROW_TRIES times a day per row + language', async () => {
+    const e = env({ GEMINI_API_KEY: 'k' });
+    const db = new Db(e.DB);
+    const t = { kind: 'hosp', state: 'AP', district: 'kurnool', variant: 'govt' };
+    await research.researchOne(db, e, t, { fetchImpl: makeFetch().f, now: NOW });
+    const bad = makeFetch({ status: 500 });
+    for (let i = 0; i < research.CIVIC_TR_ROW_TRIES; i++) {
+      expect(await research.startTranslate(db, e, t, 'ta', { fetchImpl: bad.f, now: NOW + i })).toMatchObject({ ok: false, did: 'translate' });
+    }
+    const n = bad.calls.length;
+    expect(n).toBeGreaterThan(0);
+    const r = await research.startTranslate(db, e, t, 'ta', { fetchImpl: bad.f, now: NOW + 10 });
+    expect(r.did).toBeUndefined();
+    expect(r.code).toBe('cap');
+    expect(bad.calls.length).toBe(n);
+    // the daily translation cap still holds
+    e.DB.raw.prepare("INSERT INTO usage (day, key, n) VALUES ('2026-11-18', 'civic_tr', 300) ON CONFLICT (day, key) DO UPDATE SET n = 300").run();
+    expect(await research.startTranslate(db, e, t, 'te', { fetchImpl: makeFetch().f, now: NOW })).toMatchObject({ ok: false, code: 'cap', error: 'daily translation cap reached' });
+  });
+
+  it('cron translates up to CIVIC_TR_PER_RUN missing te / hi copies per run; seed districts before others', async () => {
+    const e = env({ GEMINI_API_KEY: 'k' });
+    const db = new Db(e.DB);
+    const old = NOW - 3 * 24 * 3600 * 1000;
+    for (const [state, district, variant] of [
+      ['AP', 'kurnool', 'govt'],
+      ['AP', 'kurnool', 'private'],
+      ['TG', '', 'govt'],
+      ['TG', 'someplace', 'govt'],
+    ]) {
+      await research.researchOne(db, e, { kind: 'hosp', state, district, variant }, { fetchImpl: makeFetch().f, now: old });
+    }
+    const jobs = await research.translationBacklog(db, NOW);
+    expect(jobs).toHaveLength(8);
+    // 'someplace' is not a bundled-city district: last
+    expect(jobs.slice(-2).map((j: any) => j.t.district)).toEqual(['someplace', 'someplace']);
+    expect(jobs.slice(-2).map((j: any) => j.lang)).toEqual(['te', 'hi']);
+    const r = await research.runCivicResearch(db, e, { fetchImpl: makeFetch().f, now: NOW, perRun: 0 });
+    expect(r.ran).toBe(research.CIVIC_TR_PER_RUN);
+    expect(Number(e.DB.raw.prepare('SELECT COUNT(*) AS n FROM civic_i18n').get().n)).toBe(5);
+    const r2 = await research.runCivicResearch(db, e, { fetchImpl: makeFetch().f, now: NOW, perRun: 0 });
+    expect(r2.ran).toBe(3);
+    expect(await research.translationBacklog(db, NOW)).toHaveLength(0);
+  });
+});
