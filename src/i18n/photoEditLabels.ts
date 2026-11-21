@@ -1,6 +1,6 @@
 // Photo options labels (Original / Blur / Remove BG / Adjust / Blur face and the Adjust screen),
 // in the Settings > App language (English by default, Telugu, Hindi).
-import { AppLanguage } from './appLanguage';
+import { AppLanguage, StaticLanguage, staticLanguage } from './appLanguage';
 
 export type PhotoEditKey =
   | 'original'
@@ -25,7 +25,8 @@ export type PhotoEditKey =
   | 'imagePreview'
   | 'tooLarge';
 
-export const PHOTO_EDIT_LABELS: Record<AppLanguage, Record<PhotoEditKey, string>> = {
+// Static copies in English / Telugu / Hindi; other app languages show English here
+export const PHOTO_EDIT_LABELS: Record<StaticLanguage, Record<PhotoEditKey, string>> = {
   English: {
     original: 'Original',
     blur: 'Blur',
@@ -99,7 +100,7 @@ export const PHOTO_EDIT_LABELS: Record<AppLanguage, Record<PhotoEditKey, string>
 
 /** Label in the app language (falls back to English); {n} is replaced by n. */
 export const photoText = (key: PhotoEditKey, lang?: AppLanguage | null, n?: number): string => {
-  const table = (lang && PHOTO_EDIT_LABELS[lang]) || PHOTO_EDIT_LABELS.English;
+  const table = PHOTO_EDIT_LABELS[staticLanguage(lang)] || PHOTO_EDIT_LABELS.English;
   const s = table[key] || PHOTO_EDIT_LABELS.English[key];
   return n == null ? s : s.replace('{n}', String(n));
 };

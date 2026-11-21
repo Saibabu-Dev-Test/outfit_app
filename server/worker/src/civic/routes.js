@@ -1,12 +1,17 @@
 // Civic tab routes (Govt / Hospitals / previous vs present government comparison). All need a verified Firebase ID token (index.js); the uid
 // always comes from the token.
-//   GET  /v1/civic/data?kind=govt|hosp&state=TG&district=&variant=   stored AI summary + its public
-//        source URLs + Telugu / Hindi copies (i18n) (also ?category=govt|hosp-govt|hosp-private).
+//   GET  /v1/civic/data?kind=govt|hosp&state=TG&district=&variant=&lang=ta   stored AI summary + its
+//        public source URLs + translated copies in i18n: te, hi and the asked lang (any TR_LANGS
+//        code) (also ?category=govt|hosp-govt|hosp-private). One fast D1 read (+1 for i18n).
 //        A place never researched is queued (status 'pending').
 //        kind=gcmp: neutral previous vs present government comparison, state-level only (district
 //        must be empty); state may also be 'IN' (the centre). No reviews for it (facts only).
 //   POST /v1/civic/research {kind, state, district, variant, lang}   on demand: research the place
-//        now if it has no data, else translate the missing language (te|hi). Capped per user + per day.
+//        now (translated into lang in the same run) if it has no data, else translate the missing
+//        language (any TR_LANGS code). Capped per user + per day. `code` on failure: quota | billing |
+//        cap | timeout | config (the app shows a clear message). status 'paused' = every Gemini key
+//        is out of free quota: research paused, the saved info is kept and shown.
+//   POST /v1/civic/ask, /v1/civic/translate   civic AI answers + cached AI translations (ask.js)
 //   GET  /v1/civic/reviews?item=&limit=     visible reviews + average + my review
 //   POST /v1/civic/reviews {item, stars, body, photo?, userName?}  one per user per item (upsert)
 //   POST /v1/civic/reports {item, author, reason}                  one per reporter per review
@@ -20,7 +25,8 @@ import { utcDay } from '../days.js';
 import { placeByCode, stateByCode } from './states.js';
 import { cleanReviewText, hasProfanity } from './moderation.js';
 import { isGeminiConfigured } from './gemini.js';
-import { CIVIC_DAILY_MAX, CIVIC_LOCK_MS, CIVIC_MAX_PENDING, CIVIC_TR_DAILY_MAX, KINDS, TR_LANGS, researchNow, researchOne } from './research.js';
+import { aiProviderStatus, isAiConfigured } from './llm.js';
+import { CIVIC_LOCK_MS, CIVIC_MAX_PENDING, KINDS, TR_LANGS, civicCaps, readI18n, researchNow, researchOne } from './research.js';
 
 export const MAX_REVIEWS_PER_DAY = 20; // per user (new or edited)
 export const MAX_REPORTS_PER_DAY = 30; // per user
@@ -81,6 +87,7 @@ const cleanSources = v =>
 
 export async function getCivicData({ db, env, url, now }) {
   const t = parseTarget(url.searchParams);
+  const lang = TR_LANGS[str(url.searchParams.get('lang'), 4)] ? str(url.searchParams.get('lang'), 4) : '';
   const row = await db.first(
     'SELECT data, sources, i18n, status, updated_at, running_at FROM civic_data WHERE kind = ? AND state = ? AND district = ? AND variant = ?',
     t.kind, t.state, t.district, t.variant,
@@ -95,17 +102,20 @@ export async function getCivicData({ db, env, url, now }) {
   }
   const data = row ? parseJson(row.data, null) : null;
   const running = !!(row && row.running_at && now - Number(row.running_at) < CIVIC_LOCK_MS);
-  const i18n = row ? parseJson(row.i18n, {}) : {};
+  const i18n = data ? await readI18n(db, t, ['te', 'hi', ...(lang ? [lang] : [])], row.i18n) : {};
   return {
     ...t,
     data,
-    i18n: { te: i18n.te || null, hi: i18n.hi || null },
+    i18n: { te: i18n.te || null, hi: i18n.hi || null, ...(lang ? { [lang]: i18n[lang] || null } : {}) },
     sources: data ? cleanSources(parseJson(row.sources, [])) : [],
     aiStars: null, // no AI ratings (neutral information only)
     status: row ? (running && !data ? 'pending' : row.status) : queued ? 'pending' : 'none',
     running,
     updatedAt: row && data ? Number(row.updated_at) || 0 : 0,
-    aiConfigured: isGeminiConfigured(env),
+    // aiConfigured: Ask AI / Explain simply / translation work (any provider in the fallback chain);
+    // researchConfigured: grounded research of new places works (needs a Gemini key)
+    aiConfigured: isAiConfigured(env),
+    researchConfigured: isGeminiConfigured(env),
   };
 }
 
@@ -255,10 +265,13 @@ export async function getAdminCivic({ db, user, env, now }) {
   const full = r => ({ ...rowToReview(r, true), reportCount: Number(r.report_count) || 0 });
   return {
     aiConfigured: isGeminiConfigured(env),
+    aiProviders: await aiProviderStatus(env, { now }),
     aiToday: (await usageFor(db, utcDay(now), ['civic_ai'])).civic_ai,
-    aiDailyMax: CIVIC_DAILY_MAX,
+    aiDailyMax: civicCaps(env).dailyMax,
     trToday: (await usageFor(db, utcDay(now), ['civic_tr'])).civic_tr,
-    trDailyMax: CIVIC_TR_DAILY_MAX,
+    trDailyMax: civicCaps(env).trDailyMax,
+    askToday: (await usageFor(db, utcDay(now), ['civic_ask'])).civic_ask,
+    askDailyMax: civicCaps(env).askDailyMax,
     data: status.map(r => ({ kind: r.kind, status: r.status, count: Number(r.n) || 0, oldest: Number(r.oldest) || 0 })),
     errors: errors.map(r => ({ kind: r.kind, state: r.state, district: r.district, variant: r.variant, error: r.error, updatedAt: Number(r.updated_at) || 0 })),
     reported: reported.map(full),

@@ -3,7 +3,7 @@
 // own source link + date; the Worker drops points without them and drops evaluative words. There is
 // no verdict, rating or "which is best" anywhere. Collapsed until the user opens it, so research is
 // only asked for when someone wants it (same per-user / daily caps on the Worker).
-// Each item in the app language (Telugu / Hindi) AND English (civic_data.i18n).
+// Each item in the app language with an English toggle (civic_i18n / civic_data.i18n).
 import React, { useState } from 'react';
 import { Text, TouchableOpacity, View } from 'react-native';
 import { ui } from '../Earn/earnUi';
@@ -12,7 +12,7 @@ import { AppLanguage } from '../../i18n/appLanguage';
 import { CivicKey, civicText } from '../../i18n/civicLabels';
 import { CENTRE_CODE, COMPARE_AREAS, CompareArea, CompareData, CompareFact, CompareGovt, getCompareData } from '../../services/civicApi';
 import { CivicStatus, SourcesBox, openLink } from './civicParts';
-import { Bi, biLabel } from './bi';
+import { Bi, CivicCard, biLabel } from './bi';
 import { stateByCodeApp } from './stateName';
 import { useCivicData } from './useCivicData';
 
@@ -71,18 +71,18 @@ export default function GovtCompareBox({ lang, state }: { lang: AppLanguage; sta
   const [scope, setScope] = useState<'state' | 'centre'>('state');
   const code = scope === 'centre' ? CENTRE_CODE : state;
   // Not opened = no request at all (state '' disables the hook)
-  const { res, phase, errorText, tr } = useCivicData<CompareData>('gcmp', open ? code : '', '', '', lang, () => getCompareData(code));
+  const { res, phase, errorText, tr, aiNote, fromCache } = useCivicData<CompareData>('gcmp', open ? code : '', '', '', lang, c => getCompareData(code, c));
   const d = res?.data;
   const t = (tr && res?.i18n?.[tr]) || null;
 
   return (
-    <View style={ui.card}>
+    <CivicCard lang={lang} hasTranslation={!!t}>
       <TouchableOpacity onPress={() => setOpen(v => !v)} activeOpacity={0.8}>
         <Text style={ui.h2}>
           ⚖️ {biLabel(lang, 'compareTitle')} {open ? '▴' : '▾'}
         </Text>
         <Text style={ui.muted}>{civicText(lang, 'compareNote')}</Text>
-        {lang !== 'English' ? <Text style={[ui.muted, { fontSize: 12 }]}>{civicText('English', 'compareNote')}</Text> : null}
+        {lang !== 'English' && civicText(lang, 'compareNote') !== civicText('English', 'compareNote') ? <Text style={[ui.muted, { fontSize: 12 }]}>{civicText('English', 'compareNote')}</Text> : null}
         {!open ? <Text style={[ui.body, { color: colors.primary, marginTop: 6 }]}>{civicText(lang, 'compareShow')}</Text> : null}
       </TouchableOpacity>
       {open ? (
@@ -94,7 +94,7 @@ export default function GovtCompareBox({ lang, state }: { lang: AppLanguage; sta
               </TouchableOpacity>
             ))}
           </View>
-          <CivicStatus lang={lang} phase={phase} hasData={!!d} aiConfigured={!!res?.aiConfigured} errorText={errorText} />
+          <CivicStatus lang={lang} phase={phase} hasData={!!d} aiConfigured={!!(res?.researchConfigured ?? res?.aiConfigured)} errorText={errorText} aiNote={aiNote} fromCache={fromCache} />
           {d ? (
             <View>
               <View style={[ui.row, { alignItems: 'flex-start', marginBottom: 6 }]}>
@@ -133,6 +133,6 @@ export default function GovtCompareBox({ lang, state }: { lang: AppLanguage; sta
           ) : null}
         </View>
       ) : null}
-    </View>
+    </CivicCard>
   );
 }

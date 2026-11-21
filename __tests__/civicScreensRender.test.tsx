@@ -13,7 +13,7 @@ jest.mock('react-native-safe-area-context', () => {
 jest.mock('@react-navigation/native', () => ({ useNavigation: () => ({ navigate: jest.fn() }) }));
 jest.mock('../src/context/AuthContext', () => ({ useAuth: () => ({ user: { id: 'u1', name: 'U' } }) }));
 jest.mock('../src/services/adminSystem', () => ({ isOwnerUser: () => false }));
-jest.mock('../src/services/hospitalAi', () => ({ askHospitalAi: jest.fn(), hospitalAiAvailable: () => false }));
+
 jest.mock('../src/services/workerApi', () => {
   class WorkerError extends Error {
     status = 0;

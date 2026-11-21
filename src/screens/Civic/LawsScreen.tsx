@@ -7,18 +7,24 @@
 // language AND English (hand-written static data), the official BNSS First Schedule rows (section,
 // punishment, cognizable, bailable, court, old IPC), a simple jail range / fine line, and how to
 // file a police complaint under the BNSS. Searchable in EN / TE / HI, by section or old IPC number.
+// Other app languages (Tamil, Kannada, ...): titles + explanations of the listed items come from an AI
+// translation cached on the Worker (services/civicI18n.ts); English shows until it arrives.
+// "Ask about laws": AI answers ONLY from the sections the app's own search picks for the question
+// (services/civicAi.ts), in simple words, app language + English, ending with "not legal advice".
 import React, { useMemo, useState } from 'react';
 import { FlatList, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ui } from '../Earn/earnUi';
 import { colors } from '../../theme';
-import { useAppLanguage } from '../../i18n/appLanguage';
+import { AppLanguage, useAppLanguage } from '../../i18n/appLanguage';
 import { civicText } from '../../i18n/civicLabels';
 import { ACTS, ActId, LAW_DISCLAIMER } from '../../data/laws/acts';
 import { DEPT_CONTACTS, HELPLINES } from '../../data/laws/contacts';
 import { LawSection, plainTitle, searchLaws } from '../../services/laws';
-import { trCode } from './useCivicData';
 import { Bi } from './bi';
+import { CivicAskBox } from './civicAiParts';
+import { askLaws } from '../../services/civicAi';
+import { useAiTexts, useCivicLabels } from '../../services/civicI18n';
 import { callNumber, openLink } from './civicParts';
 import { OFFENCE_CATEGORIES, OffenceCategory } from '../../data/laws/offenceGuide';
 import {
@@ -34,6 +40,12 @@ import {
   simplePunishment,
 } from '../../services/offenceGuide';
 
+// Languages with hand-written / generated static law text (else null: English or AI translation)
+const staticCode = (lang: AppLanguage): GuideLang | null => (lang === 'Telugu' ? 'te' : lang === 'Hindi' ? 'hi' : null);
+
+// AI translations for the visible list, keyed `${id}.t` / `${id}.x` (other app languages only)
+type AiMap = Record<string, string>;
+
 const cogKey = (f: Flag | 'mixed') => (f === 'yes' ? 'cogYes' : f === 'no' ? 'cogNo' : f === 'cond' ? 'cogCond' : 'dependsMain');
 const bailKey = (f: Flag | 'mixed') => (f === 'yes' ? 'bailable' : f === 'no' ? 'nonBailable' : 'dependsMain');
 
@@ -47,11 +59,11 @@ function BiLines({ en, tr, style }: { en: string[]; tr?: string[] | null; style?
   );
 }
 
-function OffenceCard({ e, lang, open, onToggle }: { e: OffenceGuideItem; lang: ReturnType<typeof useAppLanguage>; open: boolean; onToggle: () => void }) {
+function OffenceCard({ e, lang, open, onToggle, ai }: { e: OffenceGuideItem; lang: ReturnType<typeof useAppLanguage>; open: boolean; onToggle: () => void; ai?: AiMap }) {
   const T = (k: Parameters<typeof civicText>[1]) => civicText(lang, k);
-  const L = (k: Parameters<typeof civicText>[1]) => (lang === 'English' ? civicText('English', k) : `${civicText(lang, k)} · ${civicText('English', k)}`);
-  const code = trCode(lang);
-  const gl: GuideLang | null = code;
+  const L = (k: Parameters<typeof civicText>[1]) =>
+    lang === 'English' || civicText(lang, k) === civicText('English', k) ? civicText('English', k) : `${civicText(lang, k)} · ${civicText('English', k)}`;
+  const gl: GuideLang | null = staticCode(lang);
   const secs = [...new Set(e.rows.map(r => r.section.replace(/\(.*$/, '')))].join(', ');
   const ipc = [...new Set(e.rows.map(r => (r.oldRef || '').replace(/^IPC /, '')).filter(Boolean).join(', ').split(', '))].filter(Boolean).join(', ');
   const cog = entryFlag(e.rows, r => cognizableFlag(r.cognizable));
@@ -59,13 +71,13 @@ function OffenceCard({ e, lang, open, onToggle }: { e: OffenceGuideItem; lang: R
   const steps = complaintSteps(cog === 'mixed' ? 'depends' : cog);
   return (
     <TouchableOpacity style={ui.card} activeOpacity={0.8} onPress={onToggle}>
-      <Bi en={e.t.en} tr={gl ? e.t[gl] : undefined} style={ui.h2} />
+      <Bi en={e.t.en} tr={gl ? e.t[gl] : ai?.[`${e.id}.t`]} style={ui.h2} />
       <Text style={[ui.muted, { fontSize: 12 }]}>
         BNS {secs}
         {ipc ? ` · ${T('oldLaw')}: IPC ${ipc}` : ''}
       </Text>
       <View style={{ marginTop: 4 }}>
-        <Bi en={e.x.en} tr={gl ? e.x[gl] : undefined} lines={open ? undefined : 3} />
+        <Bi en={e.x.en} tr={gl ? e.x[gl] : ai?.[`${e.id}.x`]} lines={open ? undefined : 3} />
       </View>
       <Text style={[ui.muted, { marginTop: 4 }]}>
         🚓 {T(cogKey(cog))}
@@ -126,12 +138,12 @@ function OffenceCard({ e, lang, open, onToggle }: { e: OffenceGuideItem; lang: R
   );
 }
 
-function SectionCard({ s, lang, open, onToggle }: { s: LawSection; lang: ReturnType<typeof useAppLanguage>; open: boolean; onToggle: () => void }) {
+function SectionCard({ s, lang, open, onToggle, ai }: { s: LawSection; lang: ReturnType<typeof useAppLanguage>; open: boolean; onToggle: () => void; ai?: AiMap }) {
   const T = (k: Parameters<typeof civicText>[1]) => civicText(lang, k);
-  const code = trCode(lang);
-  const local = code && s.plain ? s.plain[code] : undefined;
+  const code = staticCode(lang);
   const enPlain = s.plain?.en;
   const enTitle = plainTitle(s, 'en');
+  const local = code && s.plain ? s.plain[code] : ai && (ai[`${s.id}.t`] || ai[`${s.id}.x`]) ? { t: ai[`${s.id}.t`] || '', x: ai[`${s.id}.x`] || '', p: '' } : undefined;
   return (
     <TouchableOpacity style={ui.card} activeOpacity={0.8} onPress={onToggle}>
       <Bi en={enTitle} tr={local?.t} style={ui.h2} />
@@ -186,7 +198,35 @@ export default function LawsScreen() {
   const [gQuery, setGQuery] = useState('');
   const [gCat, setGCat] = useState<OffenceCategory | 'ALL'>('ALL');
   const guide = useMemo(() => searchOffences(gQuery, gCat), [gQuery, gCat]);
-  const gl: GuideLang = trCode(lang) || 'en';
+  const gl: GuideLang = staticCode(lang) || 'en';
+  useCivicLabels(lang);
+  // Other app languages: one cached AI translation request for the first items on screen
+  const aiSections = useAiTexts(
+    'laws',
+    lang,
+    useMemo(() => {
+      const o: Record<string, string> = {};
+      results.slice(0, 20).forEach(x => {
+        o[`${x.id}.t`] = plainTitle(x, 'en');
+        o[`${x.id}.x`] = x.plain?.en?.x || x.summary;
+      });
+      return o;
+    }, [results]),
+    mode === 'sections' && !staticCode(lang),
+  );
+  const aiGuide = useAiTexts(
+    'guide',
+    lang,
+    useMemo(() => {
+      const o: Record<string, string> = {};
+      guide.slice(0, 20).forEach(x => {
+        o[`${x.id}.t`] = x.t.en;
+        o[`${x.id}.x`] = x.x.en;
+      });
+      return o;
+    }, [guide]),
+    mode === 'guide' && !staticCode(lang),
+  );
 
   const header = (
     <View>
@@ -228,6 +268,17 @@ export default function LawsScreen() {
           </View>
         ) : null}
       </TouchableOpacity>
+      <CivicAskBox
+        lang={lang}
+        title={T('askLaws')}
+        note={T('lawsAiNote')}
+        hint={T('askLawsHint')}
+        onAsk={(q, history) => askLaws(q, lang, history)}
+        footer={a => {
+          const used = ((a as any).sections || []) as LawSection[];
+          return used.length ? <Text style={[ui.muted, { fontSize: 12, marginTop: 6 }]}>📜 {used.map(x => `${x.act} ${x.section}`).join(' · ')}</Text> : null;
+        }}
+      />
       <View style={[ui.row, { marginBottom: 8, flexWrap: 'wrap' }]}>
         {(['guide', 'sections'] as const).map(m => (
           <TouchableOpacity key={m} style={[ui.chip, mode === m && ui.chipOn]} onPress={() => setMode(m)}>
@@ -307,7 +358,9 @@ export default function LawsScreen() {
           keyboardShouldPersistTaps="handled"
           ListHeaderComponent={guideHeader}
           initialNumToRender={10}
-          renderItem={({ item }) => <OffenceCard e={item} lang={lang} open={openId === `g-${item.id}`} onToggle={() => setOpenId(openId === `g-${item.id}` ? null : `g-${item.id}`)} />}
+          renderItem={({ item }) => (
+            <OffenceCard e={item} lang={lang} ai={aiGuide} open={openId === `g-${item.id}`} onToggle={() => setOpenId(openId === `g-${item.id}` ? null : `g-${item.id}`)} />
+          )}
         />
       ) : (
         <FlatList
@@ -317,7 +370,7 @@ export default function LawsScreen() {
           keyboardShouldPersistTaps="handled"
           ListHeaderComponent={sectionsHeader}
           initialNumToRender={12}
-          renderItem={({ item }) => <SectionCard s={item} lang={lang} open={openId === item.id} onToggle={() => setOpenId(openId === item.id ? null : item.id)} />}
+          renderItem={({ item }) => <SectionCard s={item} lang={lang} ai={aiSections} open={openId === item.id} onToggle={() => setOpenId(openId === item.id ? null : item.id)} />}
         />
       )}
     </SafeAreaView>

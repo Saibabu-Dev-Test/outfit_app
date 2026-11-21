@@ -94,7 +94,8 @@ export interface CompareData {
   rows: { area: CompareArea; topic: string; previous: CompareFact | null; present: CompareFact | null }[];
 }
 
-export type TrCode = 'te' | 'hi';
+// Translated languages (every app language but English; same codes as the Worker's TR_LANGS)
+export type TrCode = 'te' | 'hi' | 'ta' | 'kn' | 'ml' | 'mr' | 'bn' | 'gu' | 'pa' | 'or' | 'ur';
 
 export interface CivicDataResponse<T> {
   kind: CivicKind;
@@ -102,20 +103,31 @@ export interface CivicDataResponse<T> {
   district: string;
   variant: string;
   data: T | null;
-  i18n?: { te: T | null; hi: T | null };
+  i18n?: Partial<Record<TrCode, T | null>>;
   sources?: { url: string; title: string }[];
   aiStars: number | null;
   status: 'ok' | 'error' | 'pending' | 'none';
   running?: boolean;
   updatedAt: number;
+  // Ask AI / Explain simply / translation work (any provider of the Worker's AI fallback chain)
   aiConfigured: boolean;
+  // Research of a new place works (grounded Gemini). Older Workers do not send it: use aiConfigured.
+  researchConfigured?: boolean;
 }
+
+// Short reason when an AI step failed: quota (free-tier limit, 429), billing (402), cap (daily cap),
+// timeout, config (no key on the Worker)
+export type CivicAiCode = 'quota' | 'billing' | 'cap' | 'timeout' | 'config' | 'key' | 'other';
 
 export interface CivicResearchResponse {
   ok: boolean;
-  status: 'ok' | 'error' | 'pending' | 'running' | 'ai_off';
+  // 'paused' = every Gemini key is out of free quota: research paused, the saved info stays
+  status: 'ok' | 'error' | 'pending' | 'running' | 'ai_off' | 'paused';
+  paused?: boolean;
   did?: 'research' | 'translate' | 'nothing' | 'already running';
   error?: string;
+  code?: CivicAiCode;
+  translated?: TrCode[];
 }
 
 export interface CivicReview {
@@ -161,23 +173,67 @@ const q = (o: Record<string, string>) =>
     .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
     .join('&');
 
-export const getGovtData = (state: string, district?: string) =>
-  workerFetch<CivicDataResponse<GovtData>>(`/v1/civic/data?${q({ kind: 'govt', state, district: districtSlug(district), variant: '' })}`);
+// lang: also return that language's translated copy in i18n (any TrCode)
+const withLang = (o: Record<string, string>, lang?: TrCode | null) => (lang ? { ...o, lang } : o);
 
-export const getHospData = (state: string, variant: HospVariant, district?: string) =>
-  workerFetch<CivicDataResponse<HospData>>(`/v1/civic/data?${q({ kind: 'hosp', state, district: districtSlug(district), variant })}`);
+export const getGovtData = (state: string, district?: string, lang?: TrCode | null) =>
+  workerFetch<CivicDataResponse<GovtData>>(`/v1/civic/data?${q(withLang({ kind: 'govt', state, district: districtSlug(district), variant: '' }, lang))}`);
+
+export const getHospData = (state: string, variant: HospVariant, district?: string, lang?: TrCode | null) =>
+  workerFetch<CivicDataResponse<HospData>>(`/v1/civic/data?${q(withLang({ kind: 'hosp', state, district: districtSlug(district), variant }, lang))}`);
 
 // state = a state code, or CENTRE_CODE ('IN') for the Union Government
-export const getCompareData = (state: string) =>
-  workerFetch<CivicDataResponse<CompareData>>(`/v1/civic/data?${q({ kind: 'gcmp', state, district: '', variant: '' })}`);
+export const getCompareData = (state: string, lang?: TrCode | null) =>
+  workerFetch<CivicDataResponse<CompareData>>(`/v1/civic/data?${q(withLang({ kind: 'gcmp', state, district: '', variant: '' }, lang))}`);
 
-// On demand: research this place now (no data yet) or translate it into lang (te | hi). Slow
-// (Gemini with Google Search), so a long timeout; the screen shows "collecting" meanwhile.
+// On demand: research this place now (no data yet; translated into lang in the same run) or
+// translate it into lang. Grounded research takes seconds, so a timeout well above that; the screen
+// keeps showing saved / cached info (or "collecting") meanwhile and polls.
 export const researchCivic = (kind: CivicKind, state: string, district: string | undefined, variant: string, lang?: TrCode | null) =>
   workerFetch<CivicResearchResponse>('/v1/civic/research', {
     method: 'POST',
     body: { kind, state, district: districtSlug(district), variant, lang: lang || '' },
-    timeoutMs: 150000,
+    timeoutMs: 90000,
+  });
+
+// ── Civic AI (Worker /v1/civic/ask): answers only from stored / app data ──
+export type AskTopic = 'laws' | 'govt' | 'hosp';
+export type GovtFocus = 'schemes' | 'grievance' | 'services' | 'offices' | 'departments' | 'helplines' | 'overview';
+
+export interface CivicAskRequest {
+  topic: AskTopic;
+  lang: string; // 'en' or a TrCode
+  question?: string;
+  history?: { role: 'user' | 'model'; text: string }[];
+  state?: string;
+  district?: string;
+  variants?: HospVariant[];
+  focus?: GovtFocus;
+  context?: string; // laws: the app's own law sections
+}
+
+export interface CivicAskResponse {
+  topic: AskTopic;
+  lang: string;
+  answer: string; // in the asked language (ends with the safety line)
+  en: string; // the same answer in English ('' when the asked language is English)
+  cached?: boolean;
+}
+
+export const askCivic = (r: CivicAskRequest) =>
+  workerFetch<CivicAskResponse>('/v1/civic/ask', {
+    method: 'POST',
+    body: { ...r, district: districtSlug(r.district) },
+    timeoutMs: 45000,
+  });
+
+// AI translation of app text without a static copy (cached on the Worker per English text)
+export type TrNamespace = 'labels' | 'laws' | 'guide';
+export const translateCivicTexts = (ns: TrNamespace, lang: TrCode, items: Record<string, string>) =>
+  workerFetch<{ items: Record<string, string>; missing: string[]; busy?: boolean; aiError?: CivicAiCode }>('/v1/civic/translate', {
+    method: 'POST',
+    body: { ns, lang, items },
+    timeoutMs: 45000,
   });
 
 export const getReviews = (item: string, limit = 20) => workerFetch<CivicReviewsResponse>(`/v1/civic/reviews?${q({ item, limit: String(limit) })}`);
@@ -189,8 +245,17 @@ export const reportReview = (item: string, author: string, reason = '') =>
   workerFetch<{ ok: boolean; alreadyReported: boolean }>('/v1/civic/reports', { method: 'POST', body: { item, author, reason } });
 
 // ── Owner only (Worker checks the verified owner email too) ──
+// AI fallback chain state on the Worker (no key values): Gemini keys -> Groq -> Workers AI
+export interface AiProviders {
+  order: string[];
+  gemini: { keys: number; ready: number; keyState: { key: number; ready: boolean; coolingUntil: number }[] };
+  groq: { configured: boolean; coolingUntil: number };
+  workersAi: { configured: boolean; model: string; coolingUntil: number };
+}
+
 export interface AdminCivic {
   aiConfigured: boolean;
+  aiProviders?: AiProviders;
   aiToday: number;
   aiDailyMax: number;
   trToday?: number;

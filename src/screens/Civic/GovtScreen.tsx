@@ -7,6 +7,9 @@
 // Neutral information only: no AI ratings. A place not researched yet is researched on demand.
 // "Previous vs present government" (GovtCompareBox): neutral side-by-side facts per state / centre,
 // every point with its source + date, no verdict.
+// Fast: saved answer shown instantly (useCivicData cache), each card in the app language with an
+// English toggle, and "Explain simply" (schemes / grievance / services) answered by AI from the
+// stored data only, in the app language + English.
 import React from 'react';
 import { RefreshControl, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -19,7 +22,10 @@ import { useAppLanguage } from '../../i18n/appLanguage';
 import { civicText } from '../../i18n/civicLabels';
 import { CivicPerson, CivicRep, GovtData, civicItem, getGovtData } from '../../services/civicApi';
 import { CivicStatus, PlacePicker, ReviewsBox, SourcesBox, callNumber, openLink, useCivicPlace } from './civicParts';
-import { Bi, biLabel } from './bi';
+import { Bi, CivicCard, biLabel } from './bi';
+import { ExplainButton } from './civicAiParts';
+import { explainGovt } from '../../services/civicAi';
+import { useCivicLabels } from '../../services/civicI18n';
 import { useCivicData } from './useCivicData';
 import GovtCompareBox from './GovtCompareBox';
 
@@ -61,9 +67,11 @@ export default function GovtScreen() {
   const { user } = useAuth();
   const navigation = useNavigation<any>();
   const [place, setPlace] = useCivicPlace();
-  const { res, phase, errorText, refresh, tr } = useCivicData<GovtData>('govt', place.state, place.district, '', lang, () =>
-    getGovtData(place.state, place.district),
+  useCivicLabels(lang);
+  const { res, phase, errorText, refresh, tr, aiNote, fromCache } = useCivicData<GovtData>('govt', place.state, place.district, '', lang, code =>
+    getGovtData(place.state, place.district, code),
   );
+  const explain = (focus: 'schemes' | 'grievance' | 'services') => () => explainGovt(place.state, place.district, focus, lang);
 
   const d = res?.data;
   const t = (tr && res?.i18n?.[tr]) || null;
@@ -92,19 +100,19 @@ export default function GovtScreen() {
           ) : null}
         </View>
         <PlacePicker lang={lang} place={place} onChange={setPlace} />
-        {place.state ? <CivicStatus lang={lang} phase={phase} hasData={!!d} aiConfigured={!!res?.aiConfigured} errorText={errorText} /> : null}
+        {place.state ? <CivicStatus lang={lang} phase={phase} hasData={!!d} aiConfigured={!!(res?.researchConfigured ?? res?.aiConfigured)} errorText={errorText} aiNote={aiNote} fromCache={fromCache} /> : null}
         {place.state ? <GovtCompareBox lang={lang} state={place.state} /> : null}
         {d ? (
           <>
             {d.overview ? (
-              <View style={ui.card}>
+              <CivicCard lang={lang} hasTranslation={!!t}>
                 <Text style={ui.h2}>{L('overview')}</Text>
                 <Bi en={d.overview} tr={t?.overview} />
-              </View>
+              </CivicCard>
             ) : null}
 
             {lead && (lead.governor || lead.chiefMinister.name || lead.deputyCMs.length || lead.ministers.length) ? (
-              <View style={ui.card}>
+              <CivicCard lang={lang} hasTranslation={!!t}>
                 <Text style={ui.h2}>🏛️ {L('leaders')}</Text>
                 <Row label={L('governor')} en={lead.governor} tr={tlead?.governor} />
                 <Row label={L('cm')} en={personLine(lead.chiefMinister)} tr={personLine(tlead?.chiefMinister)} />
@@ -121,11 +129,11 @@ export default function GovtScreen() {
                     {p.role ? <Bi en={p.role} tr={tlead?.ministers?.[i]?.role} style={ui.muted} /> : null}
                   </View>
                 ))}
-              </View>
+              </CivicCard>
             ) : null}
 
             {anyDistrict && dist ? (
-              <View style={ui.card}>
+              <CivicCard lang={lang} hasTranslation={!!t}>
                 <Text style={ui.h2}>📍 {L('districtOfficials')}</Text>
                 <Row label={L('hq')} en={dist.headquarters} tr={tdist?.headquarters} />
                 <Row label={L('collector')} en={dist.collector} tr={tdist?.collector} />
@@ -139,11 +147,11 @@ export default function GovtScreen() {
                 {dist.mlas.map((p, i) => (
                   <Bi key={`mla${i}`} en={personLine(p)} tr={personLine(tdist?.mlas?.[i])} style={[ui.body, { marginTop: 4 }]} />
                 ))}
-              </View>
+              </CivicCard>
             ) : null}
 
             {d.helplines.length ? (
-              <View style={ui.card}>
+              <CivicCard lang={lang} hasTranslation={!!t}>
                 <Text style={ui.h2}>📞 {L('helplines')}</Text>
                 {d.helplines.map((h, i) => (
                   <View key={`${h.name}${i}`} style={[ui.row, { marginTop: 6 }]}>
@@ -155,11 +163,11 @@ export default function GovtScreen() {
                     </TouchableOpacity>
                   </View>
                 ))}
-              </View>
+              </CivicCard>
             ) : null}
 
             {d.offices && d.offices.length ? (
-              <View style={ui.card}>
+              <CivicCard lang={lang} hasTranslation={!!t}>
                 <Text style={ui.h2}>🏢 {L('offices')}</Text>
                 {d.offices.map((x, i) => (
                   <View key={`${x.name}${i}`} style={{ marginTop: 10 }}>
@@ -169,11 +177,11 @@ export default function GovtScreen() {
                     <Links phone={x.phone} website={x.website} lang={lang} />
                   </View>
                 ))}
-              </View>
+              </CivicCard>
             ) : null}
 
             {d.schemes.length ? (
-              <View style={ui.card}>
+              <CivicCard lang={lang} hasTranslation={!!t}>
                 <Text style={ui.h2}>🎯 {L('schemes')}</Text>
                 {d.schemes.map((x, i) => {
                   const ts = t?.schemes?.[i];
@@ -188,11 +196,12 @@ export default function GovtScreen() {
                     </View>
                   );
                 })}
-              </View>
+                {res?.aiConfigured ? <ExplainButton lang={lang} onExplain={explain('schemes')} /> : null}
+              </CivicCard>
             ) : null}
 
             {d.grievance && d.grievance.length ? (
-              <View style={ui.card}>
+              <CivicCard lang={lang} hasTranslation={!!t}>
                 <Text style={ui.h2}>📣 {L('grievance')}</Text>
                 {d.grievance.map((x, i) => (
                   <View key={`${x.name}${i}`} style={{ marginTop: 10 }}>
@@ -201,11 +210,12 @@ export default function GovtScreen() {
                     <Links phone={x.phone} website={x.website} lang={lang} />
                   </View>
                 ))}
-              </View>
+                {res?.aiConfigured ? <ExplainButton lang={lang} onExplain={explain('grievance')} /> : null}
+              </CivicCard>
             ) : null}
 
             {anyElection && el ? (
-              <View style={ui.card}>
+              <CivicCard lang={lang} hasTranslation={!!t}>
                 <Text style={ui.h2}>🗳️ {L('election')}</Text>
                 <Row label={L('lastAssembly')} en={el.lastAssembly} tr={tel?.lastAssembly} />
                 <Row label={L('lastLokSabha')} en={el.lastLokSabha} tr={tel?.lastLokSabha} />
@@ -216,11 +226,11 @@ export default function GovtScreen() {
                     <Links phone={el.voterHelpline} website={el.ceoWebsite} lang={lang} />
                   </View>
                 ) : null}
-              </View>
+              </CivicCard>
             ) : null}
 
             {d.departments.length ? (
-              <View style={ui.card}>
+              <CivicCard lang={lang} hasTranslation={!!t}>
                 <Text style={ui.h2}>🗂️ {L('departments')}</Text>
                 {d.departments.map((x, i) => (
                   <View key={`${x.name}${i}`} style={{ marginTop: 8 }}>
@@ -229,11 +239,11 @@ export default function GovtScreen() {
                     <Links phone={x.helpline} website={x.website} lang={lang} />
                   </View>
                 ))}
-              </View>
+              </CivicCard>
             ) : null}
 
             {d.services.length ? (
-              <View style={ui.card}>
+              <CivicCard lang={lang} hasTranslation={!!t}>
                 <Text style={ui.h2}>🧾 {L('services')}</Text>
                 {d.services.map((x, i) => (
                   <View key={`${x.name}${i}`} style={{ marginTop: 8 }}>
@@ -242,7 +252,8 @@ export default function GovtScreen() {
                     <Links website={x.website} lang={lang} />
                   </View>
                 ))}
-              </View>
+                {res?.aiConfigured ? <ExplainButton lang={lang} onExplain={explain('services')} /> : null}
+              </CivicCard>
             ) : null}
 
             <SourcesBox lang={lang} sources={res?.sources} updatedAt={res?.updatedAt || 0} asOf={d.asOf} />

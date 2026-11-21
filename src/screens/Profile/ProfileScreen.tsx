@@ -33,7 +33,7 @@ import {
 } from '../../services/birthProfile';
 import { astroLanguage, birthChartRows } from '../../services/astrologyDaily';
 import SelectModal from '../../components/SelectModal';
-import { APP_LANGUAGES, setAppLanguage, useAppLanguage } from '../../i18n/appLanguage';
+import { APP_LANGUAGES, APP_LANGUAGE_NATIVE, AppLanguage, setAppLanguage, useAppLanguage } from '../../i18n/appLanguage';
 import CityPickerModal from '../../components/CityPickerModal';
 import FeedbackBoardModal from '../../components/FeedbackBoardModal';
 import ZoomableImage from '../../components/ZoomableImage';
@@ -348,10 +348,10 @@ const fetchProfile = async () => {
       { text: 'Dark', onPress: () => setThemeMode('dark') },
     ]);
 
-  const pickAppLanguage = () =>
-    Alert.alert('App language', `Wardrobe labels show in: ${appLanguage}`, [
-      ...APP_LANGUAGES.map(l => ({ text: l, onPress: () => setAppLanguage(l) })),
-    ]);
+  // 12 languages: a list (an Alert shows at most 3 buttons on Android)
+  const [isAppLangOpen, setIsAppLangOpen] = useState(false);
+  const appLangLabel = (l: AppLanguage) => (l === 'English' ? l : `${l} · ${APP_LANGUAGE_NATIVE[l]}`);
+  const pickAppLanguage = () => setIsAppLangOpen(true);
 
   // App lock, invite code, friends joined, ⭐ badge
   useEffect(() => {
@@ -1433,6 +1433,17 @@ const fetchProfile = async () => {
         value={editTimeOfBirth}
         onConfirm={setEditTimeOfBirth}
         onClose={() => setIsTimePickerOpen(false)}
+      />
+      <SelectModal
+        visible={isAppLangOpen}
+        title="App language (wardrobe labels, Govt / Laws / Hospitals tabs)"
+        options={APP_LANGUAGES.map(appLangLabel)}
+        selected={appLangLabel(appLanguage)}
+        onSelect={v => {
+          const l = APP_LANGUAGES.find(x => appLangLabel(x) === v);
+          if (l) setAppLanguage(l);
+        }}
+        onClose={() => setIsAppLangOpen(false)}
       />
       <SelectModal
         visible={isLanguageOpen}

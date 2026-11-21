@@ -291,7 +291,7 @@ export const typeLabel = (value: string, _language?: string | null): string => v
  * Label in the App language picked in Settings > App language (English by default). Only an
  * explicit 'Telugu' / 'Hindi' choice there translates; the profile language never does.
  */
-export const appTypeLabel = (value: string, appLanguage?: 'English' | 'Telugu' | 'Hindi' | null): string => {
+export const appTypeLabel = (value: string, appLanguage?: string | null): string => {
   const row = ACCESSORY_LABELS[value];
   if (!row) return value;
   if (appLanguage === 'Telugu') return row.te || value;

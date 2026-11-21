@@ -6,7 +6,7 @@ import { ui } from '../Earn/earnUi';
 import { colors } from '../../theme';
 import { INDIA_STATES } from '../../constants/indiaStates';
 import { AppLanguage } from '../../i18n/appLanguage';
-import { civicText } from '../../i18n/civicLabels';
+import { CivicKey, civicText } from '../../i18n/civicLabels';
 import { CivicReviewsResponse, getReviews, postReview, reportReview } from '../../services/civicApi';
 
 const PLACE_KEY = 'outfit.civic.place';
@@ -192,12 +192,37 @@ export function ReviewsBox({ lang, item, userName, myUid }: { lang: AppLanguage;
   );
 }
 
-// Status line for a civic place: collecting / translating / server update / error (bilingual)
-export function CivicStatus({ lang, phase, hasData, aiConfigured, errorText }: { lang: AppLanguage; phase: string; hasData: boolean; aiConfigured: boolean; errorText?: string }) {
-  const both = (k: Parameters<typeof civicText>[1]) => (lang === 'English' ? civicText('English', k) : `${civicText(lang, k)}\n${civicText('English', k)}`);
+// "local\nEnglish" (just English when the language is English or not translated yet)
+const bothLines = (lang: AppLanguage, k: CivicKey, sep = '\n') => {
+  const en = civicText('English', k);
+  const local = civicText(lang, k);
+  return lang === 'English' || local === en ? en : `${local}${sep}${en}`;
+};
+
+// Status line for a civic place: collecting / translating / server update / error / AI limit
+// (bilingual). fromCache: saved info is on screen while the Worker answer is on its way.
+export function CivicStatus({
+  lang,
+  phase,
+  hasData,
+  aiConfigured,
+  errorText,
+  aiNote,
+  fromCache,
+}: {
+  lang: AppLanguage;
+  phase: string;
+  hasData: boolean;
+  aiConfigured: boolean;
+  errorText?: string;
+  aiNote?: CivicKey | null;
+  fromCache?: boolean;
+}) {
+  const both = (k: CivicKey) => bothLines(lang, k);
+  const note = aiNote ? <Text style={[ui.muted, { marginBottom: 8 }]}>⚠️ {both(aiNote)}</Text> : null;
   if (phase === 'loading' && !hasData) return <ActivityIndicator color={colors.primary} style={{ marginVertical: 12 }} />;
   if (phase === 'serverOld') return <View style={ui.card}><Text style={ui.body}>⏳ {both('serverUpdate')}</Text></View>;
-  if (phase === 'error')
+  if (phase === 'error' && !hasData)
     return (
       <View style={ui.card}>
         <Text style={ui.bad}>{both('error')}</Text>
@@ -209,16 +234,24 @@ export function CivicStatus({ lang, phase, hasData, aiConfigured, errorText }: {
       <View style={ui.card}>
         <ActivityIndicator color={colors.primary} />
         <Text style={[ui.body, { marginTop: 8, textAlign: 'center' }]}>🔎 {both('collecting')}</Text>
+        {note}
       </View>
     );
-  if (!hasData && phase === 'ready') return <View style={ui.card}><Text style={ui.body}>{both(aiConfigured ? 'noData' : 'aiOff')}</Text></View>;
+  if (!hasData && phase === 'ready')
+    return (
+      <View style={ui.card}>
+        <Text style={ui.body}>{both(aiConfigured ? 'noData' : 'aiOff')}</Text>
+        {note}
+      </View>
+    );
   if (phase === 'translating' && lang !== 'English') return <Text style={[ui.muted, { marginBottom: 8 }]}>🌐 {civicText(lang, 'translating')}</Text>;
-  return null;
+  if (fromCache && hasData) return <Text style={[ui.muted, { marginBottom: 8, fontSize: 12 }]}>💾 {civicText(lang, 'showingSaved')}</Text>;
+  return note;
 }
 
 // Public web pages the research used + "as of" + verify note
 export function SourcesBox({ lang, sources, updatedAt, asOf }: { lang: AppLanguage; sources?: { url: string; title: string }[]; updatedAt: number; asOf?: string }) {
-  const both = (k: Parameters<typeof civicText>[1]) => (lang === 'English' ? civicText('English', k) : `${civicText(lang, k)} · ${civicText('English', k)}`);
+  const both = (k: CivicKey) => bothLines(lang, k, ' · ');
   const host = (u: string) => u.replace(/^https:\/\//, '').split('/')[0];
   return (
     <View style={ui.card}>
@@ -228,7 +261,7 @@ export function SourcesBox({ lang, sources, updatedAt, asOf }: { lang: AppLangua
         {asOf ? ` · ${civicText(lang, 'asOf')} ${asOf}` : ''}
       </Text>
       <Text style={[ui.body, { marginTop: 4 }]}>⚠️ {civicText(lang, 'outdated')}</Text>
-      {lang !== 'English' ? <Text style={ui.muted}>{civicText('English', 'outdated')}</Text> : null}
+      {lang !== 'English' && civicText(lang, 'outdated') !== civicText('English', 'outdated') ? <Text style={ui.muted}>{civicText('English', 'outdated')}</Text> : null}
       {(sources || []).map((s, i) => (
         <TouchableOpacity key={`${s.url}${i}`} onPress={() => openLink(s.url)} style={{ marginTop: 6 }}>
           <Text style={[ui.muted, { color: colors.primary }]} numberOfLines={2}>
