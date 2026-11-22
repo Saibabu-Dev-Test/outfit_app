@@ -11,6 +11,8 @@
 // translation cached on the Worker (services/civicI18n.ts); English shows until it arrives.
 // "Ask about laws": AI answers ONLY from the sections the app's own search picks for the question
 // (services/civicAi.ts), in simple words, app language + English, ending with "not legal advice".
+// Header language chip (LanguageChip): app language picker + "Also show English". Telugu / Hindi
+// section titles + summaries are static (plain.te.ts / plain.hi.ts, hand-written).
 import React, { useMemo, useState } from 'react';
 import { FlatList, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -26,6 +28,7 @@ import { CivicAskBox } from './civicAiParts';
 import { askLaws } from '../../services/civicAi';
 import { useAiTexts, useCivicLabels } from '../../services/civicI18n';
 import { callNumber, openLink } from './civicParts';
+import LanguageChip from './LanguageChip';
 import { OFFENCE_CATEGORIES, OffenceCategory } from '../../data/laws/offenceGuide';
 import {
   Flag,
@@ -193,7 +196,14 @@ export default function LawsScreen() {
   const [act, setAct] = useState<ActId | 'ALL'>('ALL');
   const [openId, setOpenId] = useState<string | null>(null);
   const [showContacts, setShowContacts] = useState(false);
-  const results = useMemo(() => searchLaws(query, act, 100), [query, act]);
+  // Telugu / Hindi with no search words: sections with static local text first (stable order), so
+  // the list opens in the app language; a search keeps its relevance order
+  const results = useMemo(() => {
+    const code = staticCode(lang);
+    if (!code || query.trim()) return searchLaws(query, act, 100);
+    const all = searchLaws('', act, 100000);
+    return [...all.filter(s => s.plain && s.plain[code]), ...all.filter(s => !(s.plain && s.plain[code]))].slice(0, 100);
+  }, [query, act, lang]);
   const [mode, setMode] = useState<'sections' | 'guide'>('sections');
   const [gQuery, setGQuery] = useState('');
   const [gCat, setGCat] = useState<OffenceCategory | 'ALL'>('ALL');
@@ -230,7 +240,10 @@ export default function LawsScreen() {
 
   const header = (
     <View>
-      <Text style={[ui.h1, { marginBottom: 8 }]}>{T('lawsTitle')}</Text>
+      <View style={[ui.row, { marginBottom: 8 }]}>
+        <Text style={[ui.h1, ui.flex1]}>{T('lawsTitle')}</Text>
+        <LanguageChip lang={lang} />
+      </View>
       <View style={[ui.card, { borderColor: '#F5A623' }]}>
         <Text style={ui.h2}>⚠️ {T('disclaimer')}</Text>
         <Text style={ui.body}>{LAW_DISCLAIMER}</Text>

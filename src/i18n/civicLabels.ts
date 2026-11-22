@@ -147,7 +147,15 @@ export type CivicKey =
   | 'lawsAiNote'
   | 'explainSimply'
   | 'showingSaved'
-  | 'researchPaused';
+  | 'researchPaused'
+  | 'langPicker'
+  | 'alsoEnglish'
+  | 'typeGovt'
+  | 'typePrivate'
+  | 'typeNotListed'
+  | 'districtSite'
+  | 'trLater'
+  | 'sourceOne';
 
 export const CIVIC_LABELS: Record<StaticLanguage, Record<CivicKey, string>> = {
   English: {
@@ -294,6 +302,14 @@ export const CIVIC_LABELS: Record<StaticLanguage, Record<CivicKey, string>> = {
     explainSimply: 'Explain simply',
     showingSaved: 'Showing saved info · updating…',
     researchPaused: 'Research paused (free AI limit used up), showing saved info.',
+    langPicker: 'Language',
+    alsoEnglish: 'Also show English',
+    typeGovt: 'Govt',
+    typePrivate: 'Private',
+    typeNotListed: 'Type not listed',
+    districtSite: 'District website',
+    trLater: 'Translation is on the way; showing English for now.',
+    sourceOne: 'Source',
   },
   Telugu: {
     govtTitle: '🏛️ ప్రభుత్వం',
@@ -439,6 +455,14 @@ export const CIVIC_LABELS: Record<StaticLanguage, Record<CivicKey, string>> = {
     explainSimply: 'సులభంగా వివరించండి',
     showingSaved: 'సేవ్ చేసిన సమాచారం · అప్‌డేట్ అవుతోంది…',
     researchPaused: 'పరిశోధన ఆగింది (ఉచిత AI పరిమితి పూర్తయింది), సేవ్ చేసిన సమాచారం చూపిస్తున్నాం.',
+    langPicker: 'భాష',
+    alsoEnglish: 'English కూడా చూపించు',
+    typeGovt: 'ప్రభుత్వ',
+    typePrivate: 'ప్రైవేట్',
+    typeNotListed: 'రకం పేర్కొనలేదు',
+    districtSite: 'జిల్లా వెబ్‌సైట్',
+    trLater: 'అనువాదం వస్తోంది; ప్రస్తుతానికి English చూపిస్తున్నాం.',
+    sourceOne: 'మూలం',
   },
   Hindi: {
     govtTitle: '🏛️ सरकार',
@@ -584,6 +608,14 @@ export const CIVIC_LABELS: Record<StaticLanguage, Record<CivicKey, string>> = {
     explainSimply: 'आसान भाषा में समझाएँ',
     showingSaved: 'सहेजी गई जानकारी · अपडेट हो रहा है…',
     researchPaused: 'रिसर्च रुकी है (मुफ़्त AI सीमा खत्म), सहेजी गई जानकारी दिखाई जा रही है।',
+    langPicker: 'भाषा',
+    alsoEnglish: 'English भी दिखाएँ',
+    typeGovt: 'सरकारी',
+    typePrivate: 'प्राइवेट',
+    typeNotListed: 'प्रकार दर्ज नहीं',
+    districtSite: 'ज़िले की वेबसाइट',
+    trLater: 'अनुवाद आ रहा है; अभी English दिखा रहे हैं।',
+    sourceOne: 'स्रोत',
   },
 };
 

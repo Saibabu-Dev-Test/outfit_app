@@ -11,6 +11,9 @@
 // on: saved / English info shows ('ready'), else 'error' with the pull-to-retry message (refresh asks
 // again). Govt status 'partial' = the parts finished so far show at once while the rest is polled for.
 // Translation status 'translating' = the Worker started it in the background: English shows, poll.
+// Free sources (data reply freeSources: true; Govt / Hospitals from Wikidata / Wikipedia / OSM): a
+// research reply with status 'ready' (origin 'free') is success, the saved rows are read at once;
+// 'paused' is never shown for them (only AI translation can hit a limit: "translation on the way").
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppLanguage, langCode } from '../../i18n/appLanguage';
 import type { CivicKey } from '../../i18n/civicLabels';
@@ -98,12 +101,19 @@ export function useCivicData<T>(
           timer.current = setTimeout(() => load(true), POLL_MS);
         }
       };
-      const note = (out: { ok: boolean; status?: string; code?: any; error?: string }) => {
+      const free = !!r.freeSources;
+      const note = (out: { ok: boolean; status?: string; code?: any; error?: string }, translate = false) => {
+        if (free) {
+          // free-source data never pauses; an AI translation hiccup only delays the translated copy
+          if (translate && (out.status === 'paused' || (!out.ok && out.code))) setAiNote('trLater');
+          return;
+        }
         if (out.status === 'paused') setAiNote('researchPaused');
         else if (!out.ok && out.code) setAiNote(aiErrorKey(null, out.code));
       };
-      // Research of a new place needs grounded Gemini on the Worker; older Workers only send aiConfigured
-      const canResearch = r.researchConfigured ?? r.aiConfigured;
+      // Research of a new place: free sources (Govt / Hospitals) or grounded Gemini on the Worker;
+      // older Workers only send aiConfigured
+      const canResearch = free || (r.researchConfigured ?? r.aiConfigured);
       if (!r.data || partial) {
         if (!canResearch) {
           setPhase('ready');
@@ -134,11 +144,13 @@ export function useCivicData<T>(
             const out = await researchCivic(kind, state, district, variant, tr);
             if (!alive.current) return;
             note(out);
-            if (out.did === 'research' && out.ok) {
+            if ((out.did === 'research' && out.ok) || (out.ok && out.status === 'ready')) {
+              // done ('ready' = free-source rows saved): read them now
+              if (timer.current) clearTimeout(timer.current);
               load(true);
               return;
             }
-            if (out.status === 'paused') {
+            if (out.status === 'paused' && !free) {
               // Out of free quota: show what is saved (cache / nothing yet) and stop polling
               stopped.current = true;
               if (timer.current) clearTimeout(timer.current);
@@ -154,7 +166,7 @@ export function useCivicData<T>(
           } catch (e) {
             if (!alive.current) return;
             const n = aiErrorKey(e);
-            if (n !== 'error') setAiNote(n);
+            if (n !== 'error' && !(free && n === 'researchPaused')) setAiNote(n);
             if (e instanceof WorkerError) {
               // the Worker answered with an error (busy 429, limit, server error): nothing is running
               giveUp();
@@ -176,7 +188,7 @@ export function useCivicData<T>(
           try {
             const out = await researchCivic(kind, state, district, variant, tr);
             if (!alive.current) return;
-            note(out);
+            note(out, true);
             if (out.did === 'translate' && out.ok && out.status !== 'translating') {
               load(true);
               return;
@@ -188,7 +200,7 @@ export function useCivicData<T>(
           } catch (e) {
             if (!alive.current) return;
             const n = aiErrorKey(e);
-            if (n !== 'error') setAiNote(n);
+            if (n !== 'error') setAiNote(free ? 'trLater' : n);
             setPhase('ready');
             return;
           }

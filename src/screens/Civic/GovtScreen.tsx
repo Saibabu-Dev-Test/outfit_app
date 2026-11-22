@@ -10,6 +10,9 @@
 // Fast: saved answer shown instantly (useCivicData cache), each card in the app language with an
 // English toggle, and "Explain simply" (schemes / grievance / services) answered by AI from the
 // stored data only, in the app language + English.
+// Free sources (Worker origin 'free': Wikidata, Wikipedia, official .gov.in): each section shows its
+// source line (name, date, link); Collector / SP have no free source, so they show "Public info not
+// available" with the district website link. Header language chip: app language + "Also show English".
 import React from 'react';
 import { RefreshControl, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -28,6 +31,8 @@ import { explainGovt } from '../../services/civicAi';
 import { useCivicLabels } from '../../services/civicI18n';
 import { useCivicData } from './useCivicData';
 import GovtCompareBox from './GovtCompareBox';
+import LanguageChip from './LanguageChip';
+import { SrcLine, districtSiteOf } from './civicFreeParts';
 
 const Links = ({ phone, website, lang }: { phone?: string; website?: string; lang: ReturnType<typeof useAppLanguage> }) =>
   phone || website ? (
@@ -51,6 +56,21 @@ function Row({ label, en, tr }: { label: string; en?: string; tr?: string }) {
     <View style={{ marginTop: 8 }}>
       <Text style={ui.muted}>{label}</Text>
       <Bi en={en} tr={tr} style={[ui.body, { fontWeight: '700' }]} />
+    </View>
+  );
+}
+
+// Collector / SP with no public source: "Public info not available" + the district website
+function NotListed({ label, lang, site }: { label: string; lang: ReturnType<typeof useAppLanguage>; site: string }) {
+  return (
+    <View style={{ marginTop: 8 }} testID="govt-not-listed">
+      <Text style={ui.muted}>{label}</Text>
+      <Text style={ui.body}>{biLabel(lang, 'publicNA')}</Text>
+      {site ? (
+        <TouchableOpacity onPress={() => openLink(site)}>
+          <Text style={[ui.muted, { color: colors.primary }]}>🔗 {biLabel(lang, 'districtSite')}</Text>
+        </TouchableOpacity>
+      ) : null}
     </View>
   );
 }
@@ -82,6 +102,11 @@ export default function GovtScreen() {
   const el = d?.election;
   const tel = t?.election;
   const anyDistrict = !!(dist && (dist.collector || dist.sp || dist.policeCommissioner || dist.mps.length || dist.mlas.length || dist.headquarters));
+  const src = d?.src;
+  const free = d?.origin === 'free';
+  const districtSite = districtSiteOf(d);
+  // a district is picked: Collector / SP always get a line ("Public info not available" when empty)
+  const showOfficials = !!place.district.trim() && (free || anyDistrict);
   const anyElection = !!(el && (el.lastAssembly || el.lastLokSabha || el.next || el.voterHelpline || el.ceoWebsite));
 
   return (
@@ -93,6 +118,7 @@ export default function GovtScreen() {
       >
         <View style={[ui.row, { marginBottom: 8 }]}>
           <Text style={[ui.h1, ui.flex1]}>{civicText(lang, 'govtTitle')}</Text>
+          <LanguageChip lang={lang} />
           {isOwnerUser() ? (
             <TouchableOpacity onPress={() => navigation.navigate('AdminCivic')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
               <Text style={ui.muted}>🛡️ Moderate</Text>
@@ -108,6 +134,7 @@ export default function GovtScreen() {
               <CivicCard lang={lang} hasTranslation={!!t}>
                 <Text style={ui.h2}>{L('overview')}</Text>
                 <Bi en={d.overview} tr={t?.overview} />
+                <SrcLine lang={lang} src={src?.overview} />
               </CivicCard>
             ) : null}
 
@@ -129,15 +156,16 @@ export default function GovtScreen() {
                     {p.role ? <Bi en={p.role} tr={tlead?.ministers?.[i]?.role} style={ui.muted} /> : null}
                   </View>
                 ))}
+                <SrcLine lang={lang} src={src?.leaders} />
               </CivicCard>
             ) : null}
 
-            {anyDistrict && dist ? (
+            {(anyDistrict || showOfficials) && dist ? (
               <CivicCard lang={lang} hasTranslation={!!t}>
                 <Text style={ui.h2}>📍 {L('districtOfficials')}</Text>
                 <Row label={L('hq')} en={dist.headquarters} tr={tdist?.headquarters} />
-                <Row label={L('collector')} en={dist.collector} tr={tdist?.collector} />
-                <Row label={L('sp')} en={dist.sp} tr={tdist?.sp} />
+                {showOfficials && !dist.collector ? <NotListed label={L('collector')} lang={lang} site={districtSite} /> : <Row label={L('collector')} en={dist.collector} tr={tdist?.collector} />}
+                {showOfficials && !dist.sp ? <NotListed label={L('sp')} lang={lang} site={districtSite} /> : <Row label={L('sp')} en={dist.sp} tr={tdist?.sp} />}
                 <Row label={L('commissioner')} en={dist.policeCommissioner} tr={tdist?.policeCommissioner} />
                 {dist.mps.length ? <Text style={[ui.muted, { marginTop: 10 }]}>{L('mps')}</Text> : null}
                 {dist.mps.map((p, i) => (
@@ -147,6 +175,7 @@ export default function GovtScreen() {
                 {dist.mlas.map((p, i) => (
                   <Bi key={`mla${i}`} en={personLine(p)} tr={personLine(tdist?.mlas?.[i])} style={[ui.body, { marginTop: 4 }]} />
                 ))}
+                <SrcLine lang={lang} src={src?.district} />
               </CivicCard>
             ) : null}
 
@@ -163,6 +192,7 @@ export default function GovtScreen() {
                     </TouchableOpacity>
                   </View>
                 ))}
+                <SrcLine lang={lang} src={src?.schemes} />
               </CivicCard>
             ) : null}
 
@@ -196,6 +226,7 @@ export default function GovtScreen() {
                     </View>
                   );
                 })}
+                <SrcLine lang={lang} src={src?.schemes} />
                 {res?.aiConfigured ? <ExplainButton lang={lang} onExplain={explain('schemes')} /> : null}
               </CivicCard>
             ) : null}
@@ -210,6 +241,7 @@ export default function GovtScreen() {
                     <Links phone={x.phone} website={x.website} lang={lang} />
                   </View>
                 ))}
+                <SrcLine lang={lang} src={src?.schemes} />
                 {res?.aiConfigured ? <ExplainButton lang={lang} onExplain={explain('grievance')} /> : null}
               </CivicCard>
             ) : null}
@@ -226,6 +258,7 @@ export default function GovtScreen() {
                     <Links phone={el.voterHelpline} website={el.ceoWebsite} lang={lang} />
                   </View>
                 ) : null}
+                <SrcLine lang={lang} src={src?.election} />
               </CivicCard>
             ) : null}
 
@@ -252,6 +285,7 @@ export default function GovtScreen() {
                     <Links website={x.website} lang={lang} />
                   </View>
                 ))}
+                <SrcLine lang={lang} src={src?.schemes} />
                 {res?.aiConfigured ? <ExplainButton lang={lang} onExplain={explain('services')} /> : null}
               </CivicCard>
             ) : null}

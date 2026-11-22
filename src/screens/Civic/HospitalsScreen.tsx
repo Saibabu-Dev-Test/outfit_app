@@ -13,6 +13,9 @@
 // specialities + facilities (never a rating). Per hospital: timings, 24x7, specialities, what it is
 // publicly stated to be special for, publicly listed specialist doctors (+ experience), facilities,
 // schemes, map link, source URLs; anything no public source states shows "Public info not available".
+// Free sources (Worker origin 'free', OpenStreetMap): compact rows (civicFreeParts.tsx) with name,
+// address, tap-to-call phone, map link, Govt / Private / "Type not listed" label and source + date.
+// Header language chip (LanguageChip): app language picker + "Also show English".
 import React, { useState } from 'react';
 import { RefreshControl, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -31,6 +34,8 @@ import { CivicAskBox, Turn } from './civicAiParts';
 import { CivicStatus, PlacePicker, ReviewsBox, SourcesBox, callNumber, openLink, useCivicPlace } from './civicParts';
 import { Bi, CivicCard, biLabel } from './bi';
 import { useCivicData } from './useCivicData';
+import LanguageChip from './LanguageChip';
+import { FreeHospitalRow, isFreeHospital } from './civicFreeParts';
 
 type HospFilter = HospVariant | 'all';
 
@@ -162,6 +167,21 @@ function HospitalCard({
   );
 }
 
+// OpenStreetMap row + people's reviews behind a small toggle
+function FreeHospitalCard({ h, t, lang, item, userName, myUid }: { h: Hospital; t?: Hospital | null; lang: ReturnType<typeof useAppLanguage>; item: string; userName?: string; myUid?: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <FreeHospitalRow h={h} t={t} lang={lang}>
+      <TouchableOpacity onPress={() => setOpen(v => !v)} style={{ marginTop: 6 }}>
+        <Text style={[ui.muted, { color: colors.primary }]}>
+          ⭐ {civicText(lang, 'reviews')} {open ? '▴' : '▾'}
+        </Text>
+      </TouchableOpacity>
+      {open ? <ReviewsBox lang={lang} item={item} userName={userName} myUid={myUid} /> : null}
+    </FreeHospitalRow>
+  );
+}
+
 export default function HospitalsScreen() {
   const lang = useAppLanguage();
   const T = (k: Parameters<typeof civicText>[1]) => civicText(lang, k);
@@ -188,7 +208,8 @@ export default function HospitalsScreen() {
   const rows = active.flatMap(a => {
     const hs = a.d.res?.data?.hospitals || [];
     const trs = (a.d.tr && a.d.res?.i18n?.[a.d.tr]?.hospitals) || [];
-    return hs.map((h, i) => ({ h, t: trs[i] || null, v: a.v }));
+    const origin = a.d.res?.data?.origin;
+    return hs.map((h, i) => ({ h, t: trs[i] || null, v: a.v, free: isFreeHospital(h, origin) }));
   });
   const list = rows.map(r => r.h);
   const found = where.trim() ? searchHospitals(list, where).map(m => ({ ...rows[list.indexOf(m.h)], matched: m.matched })) : rows.map(r => ({ ...r, matched: [] as string[] }));
@@ -203,6 +224,7 @@ export default function HospitalsScreen() {
       <ScrollView contentContainerStyle={ui.scroll} keyboardShouldPersistTaps="handled" refreshControl={<RefreshControl refreshing={phase === 'loading' && anyRes} onRefresh={refresh} />}>
         <View style={[ui.row, { marginBottom: 8 }]}>
           <Text style={[ui.h1, ui.flex1]}>{T('hospTitle')}</Text>
+          <LanguageChip lang={lang} />
           {isOwnerUser() ? (
             <TouchableOpacity onPress={() => navigation.navigate('AdminCivic')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
               <Text style={ui.muted}>🛡️ Moderate</Text>
@@ -275,20 +297,32 @@ export default function HospitalsScreen() {
             {workerAi ? (
               <CivicAskBox key={placeKey} lang={lang} title={T('askHospAi')} note={T('hospAiNote')} hint={T('askHospHint')} onAsk={ask} />
             ) : null}
-            {shown.map(r => (
-              <HospitalCard
-                key={`${r.v}:${r.h.slug}`}
-                h={r.h}
-                t={r.t}
-                lang={lang}
-                item={civicItem('hosp', place.state, place.district, r.h.slug)}
-                userName={user?.name}
-                myUid={user?.id}
-                kindLabel={variant === 'all' ? (r.v === 'govt' ? T('govtHosp') : T('privateHosp')) : undefined}
-                matched={r.matched}
-                showCount={byFacts}
-              />
-            ))}
+            {shown.map(r =>
+              r.free ? (
+                <FreeHospitalCard
+                  key={`${r.v}:${r.h.slug}`}
+                  h={r.h}
+                  t={r.t}
+                  lang={lang}
+                  item={civicItem('hosp', place.state, place.district, r.h.slug)}
+                  userName={user?.name}
+                  myUid={user?.id}
+                />
+              ) : (
+                <HospitalCard
+                  key={`${r.v}:${r.h.slug}`}
+                  h={r.h}
+                  t={r.t}
+                  lang={lang}
+                  item={civicItem('hosp', place.state, place.district, r.h.slug)}
+                  userName={user?.name}
+                  myUid={user?.id}
+                  kindLabel={variant === 'all' ? (r.v === 'govt' ? T('govtHosp') : T('privateHosp')) : undefined}
+                  matched={r.matched}
+                  showCount={byFacts}
+                />
+              ),
+            )}
             {active.map(a =>
               a.d.res?.data ? (
                 <SourcesBox key={`src-${a.v}`} lang={lang} sources={a.d.res?.sources} updatedAt={a.d.res?.updatedAt || 0} asOf={a.d.res?.data?.asOf} />
