@@ -8,7 +8,7 @@
 //   GET  /cpxHash                    CPX secure_hash for the signed-in user
 //   cron '30 0 * * *' (daily)        pending earn credits past their hold -> approved (D1)
 //   /v1/civic/..., /v1/admin/civic   Govt / Hospitals tabs (civic/routes.js)
-//   cron '*/20 * * * *'              capped Gemini research for the civic tabs (civic/research.js)
+//   cron '*/20 * * * *'              capped Gemini research for the civic tabs + gentle free-source refresh (civic/research.js)
 // Secrets (wrangler secret put, never in git): BITLABS_SECRET, CPX_SECURE_HASH, OFFERWALL_GG_SECRET,
 // FIREBASE_SA_JSON, GEMINI_API_KEY (+ optional GEMINI_API_KEY_2.._5, GROQ_API_KEY: civic AI fallback chain with the Workers AI binding AI last, civic/llm.js; no Gemini key = no new research, routes still work). A handler whose secret is missing answers 503 'not configured'.
 import { handleBitlabsPostback, handleCpxPostback, handleOfferwallPostback } from './handler.js';
@@ -17,7 +17,7 @@ import { Db } from './db.js';
 import { cpxHashFor, releaseHeld } from './earn.js';
 import * as api from './api.js';
 import * as civic from './civic/routes.js';
-import { runCivicResearch } from './civic/research.js';
+import { runCivicResearch, runFreeRefresh } from './civic/research.js';
 import { postCivicAsk, postCivicTranslate } from './civic/ask.js';
 import { PROJECT_ID, WORKER_VERSION } from './config.js';
 
@@ -186,6 +186,13 @@ export async function handleScheduled(event, env, ctx, { fetchImpl = fetch, now 
       console.log('civic research', JSON.stringify({ ran: r.ran, skipped: r.skipped || null }));
     } catch (e) {
       console.error('civic research failed', String((e && e.message) || e));
+    }
+    try {
+      // free sources (no AI): one Overpass hospital upgrade + one stale free row per run
+      const f = await runFreeRefresh(db, env, { fetchImpl, now });
+      console.log('civic free refresh', JSON.stringify({ ran: f.ran }));
+    } catch (e) {
+      console.error('civic free refresh failed', String((e && e.message) || e));
     }
   } else {
     const n = await releaseHeld(db, now);

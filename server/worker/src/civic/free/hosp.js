@@ -121,6 +121,8 @@ export async function lookupArea(stateName, districtName, opts) {
   for (let i = 0; i < tries.length; i += 1) {
     if (i > 0) await sleepImpl(gapMs);
     const r = await getJson(nomUrl({ q: tries[i], limit: '3', countrycodes: 'in' }), { fetchImpl, timeoutMs });
+    // no answer at all (network / timeout): Nominatim is unreachable, do not keep asking
+    if (!r.ok && !r.status) return { ok: false, error: r.error || 'nominatim unreachable', unreachable: true, requests: i + 1 };
     if (!r.ok || !Array.isArray(r.data)) continue;
     const hit = r.data.find(x => x && x.category === 'boundary') || r.data[0];
     const bbox = hit ? bboxOf(hit.boundingbox) : null;
@@ -143,17 +145,22 @@ export async function fetchHospFree(state, district, opts = {}) {
     sleepImpl = sleep,
     queries = HOSP_QUERIES,
     max = 60,
+    bbox = null, // cached district bbox (civic_geo): skips the area lookup
   } = opts;
   const today = isoDay(now);
   const stateName = nameOf(state).trim();
   if (!stateName) return { ok: false, hospitals: [], error: 'no state' };
   const districtName = titleCase(district);
   const o = { fetchImpl, timeoutMs, gapMs, sleepImpl };
-  const area = await lookupArea(stateName, districtName, o);
+  const area = bbox ? { ok: true, bbox, requests: 0 } : await lookupArea(stateName, districtName, o);
+  const place = [districtName, stateName].filter(Boolean).join(', ');
+  if (area.unreachable) return { ok: false, hospitals: [], bbox: null, place, error: area.error };
   const lists = [];
   const errors = [];
+  let made = area.requests > 0;
   for (const q of queries) {
-    await sleepImpl(gapMs); // 1 req/s, sequential
+    if (made) await sleepImpl(gapMs); // 1 req/s, sequential (no wait before the very first request)
+    made = true;
     const params = { q, addressdetails: '1', extratags: '1', limit: '40', countrycodes: 'in' };
     if (area.ok) Object.assign(params, { viewbox: viewboxOf(area.bbox), bounded: '1' });
     else params.q = `${q} in ${[districtName, stateName].filter(Boolean).join(', ')}`;
@@ -162,7 +169,6 @@ export async function fetchHospFree(state, district, opts = {}) {
     else errors.push(`${q}: ${r.error || 'bad response'}`);
   }
   const hospitals = mergeHospitals(lists, today, max);
-  const place = [districtName, stateName].filter(Boolean).join(', ');
   const src = { name: OSM_SRC, url: 'https://www.openstreetmap.org/copyright', date: today };
   if (!hospitals.length) return { ok: false, hospitals: [], bbox: area.ok ? area.bbox : null, place, src, error: errors[0] || area.error || 'no hospitals found' };
   return { ok: true, hospitals, bbox: area.ok ? area.bbox : null, place, src, errors };

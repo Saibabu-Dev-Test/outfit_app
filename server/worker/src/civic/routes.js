@@ -14,6 +14,10 @@
 //        language (any TR_LANGS code). Capped per user + per day. `code` on failure: quota | billing |
 //        cap | timeout | config (the app shows a clear message). status 'paused' = every Gemini key
 //        is out of free quota: research paused, the saved info is kept and shown.
+//        Govt / Hospitals are researched from the FREE, keyless sources first (research.js
+//        researchFree: Wikidata, Wikipedia, OpenStreetMap; no AI): {ok: true, status: 'ready',
+//        did: 'research', origin: 'free'}, never 'paused' for AI limits. AI research is only the
+//        fallback when the free sources fail. (Stored rows keep status 'ok' in GET /data.)
 //   POST /v1/civic/ask, /v1/civic/translate   civic AI answers + cached AI translations (ask.js)
 //   GET  /v1/civic/reviews?item=&limit=     visible reviews + average + my review
 //   POST /v1/civic/reviews {item, stars, body, photo?, userName?}  one per user per item (upsert)
@@ -29,7 +33,7 @@ import { placeByCode, stateByCode } from './states.js';
 import { cleanReviewText, hasProfanity } from './moderation.js';
 import { isGeminiConfigured } from './gemini.js';
 import { aiProviderStatus, isAiConfigured } from './llm.js';
-import { CIVIC_LOCK_MS, CIVIC_MAX_PENDING, KINDS, TR_LANGS, civicCaps, readI18n, researchNow, researchOne, startTranslate } from './research.js';
+import { CIVIC_LOCK_MS, CIVIC_MAX_PENDING, FREE_KINDS, KINDS, TR_LANGS, civicCaps, readI18n, researchFree, researchNow, researchOne, startTranslate } from './research.js';
 
 export const MAX_REVIEWS_PER_DAY = 20; // per user (new or edited)
 export const MAX_REPORTS_PER_DAY = 30; // per user
@@ -126,9 +130,11 @@ export async function getCivicData({ db, env, url, now, fetchImpl, ctx }) {
     running,
     updatedAt: row && data ? Number(row.updated_at) || 0 : 0,
     // aiConfigured: Ask AI / Explain simply / translation work (any provider in the fallback chain);
-    // researchConfigured: grounded research of new places works (needs a Gemini key)
+    // researchConfigured: new places can be researched: always for Govt / Hospitals (free sources,
+    // no key), else grounded research (needs a Gemini key)
     aiConfigured: isAiConfigured(env),
-    researchConfigured: isGeminiConfigured(env),
+    researchConfigured: FREE_KINDS.has(t.kind) || isGeminiConfigured(env),
+    freeSources: FREE_KINDS.has(t.kind),
   };
 }
 
@@ -310,14 +316,21 @@ export async function postAdminCivicReview({ db, user, body }) {
   return { ok: true, item, uid, hidden: !!hidden };
 }
 
-export async function postAdminCivicRefresh({ db, user, env, body, now, fetchImpl }) {
+export async function postAdminCivicRefresh({ db, user, env, body, now, fetchImpl, ctx }) {
   ownerOnly(user);
-  if (!isGeminiConfigured(env)) {
-    throw new HttpError(503, 'GEMINI_API_KEY not set on the Worker');
-  }
   const p = new URLSearchParams();
   ['kind', 'state', 'district', 'variant'].forEach(k => p.set(k, str(body && body[k], 60)));
   const t = parseTarget(p);
+  if (!isGeminiConfigured(env)) {
+    // No Gemini key: Govt / Hospitals still refresh from the free sources
+    const fr = FREE_KINDS.has(t.kind)
+      ? await researchFree(db, env, t, { fetchImpl: fetchImpl || fetch, now, request: false, waitUntil: ctx && ctx.waitUntil ? job => ctx.waitUntil(job) : null })
+      : null;
+    if (!fr || !fr.ok) {
+      throw new HttpError(503, 'GEMINI_API_KEY not set on the Worker');
+    }
+    return { ...t, ...fr };
+  }
   const r = await researchOne(db, env, t, { fetchImpl: fetchImpl || fetch, now, translate: true });
   return { ...t, ...r };
 }

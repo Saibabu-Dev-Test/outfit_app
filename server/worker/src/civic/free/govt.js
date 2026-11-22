@@ -19,6 +19,10 @@ export const WDQS = 'https://query.wikidata.org/sparql';
 export const WP_API = 'https://en.wikipedia.org/w/api.php';
 export const WP_REST = 'https://en.wikipedia.org/api/rest_v1/page/summary/';
 export const LOK_SABHA_PAGE = 'List_of_members_of_the_18th_Lok_Sabha'; // Lok Sabha elected 2024 (term to 2029)
+// Current governors / LGs / administrators (redirects to "Governor (India)"; only its "List of
+// incumbent ..." section is fetched and parsed: Workers free plan CPU budget)
+export const GOVERNORS_PAGE = 'List_of_current_Indian_governors';
+export const GOVERNORS_SECTION = { state: /^list of incumbent governors$/i, ut: /^list of incumbent lieutenant governors/i };
 
 // Wikidata item of each state / UT (codes as in states.js)
 export const STATE_QIDS = {
@@ -212,6 +216,50 @@ export function districtReps(mlas, mps, words, districtLabel = '') {
   return { mlas: dm.slice(0, 25), mps: dp.slice(0, 10) };
 }
 
+/**
+ * Governors (or LGs / administrators) from the incumbent table of the governors page (pure: tested).
+ * -> { [normalised state / UT name]: { name, title, since } }. Section rows inside the UT table
+ * ("Lieutenant Governors", "Administrators") set the title of the rows below them.
+ */
+export function governorsFrom(html, dflt = 'Governor') {
+  const t = findTable(html, [/^(state|union territor)/i, /officeholder|^name/i], { state: /^(state|union territor)/i, name: /officeholder|^name/i, since: /assumed|took office/i });
+  if (!t || t.cols.state < 0 || t.cols.name < 0) return {};
+  const out = {};
+  let title = dflt;
+  t.rows.forEach(r => {
+    if (isSectionRow(r)) {
+      const h = r.cells[0];
+      title = /lieutenant/i.test(h) ? 'Lieutenant Governor' : /administrator/i.test(h) ? 'Administrator' : dflt;
+      return;
+    }
+    const place = norm(cellAt(t, r, 'state').split('\n')[0]);
+    const name = cellAt(t, r, 'name')
+      .split('\n')[0]
+      .replace(/\s*\(.*?\)\s*/g, ' ')
+      .trim();
+    if (!place || !name || /^(vacant|–|-)$/i.test(name)) return;
+    const since = cellAt(t, r, 'since').split('\n')[0];
+    out[place] = { name, title, since };
+  });
+  return out;
+}
+
+/** The governor of one state / UT from a governorsFrom map (pure: tested). Exact name, else contained ("Delhi"). */
+export function governorFor(map, stateName) {
+  const k = norm(stateName);
+  if (!k || !map) return null;
+  if (map[k]) return map[k];
+  const hit = Object.keys(map).find(x => new RegExp(`(^| )${k}( |$)`).test(x));
+  return hit ? map[hit] : null;
+}
+
+/** Fetch the incumbent table for a state or UT (one Wikipedia section). -> map ({} when unavailable) */
+export async function fetchGovernors(type, opts) {
+  const ut = type === 'ut';
+  const html = await sectionHtml(GOVERNORS_PAGE, ut ? GOVERNORS_SECTION.ut : GOVERNORS_SECTION.state, opts);
+  return html ? governorsFrom(html, ut ? 'Lieutenant Governor' : 'Governor') : {};
+}
+
 async function sectionHtml(title, match, opts) {
   const secs = await wpSections(title, opts);
   const s = secs.find(x => match.test(String(x.line || '').replace(/<[^>]+>/g, '')));
@@ -223,20 +271,29 @@ async function sectionHtml(title, match, opts) {
  * free sources only. -> { ok, data, sources, error }. Every network part may fail on its own; the
  * rest still shows (status ready without AI).
  */
-export async function fetchGovtFree(state, district, { fetchImpl = fetch, now = Date.now(), timeoutMs = 7000 } = {}) {
+export async function fetchGovtFree(state, district, { fetchImpl = fetch, now = Date.now(), timeoutMs = 7000, governors } = {}) {
   const q = STATE_QIDS[state.code];
   if (!q) return { ok: false, error: 'no wikidata item for state' };
   const opts = { fetchImpl, timeoutMs };
   const today = isoDay(now);
   const words = placeWords(district);
-  const [offices, facts, dist, lsHtml] = await Promise.all([
+  // governors: a cached map (governorsFrom) from the caller, else fetched here with the first wave
+  const [offices, facts, dist, lsHtml, govMap] = await Promise.all([
     sparql(officesQuery(q), opts),
     sparql(stateQuery(q), opts),
     words ? sparql(districtQuery(q, words), opts) : Promise.resolve({ ok: true, rows: [] }),
     words ? sectionHtml(LOK_SABHA_PAGE, new RegExp(`^${state.name.replace(/[^A-Za-z ]/g, '.')}$`, 'i'), opts) : Promise.resolve(''),
+    governors && typeof governors === 'object' ? Promise.resolve(governors) : fetchGovernors(state.type, opts).catch(() => ({})),
   ]);
   if (!offices.ok && !facts.ok) return { ok: false, error: offices.error || facts.error || 'wikidata unavailable' };
   const lead = leadersFrom(offices.rows);
+  // Wikidata lacks a Governor office for some states (AP) or keeps a stale holder (Arunachal):
+  // the Wikipedia incumbent list overrides it; Wikidata stays the fallback
+  const wpGov = governorFor(govMap, state.name);
+  if (wpGov) {
+    lead.governor = wpGov.name;
+    lead.governorTitle = wpGov.title;
+  }
   const f = stateFactsFrom(facts.rows, today);
   const d = dist.rows[0] || null;
   const dLabel = d ? val(d, 'dLabel') : '';
@@ -268,6 +325,7 @@ export async function fetchGovtFree(state, district, { fetchImpl = fetch, now = 
   const sources = [
     { url: `https://www.wikidata.org/wiki/${q}`, title: `Wikidata: ${state.name}` },
     ...(f.ministry && f.ministry.article ? [{ url: f.ministry.article, title: `Wikipedia: ${f.ministry.label}` }] : []),
+    ...(wpGov ? [{ url: wikiUrl('Governor (India)'), title: 'Wikipedia: Incumbent governors' }] : []),
     ...(words && lsHtml ? [{ url: wikiUrl(LOK_SABHA_PAGE), title: 'Wikipedia: Members of the 18th Lok Sabha' }] : []),
     ...(words && f.assembly && f.assembly.article ? [{ url: f.assembly.article, title: `Wikipedia: ${f.assembly.label}` }] : []),
     ...(dArticle ? [{ url: dArticle, title: `Wikipedia: ${dLabel}` }] : f.article ? [{ url: f.article, title: `Wikipedia: ${state.name}` }] : []),
@@ -309,7 +367,7 @@ export async function fetchGovtFree(state, district, { fetchImpl = fetch, now = 
     helplines: HELPLINES,
     src: {
       overview: summary ? { name: 'Wikipedia', url: dArticle || f.article, date: today } : wdSrc,
-      leaders: ministers.length && f.ministry ? { name: 'Wikidata + Wikipedia', url: f.ministry.article, date: today } : wdSrc,
+      leaders: ministers.length && f.ministry ? { name: 'Wikidata + Wikipedia', url: f.ministry.article, date: today } : wpGov ? { name: 'Wikidata + Wikipedia', url: wikiUrl('Governor (India)'), date: today } : wdSrc,
       district: words ? { name: 'Wikidata + Wikipedia', url: (f.assembly && f.assembly.article) || dArticle || wdSrc.url, date: today } : null,
       election: wdSrc,
       schemes: { name: 'Official .gov.in websites', url: 'https://www.india.gov.in', date: today },
@@ -317,5 +375,6 @@ export async function fetchGovtFree(state, district, { fetchImpl = fetch, now = 
     },
   };
   const hasAny = data.leaders.chiefMinister.name || data.leaders.governor || data.overview;
-  return hasAny ? { ok: true, data, sources } : { ok: false, error: 'nothing found in free sources' };
+  // governors: the map used (cache it: one Wikipedia section serves every state / UT)
+  return hasAny ? { ok: true, data, sources, governors: govMap } : { ok: false, error: 'nothing found in free sources', governors: govMap };
 }

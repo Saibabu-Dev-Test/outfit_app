@@ -1,5 +1,6 @@
 // Free civic sources (server/worker/src/civic/free): Govt from Wikidata + Wikipedia, hospitals from
 // OpenStreetMap (Nominatim fast path, Overpass upgrade), official static info. fetch is mocked.
+export {}; // a module: its names do not clash with the other test files
 const free = require('../server/worker/src/civic/free/index.js');
 const hosp = require('../server/worker/src/civic/free/hosp.js');
 const staticMod = require('../server/worker/src/civic/free/staticInfo.js');
@@ -294,5 +295,98 @@ describe('civic free: static official info', () => {
       hint: 'See the official Kurnool district website: https://kurnool.ap.gov.in',
     });
     expect(s.districtOfficials().hint).toMatch(/official district website/);
+  });
+});
+
+// ── Governor from Wikipedia's incumbent list (Wikidata lacks AP's office / keeps stale holders) ──
+const GOVERNORS_HTML = `<div><h2 id="List_of_incumbent_governors">List of incumbent governors</h2>
+<table class="wikitable sortable"><tbody>
+<tr><th>State</th><th>List</th><th>Portrait</th><th>Officeholder</th><th>Assumed office<br />(tenure length)</th><th>Appointed By</th><th>Chief Minister</th></tr>
+<tr><td><a href="/wiki/Andhra_Pradesh">Andhra Pradesh</a></td><td>List</td><td><img src="x.jpg" /></td><td><b><a href="/wiki/Syed_Abdul_Nazeer">Syed Abdul Nazeer</a></b></td><td><span data-sort-value="000000002023-02-24-0000">24 February 2023</span><br />(3&#160;years)</td><td rowspan="2">Droupadi Murmu</td><td>N. Chandrababu Naidu</td></tr>
+<tr><td>Arunachal Pradesh</td><td>List</td><td></td><td><b>Kaiwalya Trivikram Parnaik</b><sup class="reference">[1]</sup></td><td>16 February 2023</td><td>Pema Khandu</td></tr>
+</tbody></table></div>`;
+const UT_HTML = `<table class="wikitable"><tbody>
+<tr><th>Union Territories</th><th>List</th><th>Portrait</th><th>Officeholder</th><th>Took office</th><th>Appointed by</th><th>Chief Ministers</th></tr>
+<tr><th colspan="7">Lieutenant Governors</th></tr>
+<tr><td>National Capital Territory of Delhi</td><td>List</td><td></td><td>Taranjit Singh Sandhu</td><td>11 March 2026</td><td>Droupadi Murmu</td><td>Rekha Gupta</td></tr>
+<tr><th colspan="7">Administrators</th></tr>
+<tr><td>Lakshadweep</td><td>List</td><td></td><td>Praful Khoda Patel (additional Charge)</td><td>5 December 2020</td><td>Droupadi Murmu</td><td>–</td></tr>
+</tbody></table>`;
+
+describe('civic free: governor (Wikipedia incumbent list overrides Wikidata)', () => {
+  const govt = require('../server/worker/src/civic/free/govt.js');
+
+  test('governorsFrom / governorFor parse only the incumbent table, titles from section rows', () => {
+    const states = govt.governorsFrom(GOVERNORS_HTML);
+    expect(govt.governorFor(states, 'Andhra Pradesh')).toEqual({ name: 'Syed Abdul Nazeer', title: 'Governor', since: '24 February 2023' });
+    expect(govt.governorFor(states, 'Arunachal Pradesh').name).toBe('Kaiwalya Trivikram Parnaik'); // footnote dropped
+    expect(govt.governorFor(states, 'Assam')).toBeNull();
+    const uts = govt.governorsFrom(UT_HTML, 'Lieutenant Governor');
+    expect(govt.governorFor(uts, 'Delhi')).toMatchObject({ name: 'Taranjit Singh Sandhu', title: 'Lieutenant Governor' });
+    expect(govt.governorFor(uts, 'Lakshadweep')).toMatchObject({ name: 'Praful Khoda Patel', title: 'Administrator' });
+    expect(govt.governorsFrom('<p>no table</p>')).toEqual({});
+  });
+
+  // Wikidata has NO Governor office row for AP here (the real gap); only the incumbent section is fetched
+  const fetchWith = (opts: { governorsDown?: boolean } = {}) => {
+    const calls: string[] = [];
+    const f = jest.fn(async (url: string) => {
+      calls.push(url);
+      const u = new URL(url);
+      if (u.host === 'query.wikidata.org') {
+        const q = u.searchParams.get('query') || '';
+        if (q.includes('Deputy Chief Minister|Administrator')) return res(rows([OFFICES.results.bindings[1]]));
+        if (q.includes('BIND("state"')) return res(STATE);
+        return res(rows([]));
+      }
+      if (u.pathname === '/w/api.php' && u.searchParams.get('page') === govt.GOVERNORS_PAGE) {
+        if (opts.governorsDown) return res('busy', 503);
+        if (u.searchParams.get('prop') === 'sections') {
+          return res({ parse: { sections: [{ line: 'Oath', index: '15' }, { line: 'List of incumbent governors', index: '19' }, { line: 'List of incumbent lieutenant governors and administrators', index: '20' }] } });
+        }
+        if (u.searchParams.get('section') === '19') return res({ parse: { text: GOVERNORS_HTML } });
+        return res({ error: 'whole page must not be fetched' }, 400);
+      }
+      if (u.pathname === '/w/api.php') return res({ parse: { sections: [], text: '' } });
+      return res({ extract: 'Andhra Pradesh is a state.' });
+    });
+    return { f, calls };
+  };
+
+  test('AP: Wikidata has no Governor -> filled from the Wikipedia section; map returned for caching', async () => {
+    const { f, calls } = fetchWith();
+    const r = await free.fetchGovtFree({ code: 'AP', name: 'Andhra Pradesh', type: 'state' }, '', { fetchImpl: f, now: NOW });
+    expect(r.ok).toBe(true);
+    expect(r.data.leaders.governor).toBe('Syed Abdul Nazeer');
+    expect(r.governors['andhra pradesh'].name).toBe('Syed Abdul Nazeer');
+    expect(r.sources.map((x: any) => x.url)).toContain('https://en.wikipedia.org/wiki/Governor_(India)');
+    // only section 19 parsed (never the whole page)
+    const gov = calls.filter(c => c.includes(govt.GOVERNORS_PAGE) && c.includes('prop=text'));
+    expect(gov).toHaveLength(1);
+    expect(gov[0]).toContain('section=19');
+  });
+
+  test('Wikipedia overrides a stale Wikidata holder; cached map skips the fetch; Wikipedia down -> Wikidata fallback', async () => {
+    const { f, calls } = fetchWith();
+    const cached = govt.governorsFrom(GOVERNORS_HTML);
+    const r = await free.fetchGovtFree({ code: 'AP', name: 'Andhra Pradesh', type: 'state' }, '', { fetchImpl: f, now: NOW, governors: cached });
+    expect(r.data.leaders.governor).toBe('Syed Abdul Nazeer');
+    expect(calls.some(c => c.includes(govt.GOVERNORS_PAGE))).toBe(false);
+    // stale Wikidata governor, Wikipedia down: Wikidata value kept
+    const stale = jest.fn(async (url: string) => {
+      const u = new URL(url);
+      if (u.host === 'query.wikidata.org' && (u.searchParams.get('query') || '').includes('Deputy Chief Minister|Administrator')) return res(OFFICES);
+      return fetchWith({ governorsDown: true }).f(url);
+    });
+    const r2 = await free.fetchGovtFree({ code: 'AP', name: 'Andhra Pradesh', type: 'state' }, '', { fetchImpl: stale, now: NOW });
+    expect(r2.data.leaders.governor).toBe('S. Abdul Nazeer');
+    // stale Wikidata governor, Wikipedia up: Wikipedia wins
+    const fresh = jest.fn(async (url: string) => {
+      const u = new URL(url);
+      if (u.host === 'query.wikidata.org' && (u.searchParams.get('query') || '').includes('Deputy Chief Minister|Administrator')) return res(OFFICES);
+      return fetchWith().f(url);
+    });
+    const r3 = await free.fetchGovtFree({ code: 'AP', name: 'Andhra Pradesh', type: 'state' }, '', { fetchImpl: fresh, now: NOW });
+    expect(r3.data.leaders.governor).toBe('Syed Abdul Nazeer');
   });
 });
