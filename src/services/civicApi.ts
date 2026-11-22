@@ -31,6 +31,26 @@ export interface GovtData {
   departments: { name: string; what: string; website: string; helpline: string }[];
   services: { name: string; how: string; website: string }[];
   helplines: { name: string; number: string }[];
+  // Free-source rows (Worker origin 'free': Wikidata / Wikipedia / official .gov.in): per-section
+  // source {name, url, date}; Collector / SP stay '' (no free source)
+  origin?: 'free' | 'ai';
+  src?: GovtSrc;
+}
+
+// One public source of a free-source value (date = the day it was fetched, YYYY-MM-DD)
+export interface CivicSrc {
+  name: string;
+  url: string;
+  date: string;
+}
+
+export interface GovtSrc {
+  overview?: CivicSrc | null;
+  leaders?: CivicSrc | null;
+  district?: CivicSrc | null;
+  election?: CivicSrc | null;
+  schemes?: CivicSrc | null;
+  place?: string;
 }
 
 export interface Hospital {
@@ -53,6 +73,13 @@ export interface Hospital {
   facilities?: string[];
   doctors?: HospitalDoctor[]; // only doctors publicly listed, each with its source page
   sources?: string[];
+  // Free-source rows (OpenStreetMap, origin 'free'): ownership as OSM tags it, coordinates, OSM page
+  ownership?: 'govt' | 'private' | 'unknown';
+  lat?: number | null;
+  lon?: number | null;
+  osmUrl?: string;
+  src?: CivicSrc | null;
+  origin?: 'free' | 'ai';
 }
 
 export interface HospitalDoctor {
@@ -66,6 +93,8 @@ export interface HospitalDoctor {
 export interface HospData {
   asOf?: string;
   hospitals: Hospital[];
+  origin?: 'free' | 'ai';
+  src?: CivicSrc | null;
 }
 
 // Previous vs present government (facts only, every point with source URL + date, no verdict)
@@ -108,13 +137,16 @@ export interface CivicDataResponse<T> {
   aiStars: number | null;
   // 'partial' = a Govt place's first research is still running: data holds the parts finished so far
   // (poll for the rest). 'translating' = English only for the asked language, its copy is on the way.
-  status: 'ok' | 'error' | 'pending' | 'none' | 'partial' | 'translating';
+  status: 'ok' | 'ready' | 'error' | 'pending' | 'none' | 'partial' | 'translating';
   running?: boolean;
   updatedAt: number;
   // Ask AI / Explain simply / translation work (any provider of the Worker's AI fallback chain)
   aiConfigured: boolean;
   // Research of a new place works (grounded Gemini). Older Workers do not send it: use aiConfigured.
   researchConfigured?: boolean;
+  // Govt / Hospitals come from free, keyless sources (Wikidata, Wikipedia, OpenStreetMap): research
+  // never needs an AI key and is never 'paused' for AI limits
+  freeSources?: boolean;
 }
 
 // Short reason when an AI step failed: quota (free-tier limit, 429), billing (402), cap (daily cap),
@@ -125,8 +157,11 @@ export interface CivicResearchResponse {
   ok: boolean;
   // 'paused' = every Gemini key is out of free quota: research paused, the saved info stays
   // 'translating' = translation started in the background (English shows meanwhile; poll for it)
-  status: 'ok' | 'error' | 'pending' | 'running' | 'ai_off' | 'paused' | 'translating';
+  // 'ready' = free-source research finished (origin 'free'): the data is saved, read it now
+  status: 'ok' | 'ready' | 'error' | 'pending' | 'running' | 'ai_off' | 'paused' | 'translating';
   paused?: boolean;
+  origin?: 'free' | 'ai';
+  translating?: boolean; // the asked language's translation started in the background
   did?: 'research' | 'translate' | 'nothing' | 'already running';
   error?: string;
   code?: CivicAiCode;

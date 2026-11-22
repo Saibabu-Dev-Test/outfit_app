@@ -1,12 +1,13 @@
 // Bilingual text for the Govt / Hospitals / Laws tabs. Inside a <CivicCard> the card shows the user's
 // app language, with an "English" toggle in its header that adds the English original under each
-// line (small muted text). Outside a card (no toggle) both are shown, as before. English app
+// line (small muted text); it starts from the header language chip's "Also show English" (on). Outside a card (no toggle) both are shown, as before. English app
 // language = English only. A line with no translation shows the English text.
-import React, { createContext, useContext, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState } from 'react';
 import { StyleProp, Text, TextStyle, TouchableOpacity, View, ViewStyle } from 'react-native';
 import { ui } from '../Earn/earnUi';
 import { AppLanguage } from '../../i18n/appLanguage';
 import { CivicKey, civicText } from '../../i18n/civicLabels';
+import { useCivicShowEnglish } from '../../i18n/civicEnglish';
 
 // "ముఖ్యమంత్రి · Chief Minister" (English, or no translation yet: "Chief Minister")
 export const biLabel = (lang: AppLanguage, key: CivicKey): string => {
@@ -31,7 +32,10 @@ export function CivicCard({
   style?: StyleProp<ViewStyle>;
   hasTranslation?: boolean;
 }) {
-  const [showEn, setShowEn] = useState(false);
+  // starts from the header chip's "Also show English" (on by default) and follows it when changed
+  const allEnglish = useCivicShowEnglish();
+  const [showEn, setShowEn] = useState(allEnglish);
+  useEffect(() => setShowEn(allEnglish), [allEnglish]);
   const toggle = lang !== 'English' && hasTranslation;
   return (
     <View style={[ui.card, style]}>

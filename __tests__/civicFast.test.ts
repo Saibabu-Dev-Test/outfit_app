@@ -289,10 +289,14 @@ describe('research: Govt in 3 parallel parts + translation in the same run', () 
     expect(r2.json).toMatchObject({ ok: false, code: 'quota' });
   });
 
-  it('data route: aiConfigured = any provider (Workers AI alone counts), researchConfigured = Gemini key', async () => {
+  it('data route: aiConfigured = any provider (Workers AI alone counts), researchConfigured = free sources (Govt / Hospitals) or Gemini key', async () => {
     const onlyCf = env({ AI: { run: jest.fn() } });
     const g = await call(onlyCf, 'GET', '/v1/civic/data?kind=hosp&state=TG&variant=govt');
-    expect(g.json).toMatchObject({ aiConfigured: true, researchConfigured: false });
+    // Hospitals / Govt are researched from free, keyless sources (no Gemini needed)
+    expect(g.json).toMatchObject({ aiConfigured: true, researchConfigured: true, freeSources: true });
+    const cmp = await call(onlyCf, 'GET', '/v1/civic/data?kind=gcmp&state=TG');
+    expect(cmp.json).toMatchObject({ aiConfigured: true, researchConfigured: false, freeSources: false });
+    // free sources unreachable (this fake answers only Gemini) and no Gemini key: ai_off as before
     const r = await call(onlyCf, 'POST', '/v1/civic/research', { body: { kind: 'hosp', state: 'TG', variant: 'govt' } });
     expect(r.json).toMatchObject({ ok: false, status: 'ai_off', code: 'config' });
     const withKey = await call(env({ GEMINI_API_KEY: 'k' }), 'GET', '/v1/civic/data?kind=hosp&state=TG&variant=govt');
