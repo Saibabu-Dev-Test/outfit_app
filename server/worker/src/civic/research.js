@@ -24,6 +24,10 @@
 // Kind 'gcmp' = neutral "previous vs present government" comparison per state + centre ('IN'):
 // schemes, budgets, major projects, schemes started / stopped, side by side; every point needs its
 // own https source URL + date or it is dropped; evaluative words are dropped; no verdict field exists.
+// Kind 'gprm' = promises tracker per state + centre ('IN'): the PRESENT government's election
+// manifesto promises, each with a status (done | in_progress | not_done | no_update). A status other
+// than no_update needs a dated https public source or it is forced to no_update; summary counts are
+// computed by the cleaner (never taken from the model); evaluative words are dropped.
 // AI fallback (llm.js): grounded research uses Gemini only (every key in turn). When every key is
 // used up the stored data is kept as it is and the run reports status 'paused' (RESEARCH_PAUSED)
 // instead of asking an ungrounded model, which would invent facts. Translation of stored data goes
@@ -36,7 +40,7 @@
 // Grounded Gemini research stays as the fallback when the free sources fail; Gemini / Groq are
 // otherwise only optional extras (translation, Explain simply). OSM rows never translate proper
 // names or addresses (FREE_HOSP_FIXED).
-import { CENTRE, STATES, placeByCode } from './states.js';
+import { CENTRE, CENTRE_KINDS, STATES, placeByCode } from './states.js';
 import { fetchGovtFree } from './free/govt.js';
 import { fetchHospFree, fetchHospOverpass, titleCase } from './free/hosp.js';
 import { sleep } from './free/http.js';
@@ -73,10 +77,10 @@ const isExhausted = code => code === 'quota' || code === 'billing';
 export const CIVIC_CRON_LANGS = ['te', 'hi'];
 // Translation chunk: arrays longer than this are split, each chunk one small parallel call
 export const TR_CHUNK = 6;
-export const KINDS = { govt: [''], hosp: ['govt', 'private'], gcmp: [''] };
+export const KINDS = { govt: [''], hosp: ['govt', 'private'], gcmp: [''], gprm: [''] };
 // Data-shape version per kind (civic_data.schema_v). hosp 2 = timings, specialFor, doctors,
 // facilities, per-hospital sources. Older rows are re-researched by the cron (data kept until then).
-export const CIVIC_SCHEMA = { govt: 1, hosp: 2, gcmp: 1 };
+export const CIVIC_SCHEMA = { govt: 1, hosp: 2, gcmp: 1, gprm: 1 };
 // App language codes (src/i18n/appLanguage.ts) -> name used in prompts. English is the stored data.
 export const TR_LANGS = {
   te: 'Telugu',
@@ -314,6 +318,62 @@ export function cleanCompare(raw) {
   return { asOf: s(o.asOf, 40), previous: cmpGovt(o.previous), present: cmpGovt(o.present), rows };
 }
 
+// ── Promises tracker (kind 'gprm') ──
+export const PRM_AREAS = ['welfare', 'farmers', 'women', 'youth', 'health', 'education', 'infrastructure', 'other'];
+export const PRM_STATUS = ['done', 'in_progress', 'not_done', 'no_update'];
+export const PRM_MAX = 80;
+const prmArea = v => {
+  const a = s(v, 30).toLowerCase();
+  if (PRM_AREAS.includes(a)) {
+    return a;
+  }
+  return /youth|job|employ/.test(a) ? 'youth' : /farm|agri/.test(a) ? 'farmers' : /infra|road|water|power|housing/.test(a) ? 'infrastructure' : 'other';
+};
+const prmStatus = v => {
+  const x = s(v, 20).toLowerCase().replace(/[\s-]+/g, '_');
+  return PRM_STATUS.includes(x) ? x : 'no_update';
+};
+export const promiseSummary = promises => ({
+  total: promises.length,
+  done: promises.filter(p => p.status === 'done').length,
+  inProgress: promises.filter(p => p.status === 'in_progress').length,
+  notDone: promises.filter(p => p.status === 'not_done').length,
+  noUpdate: promises.filter(p => p.status === 'no_update').length,
+});
+
+export function cleanPromises(raw) {
+  const o = obj(raw);
+  const g = obj(o.govt);
+  const seen = new Set();
+  // Real data only: without a public https URL of the manifesto no promise is kept (an empty list is
+  // never saved, the app shows "collecting / no data yet"), so counts come only from sourced promises
+  const manifesto = url(g.source);
+  const promises = arr(manifesto ? o.promises : [], PRM_MAX * 2)
+    .map(p => {
+      const x = obj(p);
+      const text = s(x.text || x.promise, 300);
+      // evidence = one neutral fact with its own https source + date, else none
+      const fact = s(x.fact || x.evidence, 300);
+      const source = url(x.source);
+      const d = date(x.date);
+      const evidence = fact && source && d && !OPINION_RE.test(fact);
+      const status = evidence ? prmStatus(x.status) : 'no_update';
+      return { area: prmArea(x.area), text, status, fact: evidence ? fact : '', source: evidence ? source : '', date: evidence ? d : '' };
+    })
+    .filter(p => {
+      const k = p.text.toLowerCase();
+      return p.text && !OPINION_RE.test(p.text) && !seen.has(k) && seen.add(k);
+    })
+    .slice(0, PRM_MAX);
+  return {
+    asOf: s(o.asOf, 40),
+    govt: { party: s(g.party, 160), head: s(g.head, 100), year: (/\b(19|20)\d{2}\b/.exec(s(g.year || g.manifestoYear, 40)) || [''])[0], term: s(g.term, 40), source: manifesto },
+    promises,
+    // computed here, never trusted from the model
+    summary: promiseSummary(promises),
+  };
+}
+
 const placeName = (state, district) =>
   state.type === 'centre' ? 'the Union Government of India (the Centre)' : `${district ? `${district.replace(/-/g, ' ')} district, ` : ''}${state.name}, India`;
 
@@ -337,6 +397,23 @@ export function researchPrompt(kind, variant, state, district) {
       'Reply with ONLY this JSON (no markdown):',
       '{"asOf":"YYYY-MM","previous":{"label":"e.g. 2019-2024 government","head":"CM / PM name","party":"party or alliance","from":"YYYY-MM","to":"YYYY-MM","source":"https://"},"present":{"label":"","head":"","party":"","from":"YYYY-MM","to":"","source":"https://"},',
       '"rows":[{"area":"schemes|budget|projects|started|stopped","topic":"short neutral topic, e.g. Old-age pension amount","previous":{"text":"fact","source":"https://","date":"YYYY-MM-DD"},"present":{"text":"fact","source":"https://","date":"YYYY-MM-DD"}}]}',
+    ].join('\n');
+  }
+  if (kind === 'gprm') {
+    const who = state.type === 'centre' ? 'the Union Government of India (Prime Minister and Union Cabinet)' : `the ${state.name} state government (Chief Minister and cabinet)`;
+    const head = state.type === 'centre' ? 'Prime Minister' : 'Chief Minister';
+    return [
+      `Today is ${today}. Using Google Search, find the election manifesto of the party / alliance that CURRENTLY rules ${who}, for the PRESENT term (the manifesto released for the election that brought this government to power).`,
+      `Give the ruling party / alliance, the current ${head}, the manifesto year and a public URL of the manifesto (party site, ECI, or a reputed news copy).`,
+      `List every concrete promise in that manifesto (up to ${PRM_MAX}), each with its text as stated in the manifesto (short, max 160 characters) and one area: welfare, farmers, women, youth (youth / jobs), health, education, infrastructure, other.`,
+      'Only promises that are really in that manifesto: never invent, guess or give sample promises or numbers. If you cannot find the manifesto and its URL, reply with "promises":[].',
+      'For each promise give its CURRENT status: "done", "in_progress", "not_done" or "no_update".',
+      'STRICT RULES: facts only. No opinion, no verdict, no praise or criticism, no adjectives like best, failed, historic, corrupt.',
+      '"done", "in_progress" or "not_done" ONLY when a public source supports it: a government order, budget document, PIB / .gov.in / .nic.in page, official gazette, or a reputed news report of official figures. Otherwise status MUST be "no_update".',
+      'For every status other than "no_update" give "fact" = ONE neutral line of what the source says (e.g. "Pension raised to Rs 4,000 a month from July 2024 by GO 43"), "source" = that https URL and "date" = the date of the source (YYYY-MM-DD, or YYYY-MM / YYYY). Without a source URL and a date the status is "no_update".',
+      'Reply with ONLY this JSON (no markdown):',
+      `{"asOf":"YYYY-MM","govt":{"party":"ruling party or alliance","head":"${head} name","year":"YYYY manifesto year","term":"e.g. 2024-2029","source":"https:// manifesto URL"},`,
+      '"promises":[{"area":"welfare|farmers|women|youth|health|education|infrastructure|other","text":"promise as stated","status":"done|in_progress|not_done|no_update","fact":"one neutral fact","source":"https://","date":"YYYY-MM-DD"}]}',
     ].join('\n');
   }
   if (kind === 'govt') {
@@ -478,7 +555,11 @@ const ALIGN_FIXED = new Set([...FIXED_KEYS, 'level', 'number', 'helpline', 'vote
 // OpenStreetMap hospital rows: proper names and addresses stay exactly as mapped (never translated)
 export const FREE_HOSP_FIXED = new Set([...ALIGN_FIXED, 'name', 'address', 'district']);
 // The fixed (never translated) keys for one row's English data
-export const fixedFor = (kind, data) => (kind === 'hosp' && obj(data).origin === 'free' ? FREE_HOSP_FIXED : ALIGN_FIXED);
+// Promises tracker: status codes, manifesto year and the computed counts stay as in English
+export const PRM_FIXED = new Set([...ALIGN_FIXED, 'status', 'year', 'term', 'summary']);
+export const fixedFor = (kind, data) => (kind === 'hosp' && obj(data).origin === 'free' ? FREE_HOSP_FIXED : kind === 'gprm' ? PRM_FIXED : ALIGN_FIXED);
+// A promises list is long: bigger translation chunks (fewer calls on the free tier)
+const trChunkFor = kind => (kind === 'gprm' ? 12 : TR_CHUNK);
 // The English data without its fixed keys: what is sent for translation (smaller prompt; the fixed
 // values are copied back from English by alignTranslation)
 export const stripFixed = (v, fixed = ALIGN_FIXED) =>
@@ -568,7 +649,7 @@ export async function translateData(env, kind, data, lang, { fetchImpl = fetch, 
     // Nothing to translate (e.g. a Govt part with empty lists): no call
     return { ok: true, data: alignTranslation(data, {}, fixed), calls: 0 };
   }
-  const chunks = splitForTranslation(data).filter(c => textCount(c, fixed) > 0);
+  const chunks = splitForTranslation(data, trChunkFor(kind)).filter(c => textCount(c, fixed) > 0);
   const results = await Promise.all(
     chunks.map(async chunk => {
       const r = await aiGenerate(env, { prompt: translatePrompt(kind, stripFixed(chunk, fixed), TR_LANGS[lang]), jsonOut: true, maxTokens: 8000, temperature: 0.1 }, { fetchImpl, now });
@@ -587,12 +668,14 @@ export async function translateData(env, kind, data, lang, { fetchImpl = fetch, 
   return { ok: true, data: tr, calls: chunks.length, model: results[0] && results[0].r.model };
 }
 
-const cleanFor = (kind, parsed, where = '') => (kind === 'govt' ? cleanGovt(parsed) : kind === 'gcmp' ? cleanCompare(parsed) : cleanHosp(parsed, where));
+const cleanFor = (kind, parsed, where = '') =>
+  kind === 'govt' ? cleanGovt(parsed) : kind === 'gcmp' ? cleanCompare(parsed) : kind === 'gprm' ? cleanPromises(parsed) : cleanHosp(parsed, where);
 
 const isEmpty = (kind, data) =>
   !data ||
   (kind === 'hosp' && !data.hospitals.length) ||
   (kind === 'gcmp' && !data.rows.length) ||
+  (kind === 'gprm' && !data.promises.length) ||
   (kind === 'govt' && !data.overview && !data.departments.length && !data.leaders.chiefMinister.name && !data.schemes.length);
 
 const where4 = 'kind = ? AND state = ? AND district = ? AND variant = ?';
@@ -709,7 +792,7 @@ export async function startTranslate(db, env, t, lang, { fetchImpl = fetch, now 
  */
 export async function researchOne(db, env, { kind, state, district = '', variant = '' }, { fetchImpl = fetch, now = Date.now(), translate = false, langs = null, free = true, waitUntil = null } = {}) {
   const st = placeByCode(state, kind);
-  if (!st || !KINDS[kind] || !KINDS[kind].includes(variant) || (kind === 'gcmp' && district)) {
+  if (!st || !KINDS[kind] || !KINDS[kind].includes(variant) || (CENTRE_KINDS.has(kind) && district)) {
     return { ok: false, error: 'bad target' };
   }
   const t = { kind, state, district, variant };
@@ -762,7 +845,7 @@ export async function researchOne(db, env, { kind, state, district = '', variant
   };
   const parts = await Promise.all(
     prompts.map(async (prompt, i) => {
-      const r = await aiGenerate(env, { prompt, grounded: true, maxTokens: kind === 'govt' ? 8000 : 16000 }, { fetchImpl, now });
+      const r = await aiGenerate(env, { prompt, grounded: true, maxTokens: kind === 'govt' ? 8000 : kind === 'gprm' ? 24000 : 16000 }, { fetchImpl, now });
       const parsed = r.ok ? parseJsonLoose(r.text) : null;
       const gp = kind === 'govt' ? GOVT_PARTS[i] : null;
       const raw = parsed && gp ? Object.fromEntries(gp.raw.filter(k => k in obj(parsed)).map(k => [k, parsed[k]])) : parsed;
@@ -943,10 +1026,12 @@ export function pickTargets(rows, now, n, seeds = SEED_DISTRICTS) {
       }),
     ),
   );
-  // The centre's comparison (after all states)
-  if (!byKey.has(key('gcmp', CENTRE.code, '', ''))) {
-    missing.push({ kind: 'gcmp', state: CENTRE.code, district: '', variant: '' });
-  }
+  // The centre's comparison + promises tracker (after all states)
+  CENTRE_KINDS.forEach(kind => {
+    if (!byKey.has(key(kind, CENTRE.code, '', ''))) {
+      missing.push({ kind, state: CENTRE.code, district: '', variant: '' });
+    }
+  });
   // Prefill: districts of the app's bundled cities (Govt + both hospital lists), state by state
   STATES.forEach(st =>
     ((seeds && seeds[st.code]) || []).forEach(district =>

@@ -7,6 +7,8 @@
 // Neutral information only: no AI ratings. A place not researched yet is researched on demand.
 // "Previous vs present government" (GovtCompareBox): neutral side-by-side facts per state / centre,
 // every point with its source + date, no verdict.
+// "Promises" (GovtPromisesBox): the present government's manifesto promises with done / in progress /
+// not done / no update, each status backed by a dated public source; counts from real data only.
 // Fast: saved answer shown instantly (useCivicData cache), each card in the app language with an
 // English toggle, and "Explain simply" (schemes / grievance / services) answered by AI from the
 // stored data only, in the app language + English.
@@ -31,6 +33,7 @@ import { explainGovt } from '../../services/civicAi';
 import { useCivicLabels } from '../../services/civicI18n';
 import { useCivicData } from './useCivicData';
 import GovtCompareBox from './GovtCompareBox';
+import GovtPromisesBox from './GovtPromisesBox';
 import LanguageChip from './LanguageChip';
 import { SrcLine, districtSiteOf } from './civicFreeParts';
 
@@ -128,6 +131,7 @@ export default function GovtScreen() {
         <PlacePicker lang={lang} place={place} onChange={setPlace} />
         {place.state ? <CivicStatus lang={lang} phase={phase} hasData={!!d} aiConfigured={!!(res?.researchConfigured ?? res?.aiConfigured)} errorText={errorText} aiNote={aiNote} fromCache={fromCache} /> : null}
         {place.state ? <GovtCompareBox lang={lang} state={place.state} /> : null}
+        {place.state ? <GovtPromisesBox lang={lang} state={place.state} /> : null}
         {d ? (
           <>
             {d.overview ? (
