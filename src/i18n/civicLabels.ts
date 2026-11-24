@@ -104,6 +104,19 @@ export type CivicKey =
   | 'areaStarted'
   | 'areaStopped'
   | 'notListed'
+  | 'prmTitle'
+  | 'prmNote'
+  | 'prmShow'
+  | 'prmManifesto'
+  | 'prmTotal'
+  | 'prmDone'
+  | 'prmInProgress'
+  | 'prmNotDone'
+  | 'prmNoUpdate'
+  | 'prmAll'
+  | 'prmNoData'
+  | 'prmHead'
+  | 'prmNoneInFilter'
   | 'date'
   | 'allHosp'
   | 'publicNA'
@@ -258,6 +271,19 @@ export const CIVIC_LABELS: Record<StaticLanguage, Record<CivicKey, string>> = {
     areaStarted: 'Schemes started',
     areaStopped: 'Schemes stopped / merged / renamed',
     notListed: 'No matching item with a public source',
+    prmTitle: 'Promises: what was promised, done, pending',
+    prmNote: 'Status is taken only from public sources (government orders, budgets, official sites, news of official figures), each with its date. No source = "No update". No verdict or opinion.',
+    prmShow: 'Show promises',
+    prmManifesto: 'Manifesto',
+    prmTotal: 'Total',
+    prmDone: 'Done',
+    prmInProgress: 'In progress',
+    prmNotDone: 'Not done',
+    prmNoUpdate: 'No update',
+    prmAll: 'All',
+    prmNoData: 'No researched promises yet for this government. Researching from public sources, check back in a few minutes.',
+    prmHead: 'Head of government',
+    prmNoneInFilter: 'No promise with this status.',
     date: 'Date',
     allHosp: 'All',
     publicNA: 'Public info not available',
@@ -411,6 +437,19 @@ export const CIVIC_LABELS: Record<StaticLanguage, Record<CivicKey, string>> = {
     areaStarted: 'ప్రారంభించిన పథకాలు',
     areaStopped: 'నిలిపివేసిన / విలీనం / పేరు మార్చిన పథకాలు',
     notListed: 'పబ్లిక్ మూలంతో సరిపోలే అంశం లేదు',
+    prmTitle: 'హామీలు: ఏమి హామీ ఇచ్చారు, ఏమి చేశారు, ఏమి పెండింగ్',
+    prmNote: 'స్థితి కేవలం పబ్లిక్ మూలాల నుండి (ప్రభుత్వ ఉత్తర్వులు, బడ్జెట్, అధికారిక సైట్లు, అధికారిక గణాంకాల వార్తలు), ప్రతిదానికి తేదీతో. మూలం లేకపోతే "అప్\u200cడేట్ లేదు". తీర్పు లేదా అభిప్రాయం లేదు.',
+    prmShow: 'హామీలు చూపించు',
+    prmManifesto: 'మేనిఫెస్టో',
+    prmTotal: 'మొత్తం',
+    prmDone: 'పూర్తయింది',
+    prmInProgress: 'జరుగుతోంది',
+    prmNotDone: 'చేయలేదు',
+    prmNoUpdate: 'అప్\u200cడేట్ లేదు',
+    prmAll: 'అన్నీ',
+    prmNoData: 'ఈ ప్రభుత్వానికి ఇంకా పరిశోధించిన హామీలు లేవు. పబ్లిక్ మూలాల నుండి సేకరిస్తున్నాం, కొన్ని నిమిషాల తర్వాత చూడండి.',
+    prmHead: 'ప్రభుత్వ అధిపతి',
+    prmNoneInFilter: 'ఈ స్థితితో హామీ లేదు.',
     date: 'తేదీ',
     allHosp: 'అన్నీ',
     publicNA: 'పబ్లిక్ సమాచారం అందుబాటులో లేదు',
@@ -564,6 +603,19 @@ export const CIVIC_LABELS: Record<StaticLanguage, Record<CivicKey, string>> = {
     areaStarted: 'शुरू की गई योजनाएँ',
     areaStopped: 'बंद / विलय / नाम बदली गई योजनाएँ',
     notListed: 'सार्वजनिक स्रोत के साथ कोई मिलता-जुलता बिंदु नहीं',
+    prmTitle: 'वादे: क्या वादा किया, क्या पूरा हुआ, क्या बाकी',
+    prmNote: 'स्थिति सिर्फ़ सार्वजनिक स्रोतों से (सरकारी आदेश, बजट, आधिकारिक साइटें, आधिकारिक आँकड़ों की ख़बरें), हर एक की तारीख़ के साथ। स्रोत नहीं = "कोई अपडेट नहीं"। कोई फ़ैसला या राय नहीं।',
+    prmShow: 'वादे दिखाएँ',
+    prmManifesto: 'घोषणापत्र',
+    prmTotal: 'कुल',
+    prmDone: 'पूरा हुआ',
+    prmInProgress: 'काम जारी',
+    prmNotDone: 'पूरा नहीं हुआ',
+    prmNoUpdate: 'कोई अपडेट नहीं',
+    prmAll: 'सभी',
+    prmNoData: 'इस सरकार के लिए अभी कोई शोधित वादा नहीं। सार्वजनिक स्रोतों से जानकारी जुटाई जा रही है, कुछ मिनट बाद देखें।',
+    prmHead: 'सरकार प्रमुख',
+    prmNoneInFilter: 'इस स्थिति वाला कोई वादा नहीं।',
     date: 'तारीख़',
     allHosp: 'सभी',
     publicNA: 'सार्वजनिक जानकारी उपलब्ध नहीं',

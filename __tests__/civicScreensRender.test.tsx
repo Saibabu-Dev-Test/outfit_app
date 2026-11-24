@@ -59,6 +59,17 @@ const CMP = {
     { area: 'started', topic: 'New scheme Z', previous: null, present: { text: 'Started 2025', source: 'https://example.gov.in/z', date: '2025-01-01' } },
   ],
 };
+// Test fixture only (never shipped as app data)
+const PRM = {
+  asOf: '2026-11',
+  govt: { party: 'Party X alliance', head: 'Leader Y', year: '2024', term: '2024-2029', source: 'https://example.org/manifesto.pdf' },
+  promises: [
+    { area: 'welfare', text: 'Old-age pension Rs 4,000 a month', status: 'done', fact: 'Pension raised to Rs 4,000 from July 2024 by GO 43', source: 'https://example.gov.in/go43', date: '2024-07-01' },
+    { area: 'youth', text: '20 lakh jobs in five years', status: 'in_progress', fact: 'Skill census started', source: 'https://example.gov.in/skill', date: '2025-03' },
+    { area: 'women', text: 'Free bus travel for women', status: 'no_update', fact: '', source: '', date: '' },
+  ],
+  summary: { total: 999, done: 999, inProgress: 0, notDone: 0, noUpdate: 0 },
+};
 const resp = (kind: string, state: string, variant: string, data: any) => ({
   kind,
   state,
@@ -81,6 +92,7 @@ workerFetch.mockImplementation(async (path: string) => {
     const variant = u.searchParams.get('variant') || '';
     const state = u.searchParams.get('state') || '';
     if (kind === 'gcmp') return resp('gcmp', state, '', CMP);
+    if (kind === 'gprm') return resp('gprm', state, '', state === 'AP' ? PRM : null);
     if (kind === 'hosp') return resp('hosp', state, variant, (HOSP as any)[variant]);
     return resp('govt', state, '', null);
   }
@@ -164,6 +176,34 @@ describe('civic screens render', () => {
     await pressByText(r, /Centre \(India\)/);
     await flush();
     expect(workerFetch.mock.calls.some((c: any[]) => String(c[0]).includes('kind=gcmp') && String(c[0]).includes('state=IN'))).toBe(true);
+  });
+
+  it('Govt: promises tracker with real counts from the list, status filter, sources + dates; no data = no numbers', async () => {
+    const GovtPromisesBox = require('../src/screens/Civic/GovtPromisesBox').default;
+    const r = await mount(<GovtPromisesBox lang="English" state="AP" />);
+    expect(workerFetch.mock.calls.some((c: any[]) => String(c[0]).includes('kind=gprm'))).toBe(false); // closed: no request
+    await pressByText(r, /Show promises/);
+    await flush();
+    let txt = textOf(r);
+    expect(txt).toMatch(/Party X alliance/);
+    expect(txt).toMatch(/Leader Y/);
+    expect(txt).toMatch(/Manifesto 2024 \(2024-2029\): example\.org/);
+    // counts computed from the promises on screen, never the stored / model summary
+    expect(txt).toMatch(/Total 3 · Done 1 · In progress 1 · Not done 0 · No update 1/);
+    expect(txt).not.toMatch(/999/);
+    expect(txt).toMatch(/Pension raised to Rs 4,000/);
+    expect(txt).toMatch(/example\.gov\.in · 📅 2024-07-01/);
+    expect(txt).toMatch(/Free bus travel for women/);
+    await pressByText(r, /^Done 1$/);
+    txt = textOf(r);
+    expect(txt).toMatch(/Old-age pension Rs 4,000 a month/);
+    expect(txt).not.toMatch(/20 lakh jobs/);
+    await pressByText(r, /Centre \(India\)/);
+    await flush();
+    expect(workerFetch.mock.calls.some((c: any[]) => String(c[0]).includes('kind=gprm') && String(c[0]).includes('state=IN'))).toBe(true);
+    txt = textOf(r);
+    expect(txt).not.toMatch(/Total \d/);
+    expect(txt).toMatch(/Collecting info for this place|No researched promises yet/); // researching / no data yet, never numbers
   });
 
   it('Hospitals: Govt / Private / All, where-to-go search, public info not available', async () => {

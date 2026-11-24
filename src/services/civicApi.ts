@@ -3,7 +3,8 @@
 import { workerFetch } from './workerApi';
 
 // gcmp = neutral previous vs present government comparison (state code or 'IN' for the centre)
-export type CivicKind = 'govt' | 'hosp' | 'gcmp';
+// gprm = promises tracker: the present government's manifesto promises + status (state or 'IN')
+export type CivicKind = 'govt' | 'hosp' | 'gcmp' | 'gprm';
 export const CENTRE_CODE = 'IN';
 export type HospVariant = 'govt' | 'private';
 
@@ -123,6 +124,29 @@ export interface CompareData {
   rows: { area: CompareArea; topic: string; previous: CompareFact | null; present: CompareFact | null }[];
 }
 
+// Promises tracker (kind 'gprm'): the present government's manifesto promises. A status other than
+// no_update always has a neutral fact + https source + date (the Worker forces no_update otherwise);
+// summary counts are computed by the Worker's cleaner.
+export type PromiseStatus = 'done' | 'in_progress' | 'not_done' | 'no_update';
+export const PROMISE_STATUSES: PromiseStatus[] = ['done', 'in_progress', 'not_done', 'no_update'];
+export type PromiseArea = 'welfare' | 'farmers' | 'women' | 'youth' | 'health' | 'education' | 'infrastructure' | 'other';
+
+export interface PromiseItem {
+  area: PromiseArea;
+  text: string;
+  status: PromiseStatus;
+  fact: string;
+  source: string;
+  date: string;
+}
+
+export interface PromisesData {
+  asOf?: string;
+  govt: { party: string; head: string; year: string; term: string; source: string };
+  promises: PromiseItem[];
+  summary: { total: number; done: number; inProgress: number; notDone: number; noUpdate: number };
+}
+
 // Translated languages (every app language but English; same codes as the Worker's TR_LANGS)
 export type TrCode = 'te' | 'hi' | 'ta' | 'kn' | 'ml' | 'mr' | 'bn' | 'gu' | 'pa' | 'or' | 'ur';
 
@@ -223,6 +247,10 @@ export const getHospData = (state: string, variant: HospVariant, district?: stri
 // state = a state code, or CENTRE_CODE ('IN') for the Union Government
 export const getCompareData = (state: string, lang?: TrCode | null) =>
   workerFetch<CivicDataResponse<CompareData>>(`/v1/civic/data?${q(withLang({ kind: 'gcmp', state, district: '', variant: '' }, lang))}`);
+
+// Promises tracker for a state code or CENTRE_CODE ('IN')
+export const getPromisesData = (state: string, lang?: TrCode | null) =>
+  workerFetch<CivicDataResponse<PromisesData>>(`/v1/civic/data?${q(withLang({ kind: 'gprm', state, district: '', variant: '' }, lang))}`);
 
 // On demand: research this place now (no data yet; translated into lang in the same run) or
 // translate it into lang. Grounded research takes seconds, so a timeout well above that; the screen

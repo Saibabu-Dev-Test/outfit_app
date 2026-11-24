@@ -389,8 +389,10 @@ describe('research cron', () => {
     expect(t[0]).toEqual({ kind: 'govt', state: 'TG', district: 'hyderabad', variant: '' });
     expect(t[1]).toEqual({ kind: 'hosp', state: 'AP', district: '', variant: 'govt' }); // AP govt row exists
     expect(t[t.length - 1]).toEqual({ kind: 'govt', state: 'AP', district: '', variant: '' });
-    // 36 states x (govt + 2 hosp + gcmp) + the centre's gcmp, minus the AP govt row that exists
-    expect(t).toHaveLength(1 + 36 * 4 + 1 - 1 + 1);
+    // 36 states x (govt + 2 hosp + gcmp + gprm) + the centre's gcmp + gprm, minus the AP govt row that exists
+    expect(t).toHaveLength(1 + 36 * 5 + 2 - 1 + 1);
+    expect(t).toContainEqual({ kind: 'gprm', state: 'IN', district: '', variant: '' });
+    expect(t).toContainEqual({ kind: 'gprm', state: 'TG', district: '', variant: '' });
   });
 
   it('civic cron: skips without key; runs CIVIC_PER_RUN; stops at the daily cap; never touches earn', async () => {
@@ -412,10 +414,11 @@ describe('research cron', () => {
     expect(i18n.map((x: any) => x.lang)).toEqual(['hi', 'te']);
 
     const db = new Db(e.DB);
-    // 2 calls left today: AP comparison (1 call) fits, AR govt (3 calls) does not
+    // 2 calls left today: AP comparison + AP promises (1 call each) fit, AR govt (3 calls) does not
     const r = await research.runCivicResearch(db, e, { fetchImpl: f, now: NOW, perRun: 100, dailyMax: 7, translate: false });
-    expect(r.ran).toBe(1);
+    expect(r.ran).toBe(2);
     expect(r.results[0]).toMatchObject({ kind: 'gcmp', state: 'AP' });
+    expect(r.results[1]).toMatchObject({ kind: 'gprm', state: 'AP' });
     expect((await research.runCivicResearch(db, e, { fetchImpl: f, now: NOW, dailyMax: 6, translate: false })).skipped).toBe('daily cap reached');
   });
 
@@ -536,6 +539,128 @@ describe('previous vs present government (gcmp)', () => {
     expect(te.rows[0].present.date).toBe('2024-07-01');
     const row = e.DB.raw.prepare("SELECT schema_v FROM civic_data WHERE kind='gcmp' AND state='IN'").get();
     expect(Number(row.schema_v)).toBe(research.CIVIC_SCHEMA.gcmp);
+  });
+});
+
+// ── Promises tracker (kind 'gprm') ── test fixture only, never app data
+const PRM = {
+  asOf: '2026-11',
+  govt: { party: 'Party X alliance', head: 'Leader Y', year: 'Manifesto 2024', term: '2024-2029', source: 'https://example.org/manifesto.pdf' },
+  summary: { total: 120, done: 100, inProgress: 0, notDone: 0, noUpdate: 20 },
+  verdict: 'mostly kept',
+  promises: [
+    { area: 'welfare', text: 'Old-age pension Rs 4,000 a month', status: 'done', fact: 'Pension raised to Rs 4,000 from July 2024 by GO 43', source: 'https://example.gov.in/go43', date: '2024-07-01' },
+    { area: 'Youth / Jobs', text: '20 lakh jobs in five years', status: 'in progress', fact: 'Skill census started', source: 'https://example.gov.in/skill', date: '2025-03' },
+    { area: 'farmers', text: 'Rs 20,000 a year input aid to farmers', status: 'done', fact: 'Said to be paid', date: '2025-01-01' },
+    { area: 'women', text: 'Free bus travel for women', status: 'not_done', fact: 'Not started yet', source: 'http://insecure.example/x', date: '2025-05' },
+    { area: 'health', text: 'Health cover Rs 25 lakh per family', status: 'done', fact: 'A historic and visionary scheme', source: 'https://example.gov.in/h', date: '2025-02' },
+    { area: 'education', text: 'The best schools in India', status: 'in_progress', fact: 'Works started', source: 'https://example.gov.in/e', date: '2025-06' },
+    { area: 'other', text: '', status: 'done', fact: 'x', source: 'https://example.gov.in/y', date: '2025-01' },
+    { area: 'infrastructure', text: 'Capital city works', status: 'finished!', fact: 'Works resumed', source: 'https://example.gov.in/c', date: '2024-10' },
+    { area: 'weird', text: 'Capital city works', status: 'done', fact: 'dup', source: 'https://example.gov.in/c', date: '2024-10' },
+    { area: 'women', text: 'Mega DSC for teachers', status: 'not_done', fact: 'No recruitment notification as of Nov 2026', source: 'https://example.gov.in/dsc', date: '2026-11-01' },
+  ],
+};
+
+describe('promises tracker (gprm)', () => {
+  it('cleaner: status forced to no_update without a dated https source; opinion + empty + duplicate promises dropped; counts computed', () => {
+    const c = research.cleanPromises(PRM);
+    expect(c).not.toHaveProperty('verdict');
+    expect(c.govt).toEqual({ party: 'Party X alliance', head: 'Leader Y', year: '2024', term: '2024-2029', source: 'https://example.org/manifesto.pdf' });
+    // "The best schools" (opinion), empty text and the duplicate are dropped
+    expect(c.promises.map((p: any) => p.text)).toEqual([
+      'Old-age pension Rs 4,000 a month',
+      '20 lakh jobs in five years',
+      'Rs 20,000 a year input aid to farmers',
+      'Free bus travel for women',
+      'Health cover Rs 25 lakh per family',
+      'Capital city works',
+      'Mega DSC for teachers',
+    ]);
+    const st = Object.fromEntries(c.promises.map((p: any) => [p.text, p.status]));
+    expect(st['Old-age pension Rs 4,000 a month']).toBe('done');
+    expect(st['20 lakh jobs in five years']).toBe('in_progress'); // "in progress" normalised
+    expect(st['Rs 20,000 a year input aid to farmers']).toBe('no_update'); // no source URL
+    expect(st['Free bus travel for women']).toBe('no_update'); // http source
+    expect(st['Health cover Rs 25 lakh per family']).toBe('no_update'); // evaluative evidence dropped
+    expect(st['Capital city works']).toBe('no_update'); // unknown status
+    expect(st['Mega DSC for teachers']).toBe('not_done');
+    const farm = c.promises.find((p: any) => p.text.startsWith('Rs 20,000'));
+    expect(farm).toMatchObject({ fact: '', source: '', date: '' });
+    expect(c.promises[1].area).toBe('youth');
+    // counts from the cleaned list, never the model's summary
+    expect(c.summary).toEqual({ total: 7, done: 1, inProgress: 1, notDone: 1, noUpdate: 4 });
+    expect(research.promiseSummary([])).toEqual({ total: 0, done: 0, inProgress: 0, notDone: 0, noUpdate: 0 });
+  });
+
+  it('cleaner: no manifesto URL = no promises (real data only, nothing saved)', () => {
+    const c = research.cleanPromises({ ...PRM, govt: { ...PRM.govt, source: '' } });
+    expect(c.promises).toEqual([]);
+    expect(c.summary.total).toBe(0);
+    expect(research.cleanPromises(null).promises).toEqual([]);
+    const many = { govt: PRM.govt, promises: Array.from({ length: 200 }, (_, i) => ({ area: 'other', text: `Promise ${i}`, status: 'no_update' })) };
+    expect(research.cleanPromises(many).promises).toHaveLength(research.PRM_MAX);
+  });
+
+  it('prompt: present manifesto, sourced status only, no opinion, state or centre', () => {
+    const p = research.researchPrompt('gprm', '', STATES.find((x: any) => x.code === 'AP'), '');
+    expect(p).toMatch(/election manifesto/);
+    expect(p).toMatch(/CURRENTLY rules the Andhra Pradesh state government/);
+    expect(p).toMatch(/ONLY when a public source supports it/);
+    expect(p).toMatch(/no_update/);
+    expect(p).toMatch(/No opinion, no verdict/);
+    expect(p).toMatch(/never invent/);
+    expect(research.researchPrompt('gprm', '', { code: 'IN', name: 'Union', type: 'centre' }, '')).toMatch(/Union Government of India[\s\S]*Prime Minister/);
+  });
+
+  it('routes: gprm for a state or the centre (IN), state level only, no reviews', async () => {
+    const e = env();
+    expect((await call(e, 'GET', '/v1/civic/data?kind=gprm&state=TG')).json).toMatchObject({ kind: 'gprm', state: 'TG', status: 'pending', data: null });
+    expect((await call(e, 'GET', '/v1/civic/data?kind=gprm&state=IN')).json).toMatchObject({ kind: 'gprm', state: 'IN', status: 'pending' });
+    expect((await call(e, 'GET', '/v1/civic/data?kind=gprm&state=TG&district=hyderabad')).status).toBe(400);
+    expect(routes.parseItem('gprm:TG')).toBeNull();
+  });
+
+  it('research + translation: statuses, sources, dates and counts stay as in English; empty answer saves nothing', async () => {
+    const e = env({ GEMINI_API_KEY: 'k' });
+    const f = jest.fn(async (url: string, init?: any) => {
+      if (url === JWKS_URL) {
+        return { ok: true, status: 200, headers: { get: () => 'public, max-age=3600' }, json: async () => ({ keys: [jwk] }) };
+      }
+      const prompt = JSON.parse(init.body).contents[0].parts[0].text;
+      if (prompt.startsWith('Translate the text values')) {
+        const j = JSON.parse(prompt.slice(prompt.lastIndexOf('\n') + 1));
+        if (j.promises) {
+          j.promises = j.promises.map((p: any) => ({ ...p, text: `TR ${p.text}`, status: 'done', source: 'https://wrong.example', date: 'x' }));
+        }
+        if (j.govt) {
+          j.govt = { ...j.govt, party: `TR ${j.govt.party}` };
+        }
+        return { ok: true, status: 200, json: async () => gemini(j) };
+      }
+      return { ok: true, status: 200, json: async () => gemini(PRM) };
+    });
+    const r = await call(e, 'POST', '/v1/admin/civic/refresh', { tok: OWNER(), body: { kind: 'gprm', state: 'IN' }, fetchImpl: f });
+    expect(r.json).toMatchObject({ ok: true, kind: 'gprm', state: 'IN' });
+    const g = await call(e, 'GET', '/v1/civic/data?kind=gprm&state=IN');
+    expect(g.json.data.summary).toEqual({ total: 7, done: 1, inProgress: 1, notDone: 1, noUpdate: 4 });
+    const te = g.json.i18n.te;
+    expect(te.promises).toHaveLength(7);
+    expect(te.promises[0]).toMatchObject({ text: 'TR Old-age pension Rs 4,000 a month', status: 'done', source: 'https://example.gov.in/go43', date: '2024-07-01' });
+    expect(te.promises[2]).toMatchObject({ status: 'no_update', source: '' });
+    expect(te.summary).toEqual(g.json.data.summary);
+    expect(te.govt.year).toBe('2024');
+
+    // a model answer with no manifesto URL keeps nothing (no fake rows / numbers saved)
+    const e2 = env({ GEMINI_API_KEY: 'k' });
+    const f2 = jest.fn(async (url: string) =>
+      url === JWKS_URL
+        ? { ok: true, status: 200, headers: { get: () => 'public, max-age=3600' }, json: async () => ({ keys: [jwk] }) }
+        : { ok: true, status: 200, json: async () => gemini({ ...PRM, govt: { ...PRM.govt, source: '' } }) },
+    );
+    await call(e2, 'POST', '/v1/admin/civic/refresh', { tok: OWNER(), body: { kind: 'gprm', state: 'TG' }, fetchImpl: f2 });
+    const g2 = await call(e2, 'GET', '/v1/civic/data?kind=gprm&state=TG');
+    expect(g2.json.data).toBeNull();
   });
 });
 

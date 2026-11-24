@@ -41,9 +41,13 @@ export const STATES = [
 
 export const stateByCode = code => STATES.find(s => s.code === code) || null;
 
-// The Union Government (centre), used ONLY by the "previous vs present government" comparison
-// (kind 'gcmp', state code 'IN'). Not a state: never in STATES, never in the state picker list.
+// The Union Government (centre), used ONLY by the state-level-only kinds: the "previous vs present
+// government" comparison (kind 'gcmp') and the promises tracker (kind 'gprm'), state code 'IN'.
+// Not a state: never in STATES, never in the state picker list.
 export const CENTRE = { code: 'IN', name: 'Union Government of India (Centre)', type: 'centre', capital: 'New Delhi' };
 
-// A state / UT by code, or the centre for the comparison kind
-export const placeByCode = (code, kind) => (kind === 'gcmp' && code === 'IN' ? CENTRE : stateByCode(code));
+// Kinds that are state level only (no district) and also exist for the centre ('IN')
+export const CENTRE_KINDS = new Set(['gcmp', 'gprm']);
+
+// A state / UT by code, or the centre for the comparison / promises kinds
+export const placeByCode = (code, kind) => (CENTRE_KINDS.has(kind) && code === 'IN' ? CENTRE : stateByCode(code));

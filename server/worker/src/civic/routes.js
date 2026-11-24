@@ -9,6 +9,9 @@
 //        copy is returned at once with status 'translating' (poll; the copy arrives in i18n[lang]).
 //        kind=gcmp: neutral previous vs present government comparison, state-level only (district
 //        must be empty); state may also be 'IN' (the centre). No reviews for it (facts only).
+//        kind=gprm: promises tracker (the present government's manifesto promises, each with a
+//        status done | in_progress | not_done | no_update backed by a dated public source), same
+//        rules as gcmp: state level only, state may be 'IN', no reviews.
 //   POST /v1/civic/research {kind, state, district, variant, lang}   on demand: research the place
 //        now (translated into lang in the same run) if it has no data, else translate the missing
 //        language (any TR_LANGS code). Capped per user + per day. `code` on failure: quota | billing |
@@ -29,7 +32,7 @@ import { HttpError } from '../api.js';
 import { isOwner } from '../auth.js';
 import { usageFor } from '../db.js';
 import { utcDay } from '../days.js';
-import { placeByCode, stateByCode } from './states.js';
+import { CENTRE_KINDS, placeByCode, stateByCode } from './states.js';
 import { cleanReviewText, hasProfanity } from './moderation.js';
 import { isGeminiConfigured } from './gemini.js';
 import { aiProviderStatus, isAiConfigured } from './llm.js';
@@ -72,7 +75,7 @@ export function parseTarget(p) {
   }
   const state = str(p.get('state'), 4).toUpperCase();
   const district = normDistrict(p.get('district'));
-  if (!KINDS[kind] || !KINDS[kind].includes(variant || '') || !placeByCode(state, kind) || !DISTRICT_RE.test(district) || (kind === 'gcmp' && district)) {
+  if (!KINDS[kind] || !KINDS[kind].includes(variant || '') || !placeByCode(state, kind) || !DISTRICT_RE.test(district) || (CENTRE_KINDS.has(kind) && district)) {
     throw new HttpError(400, 'bad kind / state / district / variant');
   }
   return { kind, state, district, variant: variant || '' };

@@ -296,6 +296,9 @@ describe('research: Govt in 3 parallel parts + translation in the same run', () 
     expect(g.json).toMatchObject({ aiConfigured: true, researchConfigured: true, freeSources: true });
     const cmp = await call(onlyCf, 'GET', '/v1/civic/data?kind=gcmp&state=TG');
     expect(cmp.json).toMatchObject({ aiConfigured: true, researchConfigured: false, freeSources: false });
+    // promises tracker: grounded Gemini only (free tier), no free-source fetch
+    const prm = await call(onlyCf, 'GET', '/v1/civic/data?kind=gprm&state=TG');
+    expect(prm.json).toMatchObject({ aiConfigured: true, researchConfigured: false, freeSources: false, data: null });
     // free sources unreachable (this fake answers only Gemini) and no Gemini key: ai_off as before
     const r = await call(onlyCf, 'POST', '/v1/civic/research', { body: { kind: 'hosp', state: 'TG', variant: 'govt' } });
     expect(r.json).toMatchObject({ ok: false, status: 'ai_off', code: 'config' });
@@ -306,7 +309,8 @@ describe('research: Govt in 3 parallel parts + translation in the same run', () 
   it('prefill: bundled-city districts come after missing states, before stale rows; file is up to date', () => {
     const t = research.pickTargets([], NOW, 5000);
     const firstDistrict = t.findIndex((x: any) => x.district);
-    expect(firstDistrict).toBe(36 * 4 + 1);
+    // 36 states x (govt + 2 hosp + gcmp + gprm) + the centre's gcmp + gprm
+    expect(firstDistrict).toBe(36 * 5 + 2);
     expect(t.slice(firstDistrict, firstDistrict + 3)).toEqual([
       { kind: 'govt', state: 'AP', district: SEED_DISTRICTS.AP[0], variant: '' },
       { kind: 'hosp', state: 'AP', district: SEED_DISTRICTS.AP[0], variant: 'govt' },
