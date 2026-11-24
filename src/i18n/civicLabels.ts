@@ -155,7 +155,15 @@ export type CivicKey =
   | 'typeNotListed'
   | 'districtSite'
   | 'trLater'
-  | 'sourceOne';
+  | 'sourceOne'
+  | 'bestInIndia'
+  | 'nirfRank'
+  | 'nirfNote'
+  | 'specialistInst'
+  | 'seeSpecialities'
+  | 'diseaseEmergency'
+  | 'notDiagnosis'
+  | 'didYouMean';
 
 export const CIVIC_LABELS: Record<StaticLanguage, Record<CivicKey, string>> = {
   English: {
@@ -310,6 +318,14 @@ export const CIVIC_LABELS: Record<StaticLanguage, Record<CivicKey, string>> = {
     districtSite: 'District website',
     trLater: 'Translation is on the way; showing English for now.',
     sourceOne: 'Source',
+    bestInIndia: 'Best in India for',
+    nirfRank: 'NIRF rank',
+    nirfNote: 'NIRF rank (teaching + research ranking, not a treatment-quality rating)',
+    specialistInst: 'Specialist institute',
+    seeSpecialities: 'Departments to see',
+    diseaseEmergency: 'This can be an emergency. Call 108 or 112 now, or go to the nearest emergency department.',
+    notDiagnosis: 'A guide to which department to visit, not a diagnosis. Please see a doctor.',
+    didYouMean: 'Showing results for',
   },
   Telugu: {
     govtTitle: '🏛️ ప్రభుత్వం',
@@ -463,6 +479,14 @@ export const CIVIC_LABELS: Record<StaticLanguage, Record<CivicKey, string>> = {
     districtSite: 'జిల్లా వెబ్‌సైట్',
     trLater: 'అనువాదం వస్తోంది; ప్రస్తుతానికి English చూపిస్తున్నాం.',
     sourceOne: 'మూలం',
+    bestInIndia: 'భారతదేశంలో ఉత్తమమైనవి:',
+    nirfRank: 'NIRF ర్యాంక్',
+    nirfNote: 'NIRF ర్యాంక్ (బోధన + పరిశోధన ర్యాంకింగ్, చికిత్స నాణ్యత రేటింగ్ కాదు)',
+    specialistInst: 'స్పెషాలిటీ సంస్థ',
+    seeSpecialities: 'చూపించుకోవాల్సిన విభాగాలు',
+    diseaseEmergency: 'ఇది అత్యవసర పరిస్థితి కావచ్చు. వెంటనే 108 లేదా 112కి కాల్ చేయండి, లేదా దగ్గరలోని ఎమర్జెన్సీ విభాగానికి వెళ్లండి.',
+    notDiagnosis: 'ఏ విభాగానికి వెళ్లాలో చెప్పే మార్గదర్శి మాత్రమే, ఇది రోగ నిర్ధారణ కాదు. దయచేసి డాక్టర్‌ను సంప్రదించండి.',
+    didYouMean: 'దీని కోసం ఫలితాలు',
   },
   Hindi: {
     govtTitle: '🏛️ सरकार',
@@ -616,6 +640,14 @@ export const CIVIC_LABELS: Record<StaticLanguage, Record<CivicKey, string>> = {
     districtSite: 'ज़िले की वेबसाइट',
     trLater: 'अनुवाद आ रहा है; अभी English दिखा रहे हैं।',
     sourceOne: 'स्रोत',
+    bestInIndia: 'भारत में सबसे अच्छे:',
+    nirfRank: 'NIRF रैंक',
+    nirfNote: 'NIRF रैंक (पढ़ाई + रिसर्च की रैंकिंग, इलाज की गुणवत्ता की रेटिंग नहीं)',
+    specialistInst: 'स्पेशलिटी संस्थान',
+    seeSpecialities: 'किस विभाग में दिखाएँ',
+    diseaseEmergency: 'यह इमरजेंसी हो सकती है। अभी 108 या 112 पर कॉल करें, या पास के इमरजेंसी विभाग में जाएँ।',
+    notDiagnosis: 'यह सिर्फ़ बताता है कि किस विभाग में जाएँ, यह बीमारी की जाँच (डायग्नोसिस) नहीं है। कृपया डॉक्टर को दिखाएँ।',
+    didYouMean: 'इसके नतीजे दिखा रहे हैं',
   },
 };
 

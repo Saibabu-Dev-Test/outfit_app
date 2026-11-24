@@ -66,8 +66,9 @@ const fieldsOf = (h: Hospital): [string, number][] => [
   [h.note || '', 1],
 ];
 
-export function searchHospitals<T extends Hospital>(list: T[], query: string): HospMatch<T>[] {
-  const terms = expandQuery(query);
+// `terms` (optional): search terms already worked out for the query, e.g. by the disease search
+// (services/diseaseSearch.hospitalTermsFor); default is expandQuery(query).
+export function searchHospitals<T extends Hospital>(list: T[], query: string, terms: string[] = expandQuery(query)): HospMatch<T>[] {
   if (!terms.length) return list.map(h => ({ h, matched: [], score: 0 }));
   const out: HospMatch<T>[] = [];
   list.forEach(h => {

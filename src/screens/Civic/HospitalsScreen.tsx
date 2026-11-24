@@ -16,6 +16,10 @@
 // Free sources (Worker origin 'free', OpenStreetMap): compact rows (civicFreeParts.tsx) with name,
 // address, tap-to-call phone, map link, Govt / Private / "Type not listed" label and source + date.
 // Header language chip (LanguageChip): app language picker + "Also show English".
+// The search goes through the disease dictionary first (services/diseaseSearch.ts: EN / everyday
+// words / Telugu / Hindi, misspellings -> departments -> speciality words), falling back to the old
+// word expansion, and shows "Best in India for <disease>" (BestInIndiaBox: NIRF 2025 Medical ranks,
+// a teaching + research ranking, never a treatment rating; 108 / 112 for red-flag conditions).
 import React, { useState } from 'react';
 import { RefreshControl, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -36,6 +40,8 @@ import { Bi, CivicCard, biLabel } from './bi';
 import { useCivicData } from './useCivicData';
 import LanguageChip from './LanguageChip';
 import { FreeHospitalRow, isFreeHospital } from './civicFreeParts';
+import { hospitalTermsFor } from '../../services/diseaseSearch';
+import BestInIndiaBox from './BestInIndiaBox';
 
 type HospFilter = HospVariant | 'all';
 
@@ -212,7 +218,7 @@ export default function HospitalsScreen() {
     return hs.map((h, i) => ({ h, t: trs[i] || null, v: a.v, free: isFreeHospital(h, origin) }));
   });
   const list = rows.map(r => r.h);
-  const found = where.trim() ? searchHospitals(list, where).map(m => ({ ...rows[list.indexOf(m.h)], matched: m.matched })) : rows.map(r => ({ ...r, matched: [] as string[] }));
+  const found = where.trim() ? searchHospitals(list, where, hospitalTermsFor(where)).map(m => ({ ...rows[list.indexOf(m.h)], matched: m.matched })) : rows.map(r => ({ ...r, matched: [] as string[] }));
   const shown = byFacts ? sortByFacts(found) : found;
   const workerAi = active.some(a => !!a.d.res?.aiConfigured);
 
@@ -268,26 +274,27 @@ export default function HospitalsScreen() {
               </View>
             ))
           : null}
-        {list.length ? (
-          <View style={ui.card}>
-            <Text style={ui.h2}>🔎 {biLabel(lang, 'whereToGo')}</Text>
-            <TextInput
-              style={ui.input}
-              value={where}
-              onChangeText={setWhere}
-              placeholder={T('whereHint')}
-              placeholderTextColor={colors.textMuted}
-              autoCorrect={false}
-              maxLength={60}
-              returnKeyType="search"
-            />
+        <View style={ui.card}>
+          <Text style={ui.h2}>🔎 {biLabel(lang, 'whereToGo')}</Text>
+          <TextInput
+            style={ui.input}
+            value={where}
+            onChangeText={setWhere}
+            placeholder={T('whereHint')}
+            placeholderTextColor={colors.textMuted}
+            autoCorrect={false}
+            maxLength={60}
+            returnKeyType="search"
+          />
+          {list.length > 0 ? (
             <TouchableOpacity style={[ui.chip, byFacts && ui.chipOn, { alignSelf: 'flex-start' }]} onPress={() => setByFacts(v => !v)}>
               <Text style={[ui.chipText, byFacts && ui.chipTextOn]}>📊 {T('sortFacts')}</Text>
             </TouchableOpacity>
-            {byFacts ? <Text style={[ui.muted, { fontSize: 12 }]}>{biLabel(lang, 'factsNote')}</Text> : null}
-            {where.trim() && !found.length ? <Text style={[ui.muted, { marginTop: 6 }]}>{T('noMatch')}</Text> : null}
-          </View>
-        ) : null}
+          ) : null}
+          {byFacts && list.length > 0 ? <Text style={[ui.muted, { fontSize: 12 }]}>{biLabel(lang, 'factsNote')}</Text> : null}
+          {list.length > 0 && !!where.trim() && !found.length ? <Text style={[ui.muted, { marginTop: 6 }]}>{T('noMatch')}</Text> : null}
+        </View>
+        <BestInIndiaBox lang={lang} query={where} state={place.state} />
         {list.length ? (
           <>
             <Text style={[ui.muted, { marginBottom: 8 }]}>
