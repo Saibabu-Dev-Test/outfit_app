@@ -163,7 +163,10 @@ export type CivicKey =
   | 'seeSpecialities'
   | 'diseaseEmergency'
   | 'notDiagnosis'
-  | 'didYouMean';
+  | 'didYouMean'
+  | 'govtRates'
+  | 'govtRatesNote'
+  | 'cityTiers';
 
 export const CIVIC_LABELS: Record<StaticLanguage, Record<CivicKey, string>> = {
   English: {
@@ -326,6 +329,9 @@ export const CIVIC_LABELS: Record<StaticLanguage, Record<CivicKey, string>> = {
     diseaseEmergency: 'This can be an emergency. Call 108 or 112 now, or go to the nearest emergency department.',
     notDiagnosis: 'A guide to which department to visit, not a diagnosis. Please see a doctor.',
     didYouMean: 'Showing results for',
+    govtRates: 'Govt package rates (what PM-JAY / CGHS pay a hospital)',
+    govtRatesNote: "Official scheme rates for comparing a private hospital's quote. Not what every hospital charges; implants, medicines and room upgrades can be extra. Confirm with the hospital.",
+    cityTiers: 'X = Tier 1 city, Y = Tier 2, Z = Tier 3. CGHS shown for NABH hospitals, semi-private ward.',
   },
   Telugu: {
     govtTitle: '🏛️ ప్రభుత్వం',
@@ -487,6 +493,9 @@ export const CIVIC_LABELS: Record<StaticLanguage, Record<CivicKey, string>> = {
     diseaseEmergency: 'ఇది అత్యవసర పరిస్థితి కావచ్చు. వెంటనే 108 లేదా 112కి కాల్ చేయండి, లేదా దగ్గరలోని ఎమర్జెన్సీ విభాగానికి వెళ్లండి.',
     notDiagnosis: 'ఏ విభాగానికి వెళ్లాలో చెప్పే మార్గదర్శి మాత్రమే, ఇది రోగ నిర్ధారణ కాదు. దయచేసి డాక్టర్‌ను సంప్రదించండి.',
     didYouMean: 'దీని కోసం ఫలితాలు',
+    govtRates: 'ప్రభుత్వ ప్యాకేజీ ధరలు (PM-JAY / CGHS ఆసుపత్రికి చెల్లించేవి)',
+    govtRatesNote: 'ప్రైవేట్ ఆసుపత్రి చెప్పిన ధరతో పోల్చుకోవడానికి అధికారిక పథకం ధరలు. ప్రతి ఆసుపత్రి ఇదే వసూలు చేయదు; ఇంప్లాంట్లు, మందులు, గది అప్\u200cగ్రేడ్ అదనం కావచ్చు. ఆసుపత్రితో నిర్ధారించుకోండి.',
+    cityTiers: 'X = టైర్ 1 నగరం, Y = టైర్ 2, Z = టైర్ 3. CGHS ధరలు NABH ఆసుపత్రులకు, సెమీ-ప్రైవేట్ వార్డ్.',
   },
   Hindi: {
     govtTitle: '🏛️ सरकार',
@@ -648,6 +657,9 @@ export const CIVIC_LABELS: Record<StaticLanguage, Record<CivicKey, string>> = {
     diseaseEmergency: 'यह इमरजेंसी हो सकती है। अभी 108 या 112 पर कॉल करें, या पास के इमरजेंसी विभाग में जाएँ।',
     notDiagnosis: 'यह सिर्फ़ बताता है कि किस विभाग में जाएँ, यह बीमारी की जाँच (डायग्नोसिस) नहीं है। कृपया डॉक्टर को दिखाएँ।',
     didYouMean: 'इसके नतीजे दिखा रहे हैं',
+    govtRates: 'सरकारी पैकेज दरें (PM-JAY / CGHS अस्पताल को जो देते हैं)',
+    govtRatesNote: 'प्राइवेट अस्पताल के बताए खर्च से तुलना के लिए योजना की आधिकारिक दरें। हर अस्पताल यही नहीं लेता; इम्प्लांट, दवाइयाँ और कमरे का अपग्रेड अलग हो सकता है। अस्पताल से पुष्टि करें।',
+    cityTiers: 'X = टियर 1 शहर, Y = टियर 2, Z = टियर 3। CGHS दरें NABH अस्पतालों के लिए, सेमी-प्राइवेट वार्ड।',
   },
 };
 

@@ -69,3 +69,26 @@ describe('BestInIndiaBox', () => {
     expect((await mount(<BestInIndiaBox lang="English" query="  " />)).toJSON()).toBeNull();
   });
 });
+
+describe('GovtRatesBox (inside BestInIndiaBox)', () => {
+  it('kidney stone: toggle shows PM-JAY + CGHS rates with tiers and the caveat', async () => {
+    const r = await mount(<BestInIndiaBox lang="English" query="kidney stone" />);
+    expect(textOf(r)).toMatch(/Govt package rates/);
+    expect(textOf(r)).not.toMatch(/PCNL/);
+    const toggle = r.root.findAll(
+      n => typeof n.props.onPress === 'function' && n.findAll(c => (c.type as any) === 'Text' && /Govt package rates/.test([].concat(c.props.children ?? '').join(''))).length > 0,
+    )[0];
+    await ReactTestRenderer.act(async () => toggle.props.onPress());
+    const txt = textOf(r);
+    expect(txt).toMatch(/PCNL \(Percutaneous Nephrolithotomy\)/);
+    expect(txt).toMatch(/X ₹56,300 · Y ₹52,700 · Z ₹45,000/);
+    expect(txt).toMatch(/PM-JAY HBP 2022/);
+    expect(txt).toMatch(/CGHS 2025/);
+    expect(txt).toMatch(/Not what every hospital charges/);
+  });
+
+  it('Telugu label', async () => {
+    const r = await mount(<BestInIndiaBox lang="Telugu" query="kidney stone" />);
+    expect(textOf(r)).toMatch(/ప్రభుత్వ ప్యాకేజీ ధరలు/);
+  });
+});
