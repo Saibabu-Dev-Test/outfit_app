@@ -23,6 +23,9 @@
 // When no hospital in the list states the searched speciality ("ear" -> ENT), the general /
 // multi-speciality GOVT hospitals in the list (AIIMS, medical colleges, GGH, district / area hospitals;
 // hospitalSearch.generalGovtHospitals) are shown labelled "May treat this — call to confirm" (never a claim).
+// Location: State -> District -> Mandal chosen from the official LGD lists (LocationPicker). The list is
+// for the picked mandal; a mandal with no hospital found shows the district's list with the note "No
+// data for <mandal>, showing <district> district" (state-wide when the district is empty too).
 import React, { useState } from 'react';
 import { RefreshControl, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -38,7 +41,9 @@ import { factsCount, generalGovtHospitals, searchHospitals, sortByFacts, uniqueR
 import { askHospitals } from '../../services/civicAi';
 import { useCivicLabels } from '../../services/civicI18n';
 import { CivicAskBox, Turn } from './civicAiParts';
-import { CivicStatus, PlacePicker, ReviewsBox, SourcesBox, callNumber, openLink, useCivicPlace } from './civicParts';
+import { AnsweredByLine, CivicStatus, PlacePicker, ReviewsBox, ScopeNoteLine, SourcesBox, callNumber, openLink, scopeNote, useCivicPlace } from './civicParts';
+import { answerFor, shownLevel, useFallbackWhen, useScopeLevel } from './useScopeLevel';
+import { stateByCodeApp } from './stateName';
 import { Bi, CivicCard, biLabel } from './bi';
 import { useCivicData } from './useCivicData';
 import LanguageChip from './LanguageChip';
@@ -212,15 +217,29 @@ export default function HospitalsScreen() {
   // One loader per kind; a loader whose kind is filtered out gets state '' (no request at all)
   const useGovt = variant === 'govt' || variant === 'all';
   const usePriv = variant === 'private' || variant === 'all';
-  const gov = useCivicData<HospData>('hosp', useGovt ? place.state : '', place.district, 'govt', lang, c => getHospData(place.state, 'govt', place.district, c));
-  const priv = useCivicData<HospData>('hosp', usePriv ? place.state : '', place.district, 'private', lang, c =>
-    getHospData(place.state, 'private', place.district, c),
+  // Scope: the picked mandal, else (empty answer) the district, else the state (useScopeLevel)
+  const { req, fallback: scopeDown } = useScopeLevel(place);
+  const gov = useCivicData<HospData>('hosp', useGovt ? place.state : '', req.district, 'govt', lang, c => getHospData(place.state, 'govt', req.district, c, req.mandal), req.mandal);
+  const priv = useCivicData<HospData>('hosp', usePriv ? place.state : '', req.district, 'private', lang, c =>
+    getHospData(place.state, 'private', req.district, c, req.mandal), req.mandal,
+  );
+  const loaders = [...(useGovt ? [gov] : []), ...(usePriv ? [priv] : [])];
+  useFallbackWhen(
+    !!place.state && loaders.length > 0 && loaders.every(l => l.phase === 'ready' && answerFor(l.res, place.state, req) && !(l.res?.data?.hospitals || []).length),
+    req,
+    scopeDown,
   );
   const active = [...(useGovt ? [{ v: 'govt' as HospVariant, d: gov }] : []), ...(usePriv ? [{ v: 'private' as HospVariant, d: priv }] : [])];
   const refresh = () => active.forEach(a => a.d.refresh());
   const phase = active.some(a => a.d.phase === 'loading') ? 'loading' : active[0]?.d.phase;
   const anyRes = active.some(a => !!a.d.res);
-  const placeKey = `${place.state}|${place.district}|${variant}`;
+  const placeKey = `${place.state}|${req.district}|${req.mandal}|${variant}`;
+  // Level shown: the least specific level among the lists that have rows (Worker data.scope)
+  const withRows = active.filter(a => (a.d.res?.data?.hospitals || []).length > 0);
+  const levels = withRows.map(a => shownLevel(req, a.d.res?.data?.scope));
+  const shownLv = levels.includes('state') ? 'state' : levels.includes('district') ? 'district' : levels.length ? 'mandal' : req.level;
+  const note = withRows.length ? scopeNote(lang, place, shownLv, stateByCodeApp(place.state)) : '';
+  const shownDistrict = shownLv === 'state' ? '' : place.district;
 
   const raw = active.flatMap(a => {
     const hs = (a.d.res?.data?.hospitals || []).filter(h => !!h && typeof h === 'object' && !!h.name);
@@ -243,7 +262,7 @@ export default function HospitalsScreen() {
   const workerAi = active.some(a => !!a.d.res?.aiConfigured);
 
   // Hospital AI runs only on the Worker (its AI fallback chain); no on-phone AI key
-  const ask = (q: string, history: Turn[]) => askHospitals(place.state, place.district, active.map(a => a.v), q, lang, history);
+  const ask = (q: string, history: Turn[]) => askHospitals(place.state, shownDistrict, active.map(a => a.v), q, lang, history);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top']}>
@@ -278,6 +297,9 @@ export default function HospitalsScreen() {
         </View>
         {/* Stable containers (collapsable={false}, always mounted): the ScrollView's direct children keep
             the same count and order whatever the filter / results (Fabric "addViewAt" crash). */}
+        <View collapsable={false} testID="hosp-scope">
+          <ScopeNoteLine text={note} />
+        </View>
         <View collapsable={false} testID="hosp-status">
           {place.state
             ? active.map(a => (
@@ -294,6 +316,7 @@ export default function HospitalsScreen() {
                     aiNote={a.d.aiNote}
                     fromCache={a.d.fromCache}
                   />
+                  {(a.d.res?.data?.hospitals || []).length ? <AnsweredByLine lang={lang} by={a.d.answeredBy} updatedAt={a.d.res?.updatedAt} /> : null}
                 </View>
               ))
             : null}
@@ -347,7 +370,7 @@ export default function HospitalsScreen() {
                     h={r.h}
                     t={r.t}
                     lang={lang}
-                    item={civicItem('hosp', place.state, place.district, r.h.slug)}
+                    item={civicItem('hosp', place.state, shownDistrict, r.h.slug)}
                     userName={user?.name}
                     myUid={user?.id}
                   />
@@ -358,7 +381,7 @@ export default function HospitalsScreen() {
                     h={r.h}
                     t={r.t}
                     lang={lang}
-                    item={civicItem('hosp', place.state, place.district, r.h.slug)}
+                    item={civicItem('hosp', place.state, shownDistrict, r.h.slug)}
                     userName={user?.name}
                     myUid={user?.id}
                     kindLabel={variant === 'all' ? (r.v === 'govt' ? T('govtHosp') : T('privateHosp')) : undefined}

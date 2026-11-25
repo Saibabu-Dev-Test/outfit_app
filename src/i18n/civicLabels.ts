@@ -12,6 +12,31 @@ export type CivicKey =
   | 'district'
   | 'districtHint'
   | 'pickState'
+  | 'pickDistrict'
+  | 'pickSub'
+  | 'optional'
+  | 'filterList'
+  | 'change'
+  | 'noSubdistricts'
+  | 'noMatchList'
+  | 'lvMandal'
+  | 'lvTehsil'
+  | 'lvTaluk'
+  | 'lvTaluka'
+  | 'lvBlock'
+  | 'lvCircle'
+  | 'lvSubdivision'
+  | 'lvDistrict'
+  | 'scopeDistrict'
+  | 'scopeState'
+  | 'scopeStateFromSub'
+  | 'srcAnswered'
+  | 'srcSaved'
+  | 'srcFree'
+  | 'srcGemini'
+  | 'srcGroq'
+  | 'srcWorkersAi'
+  | 'mandalInfo'
   | 'loading'
   | 'noData'
   | 'pending'
@@ -196,6 +221,31 @@ export const CIVIC_LABELS: Record<StaticLanguage, Record<CivicKey, string>> = {
     district: 'District',
     districtHint: 'District (optional, e.g. Hyderabad)',
     pickState: 'Pick your state',
+    pickDistrict: 'Choose district',
+    pickSub: 'Choose {level}',
+    optional: 'optional',
+    filterList: 'Type to filter the list',
+    change: 'Change',
+    noSubdistricts: 'No {level} list for this district in the official directory',
+    noMatchList: 'Nothing in the list matches',
+    lvMandal: 'Mandal',
+    lvTehsil: 'Tehsil',
+    lvTaluk: 'Taluk',
+    lvTaluka: 'Taluka',
+    lvBlock: 'Block',
+    lvCircle: 'Circle',
+    lvSubdivision: 'Sub-division',
+    lvDistrict: 'District',
+    scopeDistrict: 'No data for {m}, showing {d} district',
+    scopeState: 'No data for {d} district, showing {s}',
+    scopeStateFromSub: 'No data for {m} or {d} district, showing {s}',
+    srcAnswered: 'Answered by',
+    srcSaved: 'Saved copy',
+    srcFree: 'Free public sources',
+    srcGemini: 'Gemini (Google Search)',
+    srcGroq: 'Groq web search',
+    srcWorkersAi: 'Workers AI',
+    mandalInfo: 'About',
     loading: 'Loading…',
     noData: 'No information yet for this place.',
     pending: 'We are collecting information for this place. Check back in a few hours.',
@@ -379,6 +429,31 @@ export const CIVIC_LABELS: Record<StaticLanguage, Record<CivicKey, string>> = {
     district: 'జిల్లా',
     districtHint: 'జిల్లా (ఐచ్ఛికం, ఉదా. హైదరాబాద్)',
     pickState: 'మీ రాష్ట్రాన్ని ఎంచుకోండి',
+    pickDistrict: 'జిల్లా ఎంచుకోండి',
+    pickSub: '{level} ఎంచుకోండి',
+    optional: 'ఐచ్ఛికం',
+    filterList: 'జాబితాలో వెతకడానికి టైప్ చేయండి',
+    change: 'మార్చు',
+    noSubdistricts: 'అధికారిక జాబితాలో ఈ జిల్లాకు {level} జాబితా లేదు',
+    noMatchList: 'జాబితాలో ఏదీ సరిపోలలేదు',
+    lvMandal: 'మండలం',
+    lvTehsil: 'తహసీల్',
+    lvTaluk: 'తాలూకా',
+    lvTaluka: 'తాలూకా',
+    lvBlock: 'బ్లాక్',
+    lvCircle: 'సర్కిల్',
+    lvSubdivision: 'ఉప విభాగం',
+    lvDistrict: 'జిల్లా',
+    scopeDistrict: '{m} కు సమాచారం లేదు, {d} జిల్లా సమాచారం చూపిస్తున్నాం',
+    scopeState: '{d} జిల్లాకు సమాచారం లేదు, {s} సమాచారం చూపిస్తున్నాం',
+    scopeStateFromSub: '{m} లేదా {d} జిల్లాకు సమాచారం లేదు, {s} సమాచారం చూపిస్తున్నాం',
+    srcAnswered: 'సమాధానం ఇచ్చింది',
+    srcSaved: 'సేవ్ చేసిన కాపీ',
+    srcFree: 'ఉచిత పబ్లిక్ సోర్సులు',
+    srcGemini: 'Gemini (Google Search)',
+    srcGroq: 'Groq వెబ్ సెర్చ్',
+    srcWorkersAi: 'Workers AI',
+    mandalInfo: 'గురించి',
     loading: 'లోడ్ అవుతోంది…',
     noData: 'ఈ ప్రాంతానికి ఇంకా సమాచారం లేదు.',
     pending: 'ఈ ప్రాంతం సమాచారం సేకరిస్తున్నాం. కొన్ని గంటల తర్వాత చూడండి.',
@@ -562,6 +637,31 @@ export const CIVIC_LABELS: Record<StaticLanguage, Record<CivicKey, string>> = {
     district: 'ज़िला',
     districtHint: 'ज़िला (वैकल्पिक, जैसे हैदराबाद)',
     pickState: 'अपना राज्य चुनें',
+    pickDistrict: 'ज़िला चुनें',
+    pickSub: '{level} चुनें',
+    optional: 'वैकल्पिक',
+    filterList: 'सूची में खोजने के लिए लिखें',
+    change: 'बदलें',
+    noSubdistricts: 'आधिकारिक सूची में इस ज़िले की {level} सूची नहीं है',
+    noMatchList: 'सूची में कुछ नहीं मिला',
+    lvMandal: 'मंडल',
+    lvTehsil: 'तहसील',
+    lvTaluk: 'तालुक',
+    lvTaluka: 'तालुका',
+    lvBlock: 'ब्लॉक',
+    lvCircle: 'सर्किल',
+    lvSubdivision: 'उपमंडल',
+    lvDistrict: 'ज़िला',
+    scopeDistrict: '{m} का डेटा नहीं है, {d} ज़िले का दिखा रहे हैं',
+    scopeState: '{d} ज़िले का डेटा नहीं है, {s} का दिखा रहे हैं',
+    scopeStateFromSub: '{m} या {d} ज़िले का डेटा नहीं है, {s} का दिखा रहे हैं',
+    srcAnswered: 'जवाब स्रोत',
+    srcSaved: 'सहेजी गई कॉपी',
+    srcFree: 'मुफ़्त सार्वजनिक स्रोत',
+    srcGemini: 'Gemini (Google Search)',
+    srcGroq: 'Groq वेब सर्च',
+    srcWorkersAi: 'Workers AI',
+    mandalInfo: 'जानकारी',
     loading: 'लोड हो रहा है…',
     noData: 'इस जगह की जानकारी अभी नहीं है।',
     pending: 'इस जगह की जानकारी इकट्ठा हो रही है। कुछ घंटों बाद देखें।',

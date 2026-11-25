@@ -36,6 +36,20 @@ export interface GovtData {
   // source {name, url, date}; Collector / SP stay '' (no free source)
   origin?: 'free' | 'ai';
   src?: GovtSrc;
+  // Asked with a mandal (sub-district): that mandal's own facts (LGD name, Wikipedia summary, the
+  // assembly constituencies named after it). Empty = nothing public for the mandal (district shown).
+  mandal?: GovtMandal | null;
+  // Level the data really covers (Worker fallback mandal -> district -> state); missing = as asked
+  scope?: DataScope;
+}
+
+export type DataScope = 'mandal' | 'district' | 'state';
+
+export interface GovtMandal {
+  name: string;
+  overview: string;
+  mlas: CivicRep[];
+  src?: CivicSrc | null;
 }
 
 // One public source of a free-source value (date = the day it was fetched, YYYY-MM-DD)
@@ -96,6 +110,9 @@ export interface HospData {
   hospitals: Hospital[];
   origin?: 'free' | 'ai';
   src?: CivicSrc | null;
+  // Level the list really covers: asked for a mandal with no hospital found there = the district's
+  // list ('district'), district empty too = the state's ('state'). Missing = as asked.
+  scope?: DataScope;
 }
 
 // Previous vs present government (facts only, every point with source URL + date, no verdict)
@@ -159,6 +176,7 @@ export interface CivicDataResponse<T> {
   kind: CivicKind;
   state: string;
   district: string;
+  mandal?: string; // echoed by Workers that take the mandal param
   variant: string;
   data: T | null;
   i18n?: Partial<Record<TrCode, T | null>>;
@@ -176,7 +194,11 @@ export interface CivicDataResponse<T> {
   // Govt / Hospitals come from free, keyless sources (Wikidata, Wikipedia, OpenStreetMap): research
   // never needs an AI key and is never 'paused' for AI limits
   freeSources?: boolean;
+  // Which source answered the stored data: free public sources, Gemini, Groq, Workers AI
+  answeredBy?: AnsweredBy;
 }
+
+export type AnsweredBy = 'free' | 'gemini' | 'groq' | 'workers-ai' | 'saved';
 
 // Short reason when an AI step failed: quota (free-tier limit, 429), billing (402), cap (daily cap),
 // timeout, config (no key on the Worker)
@@ -184,12 +206,14 @@ export type CivicAiCode = 'quota' | 'billing' | 'cap' | 'timeout' | 'config' | '
 
 export interface CivicResearchResponse {
   ok: boolean;
-  // 'paused' = every Gemini key is out of free quota: research paused, the saved info stays
   // 'translating' = translation started in the background (English shows meanwhile; poll for it)
   // 'ready' = free-source research finished (origin 'free'): the data is saved, read it now
-  status: 'ok' | 'ready' | 'error' | 'pending' | 'running' | 'ai_off' | 'paused' | 'translating';
+  // 'saved' = every live source failed (Gemini keys, free sources, Groq): the last saved data stands
+  // 'none' = every source failed and nothing is saved yet ("no data yet")
+  // 'paused' = only from Workers deployed before the never-stop chain (treated like 'saved')
+  status: 'ok' | 'ready' | 'error' | 'pending' | 'running' | 'ai_off' | 'paused' | 'saved' | 'none' | 'translating';
   paused?: boolean;
-  origin?: 'free' | 'ai';
+  origin?: 'free' | 'ai' | 'groq' | 'saved';
   translating?: boolean; // the asked language's translation started in the background
   did?: 'research' | 'translate' | 'nothing' | 'already running';
   error?: string;
@@ -243,11 +267,14 @@ const q = (o: Record<string, string>) =>
 // lang: also return that language's translated copy in i18n (any TrCode)
 const withLang = (o: Record<string, string>, lang?: TrCode | null) => (lang ? { ...o, lang } : o);
 
-export const getGovtData = (state: string, district?: string, lang?: TrCode | null) =>
-  workerFetch<CivicDataResponse<GovtData>>(`/v1/civic/data?${q(withLang({ kind: 'govt', state, district: districtSlug(district), variant: '' }, lang))}`);
+// mandal (sub-district name, LGD): only sent when picked (and only with a district)
+const withMandal = (o: Record<string, string>, mandal?: string | null) => (mandal && o.district ? { ...o, mandal: districtSlug(mandal) } : o);
 
-export const getHospData = (state: string, variant: HospVariant, district?: string, lang?: TrCode | null) =>
-  workerFetch<CivicDataResponse<HospData>>(`/v1/civic/data?${q(withLang({ kind: 'hosp', state, district: districtSlug(district), variant }, lang))}`);
+export const getGovtData = (state: string, district?: string, lang?: TrCode | null, mandal?: string | null) =>
+  workerFetch<CivicDataResponse<GovtData>>(`/v1/civic/data?${q(withLang(withMandal({ kind: 'govt', state, district: districtSlug(district), variant: '' }, mandal), lang))}`);
+
+export const getHospData = (state: string, variant: HospVariant, district?: string, lang?: TrCode | null, mandal?: string | null) =>
+  workerFetch<CivicDataResponse<HospData>>(`/v1/civic/data?${q(withLang(withMandal({ kind: 'hosp', state, district: districtSlug(district), variant }, mandal), lang))}`);
 
 // state = a state code, or CENTRE_CODE ('IN') for the Union Government
 export const getCompareData = (state: string, lang?: TrCode | null) =>
@@ -260,10 +287,10 @@ export const getPromisesData = (state: string, lang?: TrCode | null) =>
 // On demand: research this place now (no data yet; translated into lang in the same run) or
 // translate it into lang. Grounded research takes seconds, so a timeout well above that; the screen
 // keeps showing saved / cached info (or "collecting") meanwhile and polls.
-export const researchCivic = (kind: CivicKind, state: string, district: string | undefined, variant: string, lang?: TrCode | null) =>
+export const researchCivic = (kind: CivicKind, state: string, district: string | undefined, variant: string, lang?: TrCode | null, mandal?: string | null) =>
   workerFetch<CivicResearchResponse>('/v1/civic/research', {
     method: 'POST',
-    body: { kind, state, district: districtSlug(district), variant, lang: lang || '' },
+    body: withMandal({ kind, state, district: districtSlug(district), variant, lang: lang || '' }, mandal),
     timeoutMs: 90000,
   });
 

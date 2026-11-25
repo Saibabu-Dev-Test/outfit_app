@@ -15,6 +15,10 @@
 // Free sources (Worker origin 'free': Wikidata, Wikipedia, official .gov.in): each section shows its
 // source line (name, date, link); Collector / SP have no free source, so they show "Public info not
 // available" with the district website link. Header language chip: app language + "Also show English".
+// Location: State -> District -> Mandal chosen from the official LGD lists (LocationPicker). A picked
+// mandal shows its own facts (Wikipedia summary, assembly constituencies named after it) above the
+// district's; nothing public for the mandal = the note "No data for <mandal>, showing <district>
+// district" (state-wide with a note when the district has nothing either).
 import React from 'react';
 import { RefreshControl, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -26,7 +30,9 @@ import { isOwnerUser } from '../../services/adminSystem';
 import { useAppLanguage } from '../../i18n/appLanguage';
 import { civicText } from '../../i18n/civicLabels';
 import { CivicPerson, CivicRep, GovtData, civicItem, getGovtData } from '../../services/civicApi';
-import { CivicStatus, PlacePicker, ReviewsBox, SourcesBox, callNumber, openLink, useCivicPlace } from './civicParts';
+import { AnsweredByLine, CivicStatus, PlacePicker, ReviewsBox, ScopeNoteLine, SourcesBox, callNumber, openLink, scopeNote, subLevelLabel, useCivicPlace } from './civicParts';
+import { answerFor, shownLevel, useFallbackWhen, useScopeLevel } from './useScopeLevel';
+import { stateByCodeApp } from './stateName';
 import { Bi, CivicCard, biLabel } from './bi';
 import { ExplainButton } from './civicAiParts';
 import { explainGovt } from '../../services/civicAi';
@@ -91,10 +97,18 @@ export default function GovtScreen() {
   const navigation = useNavigation<any>();
   const [place, setPlace] = useCivicPlace();
   useCivicLabels(lang);
-  const { res, phase, errorText, refresh, tr, aiNote, fromCache } = useCivicData<GovtData>('govt', place.state, place.district, '', lang, code =>
-    getGovtData(place.state, place.district, code),
+  // Scope: the picked mandal, else (no answer at all) the district, else the state (useScopeLevel)
+  const { req, fallback: scopeDown } = useScopeLevel(place);
+  const { res, phase, errorText, refresh, tr, aiNote, fromCache, answeredBy } = useCivicData<GovtData>(
+    'govt',
+    place.state,
+    req.district,
+    '',
+    lang,
+    code => getGovtData(place.state, req.district, code, req.mandal),
+    req.mandal,
   );
-  const explain = (focus: 'schemes' | 'grievance' | 'services') => () => explainGovt(place.state, place.district, focus, lang);
+  useFallbackWhen(!!place.state && phase === 'ready' && answerFor(res, place.state, req) && !res?.data, req, scopeDown);
 
   const d = res?.data;
   const t = (tr && res?.i18n?.[tr]) || null;
@@ -105,11 +119,21 @@ export default function GovtScreen() {
   const el = d?.election;
   const tel = t?.election;
   const anyDistrict = !!(dist && (dist.collector || dist.sp || dist.policeCommissioner || dist.mps.length || dist.mlas.length || dist.headquarters));
+  const mandal = d?.mandal;
+  const tmandal = t?.mandal;
+  const anyMandal = !!(mandal && (mandal.overview || (mandal.mlas || []).length));
+  // Level shown: the Worker's data.scope; else a mandal with nothing public = the district (or the
+  // state when the district block is empty too)
+  const lv0 = shownLevel(req, d?.scope);
+  const shownLv = req.level === 'mandal' && !d?.scope ? (anyMandal ? 'mandal' : anyDistrict ? 'district' : 'state') : lv0 === 'mandal' && !anyMandal ? (anyDistrict ? 'district' : 'state') : lv0;
+  const note = d ? scopeNote(lang, place, shownLv, stateByCodeApp(place.state)) : '';
+  const shownDistrict = shownLv === 'state' ? '' : place.district;
+  const explain = (focus: 'schemes' | 'grievance' | 'services') => () => explainGovt(place.state, shownDistrict, focus, lang);
   const src = d?.src;
   const free = d?.origin === 'free';
   const districtSite = districtSiteOf(d);
   // a district is picked: Collector / SP always get a line ("Public info not available" when empty)
-  const showOfficials = !!place.district.trim() && (free || anyDistrict);
+  const showOfficials = !!shownDistrict && (free || anyDistrict);
   const anyElection = !!(el && (el.lastAssembly || el.lastLokSabha || el.next || el.voterHelpline || el.ceoWebsite));
 
   return (
@@ -117,6 +141,7 @@ export default function GovtScreen() {
       <ScrollView
         contentContainerStyle={ui.scroll}
         keyboardShouldPersistTaps="handled"
+        removeClippedSubviews={false}
         refreshControl={<RefreshControl refreshing={phase === 'loading' && !!res} onRefresh={refresh} />}
       >
         <View style={[ui.row, { marginBottom: 8 }]}>
@@ -130,6 +155,10 @@ export default function GovtScreen() {
         </View>
         <PlacePicker lang={lang} place={place} onChange={setPlace} />
         {place.state ? <CivicStatus lang={lang} phase={phase} hasData={!!d} aiConfigured={!!(res?.researchConfigured ?? res?.aiConfigured)} errorText={errorText} aiNote={aiNote} fromCache={fromCache} /> : null}
+        <View collapsable={false} testID="govt-scope">
+          <ScopeNoteLine text={note} />
+          {d ? <AnsweredByLine lang={lang} by={answeredBy} updatedAt={res?.updatedAt} /> : null}
+        </View>
         {place.state ? <GovtCompareBox lang={lang} state={place.state} /> : null}
         {place.state ? <GovtPromisesBox lang={lang} state={place.state} /> : null}
         {d ? (
@@ -139,6 +168,22 @@ export default function GovtScreen() {
                 <Text style={ui.h2}>{L('overview')}</Text>
                 <Bi en={d.overview} tr={t?.overview} />
                 <SrcLine lang={lang} src={src?.overview} />
+              </CivicCard>
+            ) : null}
+
+            {anyMandal && mandal && shownLv === 'mandal' ? (
+              <CivicCard lang={lang} hasTranslation={!!t}>
+                <View testID="govt-mandal">
+                  <Text style={ui.h2}>
+                    📌 {subLevelLabel(lang, place.state)}: {mandal.name || place.mandal}
+                  </Text>
+                  {mandal.overview ? <Bi en={mandal.overview} tr={tmandal?.overview} /> : null}
+                  {(mandal.mlas || []).length ? <Text style={[ui.muted, { marginTop: 10 }]}>{L('mlas')}</Text> : null}
+                  {(mandal.mlas || []).map((p, i) => (
+                    <Bi key={`mmla${i}`} en={personLine(p)} tr={personLine(tmandal?.mlas?.[i])} style={[ui.body, { marginTop: 4 }]} />
+                  ))}
+                  <SrcLine lang={lang} src={mandal.src} />
+                </View>
               </CivicCard>
             ) : null}
 
@@ -297,7 +342,7 @@ export default function GovtScreen() {
             <SourcesBox lang={lang} sources={res?.sources} updatedAt={res?.updatedAt || 0} asOf={d.asOf} />
           </>
         ) : null}
-        {place.state && res ? <ReviewsBox lang={lang} item={civicItem('govt', place.state, place.district)} userName={user?.name} myUid={user?.id} /> : null}
+        {place.state && res ? <ReviewsBox lang={lang} item={civicItem('govt', place.state, shownDistrict)} userName={user?.name} myUid={user?.id} /> : null}
       </ScrollView>
     </SafeAreaView>
   );

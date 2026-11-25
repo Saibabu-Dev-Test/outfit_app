@@ -123,10 +123,11 @@ describe('useCivicData: free sources', () => {
     act(() => r.unmount());
   });
 
-  it('without freeSources (AI-researched kinds) a paused reply still shows the paused note', async () => {
+  it("without freeSources (AI-researched kinds) a paused reply never shows 'Research paused' either", async () => {
     researchCivic.mockResolvedValueOnce({ ok: false, status: 'paused', paused: true, code: 'quota' });
     const r = await mount(jest.fn(async () => empty({ freeSources: false, aiConfigured: true })));
-    expect(hook.aiNote).toBe('researchPaused');
+    expect(hook.aiNote).not.toBe('researchPaused');
+    expect(hook.phase).toBe('ready');
     act(() => r.unmount());
   });
 });

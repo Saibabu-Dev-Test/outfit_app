@@ -1,38 +1,15 @@
-// Shared bits for the Govt / Hospitals tabs: state + district picker, stars, people's reviews.
+// Shared bits for the Govt / Hospitals tabs: State -> District -> Mandal picker (LocationPicker.tsx), stars,
+// people's reviews.
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Linking, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { ActivityIndicator, Alert, Linking, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { ui } from '../Earn/earnUi';
 import { colors } from '../../theme';
-import { INDIA_STATES } from '../../constants/indiaStates';
 import { AppLanguage } from '../../i18n/appLanguage';
 import { CivicKey, civicText } from '../../i18n/civicLabels';
-import { CivicReviewsResponse, getReviews, postReview, reportReview } from '../../services/civicApi';
+import { AnsweredBy, CivicReviewsResponse, getReviews, postReview, reportReview } from '../../services/civicApi';
 
-const PLACE_KEY = 'outfit.civic.place';
-
-export interface CivicPlace {
-  state: string;
-  district: string;
-}
-
-export const useCivicPlace = (): [CivicPlace, (p: CivicPlace) => void] => {
-  const [place, setPlace] = useState<CivicPlace>({ state: '', district: '' });
-  useEffect(() => {
-    AsyncStorage.getItem(PLACE_KEY)
-      .then(v => {
-        if (!v) return;
-        const p = JSON.parse(v);
-        if (p && typeof p.state === 'string') setPlace({ state: p.state, district: String(p.district || '') });
-      })
-      .catch(() => undefined);
-  }, []);
-  const save = useCallback((p: CivicPlace) => {
-    setPlace(p);
-    AsyncStorage.setItem(PLACE_KEY, JSON.stringify(p)).catch(() => undefined);
-  }, []);
-  return [place, save];
-};
+export { PlacePicker, useCivicPlace, scopeNote, askedLevel, subLevelLabel } from './LocationPicker';
+export type { CivicPlace, ScopeLevel } from './LocationPicker';
 
 export const openLink = (url: string) => {
   if (url) Linking.openURL(url).catch(() => undefined);
@@ -42,41 +19,6 @@ export const callNumber = (n: string) => {
   const d = String(n || '').split(/[,/]/)[0].replace(/[^0-9+]/g, '');
   if (d) Linking.openURL(`tel:${d}`).catch(() => undefined);
 };
-
-export function PlacePicker({ lang, place, onChange }: { lang: AppLanguage; place: CivicPlace; onChange: (p: CivicPlace) => void }) {
-  const [district, setDistrict] = useState(place.district);
-  useEffect(() => setDistrict(place.district), [place.district]);
-  return (
-    <View style={ui.card}>
-      <Text style={ui.h2}>{civicText(lang, 'state')}</Text>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-        {INDIA_STATES.map(s => {
-          const on = s.code === place.state;
-          return (
-            <TouchableOpacity key={s.code} style={[ui.chip, on && ui.chipOn]} onPress={() => onChange({ state: s.code, district: on ? place.district : '' })}>
-              <Text style={[ui.chipText, on && ui.chipTextOn]}>{s.name}</Text>
-            </TouchableOpacity>
-          );
-        })}
-      </ScrollView>
-      {place.state ? (
-        <TextInput
-          style={ui.input}
-          value={district}
-          onChangeText={setDistrict}
-          onEndEditing={() => onChange({ ...place, district: district.trim() })}
-          onSubmitEditing={() => onChange({ ...place, district: district.trim() })}
-          placeholder={civicText(lang, 'districtHint')}
-          placeholderTextColor={colors.textMuted}
-          returnKeyType="search"
-          maxLength={40}
-        />
-      ) : (
-        <Text style={ui.muted}>{civicText(lang, 'pickState')}</Text>
-      )}
-    </View>
-  );
-}
 
 export function Stars({ value, onPick, size = 22 }: { value: number; onPick?: (n: number) => void; size?: number }) {
   return (
@@ -278,6 +220,35 @@ export function SourcesBox({ lang, sources, updatedAt, asOf }: { lang: AppLangua
           </Text>
         </TouchableOpacity>
       ))}
+    </View>
+  );
+}
+
+const ANSWER_KEY: Record<AnsweredBy, CivicKey> = {
+  free: 'srcFree',
+  gemini: 'srcGemini',
+  groq: 'srcGroq',
+  'workers-ai': 'srcWorkersAi',
+  saved: 'srcSaved',
+};
+
+// "Answered by: Free public sources · 25 Nov 2026" (which source in the fallback chain answered)
+export function AnsweredByLine({ lang, by, updatedAt }: { lang: AppLanguage; by?: AnsweredBy; updatedAt?: number }) {
+  if (!by) return null;
+  return (
+    <Text testID="civic-answered-by" style={[ui.muted, { fontSize: 12, marginBottom: 6 }]}>
+      ℹ️ {civicText(lang, 'srcAnswered')}: {civicText(lang, ANSWER_KEY[by])}
+      {updatedAt ? ` · ${fmtDate(updatedAt)}` : ''}
+    </Text>
+  );
+}
+
+// Visible "No data for <mandal>, showing <district> district" line ('' = nothing to say)
+export function ScopeNoteLine({ text }: { text: string }) {
+  if (!text) return null;
+  return (
+    <View testID="civic-scope-note" style={[ui.card, { borderColor: '#F5A623', paddingVertical: 8 }]}>
+      <Text style={ui.body}>📍 {text}</Text>
     </View>
   );
 }
