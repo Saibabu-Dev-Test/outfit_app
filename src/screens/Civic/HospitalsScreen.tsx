@@ -31,7 +31,7 @@ import { isOwnerUser } from '../../services/adminSystem';
 import { useAppLanguage } from '../../i18n/appLanguage';
 import { civicText } from '../../i18n/civicLabels';
 import { HospData, HospVariant, Hospital, civicItem, getHospData } from '../../services/civicApi';
-import { factsCount, searchHospitals, sortByFacts } from '../../services/hospitalSearch';
+import { factsCount, searchHospitals, sortByFacts, uniqueRowKeys } from '../../services/hospitalSearch';
 import { askHospitals } from '../../services/civicAi';
 import { useCivicLabels } from '../../services/civicI18n';
 import { CivicAskBox, Turn } from './civicAiParts';
@@ -211,12 +211,15 @@ export default function HospitalsScreen() {
   const anyRes = active.some(a => !!a.d.res);
   const placeKey = `${place.state}|${place.district}|${variant}`;
 
-  const rows = active.flatMap(a => {
-    const hs = a.d.res?.data?.hospitals || [];
+  const raw = active.flatMap(a => {
+    const hs = (a.d.res?.data?.hospitals || []).filter(h => !!h && typeof h === 'object' && !!h.name);
     const trs = (a.d.tr && a.d.res?.i18n?.[a.d.tr]?.hospitals) || [];
     const origin = a.d.res?.data?.origin;
     return hs.map((h, i) => ({ h, t: trs[i] || null, v: a.v, free: isFreeHospital(h, origin) }));
   });
+  // One unique, stable key per row, fixed before search / sort (uniqueRowKeys: Fabric addViewAt crash)
+  const keys = uniqueRowKeys(raw);
+  const rows = raw.map((r, i) => ({ ...r, key: keys[i] }));
   const list = rows.map(r => r.h);
   const found = where.trim() ? searchHospitals(list, where, hospitalTermsFor(where)).map(m => ({ ...rows[list.indexOf(m.h)], matched: m.matched })) : rows.map(r => ({ ...r, matched: [] as string[] }));
   const shown = byFacts ? sortByFacts(found) : found;
@@ -227,7 +230,7 @@ export default function HospitalsScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top']}>
-      <ScrollView contentContainerStyle={ui.scroll} keyboardShouldPersistTaps="handled" refreshControl={<RefreshControl refreshing={phase === 'loading' && anyRes} onRefresh={refresh} />}>
+      <ScrollView testID="hosp-scroll" contentContainerStyle={ui.scroll} keyboardShouldPersistTaps="handled" removeClippedSubviews={false} refreshControl={<RefreshControl refreshing={phase === 'loading' && anyRes} onRefresh={refresh} />}>
         <View style={[ui.row, { marginBottom: 8 }]}>
           <Text style={[ui.h1, ui.flex1]}>{T('hospTitle')}</Text>
           <LanguageChip lang={lang} />
@@ -256,24 +259,28 @@ export default function HospitalsScreen() {
             </TouchableOpacity>
           ))}
         </View>
-        {place.state
-          ? active.map(a => (
-              <View key={a.v}>
-                {variant === 'all' && a.d.phase !== 'ready' && a.d.phase !== 'idle' ? (
-                  <Text style={[ui.muted, { fontSize: 12 }]}>{a.v === 'govt' ? T('govtHosp') : T('privateHosp')}</Text>
-                ) : null}
-                <CivicStatus
-                  lang={lang}
-                  phase={a.d.phase}
-                  hasData={(a.d.res?.data?.hospitals || []).length > 0}
-                  aiConfigured={!!(a.d.res?.researchConfigured ?? a.d.res?.aiConfigured)}
-                  errorText={a.d.errorText}
-                  aiNote={a.d.aiNote}
-                  fromCache={a.d.fromCache}
-                />
-              </View>
-            ))
-          : null}
+        {/* Stable containers (collapsable={false}, always mounted): the ScrollView's direct children keep
+            the same count and order whatever the filter / results (Fabric "addViewAt" crash). */}
+        <View collapsable={false} testID="hosp-status">
+          {place.state
+            ? active.map(a => (
+                <View key={`status-${a.v}`} collapsable={false}>
+                  {variant === 'all' && a.d.phase !== 'ready' && a.d.phase !== 'idle' ? (
+                    <Text style={[ui.muted, { fontSize: 12 }]}>{a.v === 'govt' ? T('govtHosp') : T('privateHosp')}</Text>
+                  ) : null}
+                  <CivicStatus
+                    lang={lang}
+                    phase={a.d.phase}
+                    hasData={(a.d.res?.data?.hospitals || []).length > 0}
+                    aiConfigured={!!(a.d.res?.researchConfigured ?? a.d.res?.aiConfigured)}
+                    errorText={a.d.errorText}
+                    aiNote={a.d.aiNote}
+                    fromCache={a.d.fromCache}
+                  />
+                </View>
+              ))
+            : null}
+        </View>
         <View style={ui.card}>
           <Text style={ui.h2}>🔎 {biLabel(lang, 'whereToGo')}</Text>
           <TextInput
@@ -294,49 +301,53 @@ export default function HospitalsScreen() {
           {byFacts && list.length > 0 ? <Text style={[ui.muted, { fontSize: 12 }]}>{biLabel(lang, 'factsNote')}</Text> : null}
           {list.length > 0 && !!where.trim() && !found.length ? <Text style={[ui.muted, { marginTop: 6 }]}>{T('noMatch')}</Text> : null}
         </View>
-        <BestInIndiaBox lang={lang} query={where} state={place.state} />
-        {list.length ? (
-          <>
-            <Text style={[ui.muted, { marginBottom: 8 }]}>
-              ⚠️ {T('verify')}
-              {lang !== 'English' && T('verify') !== civicText('English', 'verify') ? `\n${civicText('English', 'verify')}` : ''}
-            </Text>
-            {workerAi ? (
-              <CivicAskBox key={placeKey} lang={lang} title={T('askHospAi')} note={T('hospAiNote')} hint={T('askHospHint')} onAsk={ask} />
-            ) : null}
-            {shown.map(r =>
-              r.free ? (
-                <FreeHospitalCard
-                  key={`${r.v}:${r.h.slug}`}
-                  h={r.h}
-                  t={r.t}
-                  lang={lang}
-                  item={civicItem('hosp', place.state, place.district, r.h.slug)}
-                  userName={user?.name}
-                  myUid={user?.id}
-                />
-              ) : (
-                <HospitalCard
-                  key={`${r.v}:${r.h.slug}`}
-                  h={r.h}
-                  t={r.t}
-                  lang={lang}
-                  item={civicItem('hosp', place.state, place.district, r.h.slug)}
-                  userName={user?.name}
-                  myUid={user?.id}
-                  kindLabel={variant === 'all' ? (r.v === 'govt' ? T('govtHosp') : T('privateHosp')) : undefined}
-                  matched={r.matched}
-                  showCount={byFacts}
-                />
-              ),
-            )}
-            {active.map(a =>
-              a.d.res?.data ? (
-                <SourcesBox key={`src-${a.v}`} lang={lang} sources={a.d.res?.sources} updatedAt={a.d.res?.updatedAt || 0} asOf={a.d.res?.data?.asOf} />
-              ) : null,
-            )}
-          </>
-        ) : null}
+        <View collapsable={false} testID="hosp-best">
+          <BestInIndiaBox lang={lang} query={where} state={place.state} />
+        </View>
+        <View collapsable={false} testID="hosp-list">
+          {list.length ? (
+            <View collapsable={false}>
+              <Text style={[ui.muted, { marginBottom: 8 }]}>
+                ⚠️ {T('verify')}
+                {lang !== 'English' && T('verify') !== civicText('English', 'verify') ? `\n${civicText('English', 'verify')}` : ''}
+              </Text>
+              {workerAi ? (
+                <CivicAskBox key={placeKey} lang={lang} title={T('askHospAi')} note={T('hospAiNote')} hint={T('askHospHint')} onAsk={ask} />
+              ) : null}
+              {shown.map(r =>
+                r.free ? (
+                  <FreeHospitalCard
+                    key={r.key}
+                    h={r.h}
+                    t={r.t}
+                    lang={lang}
+                    item={civicItem('hosp', place.state, place.district, r.h.slug)}
+                    userName={user?.name}
+                    myUid={user?.id}
+                  />
+                ) : (
+                  <HospitalCard
+                    key={r.key}
+                    h={r.h}
+                    t={r.t}
+                    lang={lang}
+                    item={civicItem('hosp', place.state, place.district, r.h.slug)}
+                    userName={user?.name}
+                    myUid={user?.id}
+                    kindLabel={variant === 'all' ? (r.v === 'govt' ? T('govtHosp') : T('privateHosp')) : undefined}
+                    matched={r.matched}
+                    showCount={byFacts}
+                  />
+                ),
+              )}
+              {active.map(a =>
+                a.d.res?.data ? (
+                  <SourcesBox key={`src-${a.v}`} lang={lang} sources={a.d.res?.sources} updatedAt={a.d.res?.updatedAt || 0} asOf={a.d.res?.data?.asOf} />
+                ) : null,
+              )}
+            </View>
+          ) : null}
+        </View>
       </ScrollView>
     </SafeAreaView>
   );

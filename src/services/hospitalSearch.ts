@@ -100,3 +100,16 @@ export function sortByFacts<T extends { h: Hospital }>(rows: T[]): T[] {
     .sort((a, b) => b.n - a.n || a.i - b.i)
     .map(x => x.r);
 }
+
+// React keys for the hospital rows: `${variant}:${slug}` (falls back to the OSM page / name / index),
+// made unique with a "#n" suffix when two rows share one. Duplicate keys make React re-order native
+// children, which on Fabric (Android) crashes with "addViewAt: failed to insert view into parent".
+export function uniqueRowKeys<T extends { v: string; h: Pick<Hospital, 'slug' | 'name'> & { osmUrl?: string } }>(rows: T[]): string[] {
+  const seen = new Map<string, number>();
+  return rows.map((r, i) => {
+    const base = `${r.v}:${r.h.slug || r.h.osmUrl || r.h.name || `row${i}`}`;
+    const n = seen.get(base) || 0;
+    seen.set(base, n + 1);
+    return n ? `${base}#${n}` : base;
+  });
+}
