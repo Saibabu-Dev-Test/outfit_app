@@ -889,3 +889,41 @@ describe('promises free fallback (gprm)', () => {
     expect(d.promises[1]).toMatchObject({ ref: 'https://inc.in/manifesto-tg.pdf', refDate: '2023', source: '' });
   });
 });
+
+describe('promises output size: capped per request, truncated JSON keeps complete items', () => {
+  it('prompt asks for at most PRM_PER_REQUEST promises, far below the output-token budget', () => {
+    expect(research.PRM_PER_REQUEST).toBeLessThanOrEqual(40);
+    const p = research.researchPrompt('gprm', '', STATES.find((x: any) => x.code === 'TG'), '');
+    expect(p).toMatch(new RegExp(`at most ${research.PRM_PER_REQUEST}`));
+    expect(p).not.toMatch(/up to 80/);
+  });
+
+  it('parseJsonLoose: a cut-off answer keeps only whole items (half item / key / string dropped, never finished)', () => {
+    const full = JSON.stringify(PRM);
+    const cutMid = full.slice(0, full.indexOf('Free bus travel') + 6); // inside the 4th promise's text
+    const v = parseJsonLoose('```json\n' + cutMid);
+    expect(v.promises.map((p: any) => p.text)).toEqual(['Old-age pension Rs 4,000 a month', '20 lakh jobs in five years', 'Rs 20,000 a year input aid to farmers']);
+    expect(v.govt.source).toBe('https://example.org/manifesto.pdf');
+    const c = research.cleanPromises(v);
+    expect(c.summary).toEqual({ total: 3, done: 1, inProgress: 1, notDone: 0, noUpdate: 1 });
+    expect(parseJsonLoose('[{"a":1},{"a":2},{"a"')).toEqual([{ a: 1 }, { a: 2 }]);
+    expect(parseJsonLoose('{"a":"unfinished')).toBeNull();
+    expect(parseJsonLoose('nope')).toBeNull();
+    expect(parseJsonLoose('{"a":1} trailing')).toEqual({ a: 1 });
+  });
+
+  it('research: a truncated grounded answer saves its complete promises only', async () => {
+    const e = env({ GEMINI_API_KEY: 'k' });
+    const full = JSON.stringify(PRM);
+    const cutMid = full.slice(0, full.indexOf('Free bus travel') + 6);
+    const f = jest.fn(async (url: string) =>
+      url === JWKS_URL
+        ? { ok: true, status: 200, headers: { get: () => 'public, max-age=3600' }, json: async () => ({ keys: [jwk] }) }
+        : { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: cutMid }] }, finishReason: 'MAX_TOKENS' }] }) },
+    );
+    await call(e, 'POST', '/v1/admin/civic/refresh', { tok: OWNER(), body: { kind: 'gprm', state: 'TG' }, fetchImpl: f });
+    const d = (await call(e, 'GET', '/v1/civic/data?kind=gprm&state=TG')).json.data;
+    expect(d.promises).toHaveLength(3);
+    expect(d.summary.total).toBe(3);
+  });
+});
