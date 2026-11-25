@@ -119,6 +119,7 @@ export type CivicKey =
   | 'prmNoneInFilter'
   | 'prmNotLive'
   | 'prmNoDataYet'
+  | 'prmFreeNote'
   | 'date'
   | 'allHosp'
   | 'publicNA'
@@ -302,6 +303,7 @@ export const CIVIC_LABELS: Record<StaticLanguage, Record<CivicKey, string>> = {
     prmNoneInFilter: 'No promise with this status.',
     prmNotLive: 'Promises feature is not live on the server yet. No data yet: it will show here once the server is updated.',
     prmNoDataYet: 'No data yet for this government. Pull down to try again later.',
+    prmFreeNote: 'Promises read from the Wikipedia article on this election (free source). Status shows only when a public source states it.',
     date: 'Date',
     allHosp: 'All',
     publicNA: 'Public info not available',
@@ -484,6 +486,7 @@ export const CIVIC_LABELS: Record<StaticLanguage, Record<CivicKey, string>> = {
     prmNoneInFilter: 'ఈ స్థితితో హామీ లేదు.',
     prmNotLive: 'హామీల ఫీచర్ ఇంకా సర్వర్‌లో అందుబాటులోకి రాలేదు. ఇంకా డేటా లేదు: సర్వర్ అప్‌డేట్ అయిన తర్వాత ఇక్కడ కనిపిస్తుంది.',
     prmNoDataYet: 'ఈ ప్రభుత్వానికి ఇంకా డేటా లేదు. కాసేపటి తర్వాత కిందికి లాగి మళ్లీ ప్రయత్నించండి.',
+    prmFreeNote: 'ఈ ఎన్నికపై వికీపీడియా వ్యాసం నుండి తీసుకున్న హామీలు (ఉచిత మూలం). పబ్లిక్ మూలం చెప్పినప్పుడే స్థితి చూపిస్తాం.',
     date: 'తేదీ',
     allHosp: 'అన్నీ',
     publicNA: 'పబ్లిక్ సమాచారం అందుబాటులో లేదు',
@@ -666,6 +669,7 @@ export const CIVIC_LABELS: Record<StaticLanguage, Record<CivicKey, string>> = {
     prmNoneInFilter: 'इस स्थिति वाला कोई वादा नहीं।',
     prmNotLive: 'वादों की सुविधा अभी सर्वर पर चालू नहीं हुई है। अभी कोई डेटा नहीं: सर्वर अपडेट होने के बाद यहाँ दिखेगा।',
     prmNoDataYet: 'इस सरकार के लिए अभी कोई डेटा नहीं। थोड़ी देर बाद नीचे खींचकर दोबारा कोशिश करें।',
+    prmFreeNote: 'वादे इस चुनाव पर विकिपीडिया लेख से लिए गए (मुफ़्त स्रोत)। स्थिति तभी दिखती है जब कोई सार्वजनिक स्रोत उसे बताए।',
     date: 'तारीख़',
     allHosp: 'सभी',
     publicNA: 'सार्वजनिक जानकारी उपलब्ध नहीं',

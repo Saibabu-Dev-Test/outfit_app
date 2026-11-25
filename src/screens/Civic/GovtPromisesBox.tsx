@@ -130,6 +130,7 @@ export default function GovtPromisesBox({ lang, state }: { lang: AppLanguage; st
                     </Text>
                   </TouchableOpacity>
                 ) : null}
+                {d.origin === 'free' ? <Text testID="prm-free" style={[ui.muted, { fontSize: 12 }]}>{biLabel(lang, 'prmFreeNote')}</Text> : null}
                 {d.asOf ? (
                   <Text style={[ui.muted, { fontSize: 12 }]}>
                     {civicText(lang, 'asOf')}: {d.asOf}
@@ -165,6 +166,14 @@ export default function GovtPromisesBox({ lang, state }: { lang: AppLanguage; st
                         <Text style={[ui.muted, { fontSize: 12, color: colors.primary }]} numberOfLines={1}>
                           🔗 {host(p.source)}
                           {p.date ? ` · 📅 ${p.date}` : ''}
+                        </Text>
+                      </TouchableOpacity>
+                    ) : null}
+                    {p.ref && p.ref !== p.source ? (
+                      <TouchableOpacity onPress={() => openLink(p.ref || '')}>
+                        <Text style={[ui.muted, { fontSize: 12, color: colors.primary }]} numberOfLines={1}>
+                          📄 {host(p.ref)}
+                          {p.refDate ? ` · 📅 ${p.refDate}` : ''}
                         </Text>
                       </TouchableOpacity>
                     ) : null}
