@@ -117,6 +117,8 @@ export type CivicKey =
   | 'prmNoData'
   | 'prmHead'
   | 'prmNoneInFilter'
+  | 'prmNotLive'
+  | 'prmNoDataYet'
   | 'date'
   | 'allHosp'
   | 'publicNA'
@@ -298,6 +300,8 @@ export const CIVIC_LABELS: Record<StaticLanguage, Record<CivicKey, string>> = {
     prmNoData: 'No researched promises yet for this government. Researching from public sources, check back in a few minutes.',
     prmHead: 'Head of government',
     prmNoneInFilter: 'No promise with this status.',
+    prmNotLive: 'Promises feature is not live on the server yet. No data yet: it will show here once the server is updated.',
+    prmNoDataYet: 'No data yet for this government. Pull down to try again later.',
     date: 'Date',
     allHosp: 'All',
     publicNA: 'Public info not available',
@@ -478,6 +482,8 @@ export const CIVIC_LABELS: Record<StaticLanguage, Record<CivicKey, string>> = {
     prmNoData: 'ఈ ప్రభుత్వానికి ఇంకా పరిశోధించిన హామీలు లేవు. పబ్లిక్ మూలాల నుండి సేకరిస్తున్నాం, కొన్ని నిమిషాల తర్వాత చూడండి.',
     prmHead: 'ప్రభుత్వ అధిపతి',
     prmNoneInFilter: 'ఈ స్థితితో హామీ లేదు.',
+    prmNotLive: 'హామీల ఫీచర్ ఇంకా సర్వర్‌లో అందుబాటులోకి రాలేదు. ఇంకా డేటా లేదు: సర్వర్ అప్‌డేట్ అయిన తర్వాత ఇక్కడ కనిపిస్తుంది.',
+    prmNoDataYet: 'ఈ ప్రభుత్వానికి ఇంకా డేటా లేదు. కాసేపటి తర్వాత కిందికి లాగి మళ్లీ ప్రయత్నించండి.',
     date: 'తేదీ',
     allHosp: 'అన్నీ',
     publicNA: 'పబ్లిక్ సమాచారం అందుబాటులో లేదు',
@@ -658,6 +664,8 @@ export const CIVIC_LABELS: Record<StaticLanguage, Record<CivicKey, string>> = {
     prmNoData: 'इस सरकार के लिए अभी कोई शोधित वादा नहीं। सार्वजनिक स्रोतों से जानकारी जुटाई जा रही है, कुछ मिनट बाद देखें।',
     prmHead: 'सरकार प्रमुख',
     prmNoneInFilter: 'इस स्थिति वाला कोई वादा नहीं।',
+    prmNotLive: 'वादों की सुविधा अभी सर्वर पर चालू नहीं हुई है। अभी कोई डेटा नहीं: सर्वर अपडेट होने के बाद यहाँ दिखेगा।',
+    prmNoDataYet: 'इस सरकार के लिए अभी कोई डेटा नहीं। थोड़ी देर बाद नीचे खींचकर दोबारा कोशिश करें।',
     date: 'तारीख़',
     allHosp: 'सभी',
     publicNA: 'सार्वजनिक जानकारी उपलब्ध नहीं',
