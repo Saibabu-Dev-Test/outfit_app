@@ -96,3 +96,27 @@ describe('GovtPromisesBox when the Worker fails', () => {
     r.unmount();
   });
 });
+
+describe('GovtPromisesBox with promises from the free Wikipedia fallback', () => {
+  afterEach(() => workerFetch.mockReset());
+
+  it('shows each promise with where it is stated (source + date) and the free-source note; status stays "No update"', async () => {
+    const data = {
+      origin: 'free',
+      asOf: '2026-11',
+      govt: { party: 'INC', head: 'A. Revanth Reddy', year: '2023', term: '', source: 'https://en.wikipedia.org/wiki/2023_Telangana_Legislative_Assembly_election#Manifesto_2' },
+      promises: [
+        { area: 'farmers', text: 'Farmers will receive ₹15,000 each year.', status: 'no_update', fact: '', source: '', date: '', ref: 'https://www.indiatoday.in/six-guarantees', refDate: '2023-09-17' },
+      ],
+      summary: { total: 1, done: 0, inProgress: 0, notDone: 0, noUpdate: 1 },
+    };
+    workerFetch.mockImplementation(async () => ({ kind: 'gprm', state: 'AP', district: '', variant: '', data, i18n: { te: null, hi: null }, sources: [], aiStars: null, status: 'ok', updatedAt: 1, aiConfigured: true, researchConfigured: true }));
+    const r = await openBox();
+    const txt = textOf(r);
+    expect(txt).toMatch(/Wikipedia article on this election \(free source\)/);
+    expect(txt).toMatch(/Farmers will receive ₹15,000 each year\./);
+    expect(txt).toMatch(/www\.indiatoday\.in · 📅 2023-09-17/);
+    expect(txt).toMatch(/Total 1 · Done 0 · In progress 0 · Not done 0 · No update 1/);
+    r.unmount();
+  });
+});

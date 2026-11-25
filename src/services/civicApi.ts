@@ -138,10 +138,15 @@ export interface PromiseItem {
   fact: string;
   source: string;
   date: string;
+  // where the promise itself is stated (its cited source, else the manifesto) + that date
+  ref?: string;
+  refDate?: string;
 }
 
 export interface PromisesData {
   asOf?: string;
+  // 'free' = read from Wikipedia's election article (Gemini free quota used up); statuses stay "no update"
+  origin?: 'free';
   govt: { party: string; head: string; year: string; term: string; source: string };
   promises: PromiseItem[];
   summary: { total: number; done: number; inProgress: number; notDone: number; noUpdate: number };

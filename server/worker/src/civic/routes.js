@@ -136,7 +136,8 @@ export async function getCivicData({ db, env, url, now, fetchImpl, ctx }) {
     // researchConfigured: new places can be researched: always for Govt / Hospitals (free sources,
     // no key), else grounded research (needs a Gemini key)
     aiConfigured: isAiConfigured(env),
-    researchConfigured: FREE_KINDS.has(t.kind) || isGeminiConfigured(env),
+    // gprm: the keyless Wikipedia fallback (research.js researchPromisesFallback) always works
+    researchConfigured: FREE_KINDS.has(t.kind) || t.kind === 'gprm' || isGeminiConfigured(env),
     freeSources: FREE_KINDS.has(t.kind),
   };
 }

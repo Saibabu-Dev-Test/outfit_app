@@ -136,6 +136,90 @@ export async function groqGenerate(env, { prompt, system = '', maxTokens = 2048,
   return { ok: false, error: lastError, code: codes.includes('quota') ? 'quota' : codes.length && codes.every(c => c === 'timeout') ? 'timeout' : 'other' };
 }
 
+// Groq Compound (built-in web search; https://console.groq.com/docs/compound): the ONLY non-Gemini
+// model used for web research, and only when the GROQ_API_KEY secret is set (no key = never called).
+// Used by the promises tracker when every Gemini key is out of free quota and the keyless Wikipedia
+// source found nothing; its answer still goes through cleanPromises (dated https source or no_update).
+export const GROQ_SEARCH_MODEL = 'groq/compound';
+export const GROQ_SEARCH_TIMEOUT_MS = 45000;
+
+// https source URLs of the searches Compound ran (pure: tested)
+export function groqSearchSources(msg) {
+  const out = [];
+  const tools = (msg && Array.isArray(msg.executed_tools) && msg.executed_tools) || [];
+  tools.forEach(tl => {
+    const res = (tl && tl.search_results && Array.isArray(tl.search_results.results) && tl.search_results.results) || [];
+    res.forEach(r => {
+      const u = r && typeof r.url === 'string' ? r.url.trim() : '';
+      if (/^https:\/\/[^\s"'<>]{3,300}$/.test(u) && !out.some(x => x.url === u) && out.length < 12) {
+        out.push({ url: u, title: typeof r.title === 'string' ? r.title.slice(0, 120) : '' });
+      }
+    });
+  });
+  return out;
+}
+
+/**
+ * groqSearchGenerate(env, { prompt, maxTokens, timeoutMs }, { fetchImpl, now, cooldown })
+ * -> { ok: true, text, model, sources, provider: 'groq' } | { ok: false, error, code }
+ */
+export async function groqSearchGenerate(env, { prompt, maxTokens = 8000, timeoutMs = 0 } = {}, { fetchImpl = fetch, now, cooldown } = {}) {
+  if (!isGroqConfigured(env)) {
+    return { ok: false, error: 'not configured', code: 'config' };
+  }
+  const t0 = now === undefined ? Date.now() : now;
+  const view = await coolView(cooldownFor(env, { cooldown }), t0);
+  const id = `groq:${GROQ_SEARCH_MODEL}`;
+  if (view.isCool('groq:*') || view.isCool(id)) {
+    return { ok: false, error: 'groq: cooling down', code: 'quota' };
+  }
+  let res;
+  try {
+    res = await post(
+      fetchImpl,
+      GROQ_ENDPOINT,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${env.GROQ_API_KEY.trim()}` },
+        body: JSON.stringify({ model: GROQ_SEARCH_MODEL, messages: messagesFor('', prompt), temperature: 0.1, max_completion_tokens: maxTokens }),
+      },
+      timeoutMs || GROQ_SEARCH_TIMEOUT_MS,
+    );
+  } catch (e) {
+    return { ok: false, error: `groq compound: ${e && e.timeout ? 'timeout' : 'network error'}`, code: e && e.timeout ? 'timeout' : 'other' };
+  }
+  if (res.status === 429) {
+    let msg = '';
+    try {
+      msg = JSON.stringify(await res.json());
+    } catch (e) {
+      msg = '';
+    }
+    const daily = /per day|\bRPD\b|\bTPD\b/i.test(msg);
+    await view.cool(id, daily ? nextUtcDay(t0) : t0 + 60 * 1000, daily ? 'daily' : 'minute');
+    return { ok: false, error: 'groq compound: http 429', code: 'quota' };
+  }
+  if (res.status === 401 || res.status === 403) {
+    await view.cool('groq:*', t0 + 10 * MINUTE_MS, 'key');
+    return { ok: false, error: `groq: http ${res.status}`, code: 'key' };
+  }
+  if (!res.ok) {
+    return { ok: false, error: `groq compound: http ${res.status}`, code: 'other' };
+  }
+  let data;
+  try {
+    data = await res.json();
+  } catch (e) {
+    return { ok: false, error: 'groq compound: bad json', code: 'other' };
+  }
+  const msg = data && data.choices && data.choices[0] && data.choices[0].message;
+  const text = stripThinking(msg && msg.content);
+  if (!text) {
+    return { ok: false, error: 'groq compound: empty answer', code: 'other' };
+  }
+  return { ok: true, text, model: GROQ_SEARCH_MODEL, sources: groqSearchSources(msg), provider: 'groq' };
+}
+
 // Text out of a Workers AI answer: classic { response } or OpenAI-style { choices } (pure: tested)
 export function workersAiText(out) {
   if (!out) {
