@@ -1,6 +1,6 @@
 // Free-source rows for the Govt / Hospitals tabs (Worker origin 'free': Wikidata, Wikipedia,
 // OpenStreetMap, official .gov.in sites; no AI). Hospital row = name, address, tap-to-call phone,
-// map link, type label (Govt / Private / "Type not listed" when OSM does not tag it) and a
+// map link, type label (Govt / Private / "Likely private · ownership not confirmed" or "Type not listed" when OSM does not tag it) and a
 // "source · date" line. Govt sections get the same source line (name, date, link).
 import React from 'react';
 import { Text, TouchableOpacity, View } from 'react-native';
@@ -12,9 +12,19 @@ import { CivicSrc, GovtData, Hospital } from '../../services/civicApi';
 import { callNumber, openLink } from './civicParts';
 import { Bi, CivicCard, biLabel } from './bi';
 
-// Type label key for a free-source hospital (OSM operator:type / ownership)
-export const hospTypeKey = (h: Pick<Hospital, 'ownership'>): CivicKey =>
-  h.ownership === 'govt' ? 'typeGovt' : h.ownership === 'private' ? 'typePrivate' : 'typeNotListed';
+// Names that read as a government facility (same idea as the Worker's classifyHospital)
+const GOVT_NAME =
+  /\b(government|govt\.?|ggh|phc|chc|uphc|area hospital|district hospital|general hospital|primary health|community health|urban health|health (sub )?centre|sub[- ]?centre|esic?|railway hospital|teaching hospital|medical college|aiims|civil hospital|taluk hospital|mandal hospital|cghs)(?![a-z])/i;
+
+// Type label key for a free-source hospital (OSM operator:type / ownership). No ownership tag and a
+// name that does not read as a govt facility = "Likely private · ownership not confirmed" (never
+// "Private"); no tag but a govt-looking name = "Type not listed". Rows without OSM ownership = not listed.
+export const hospTypeKey = (h: Pick<Hospital, 'ownership'> & { name?: string; type?: string }): CivicKey => {
+  if (h.ownership === 'govt') return 'typeGovt';
+  if (h.ownership === 'private') return 'typePrivate';
+  if (h.ownership === 'unknown' && h.name && !GOVT_NAME.test(`${h.name} ${h.type || ''}`)) return 'typePrivateLikely';
+  return 'typeNotListed';
+};
 
 // A row / dataset from the free sources (ownership is only set on OSM rows)
 export const isFreeHospital = (h: Hospital, dataOrigin?: string): boolean => dataOrigin === 'free' || h.origin === 'free' || h.ownership !== undefined;
@@ -55,7 +65,7 @@ export function FreeHospitalRow({ h, t, lang, children }: { h: Hospital; t?: Hos
   return (
     <CivicCard lang={lang} hasTranslation={!!t}>
       <Bi en={h.name} tr={t?.name} style={ui.h2} />
-      <Text testID="hosp-type" style={[typeKey === 'typeNotListed' ? ui.muted : ui.good, { fontSize: 12 }]}>
+      <Text testID="hosp-type" style={[typeKey === 'typeNotListed' || typeKey === 'typePrivateLikely' ? ui.muted : ui.good, { fontSize: 12 }]}>
         🏷️ {biLabel(lang, typeKey)}
       </Text>
       {h.address ? (

@@ -231,6 +231,32 @@ describe('civic free: hospitals (OpenStreetMap)', () => {
     expect(hosp.classifyHospital('KIMS Pvt Ltd')).toBe('private');
     expect(hosp.classifyHospital('City Care', { 'operator:type': 'government' })).toBe('govt');
     expect(hosp.classifyHospital('Government Hospital', { 'operator:type': 'private' })).toBe('private');
+    expect(hosp.classifyHospital('City Care', { 'healthcare:operator:type': 'private' })).toBe('private');
+    expect(hosp.classifyHospital('City Care', { ownership: 'public' })).toBe('govt');
+    expect(hosp.classifyHospital('City Care', { 'healthcare:operator': 'Sai Pvt Ltd' })).toBe('private');
+    expect(hosp.classifyHospital('APSRTC Hospital')).toBe('govt');
+    expect(hosp.classifyHospital('Government Medical College, Ongole')).toBe('govt');
+  });
+
+  test('mergeHospitals: capped per side (Private list never emptied by govt rows), other states and junk names dropped', () => {
+    const govt = Array.from({ length: 70 }, (_, i) => nom('node', 1000 + i, `Government Hospital ${String(i).padStart(2, '0')}`));
+    const others = [
+      nom('node', 2001, 'Sukheebhava Hospital'),
+      nom('node', 2002, 'Sai Clinic', { extratags: { 'operator:type': 'private' } }),
+      nom('node', 2003, 'Hospital', { address: { city: 'Hyderabad', state: 'Telangana' } }), // other state
+      nom('node', 2004, '#hospital', { address: {} }), // junk generic name, no town
+      nom('node', 2005, 'Lalitha Hospital', { address: { city: 'Guntur' } }), // no state in address: kept
+    ];
+    const m = hosp.mergeHospitals([govt, others], '2026-11-25', 60, 'Andhra Pradesh');
+    expect(m.filter((h: any) => h.type === 'govt')).toHaveLength(60);
+    expect(m.filter((h: any) => h.type !== 'govt').map((h: any) => h.name)).toEqual(['Sai Clinic', 'Lalitha Hospital', 'Sukheebhava Hospital']);
+    expect(m.some((h: any) => /Hyderabad|#/.test(h.name))).toBe(false);
+    // no state given: nothing dropped by state
+    expect(hosp.mergeHospitals([others], '2026-11-25', 60).some((h: any) => h.name === 'Hospital, Hyderabad')).toBe(true);
+    expect(hosp.capBySide([{ type: 'unknown', name: 'b' }, { type: 'govt', name: 'a' }, { type: 'private', name: 'c' }], 1)).toEqual([
+      { type: 'govt', name: 'a' },
+      { type: 'private', name: 'c' },
+    ]);
   });
 
   test('Overpass upgrade: POST, falls back to the next mirror', async () => {

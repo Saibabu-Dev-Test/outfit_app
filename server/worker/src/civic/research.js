@@ -1136,8 +1136,8 @@ const rankOwn = h => (h.ownership === 'govt' ? 0 : h.ownership === 'private' ? 1
 
 /**
  * One variant's stored hospital list from free OSM items (pure: tested). govt = items classed
- * government; private = every other item (private + not stated; ownership 'unknown' is not called
- * private in the app). Shape = cleanHosp with origin 'free'.
+ * government; private = every other item (private + not stated; ownership 'unknown' is shown in
+ * the app as "Likely private · ownership not confirmed", never as confirmed private). Shape = cleanHosp with origin 'free'.
  */
 export function freeHospData(items, variant, { district = '', today = '', src = null, where = '' } = {}) {
   const pick = (items || []).filter(h => (variant === 'govt' ? h.type === 'govt' : h.type !== 'govt'));
