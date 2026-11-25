@@ -36,6 +36,8 @@
 // source + date, status always "no_update"), saved with origin 'free'. Only if that finds nothing
 // AND the GROQ_API_KEY secret is set, Groq Compound (built-in web search) is asked with the same
 // prompt; its answer goes through the same cleaner. Nothing found = nothing saved ("no data yet").
+// Output size: one grounded call asks for at most PRM_PER_REQUEST promises (well under maxTokens),
+// and parseJsonLoose keeps the complete items of a cut-off (truncated) JSON answer.
 // AI fallback (llm.js): grounded research uses Gemini only (every key in turn). When every key is
 // used up the stored data is kept as it is and the run reports status 'paused' (RESEARCH_PAUSED)
 // instead of asking an ungrounded model, which would invent facts. Translation of stored data goes
@@ -331,6 +333,9 @@ export function cleanCompare(raw) {
 export const PRM_AREAS = ['welfare', 'farmers', 'women', 'youth', 'health', 'education', 'infrastructure', 'other'];
 export const PRM_STATUS = ['done', 'in_progress', 'not_done', 'no_update'];
 export const PRM_MAX = 80;
+// Promises asked for per AI call: ~40 x ~150 output tokens stays far below the 24k maxTokens, so the
+// JSON is not cut off (a truncated answer still keeps its complete items: parseJsonLoose)
+export const PRM_PER_REQUEST = 40;
 const prmArea = v => {
   const a = s(v, 30).toLowerCase();
   if (PRM_AREAS.includes(a)) {
@@ -419,12 +424,12 @@ export function researchPrompt(kind, variant, state, district) {
     return [
       `Today is ${today}. Using Google Search, find the election manifesto of the party / alliance that CURRENTLY rules ${who}, for the PRESENT term (the manifesto released for the election that brought this government to power).`,
       `Give the ruling party / alliance, the current ${head}, the manifesto year and a public URL of the manifesto (party site, ECI, or a reputed news copy).`,
-      `List every concrete promise in that manifesto (up to ${PRM_MAX}), each with its text as stated in the manifesto (short, max 160 characters) and one area: welfare, farmers, women, youth (youth / jobs), health, education, infrastructure, other.`,
+      `List the concrete promises in that manifesto (at most ${PRM_PER_REQUEST}, the main ones first), each with its text as stated in the manifesto (short, max 140 characters) and one area: welfare, farmers, women, youth (youth / jobs), health, education, infrastructure, other.`,
       'Only promises that are really in that manifesto: never invent, guess or give sample promises or numbers. If you cannot find the manifesto and its URL, reply with "promises":[].',
       'For each promise give its CURRENT status: "done", "in_progress", "not_done" or "no_update".',
       'STRICT RULES: facts only. No opinion, no verdict, no praise or criticism, no adjectives like best, failed, historic, corrupt.',
       '"done", "in_progress" or "not_done" ONLY when a public source supports it: a government order, budget document, PIB / .gov.in / .nic.in page, official gazette, or a reputed news report of official figures. Otherwise status MUST be "no_update".',
-      'For every status other than "no_update" give "fact" = ONE neutral line of what the source says (e.g. "Pension raised to Rs 4,000 a month from July 2024 by GO 43"), "source" = that https URL and "date" = the date of the source (YYYY-MM-DD, or YYYY-MM / YYYY). Without a source URL and a date the status is "no_update".',
+      'Keep "fact" under 160 characters. For every status other than "no_update" give "fact" = ONE neutral line of what the source says (e.g. "Pension raised to Rs 4,000 a month from July 2024 by GO 43"), "source" = that https URL and "date" = the date of the source (YYYY-MM-DD, or YYYY-MM / YYYY). Without a source URL and a date the status is "no_update".',
       'Reply with ONLY this JSON (no markdown):',
       `{"asOf":"YYYY-MM","govt":{"party":"ruling party or alliance","head":"${head} name","year":"YYYY manifesto year","term":"e.g. 2024-2029","source":"https:// manifesto URL"},`,
       '"promises":[{"area":"welfare|farmers|women|youth|health|education|infrastructure|other","text":"promise as stated","status":"done|in_progress|not_done|no_update","fact":"one neutral fact","source":"https://","date":"YYYY-MM-DD"}]}',

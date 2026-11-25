@@ -133,14 +133,82 @@ export function parseJsonLoose(text) {
   const open = s[start];
   const close = open === '{' ? '}' : ']';
   const end = s.lastIndexOf(close);
-  if (end <= start) {
+  if (end > start) {
+    try {
+      return JSON.parse(s.slice(start, end + 1));
+    } catch (e) {
+      // fall through: maybe cut off (maxOutputTokens), keep what is complete
+    }
+  }
+  const fixed = closeTruncatedJson(s.slice(start));
+  if (!fixed) {
     return null;
   }
   try {
-    return JSON.parse(s.slice(start, end + 1));
+    const v = JSON.parse(fixed);
+    return v && typeof v === 'object' ? v : null;
   } catch (e) {
     return null;
   }
+}
+
+/**
+ * A JSON answer cut off mid-way (output token limit) -> the same JSON up to its last COMPLETE value,
+ * with the open arrays / objects closed (pure: tested). Never invents a value: a half-written
+ * list item (an object inside an array), key or string is dropped whole, not finished. null when
+ * nothing complete is left.
+ */
+export function closeTruncatedJson(text) {
+  const t = String(text || '');
+  const stack = [];
+  let inStr = false;
+  let esc = false;
+  let cut = -1; // end (exclusive) of the last spot where everything before is complete
+  let cutStack = '';
+  // a spot inside a list item (an object open inside an array) would keep half an item: not a cut
+  const mark = at => {
+    const st = stack.join('');
+    if (!/\].*\}/.test(st)) {
+      cut = at;
+      cutStack = st;
+    }
+  };
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i];
+    if (inStr) {
+      if (esc) {
+        esc = false;
+      } else if (c === '\\') {
+        esc = true;
+      } else if (c === '"') {
+        inStr = false;
+      }
+      continue;
+    }
+    if (c === '"') {
+      inStr = true;
+    } else if (c === '{' || c === '[') {
+      stack.push(c === '{' ? '}' : ']');
+      if (c === '[') {
+        mark(i + 1); // an empty array so far is complete
+      }
+    } else if (c === '}' || c === ']') {
+      stack.pop();
+      if (!stack.length) {
+        return t.slice(0, i + 1);
+      }
+      mark(i + 1);
+    } else if (c === ',' && stack.length) {
+      mark(i); // the value before this comma is complete (cut before the comma)
+    }
+  }
+  if (cut < 0) {
+    return null;
+  }
+  let head = t.slice(0, cut).replace(/[\s,]+$/, '');
+  // an object cut right after "key": has no value: drop the dangling key
+  head = head.replace(/,?\s*"(?:[^"\\]|\\.)*"\s*:\s*$/, '');
+  return head + cutStack.split('').reverse().join('');
 }
 
 // Short app-facing code for a failed call (pure: tested). With several keys a temporary 429 wins
