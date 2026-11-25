@@ -166,7 +166,9 @@ export type CivicKey =
   | 'didYouMean'
   | 'govtRates'
   | 'govtRatesNote'
-  | 'cityTiers';
+  | 'cityTiers'
+  | 'mayTreatTitle'
+  | 'mayTreat';
 
 export const CIVIC_LABELS: Record<StaticLanguage, Record<CivicKey, string>> = {
   English: {
@@ -332,6 +334,8 @@ export const CIVIC_LABELS: Record<StaticLanguage, Record<CivicKey, string>> = {
     govtRates: 'Govt package rates (what PM-JAY / CGHS pay a hospital)',
     govtRatesNote: "Official scheme rates for comparing a private hospital's quote. Not what every hospital charges; implants, medicines and room upgrades can be extra. Confirm with the hospital.",
     cityTiers: 'X = Tier 1 city, Y = Tier 2, Z = Tier 3. CGHS shown for NABH hospitals, semi-private ward.',
+    mayTreatTitle: 'No hospital in this list states this in public sources. General / multi-speciality government hospitals that may treat this',
+    mayTreat: 'May treat this — call to confirm (no public source states it)',
   },
   Telugu: {
     govtTitle: '🏛️ ప్రభుత్వం',
@@ -496,6 +500,8 @@ export const CIVIC_LABELS: Record<StaticLanguage, Record<CivicKey, string>> = {
     govtRates: 'ప్రభుత్వ ప్యాకేజీ ధరలు (PM-JAY / CGHS ఆసుపత్రికి చెల్లించేవి)',
     govtRatesNote: 'ప్రైవేట్ ఆసుపత్రి చెప్పిన ధరతో పోల్చుకోవడానికి అధికారిక పథకం ధరలు. ప్రతి ఆసుపత్రి ఇదే వసూలు చేయదు; ఇంప్లాంట్లు, మందులు, గది అప్\u200cగ్రేడ్ అదనం కావచ్చు. ఆసుపత్రితో నిర్ధారించుకోండి.',
     cityTiers: 'X = టైర్ 1 నగరం, Y = టైర్ 2, Z = టైర్ 3. CGHS ధరలు NABH ఆసుపత్రులకు, సెమీ-ప్రైవేట్ వార్డ్.',
+    mayTreatTitle: 'ఈ జాబితాలో ఏ ఆసుపత్రీ పబ్లిక్ మూలాల్లో దీన్ని పేర్కొనలేదు. దీనికి చికిత్స చేయగల సాధారణ / మల్టీ-స్పెషాలిటీ ప్రభుత్వ ఆసుపత్రులు',
+    mayTreat: 'చికిత్స చేయవచ్చు — ఫోన్ చేసి నిర్ధారించుకోండి (పబ్లిక్ మూలం పేర్కొనలేదు)',
   },
   Hindi: {
     govtTitle: '🏛️ सरकार',
@@ -660,6 +666,8 @@ export const CIVIC_LABELS: Record<StaticLanguage, Record<CivicKey, string>> = {
     govtRates: 'सरकारी पैकेज दरें (PM-JAY / CGHS अस्पताल को जो देते हैं)',
     govtRatesNote: 'प्राइवेट अस्पताल के बताए खर्च से तुलना के लिए योजना की आधिकारिक दरें। हर अस्पताल यही नहीं लेता; इम्प्लांट, दवाइयाँ और कमरे का अपग्रेड अलग हो सकता है। अस्पताल से पुष्टि करें।',
     cityTiers: 'X = टियर 1 शहर, Y = टियर 2, Z = टियर 3। CGHS दरें NABH अस्पतालों के लिए, सेमी-प्राइवेट वार्ड।',
+    mayTreatTitle: 'इस सूची में किसी अस्पताल ने सार्वजनिक स्रोतों में यह नहीं बताया। सामान्य / मल्टी-स्पेशियलिटी सरकारी अस्पताल जो इसका इलाज कर सकते हैं',
+    mayTreat: 'इलाज कर सकते हैं — फ़ोन करके पुष्टि करें (किसी सार्वजनिक स्रोत में दर्ज नहीं)',
   },
 };
 

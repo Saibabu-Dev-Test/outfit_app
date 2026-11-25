@@ -20,6 +20,9 @@
 // words / Telugu / Hindi, misspellings -> departments -> speciality words), falling back to the old
 // word expansion, and shows "Best in India for <disease>" (BestInIndiaBox: NIRF 2025 Medical ranks,
 // a teaching + research ranking, never a treatment rating; 108 / 112 for red-flag conditions).
+// When no hospital in the list states the searched speciality ("ear" -> ENT), the general /
+// multi-speciality GOVT hospitals in the list (AIIMS, medical colleges, GGH, district / area hospitals;
+// hospitalSearch.generalGovtHospitals) are shown labelled "May treat this — call to confirm" (never a claim).
 import React, { useState } from 'react';
 import { RefreshControl, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -31,7 +34,7 @@ import { isOwnerUser } from '../../services/adminSystem';
 import { useAppLanguage } from '../../i18n/appLanguage';
 import { civicText } from '../../i18n/civicLabels';
 import { HospData, HospVariant, Hospital, civicItem, getHospData } from '../../services/civicApi';
-import { factsCount, searchHospitals, sortByFacts, uniqueRowKeys } from '../../services/hospitalSearch';
+import { factsCount, generalGovtHospitals, searchHospitals, sortByFacts, uniqueRowKeys } from '../../services/hospitalSearch';
 import { askHospitals } from '../../services/civicAi';
 import { useCivicLabels } from '../../services/civicI18n';
 import { CivicAskBox, Turn } from './civicAiParts';
@@ -40,7 +43,7 @@ import { Bi, CivicCard, biLabel } from './bi';
 import { useCivicData } from './useCivicData';
 import LanguageChip from './LanguageChip';
 import { FreeHospitalRow, isFreeHospital } from './civicFreeParts';
-import { hospitalTermsFor } from '../../services/diseaseSearch';
+import { hospitalTermsFor, specialitiesFor } from '../../services/diseaseSearch';
 import BestInIndiaBox from './BestInIndiaBox';
 
 type HospFilter = HospVariant | 'all';
@@ -64,6 +67,7 @@ function HospitalCard({
   kindLabel,
   matched,
   showCount,
+  maybe,
 }: {
   h: Hospital;
   t?: Hospital | null;
@@ -74,6 +78,7 @@ function HospitalCard({
   kindLabel?: string;
   matched?: string[];
   showCount?: boolean;
+  maybe?: string;
 }) {
   const T = (k: Parameters<typeof civicText>[1]) => civicText(lang, k);
   const [open, setOpen] = useState(false);
@@ -85,6 +90,7 @@ function HospitalCard({
       <TouchableOpacity onPress={() => setOpen(v => !v)} activeOpacity={0.8}>
         <Bi en={h.name} tr={t?.name} style={ui.h2} />
         {kindLabel ? <Text style={[ui.muted, { fontSize: 12 }]}>🏷️ {kindLabel}</Text> : null}
+        {maybe ? <Text testID="hosp-may-treat" style={[ui.bad, { fontSize: 12 }]}>📞 {maybe}</Text> : null}
         {h.type ? <Bi en={h.type} tr={t?.type} style={ui.muted} /> : null}
         {matched && matched.length ? (
           <Text style={[ui.good, { marginTop: 2 }]}>
@@ -174,10 +180,15 @@ function HospitalCard({
 }
 
 // OpenStreetMap row + people's reviews behind a small toggle
-function FreeHospitalCard({ h, t, lang, item, userName, myUid }: { h: Hospital; t?: Hospital | null; lang: ReturnType<typeof useAppLanguage>; item: string; userName?: string; myUid?: string }) {
+function FreeHospitalCard({ h, t, lang, item, userName, myUid, maybe }: { h: Hospital; t?: Hospital | null; lang: ReturnType<typeof useAppLanguage>; item: string; userName?: string; myUid?: string; maybe?: string }) {
   const [open, setOpen] = useState(false);
   return (
     <FreeHospitalRow h={h} t={t} lang={lang}>
+      {maybe ? (
+        <Text testID="hosp-may-treat" style={[ui.bad, { fontSize: 12, marginTop: 4 }]}>
+          📞 {maybe}
+        </Text>
+      ) : null}
       <TouchableOpacity onPress={() => setOpen(v => !v)} style={{ marginTop: 6 }}>
         <Text style={[ui.muted, { color: colors.primary }]}>
           ⭐ {civicText(lang, 'reviews')} {open ? '▴' : '▾'}
@@ -222,7 +233,13 @@ export default function HospitalsScreen() {
   const rows = raw.map((r, i) => ({ ...r, key: keys[i] }));
   const list = rows.map(r => r.h);
   const found = where.trim() ? searchHospitals(list, where, hospitalTermsFor(where)).map(m => ({ ...rows[list.indexOf(m.h)], matched: m.matched })) : rows.map(r => ({ ...r, matched: [] as string[] }));
-  const shown = byFacts ? sortByFacts(found) : found;
+  // Nothing in the list states the searched speciality: general / multi-speciality govt hospitals
+  // (AIIMS, medical colleges, GGH, district / area hospitals) as "may treat this — call to confirm"
+  const searching = !!where.trim() && list.length > 0 && !found.length;
+  const needSp = searching ? specialitiesFor(where) : [];
+  const fallback = needSp.length ? generalGovtHospitals(rows).map(r => ({ ...r, matched: [] as string[] })) : [];
+  const maybe = fallback.length > 0;
+  const shown = maybe ? fallback : byFacts ? sortByFacts(found) : found;
   const workerAi = active.some(a => !!a.d.res?.aiConfigured);
 
   // Hospital AI runs only on the Worker (its AI fallback chain); no on-phone AI key
@@ -299,7 +316,15 @@ export default function HospitalsScreen() {
             </TouchableOpacity>
           ) : null}
           {byFacts && list.length > 0 ? <Text style={[ui.muted, { fontSize: 12 }]}>{biLabel(lang, 'factsNote')}</Text> : null}
-          {list.length > 0 && !!where.trim() && !found.length ? <Text style={[ui.muted, { marginTop: 6 }]}>{T('noMatch')}</Text> : null}
+          {searching && !maybe ? <Text style={[ui.muted, { marginTop: 6 }]}>{T('noMatch')}</Text> : null}
+          {maybe ? (
+            <View testID="hosp-maybe" style={{ marginTop: 6 }}>
+              <Text style={ui.bad}>⚠️ {biLabel(lang, 'mayTreatTitle')}</Text>
+              <Text style={[ui.muted, { marginTop: 2 }]}>
+                🩺 {T('seeSpecialities')}: {needSp.join(' • ')}
+              </Text>
+            </View>
+          ) : null}
         </View>
         <View collapsable={false} testID="hosp-best">
           <BestInIndiaBox lang={lang} query={where} state={place.state} />
@@ -318,6 +343,7 @@ export default function HospitalsScreen() {
                 r.free ? (
                   <FreeHospitalCard
                     key={r.key}
+                    maybe={maybe ? biLabel(lang, 'mayTreat') : undefined}
                     h={r.h}
                     t={r.t}
                     lang={lang}
@@ -328,6 +354,7 @@ export default function HospitalsScreen() {
                 ) : (
                   <HospitalCard
                     key={r.key}
+                    maybe={maybe ? biLabel(lang, 'mayTreat') : undefined}
                     h={r.h}
                     t={r.t}
                     lang={lang}
