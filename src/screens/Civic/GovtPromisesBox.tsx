@@ -30,6 +30,16 @@ const statusColor = (st: PromiseStatus): string =>
 
 const host = (u: string) => u.replace(/^https:\/\//, '').split('/')[0];
 
+// A Worker deployed before kind 'gprm' answers 400 "bad kind / state / district / variant" (or 404 =
+// 'serverOld'): the feature is simply not live there yet. Any other failure with nothing saved is
+// "no data yet". Never a raw error text on screen, never numbers without researched promises.
+export type PromisesNotice = 'notLive' | 'noData' | null;
+export const promisesNotice = (phase: string, errorText: string, hasData: boolean): PromisesNotice => {
+  if (hasData) return null;
+  if (phase === 'serverOld' || /\b(bad|unknown|invalid) kind\b/i.test(errorText || '')) return 'notLive';
+  return phase === 'error' ? 'noData' : null;
+};
+
 // Counts from the promises themselves (only researched, sourced promises reach the app)
 export const countPromises = (list: PromiseItem[]) => ({
   total: list.length,
@@ -61,6 +71,7 @@ export default function GovtPromisesBox({ lang, state }: { lang: AppLanguage; st
   const hasData = list.length > 0;
   const shown = list.map((p, i) => ({ p, i })).filter(x => filter === 'all' || x.p.status === filter);
   const pct = (k: number) => (n.total ? `${(k / n.total) * 100}%` : '0%');
+  const notice = promisesNotice(phase, errorText, hasData);
 
   return (
     <CivicCard lang={lang} hasTranslation={!!t}>
@@ -88,7 +99,13 @@ export default function GovtPromisesBox({ lang, state }: { lang: AppLanguage; st
               </TouchableOpacity>
             ))}
           </View>
-          <CivicStatus lang={lang} phase={phase} hasData={hasData} aiConfigured={!!(res?.researchConfigured ?? res?.aiConfigured)} errorText={errorText} aiNote={aiNote} fromCache={fromCache} />
+          {notice ? (
+            <Text testID={notice === 'notLive' ? 'prm-notlive' : 'prm-nodata-yet'} style={[ui.muted, { marginVertical: 6 }]}>
+              {notice === 'notLive' ? '⏳' : '🔎'} {biLabel(lang, notice === 'notLive' ? 'prmNotLive' : 'prmNoDataYet')}
+            </Text>
+          ) : (
+            <CivicStatus lang={lang} phase={phase} hasData={hasData} aiConfigured={!!(res?.researchConfigured ?? res?.aiConfigured)} errorText={errorText} aiNote={aiNote} fromCache={fromCache} />
+          )}
           {!hasData && phase !== 'loading' && phase !== 'collecting' && phase !== 'error' && phase !== 'serverOld' ? (
             <Text testID="prm-nodata" style={[ui.muted, { marginVertical: 6 }]}>
               🔎 {biLabel(lang, 'prmNoData')}
