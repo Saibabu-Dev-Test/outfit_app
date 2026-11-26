@@ -51,7 +51,8 @@
 // otherwise only optional extras (translation, Explain simply). OSM rows never translate proper
 // names or addresses (FREE_HOSP_FIXED).
 import { CENTRE, CENTRE_KINDS, STATES, placeByCode } from './states.js';
-import { fetchGovtFree } from './free/govt.js';
+import { fetchGovtFree, fetchMandalFree } from './free/govt.js';
+import { levelOf, splitPlace, subLevelWord } from './place.js';
 import { fetchHospFree, fetchHospOverpass, titleCase } from './free/hosp.js';
 import { fetchPromisesFree } from './free/promises.js';
 import { sleep } from './free/http.js';
@@ -226,7 +227,29 @@ export function cleanGovt(raw) {
       .map(d => ({ name: s(obj(d).name, 100), number: phone(obj(d).number) }))
       .filter(d => d.name && d.number),
     ...(o.origin === 'free' ? { origin: 'free', src: cleanSrc(o.src) } : {}),
+    ...cleanScope(o),
   };
+}
+
+const SCOPES = new Set(['mandal', 'district', 'state']);
+// A wider level answered than the one asked (mandal -> district -> state): a short note says so (pure: tested)
+export const scopeNote = (asked, got) => (asked && got && asked !== got ? { note: `nothing public for the ${asked} yet: showing the ${got}` } : {});
+// Mandal rows (place.js): the level the data covers + Govt's mandal block (free sources only)
+function cleanScope(o) {
+  const out = {};
+  if (SCOPES.has(o.scope)) {
+    out.scope = o.scope;
+  }
+  const m = o.mandal && typeof o.mandal === 'object' ? o.mandal : null;
+  if (m) {
+    out.mandal = {
+      name: s(m.name, 80),
+      overview: s(m.overview, 800),
+      mlas: arr(m.mlas, 10).map(rep).filter(p => p.name),
+      src: srcItem(m.src),
+    };
+  }
+  return out;
 }
 
 // Google Maps search link from the hospital's own name + address (a search, not a guessed place)
@@ -292,7 +315,7 @@ export function cleanHosp(raw, where = '') {
       return item.name && slug && !seen.has(slug) && seen.add(slug) ? item : null;
     })
     .filter(Boolean);
-  return { asOf: s(o.asOf, 40), hospitals, ...(free ? { origin: 'free', src: srcItem(o.src) } : {}) };
+  return { asOf: s(o.asOf, 40), hospitals, ...(free ? { origin: 'free', src: srcItem(o.src) } : {}), ...(SCOPES.has(o.scope) ? { scope: o.scope } : {}) };
 }
 
 // ── Previous vs present government (kind 'gcmp') ──
@@ -393,8 +416,22 @@ export function cleanPromises(raw) {
   };
 }
 
-const placeName = (state, district) =>
-  state.type === 'centre' ? 'the Union Government of India (the Centre)' : `${district ? `${district.replace(/-/g, ' ')} district, ` : ''}${state.name}, India`;
+// district may be a mandal key ("ranga-reddy~shamshabad", place.js): "shamshabad mandal, ranga reddy district, ..."
+const placeName = (state, district) => {
+  if (state.type === 'centre') return 'the Union Government of India (the Centre)';
+  const p = splitPlace(district);
+  const m = p.mandal ? `${p.mandal.replace(/-/g, ' ')} ${subLevelWord(state.code)}, ` : '';
+  return `${m}${p.district ? `${p.district.replace(/-/g, ' ')} district, ` : ''}${state.name}, India`;
+};
+
+// Which source answered a stored row (GET /data answeredBy; the app shows it as a source label)
+export const answeredByOf = (origin, model) => {
+  const m = String(model || '');
+  if (origin === 'free' || m === 'free') return 'free';
+  if (/^@cf\//.test(m)) return 'workers-ai';
+  if (/groq|compound|gpt-oss|llama/i.test(m)) return 'groq';
+  return 'gemini';
+};
 
 const STATE_SCHEMES = {
   AP: 'Dr NTR Vaidya Seva (Aarogyasri AP)',
@@ -442,7 +479,7 @@ export function researchPrompt(kind, variant, state, district) {
       'Prefer official sources (.gov.in, .nic.in, ap.gov.in style state portals, district NIC sites, ECI). Use the CURRENT office holders as of today.',
       'If you are not sure of a value (a name, a phone number, a website), leave it empty "" instead of guessing. Never invent phone numbers.',
       district
-        ? `Include the state leaders AND the ${district.replace(/-/g, ' ')} district: District Collector, Superintendent of Police (or Commissioner of Police if a commissionerate), the Lok Sabha MP(s) whose constituency covers the district, and ALL MLAs of assembly constituencies in the district.`
+        ? `Include the state leaders AND the ${splitPlace(district).district.replace(/-/g, ' ')} district: District Collector, Superintendent of Police (or Commissioner of Police if a commissionerate), the Lok Sabha MP(s) whose constituency covers the district, and ALL MLAs of assembly constituencies in the district.`
         : 'District fields may stay empty (state-level summary).',
       'Schemes: the major state AND central welfare schemes people here use (health, pensions, farmers, housing, education, women, food), with eligibility and how to apply.',
       'Grievance: CM helpline / state grievance portal (for example PGRS / Meeseva / Spandana-type portals as they exist in this state now), CPGRAMS (pgportal.gov.in), and district grievance day details if found.',
@@ -482,7 +519,7 @@ export const GOVT_PARTS = [
     ask: (district) => [
       'Collect: a short neutral overview, the state leaders (Governor, Chief Minister, Deputy CMs, ministers with portfolios), elections, and',
       district
-        ? `the ${district.replace(/-/g, ' ')} district: District Collector, Superintendent of Police (or Commissioner of Police if a commissionerate), the Lok Sabha MP(s) whose constituency covers the district, and ALL MLAs of assembly constituencies in the district.`
+        ? `the ${splitPlace(district).district.replace(/-/g, ' ')} district: District Collector, Superintendent of Police (or Commissioner of Police if a commissionerate), the Lok Sabha MP(s) whose constituency covers the district, and ALL MLAs of assembly constituencies in the district.`
         : 'district fields may stay empty (state-level summary).',
       'Reply with ONLY this JSON (no markdown):',
       '{"asOf":"YYYY-MM","overview":"3-4 neutral sentences about the place (district HQ, population, main languages)",',
@@ -1035,7 +1072,7 @@ export async function researchNow(db, env, t, lang, { fetchImpl = fetch, now = D
       await unlock(db, t);
     }
     if (fr.ok) {
-      const out = { ok: true, status: 'ready', did: 'research', origin: 'free', model: 'free', translated: [] };
+      const out = { ok: true, status: 'ready', did: 'research', origin: 'free', model: 'free', translated: [], ...(fr.scope ? { scope: fr.scope } : {}), ...(fr.note ? { note: fr.note } : {}) };
       if (TR_LANGS[lang] && isAiConfigured(env) && waitUntil) {
         const k = await startTranslate(db, env, t, lang, { fetchImpl, now, waitUntil });
         if (k.started) {
@@ -1359,43 +1396,94 @@ export async function researchFree(db, env, t, { fetchImpl = fetch, now = Date.n
   }
   await addUsage(db, day, 'civic_free', 1);
   const today = new Date(now).toISOString().slice(0, 10);
+  const place = splitPlace(t.district);
+  const asked = levelOf(t.district);
+  const timeoutMs = request ? FREE_REQ_TIMEOUT_MS : 8000;
   if (t.kind === 'govt') {
     const gov = await cachedGovernors(db, st.type, now);
-    const r = await fetchGovtFree(st, t.district, { fetchImpl, now, timeoutMs: request ? FREE_REQ_TIMEOUT_MS : 8000, governors: gov || undefined });
+    const r = await fetchGovtFree(st, place.district, { fetchImpl, now, timeoutMs, governors: gov || undefined });
     if (!gov && r.governors && Object.keys(r.governors).length) {
       await saveGovernors(db, st.type, r.governors, now);
     }
     if (!r.ok) {
       return { ok: false, error: r.error || 'free sources unavailable', code: 'source' };
     }
-    await saveFree(db, t, cleanGovt(r.data), r.sources, now);
-    return { ok: true, origin: 'free', model: 'free', translated: [] };
+    const data = { ...r.data };
+    if (place.mandal) {
+      // The mandal's own facts on top of the district's (nothing public = scope 'district')
+      const m = await fetchMandalFree(st, titleCase(place.district), titleCase(place.mandal), {
+        fetchImpl,
+        now,
+        timeoutMs,
+        level: subLevelWord(st.code),
+        mlas: (r.data.district && r.data.district.mlas) || [],
+      }).catch(() => null);
+      data.mandal = m;
+      if (m && m.src && m.src.url) {
+        r.sources = [...(r.sources || []), { url: m.src.url, title: `Wikipedia: ${m.name}` }];
+      }
+    }
+    const d = data.district || {};
+    const hasDistrict = !!(d.headquarters || (d.mlas || []).length || (d.mps || []).length);
+    const hasMandal = !!(data.mandal && (data.mandal.overview || data.mandal.mlas.length));
+    data.scope = asked === 'mandal' ? (hasMandal ? 'mandal' : hasDistrict ? 'district' : 'state') : asked === 'district' ? (hasDistrict || data.overview ? 'district' : 'state') : 'state';
+    await saveFree(db, t, cleanGovt(data), r.sources, now);
+    return { ok: true, origin: 'free', model: 'free', translated: [], scope: data.scope, ...scopeNote(asked, data.scope) };
   }
-  const where = placeName(st, t.district);
-  const geo = await cachedGeo(db, t);
-  const r = await fetchHospFree(st, t.district, {
-    fetchImpl,
-    now,
-    timeoutMs: request ? FREE_REQ_TIMEOUT_MS : 6000,
-    gapMs: caps.freeGapMs,
-    sleepImpl,
-    bbox: geo ? geo.bbox : null,
-  });
-  if (r.bbox && !geo) {
-    await saveGeo(db, t, r.bbox, r.place, now);
+  // Hospitals: the mandal's area first, then the district's, then the state's (data.scope says which)
+  const levels = asked === 'mandal' ? ['mandal', 'district', 'state'] : asked === 'district' ? ['district', 'state'] : ['state'];
+  let r = null;
+  let got = '';
+  let gt = t;
+  for (const lv of levels) {
+    gt = { ...t, district: lv === 'mandal' ? t.district : lv === 'district' ? place.district : '' };
+    if (lv !== asked) {
+      // a wider level already saved from free sources: reuse it (no extra Nominatim requests)
+      const wide = await db.first(`SELECT data, origin FROM civic_data WHERE ${where4}`, ...binds4({ ...gt, variant: 'govt' }));
+      const wideP = await db.first(`SELECT data FROM civic_data WHERE ${where4}`, ...binds4({ ...gt, variant: 'private' }));
+      const wg = wide && wide.origin === 'free' ? parseJsonCol(wide.data, null) : null;
+      const wp = wideP ? parseJsonCol(wideP.data, null) : null;
+      if (wg && wp && (wg.hospitals || []).length + (wp.hospitals || []).length > 0) {
+        for (const [variant, dv] of [['govt', wg], ['private', wp]]) {
+          await saveFree(db, { ...t, variant }, cleanHosp({ ...dv, origin: 'free', scope: lv }, placeName(st, gt.district)), OSM_SOURCES, now);
+        }
+        return { ok: true, origin: 'free', model: 'free', translated: [], count: (wg.hospitals || []).length + (wp.hospitals || []).length, scope: lv, ...scopeNote(asked, lv) };
+      }
+    }
+    const geo = await cachedGeo(db, gt);
+    r = await fetchHospFree(st, splitPlace(gt.district).district, {
+      fetchImpl,
+      now,
+      timeoutMs: request ? FREE_REQ_TIMEOUT_MS : 6000,
+      gapMs: caps.freeGapMs,
+      sleepImpl,
+      bbox: geo ? geo.bbox : null,
+      mandal: splitPlace(gt.district).mandal,
+    });
+    if (r.bbox && !geo) {
+      await saveGeo(db, gt, r.bbox, r.place, now);
+    }
+    if (r.ok) {
+      got = lv;
+      break;
+    }
+    if (!r.bbox && /unreachable|timeout|network/i.test(String(r.error || ''))) {
+      break; // Nominatim is down: a wider level would fail the same way
+    }
   }
-  if (!r.ok) {
-    return { ok: false, error: r.error || 'free sources unavailable', code: 'source' };
+  if (!r || !r.ok) {
+    return { ok: false, error: (r && r.error) || 'free sources unavailable', code: 'source' };
   }
-  const district = t.district ? titleCase(t.district) : '';
+  const where = placeName(st, gt.district);
+  const district = place.district ? titleCase(place.district) : '';
   for (const variant of KINDS.hosp) {
-    await saveFree(db, { ...t, variant }, freeHospData(r.hospitals, variant, { district, today, src: r.src, where }), OSM_SOURCES, now);
+    await saveFree(db, { ...t, variant }, { ...freeHospData(r.hospitals, variant, { district, today, src: r.src, where }), ...(got !== 'state' || asked !== 'state' ? { scope: got } : {}) }, OSM_SOURCES, now);
   }
-  if (waitUntil && r.bbox) {
+  if (waitUntil && r.bbox && got === asked) {
     // every hospital / health centre of the area, after the response (never on the request path)
     waitUntil(upgradeHospOverpass(db, env, t, { fetchImpl, now, bbox: r.bbox, sleepImpl }).catch(() => undefined));
   }
-  return { ok: true, origin: 'free', model: 'free', translated: [], count: r.hospitals.length };
+  return { ok: true, origin: 'free', model: 'free', translated: [], count: r.hospitals.length, scope: got, ...scopeNote(asked, got) };
 }
 
 /**
@@ -1413,7 +1501,8 @@ export async function upgradeHospOverpass(db, env, t, { fetchImpl = fetch, now =
     const geo = await cachedGeo(db, t);
     box = geo ? geo.bbox : null;
   }
-  const r = await fetchHospOverpass(st, t.district, { fetchImpl, now, bbox: box, sleepImpl, gapMs: civicCaps(env).freeGapMs, timeoutMs: 25000 });
+  const pl = splitPlace(t.district);
+  const r = await fetchHospOverpass(st, pl.district, { fetchImpl, now, bbox: box, sleepImpl, gapMs: civicCaps(env).freeGapMs, timeoutMs: 25000, mandal: pl.mandal });
   const place = geoKey(t);
   if (r.bbox && !box) {
     await saveGeo(db, t, r.bbox, '', now);
@@ -1423,15 +1512,16 @@ export async function upgradeHospOverpass(db, env, t, { fetchImpl = fetch, now =
     return { ok: false, error: r.error };
   }
   const today = new Date(now).toISOString().slice(0, 10);
-  const district = t.district ? titleCase(t.district) : '';
+  const district = pl.district ? titleCase(pl.district) : '';
   const where = placeName(st, t.district);
+  const lv = levelOf(t.district);
   let saved = 0;
   for (const variant of KINDS.hosp) {
     const vt = { kind: 'hosp', state: t.state, district: t.district || '', variant };
     const row = await db.first(`SELECT data, origin FROM civic_data WHERE ${where4}`, ...binds4(vt));
     const cur = row ? parseJsonCol(row.data, null) : null;
-    if (row && row.data && row.origin !== 'free') {
-      continue;
+    if ((row && row.data && row.origin !== 'free') || (cur && cur.scope && cur.scope !== lv)) {
+      continue; // AI data, or a mandal / district row showing a wider level's list
     }
     const have = cur && Array.isArray(cur.hospitals) ? cur.hospitals : [];
     const known = new Set(have.map(h => h.osmUrl).filter(Boolean));
@@ -1440,7 +1530,7 @@ export async function upgradeHospOverpass(db, env, t, { fetchImpl = fetch, now =
       continue;
     }
     const hospitals = [...have, ...add].sort((a, b) => rankOwn(a) - rankOwn(b) || a.name.localeCompare(b.name));
-    const data = cleanHosp({ origin: 'free', asOf: today, src: (cur && cur.src) || r.src, hospitals: hospitals.map(h => ({ ...h, id: h.osmUrl })) }, where);
+    const data = cleanHosp({ origin: 'free', asOf: today, src: (cur && cur.src) || r.src, hospitals: hospitals.map(h => ({ ...h, id: h.osmUrl })), ...(cur && cur.scope ? { scope: cur.scope } : {}) }, where);
     await saveFree(db, vt, data, OSM_SOURCES, now);
     saved += 1;
   }

@@ -1,8 +1,11 @@
 // Civic tab routes (Govt / Hospitals / previous vs present government comparison). All need a verified Firebase ID token (index.js); the uid
 // always comes from the token.
-//   GET  /v1/civic/data?kind=govt|hosp&state=TG&district=&variant=&lang=ta   stored AI summary + its
+//   GET  /v1/civic/data?kind=govt|hosp&state=TG&district=&mandal=&variant=&lang=ta   stored AI summary + its
 //        public source URLs + translated copies in i18n: te, hi and the asked lang (any TR_LANGS
-//        code) (also ?category=govt|hosp-govt|hosp-private). One fast D1 read (+1 for i18n).
+//        code). mandal (Govt / Hospitals, with a district): the sub-district's own row (place.js);
+//        data.scope says which level the data really covers (mandal, else district, else state).
+//        answeredBy: which source answered the stored data (free | gemini | groq | workers-ai).
+//        (also ?category=govt|hosp-govt|hosp-private). One fast D1 read (+1 for i18n).
 //        A place never researched is queued (status 'pending'). status 'partial' = a Govt place's first
 //        research is still running and the parts shown are the ones finished so far (poll for the rest).
 //        Asked lang missing (English only): its translation starts in the background and the English
@@ -33,10 +36,11 @@ import { isOwner } from '../auth.js';
 import { usageFor } from '../db.js';
 import { utcDay } from '../days.js';
 import { CENTRE_KINDS, placeByCode, stateByCode } from './states.js';
+import { MANDAL_KINDS, placeKey, publicTarget } from './place.js';
 import { cleanReviewText, hasProfanity } from './moderation.js';
 import { isGeminiConfigured } from './gemini.js';
 import { aiProviderStatus, isAiConfigured } from './llm.js';
-import { CIVIC_LOCK_MS, CIVIC_MAX_PENDING, FREE_KINDS, KINDS, TR_LANGS, civicCaps, readI18n, researchFree, researchNow, researchOne, startTranslate } from './research.js';
+import { CIVIC_LOCK_MS, CIVIC_MAX_PENDING, FREE_KINDS, answeredByOf, KINDS, TR_LANGS, civicCaps, readI18n, researchFree, researchNow, researchOne, startTranslate } from './research.js';
 
 export const MAX_REVIEWS_PER_DAY = 20; // per user (new or edited)
 export const MAX_REPORTS_PER_DAY = 30; // per user
@@ -75,10 +79,12 @@ export function parseTarget(p) {
   }
   const state = str(p.get('state'), 4).toUpperCase();
   const district = normDistrict(p.get('district'));
-  if (!KINDS[kind] || !KINDS[kind].includes(variant || '') || !placeByCode(state, kind) || !DISTRICT_RE.test(district) || (CENTRE_KINDS.has(kind) && district)) {
+  // mandal (sub-district): Govt / Hospitals only, inside a district; stored as "<district>~<mandal>"
+  const mandal = MANDAL_KINDS.has(kind) && district ? normDistrict(p.get('mandal')) : '';
+  if (!KINDS[kind] || !KINDS[kind].includes(variant || '') || !placeByCode(state, kind) || !DISTRICT_RE.test(district) || !DISTRICT_RE.test(mandal) || (CENTRE_KINDS.has(kind) && district)) {
     throw new HttpError(400, 'bad kind / state / district / variant');
   }
-  return { kind, state, district, variant: variant || '' };
+  return { kind, state, district: placeKey(district, mandal), variant: variant || '' };
 }
 
 const parseJson = (v, dflt) => {
@@ -99,7 +105,7 @@ export async function getCivicData({ db, env, url, now, fetchImpl, ctx }) {
   const t = parseTarget(url.searchParams);
   const lang = TR_LANGS[str(url.searchParams.get('lang'), 4)] ? str(url.searchParams.get('lang'), 4) : '';
   const row = await db.first(
-    'SELECT data, sources, i18n, status, updated_at, running_at FROM civic_data WHERE kind = ? AND state = ? AND district = ? AND variant = ?',
+    'SELECT data, sources, i18n, status, updated_at, running_at, origin, model FROM civic_data WHERE kind = ? AND state = ? AND district = ? AND variant = ?',
     t.kind, t.state, t.district, t.variant,
   );
   let queued = false;
@@ -124,7 +130,7 @@ export async function getCivicData({ db, env, url, now, fetchImpl, ctx }) {
     }
   }
   return {
-    ...t,
+    ...publicTarget(t),
     data,
     i18n: { te: i18n.te || null, hi: i18n.hi || null, ...(lang ? { [lang]: i18n[lang] || null } : {}) },
     sources: data ? cleanSources(parseJson(row.sources, [])) : [],
@@ -139,12 +145,13 @@ export async function getCivicData({ db, env, url, now, fetchImpl, ctx }) {
     // gprm: the keyless Wikipedia fallback (research.js researchPromisesFallback) always works
     researchConfigured: FREE_KINDS.has(t.kind) || t.kind === 'gprm' || isGeminiConfigured(env),
     freeSources: FREE_KINDS.has(t.kind),
+    ...(data ? { answeredBy: answeredByOf(row.origin, row.model) } : {}),
   };
 }
 
 export async function postCivicResearch({ db, env, user, body, now, fetchImpl, ctx }) {
   const p = new URLSearchParams();
-  ['kind', 'state', 'district', 'variant'].forEach(k => p.set(k, str(body && body[k], 60)));
+  ['kind', 'state', 'district', 'mandal', 'variant'].forEach(k => p.set(k, str(body && body[k], 60)));
   const t = parseTarget(p);
   const lang = TR_LANGS[str(body && body.lang, 4)] ? str(body && body.lang, 4) : '';
   const day = utcDay(now);
@@ -162,7 +169,7 @@ export async function postCivicResearch({ db, env, user, body, now, fetchImpl, c
   if (r.did === 'research' || r.did === 'translate') {
     await db.run('INSERT INTO usage (day, key, n) VALUES (?, ?, 1) ON CONFLICT (day, key) DO UPDATE SET n = n + 1', day, rk);
   }
-  return { ...t, lang, ...r };
+  return { ...publicTarget(t), lang, ...r };
 }
 
 const rowToReview = (r, mine = false) => ({

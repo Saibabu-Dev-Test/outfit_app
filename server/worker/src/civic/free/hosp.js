@@ -144,12 +144,17 @@ export const viewboxOf = b => `${b.west},${b.north},${b.east},${b.south}`;
 
 const nomUrl = params => `${NOMINATIM}?${new URLSearchParams({ format: 'jsonv2', ...params }).toString()}`;
 
-/** Bounding box of the district (or of the state when no district) via Nominatim. */
-export async function lookupArea(stateName, districtName, opts) {
+/** Bounding box of the mandal (sub-district) / district / state via Nominatim (pure query list: tested). */
+export const areaQueries = (stateName, districtName, mandalName = '') =>
+  mandalName && districtName
+    ? [`${mandalName}, ${districtName} district, ${stateName}, India`, `${mandalName}, ${districtName}, ${stateName}, India`]
+    : districtName
+      ? [`${districtName} district, ${stateName}, India`, `${districtName}, ${stateName}, India`]
+      : [`${stateName}, India`];
+
+export async function lookupArea(stateName, districtName, opts, mandalName = '') {
   const { fetchImpl, timeoutMs, gapMs, sleepImpl } = opts;
-  const tries = districtName
-    ? [`${districtName} district, ${stateName}, India`, `${districtName}, ${stateName}, India`]
-    : [`${stateName}, India`];
+  const tries = areaQueries(stateName, districtName, mandalName);
   for (let i = 0; i < tries.length; i += 1) {
     if (i > 0) await sleepImpl(gapMs);
     const r = await getJson(nomUrl({ q: tries[i], limit: '3', countrycodes: 'in' }), { fetchImpl, timeoutMs });
@@ -166,7 +171,9 @@ export async function lookupArea(stateName, districtName, opts) {
 /**
  * Hospitals of a district (fast path, Nominatim only). state: { name } or a state name; district:
  * slug or name (optional). opts: fetchImpl, now, timeoutMs (per request), gapMs (between
- * requests, >= 1000 for the public Nominatim), sleepImpl, queries, max.
+ * requests, >= 1000 for the public Nominatim), sleepImpl, queries, max, mandal (sub-district slug or
+ * name: the search is bounded to the mandal's area, looked up as "<mandal>, <district> district,
+ * <state>"; no area found = "hospital in <mandal>, <district>, <state>").
  */
 export async function fetchHospFree(state, district, opts = {}) {
   const {
@@ -178,14 +185,16 @@ export async function fetchHospFree(state, district, opts = {}) {
     queries = HOSP_QUERIES,
     max = 60,
     bbox = null, // cached district bbox (civic_geo): skips the area lookup
+    mandal = '',
   } = opts;
   const today = isoDay(now);
   const stateName = nameOf(state).trim();
   if (!stateName) return { ok: false, hospitals: [], error: 'no state' };
   const districtName = titleCase(district);
+  const mandalName = districtName ? titleCase(mandal) : '';
   const o = { fetchImpl, timeoutMs, gapMs, sleepImpl };
-  const area = bbox ? { ok: true, bbox, requests: 0 } : await lookupArea(stateName, districtName, o);
-  const place = [districtName, stateName].filter(Boolean).join(', ');
+  const area = bbox ? { ok: true, bbox, requests: 0 } : await lookupArea(stateName, districtName, o, mandalName);
+  const place = [mandalName, districtName, stateName].filter(Boolean).join(', ');
   if (area.unreachable) return { ok: false, hospitals: [], bbox: null, place, error: area.error };
   const lists = [];
   const errors = [];
@@ -195,7 +204,7 @@ export async function fetchHospFree(state, district, opts = {}) {
     made = true;
     const params = { q, addressdetails: '1', extratags: '1', limit: '40', countrycodes: 'in' };
     if (area.ok) Object.assign(params, { viewbox: viewboxOf(area.bbox), bounded: '1' });
-    else params.q = `${q} in ${[districtName, stateName].filter(Boolean).join(', ')}`;
+    else params.q = `${q} in ${place}`;
     const r = await getJson(nomUrl(params), { fetchImpl, timeoutMs });
     if (r.ok && Array.isArray(r.data)) lists.push(r.data);
     else errors.push(`${q}: ${r.error || 'bad response'}`);
@@ -248,7 +257,7 @@ export async function fetchHospOverpass(state, district, opts = {}) {
   const today = isoDay(now);
   let bbox = opts.bbox || null;
   if (!bbox) {
-    const area = await lookupArea(nameOf(state).trim(), titleCase(district), { fetchImpl, timeoutMs: Math.min(timeoutMs, 8000), gapMs, sleepImpl });
+    const area = await lookupArea(nameOf(state).trim(), titleCase(district), { fetchImpl, timeoutMs: Math.min(timeoutMs, 8000), gapMs, sleepImpl }, district ? titleCase(opts.mandal || '') : '');
     if (!area.ok) return { ok: false, hospitals: [], error: area.error };
     bbox = area.bbox;
   }

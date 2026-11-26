@@ -378,3 +378,57 @@ export async function fetchGovtFree(state, district, { fetchImpl = fetch, now = 
   // governors: the map used (cache it: one Wikipedia section serves every state / UT)
   return hasAny ? { ok: true, data, sources, governors: govMap } : { ok: false, error: 'nothing found in free sources', governors: govMap };
 }
+
+/**
+ * Wikipedia titles to try for a mandal / tehsil / taluk (pure: tested), most specific first.
+ * level: the state's own word for the sub-district ('mandal', 'tehsil', 'taluk', ...).
+ */
+export const mandalTitles = (mandalName, districtName, level = '') => {
+  const m = String(mandalName || '').trim();
+  const d = String(districtName || '').trim();
+  if (!m) return [];
+  const lv = level ? level.charAt(0).toUpperCase() + level.slice(1) : '';
+  return [...new Set([lv ? `${m} ${lv.toLowerCase()}` : '', lv ? `${m} ${lv}` : '', d ? `${m}, ${d} district` : '', d ? `${m}, ${d}` : '', m].filter(Boolean))];
+};
+
+// A summary counts only when it is about a place in this district / state (same-name places)
+export const summaryFits = (text, districtName, stateName) => {
+  const t = norm(text);
+  const d = norm(String(districtName || '').replace(/district/i, ''));
+  const st = norm(stateName);
+  return t.length > 40 && ((d.length >= 3 && t.includes(d)) || (st.length >= 3 && t.includes(st)));
+};
+
+/**
+ * One mandal's own facts from free sources: the Wikipedia summary of its article (only when it names
+ * the district or state) and the assembly constituencies named after it among the district's MLAs.
+ * -> { name, overview, mlas, src } (overview '' and mlas [] = nothing public for the mandal)
+ */
+export async function fetchMandalFree(state, districtName, mandalName, { fetchImpl = fetch, now = Date.now(), timeoutMs = 7000, level = '', mlas = [] } = {}) {
+  const today = isoDay(now);
+  const opts = { fetchImpl, timeoutMs };
+  let overview = '';
+  let url = '';
+  for (const title of mandalTitles(mandalName, districtName, level)) {
+    const text = await wpSummary(title, opts).catch(() => '');
+    if (text && summaryFits(text, districtName, state.name)) {
+      overview = text.slice(0, 800);
+      url = wikiUrl(title);
+      break;
+    }
+  }
+  const key = norm(mandalName);
+  const mine =
+    key.length >= 3
+      ? (mlas || []).filter(x => {
+          const c = norm(x.constituency);
+          return c.length >= 3 && (c.includes(key) || key.includes(c));
+        })
+      : [];
+  return {
+    name: String(mandalName || ''),
+    overview,
+    mlas: mine.map(x => ({ name: x.name, constituency: x.constituency, party: x.party })),
+    src: overview ? { name: 'Wikipedia', url, date: today } : mine.length ? { name: 'Wikipedia (assembly election results)', url: '', date: today } : null,
+  };
+}
