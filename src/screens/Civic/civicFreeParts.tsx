@@ -2,6 +2,7 @@
 // OpenStreetMap, official .gov.in sites; no AI). Hospital row = name, address, tap-to-call phone,
 // map link, type label (Govt / Private / "Likely private · ownership not confirmed" or "Type not listed" when OSM does not tag it) and a
 // "source · date" line. Govt sections get the same source line (name, date, link).
+// The hospital row is a HeadlineCard: bold name, address summary; tap = the source line.
 import React from 'react';
 import { Text, TouchableOpacity, View } from 'react-native';
 import { ui } from '../Earn/earnUi';
@@ -10,7 +11,8 @@ import { AppLanguage } from '../../i18n/appLanguage';
 import { CivicKey, civicText } from '../../i18n/civicLabels';
 import { CivicSrc, GovtData, Hospital } from '../../services/civicApi';
 import { callNumber, openLink } from './civicParts';
-import { Bi, CivicCard, biLabel } from './bi';
+import { CivicCard, biLabel } from './bi';
+import HeadlineCard from '../../components/HeadlineCard';
 
 // Names that read as a government facility (same idea as the Worker's classifyHospital)
 const GOVT_NAME =
@@ -64,40 +66,53 @@ export function FreeHospitalRow({ h, t, lang, children }: { h: Hospital; t?: Hos
   const typeKey = hospTypeKey(h);
   return (
     <CivicCard lang={lang} hasTranslation={!!t}>
-      <Bi en={h.name} tr={t?.name} style={ui.h2} />
-      <Text testID="hosp-type" style={[typeKey === 'typeNotListed' || typeKey === 'typePrivateLikely' ? ui.muted : ui.good, { fontSize: 12 }]}>
-        🏷️ {biLabel(lang, typeKey)}
-      </Text>
-      {h.address ? (
-        <Bi prefix="📍 " en={h.address} tr={t?.address} />
-      ) : (
-        <Text style={[ui.muted, { fontSize: 12 }]}>
-          📍 {T('address')}: {biLabel(lang, 'publicNA')}
-        </Text>
-      )}
-      {!h.phone ? (
-        <Text style={[ui.muted, { fontSize: 12 }]}>
-          📞 {T('phone')}: {biLabel(lang, 'publicNA')}
-        </Text>
-      ) : null}
-      <View style={[ui.row, { marginTop: 6, flexWrap: 'wrap' }]}>
-        {h.phone ? (
-          <TouchableOpacity testID="hosp-call" style={[ui.btnGhost, { marginRight: 8, marginTop: 4 }]} onPress={() => callNumber(h.phone)}>
-            <Text style={ui.btnGhostText}>📞 {h.phone}</Text>
-          </TouchableOpacity>
+      <HeadlineCard
+        lang={lang}
+        testID="hosp-free-card"
+        headline={h.name}
+        headlineTr={t?.name}
+        summaryPrefix="📍 "
+        summary={h.address}
+        summaryTr={t?.address}
+        extra={
+          <>
+            <Text testID="hosp-type" style={[typeKey === 'typeNotListed' || typeKey === 'typePrivateLikely' ? ui.muted : ui.good, { fontSize: 12 }]}>
+              🏷️ {biLabel(lang, typeKey)}
+            </Text>
+            {!h.phone ? (
+              <Text style={[ui.muted, { fontSize: 12 }]}>
+                📞 {T('phone')}: {biLabel(lang, 'publicNA')}
+              </Text>
+            ) : null}
+          </>
+        }
+        footer={
+          <View style={[ui.row, { marginTop: 6, flexWrap: 'wrap' }]}>
+            {h.phone ? (
+              <TouchableOpacity testID="hosp-call" style={[ui.btnGhost, { marginRight: 8, marginTop: 4 }]} onPress={() => callNumber(h.phone)}>
+                <Text style={ui.btnGhostText}>📞 {h.phone}</Text>
+              </TouchableOpacity>
+            ) : null}
+            {h.mapUrl ? (
+              <TouchableOpacity testID="hosp-map" style={[ui.btnGhost, { marginRight: 8, marginTop: 4 }]} onPress={() => openLink(h.mapUrl as string)}>
+                <Text style={ui.btnGhostText}>🗺️ {T('map')}</Text>
+              </TouchableOpacity>
+            ) : null}
+            {h.website ? (
+              <TouchableOpacity style={[ui.btnGhost, { marginTop: 4 }]} onPress={() => openLink(h.website)}>
+                <Text style={ui.btnGhostText}>🔗 {T('open')}</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        }
+      >
+        {!h.address ? (
+          <Text style={[ui.muted, { fontSize: 12 }]}>
+            📍 {T('address')}: {biLabel(lang, 'publicNA')}
+          </Text>
         ) : null}
-        {h.mapUrl ? (
-          <TouchableOpacity testID="hosp-map" style={[ui.btnGhost, { marginRight: 8, marginTop: 4 }]} onPress={() => openLink(h.mapUrl as string)}>
-            <Text style={ui.btnGhostText}>🗺️ {T('map')}</Text>
-          </TouchableOpacity>
-        ) : null}
-        {h.website ? (
-          <TouchableOpacity style={[ui.btnGhost, { marginTop: 4 }]} onPress={() => openLink(h.website)}>
-            <Text style={ui.btnGhostText}>🔗 {T('open')}</Text>
-          </TouchableOpacity>
-        ) : null}
-      </View>
-      <SrcLine lang={lang} src={h.src} fallbackUrl={h.osmUrl} />
+        <SrcLine lang={lang} src={h.src} fallbackUrl={h.osmUrl} />
+      </HeadlineCard>
       {children}
     </CivicCard>
   );

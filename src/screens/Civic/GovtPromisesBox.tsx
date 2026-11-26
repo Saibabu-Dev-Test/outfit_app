@@ -6,6 +6,7 @@
 // placeholder or seed number); with no researched promises the box says "no data yet" instead.
 // Collapsed until the user opens it, so research is only asked for when someone wants it (same
 // per-user / daily caps on the Worker). Each item in the app language with an English toggle.
+// Each promise is a HeadlineCard: status badge, bold promise text, 2-line fact; tap = source + dates.
 import React, { useMemo, useState } from 'react';
 import { Text, TouchableOpacity, View } from 'react-native';
 import { ui } from '../Earn/earnUi';
@@ -17,6 +18,7 @@ import { CivicStatus, SourcesBox, openLink } from './civicParts';
 import { Bi, CivicCard, biLabel } from './bi';
 import { stateByCodeApp } from './stateName';
 import { useCivicData } from './useCivicData';
+import HeadlineCard from '../../components/HeadlineCard';
 
 export const STATUS_LABEL: Record<PromiseStatus, CivicKey> = {
   done: 'prmDone',
@@ -157,10 +159,16 @@ export default function GovtPromisesBox({ lang, state }: { lang: AppLanguage; st
               {shown.map(({ p, i }) => {
                 const tp = t?.promises?.[i];
                 return (
-                  <View key={`p${i}`} style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 6 }}>
-                    <Badge status={p.status} lang={lang} />
-                    <Bi en={p.text} tr={tp?.text} style={[ui.body, { fontWeight: '700' }]} />
-                    {p.fact ? <Bi en={p.fact} tr={tp?.fact} /> : null}
+                  <HeadlineCard
+                    key={`p${i}`}
+                    divided
+                    lang={lang}
+                    badge={<Badge status={p.status} lang={lang} />}
+                    headline={p.text}
+                    headlineTr={tp?.text}
+                    summary={p.fact}
+                    summaryTr={tp?.fact}
+                  >
                     {p.source ? (
                       <TouchableOpacity onPress={() => openLink(p.source)}>
                         <Text style={[ui.muted, { fontSize: 12, color: colors.primary }]} numberOfLines={1}>
@@ -177,7 +185,7 @@ export default function GovtPromisesBox({ lang, state }: { lang: AppLanguage; st
                         </Text>
                       </TouchableOpacity>
                     ) : null}
-                  </View>
+                  </HeadlineCard>
                 );
               })}
               <SourcesBox lang={lang} sources={res?.sources} updatedAt={res?.updatedAt || 0} asOf={d.asOf} />

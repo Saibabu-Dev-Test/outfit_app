@@ -6,6 +6,7 @@
 // its source link and the note that NIRF is a teaching + research ranking, not a treatment rating.
 // Under it, "Govt package rates": the official PM-JAY HBP 2022 and CGHS 2025 rates for the procedures
 // that treat the matched disease (services/procedureRates.ts), behind a toggle, each with its source.
+// Each institution is a HeadlineCard: bold "#rank name", city / state summary; tap = its NIRF source link.
 import React, { useState } from 'react';
 import { Text, TouchableOpacity, View } from 'react-native';
 import { ui } from '../Earn/earnUi';
@@ -17,6 +18,7 @@ import { NIRF_SOURCE_LABEL, bestHospitalsFor } from '../../data/topHospitalsIndi
 import { CGHS, PMJAY, RateHit, priceLine, ratesFor, rowTitle } from '../../services/procedureRates';
 import { callNumber, openLink } from './civicParts';
 import { biLabel } from './bi';
+import HeadlineCard from '../../components/HeadlineCard';
 
 const RED = '#C62828';
 
@@ -107,20 +109,20 @@ export default function BestInIndiaBox({ lang, query, state }: { lang: AppLangua
         ))}
       </View>
       {best.hospitals.map(h => (
-        <View key={h.nirfId} style={{ marginTop: 8 }}>
-          <Text style={[ui.body, { fontWeight: '700' }]}>
-            #{h.rank} {h.name}
-          </Text>
-          <Text style={ui.muted}>
-            📍 {h.city}, {h.state}
-            {h.reason === 'specialist' ? ` · ⭐ ${T('specialistInst')}` : ''}
-          </Text>
+        <HeadlineCard
+          key={h.nirfId}
+          divided
+          lang={lang}
+          headline={`#${h.rank} ${h.name}`}
+          summaryPrefix="📍 "
+          summary={`${h.city}, ${h.state}${h.reason === 'specialist' ? ` · ⭐ ${T('specialistInst')}` : ''}`}
+        >
           <TouchableOpacity onPress={() => openLink(h.sourceUrl)}>
             <Text style={[ui.muted, { fontSize: 12, color: colors.primary }]}>
               🔗 {T('nirfRank')} {h.rank} · {NIRF_SOURCE_LABEL}
             </Text>
           </TouchableOpacity>
-        </View>
+        </HeadlineCard>
       ))}
       <Text style={[ui.muted, { fontSize: 12, marginTop: 8 }]}>ℹ️ {biLabel(lang, 'nirfNote')}</Text>
       <GovtRatesBox lang={lang} query={q} />

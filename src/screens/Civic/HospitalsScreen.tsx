@@ -26,6 +26,8 @@
 // Location: State -> District -> Mandal chosen from the official LGD lists (LocationPicker). The list is
 // for the picked mandal; a mandal with no hospital found shows the district's list with the note "No
 // data for <mandal>, showing <district> district" (state-wide when the district is empty too).
+// Each hospital is a HeadlineCard: bold name, 2-line type + address; tap = timings, specialities,
+// schemes, doctors, facilities, sources and reviews. Call / map / website buttons stay visible.
 import React, { useState } from 'react';
 import { RefreshControl, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -50,8 +52,12 @@ import LanguageChip from './LanguageChip';
 import { FreeHospitalRow, isFreeHospital } from './civicFreeParts';
 import { hospitalTermsFor, specialitiesFor } from '../../services/diseaseSearch';
 import BestInIndiaBox from './BestInIndiaBox';
+import HeadlineCard from '../../components/HeadlineCard';
 
 type HospFilter = HospVariant | 'all';
+
+// Card summary: the hospital's own type + address (nothing when neither is listed)
+const summaryOf = (h: Pick<Hospital, 'type' | 'address'>): string => [h.type, h.address].filter(Boolean).join(' · ');
 
 // "Label: Public info not available" when a public source did not state the value
 function NA({ lang, label }: { lang: ReturnType<typeof useAppLanguage>; label: Parameters<typeof civicText>[1] }) {
@@ -86,28 +92,56 @@ function HospitalCard({
   maybe?: string;
 }) {
   const T = (k: Parameters<typeof civicText>[1]) => civicText(lang, k);
-  const [open, setOpen] = useState(false);
   const join = (xs?: string[]) => (xs && xs.length ? xs.join(' • ') : '');
   const host = (u: string) => u.replace(/^https:\/\//, '').split('/')[0];
   const n = factsCount(h);
   return (
     <CivicCard lang={lang} hasTranslation={!!t}>
-      <TouchableOpacity onPress={() => setOpen(v => !v)} activeOpacity={0.8}>
-        <Bi en={h.name} tr={t?.name} style={ui.h2} />
-        {kindLabel ? <Text style={[ui.muted, { fontSize: 12 }]}>🏷️ {kindLabel}</Text> : null}
-        {maybe ? <Text testID="hosp-may-treat" style={[ui.bad, { fontSize: 12 }]}>📞 {maybe}</Text> : null}
-        {h.type ? <Bi en={h.type} tr={t?.type} style={ui.muted} /> : null}
-        {matched && matched.length ? (
-          <Text style={[ui.good, { marginTop: 2 }]}>
-            🔎 {T('matches')}: {matched.join(' • ')}
-          </Text>
-        ) : null}
-        {showCount ? (
-          <Text style={[ui.muted, { fontSize: 12 }]}>
-            🩺 {n.specialities} {T('specialities')} · 🏥 {n.facilities} {T('facilities')}
-          </Text>
-        ) : null}
-        {h.emergency24x7 ? <Text style={ui.good}>🚑 24x7 {biLabel(lang, 'emergency')}</Text> : <NA lang={lang} label="emergency24" />}
+      <HeadlineCard
+        lang={lang}
+        testID="hosp-card"
+        headline={h.name}
+        headlineTr={t?.name}
+        summary={summaryOf(h)}
+        summaryTr={t ? summaryOf({ type: t.type || h.type, address: t.address || h.address }) : null}
+        extra={
+          <>
+            {kindLabel ? <Text style={[ui.muted, { fontSize: 12 }]}>🏷️ {kindLabel}</Text> : null}
+            {maybe ? <Text testID="hosp-may-treat" style={[ui.bad, { fontSize: 12 }]}>📞 {maybe}</Text> : null}
+            {matched && matched.length ? (
+              <Text style={[ui.good, { marginTop: 2 }]}>
+                🔎 {T('matches')}: {matched.join(' • ')}
+              </Text>
+            ) : null}
+            {showCount ? (
+              <Text style={[ui.muted, { fontSize: 12 }]}>
+                🩺 {n.specialities} {T('specialities')} · 🏥 {n.facilities} {T('facilities')}
+              </Text>
+            ) : null}
+            {h.emergency24x7 ? <Text style={ui.good}>🚑 24x7 {biLabel(lang, 'emergency')}</Text> : null}
+          </>
+        }
+        footer={
+          <View style={[ui.row, { marginTop: 6, flexWrap: 'wrap' }]}>
+            {h.phone ? (
+              <TouchableOpacity style={[ui.btnGhost, { marginRight: 8, marginTop: 4 }]} onPress={() => callNumber(h.phone)}>
+                <Text style={ui.btnGhostText}>📞 {h.phone}</Text>
+              </TouchableOpacity>
+            ) : null}
+            {h.mapUrl ? (
+              <TouchableOpacity style={[ui.btnGhost, { marginRight: 8, marginTop: 4 }]} onPress={() => openLink(h.mapUrl as string)}>
+                <Text style={ui.btnGhostText}>🗺️ {T('map')}</Text>
+              </TouchableOpacity>
+            ) : null}
+            {h.website ? (
+              <TouchableOpacity style={[ui.btnGhost, { marginTop: 4 }]} onPress={() => openLink(h.website)}>
+                <Text style={ui.btnGhostText}>🔗 {T('open')}</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        }
+      >
+        {!h.emergency24x7 ? <NA lang={lang} label="emergency24" /> : null}
         {h.timings ? <Bi prefix={`🕒 ${T('timings')}: `} en={h.timings} tr={t?.timings} /> : <NA lang={lang} label="timings" />}
         {h.address ? <Bi prefix="📍 " en={h.address} tr={t?.address} /> : <NA lang={lang} label="address" />}
         {h.specialities.length ? <Bi prefix="🩺 " en={join(h.specialities)} tr={join(t?.specialities)} style={ui.muted} /> : <NA lang={lang} label="specialities" />}
@@ -121,65 +155,44 @@ function HospitalCard({
         )}
         {h.note ? <Bi en={h.note} tr={t?.note} style={ui.muted} /> : null}
         {!h.phone ? <NA lang={lang} label="phone" /> : null}
-      </TouchableOpacity>
-      {open ? (
-        <View style={{ marginTop: 6 }}>
-          <Text style={[ui.muted, { marginTop: 4 }]}>⭐ {biLabel(lang, 'specialFor')}</Text>
-          {h.specialFor && h.specialFor.length ? <Bi en={join(h.specialFor)} tr={join(t?.specialFor)} /> : <Text style={[ui.muted, { fontSize: 12 }]}>{biLabel(lang, 'publicNA')}</Text>}
-          <Text style={[ui.muted, { marginTop: 6 }]}>👩‍⚕️ {biLabel(lang, 'doctors')}</Text>
-          {h.doctors && h.doctors.length ? (
-            h.doctors.map((d, i) => {
-              const td = t?.doctors?.[i];
-              return (
-                <View key={`${d.name}${i}`} style={{ marginTop: 4 }}>
-                  <Bi en={[d.name, d.qualification].filter(Boolean).join(', ')} tr={td ? [td.name, td.qualification].filter(Boolean).join(', ') : undefined} style={[ui.body, { fontWeight: '700' }]} />
-                  {d.speciality ? <Bi en={d.speciality} tr={td?.speciality} style={ui.muted} /> : null}
-                  <Text style={[ui.muted, { fontSize: 12 }]}>
-                    {T('experience')}: {d.experience || civicText(lang, 'publicNA')}
-                  </Text>
-                  <TouchableOpacity onPress={() => openLink(d.source)}>
-                    <Text style={[ui.muted, { fontSize: 12, color: colors.primary }]}>🔗 {host(d.source)}</Text>
-                  </TouchableOpacity>
-                </View>
-              );
-            })
-          ) : (
-            <Text style={[ui.muted, { fontSize: 12 }]}>{biLabel(lang, 'publicNA')}</Text>
-          )}
-          <Text style={[ui.muted, { marginTop: 6 }]}>🏥 {biLabel(lang, 'facilities')}</Text>
-          {h.facilities && h.facilities.length ? <Bi en={join(h.facilities)} tr={join(t?.facilities)} /> : <Text style={[ui.muted, { fontSize: 12 }]}>{biLabel(lang, 'publicNA')}</Text>}
-          <Text style={[ui.muted, { marginTop: 6 }]}>📚 {biLabel(lang, 'sources')}</Text>
-          {h.sources && h.sources.length ? (
-            h.sources.map(u => (
-              <TouchableOpacity key={u} onPress={() => openLink(u)}>
-                <Text style={[ui.muted, { fontSize: 12, color: colors.primary }]} numberOfLines={1}>
-                  🔗 {host(u)}
+        <Text style={[ui.muted, { marginTop: 4 }]}>⭐ {biLabel(lang, 'specialFor')}</Text>
+        {h.specialFor && h.specialFor.length ? <Bi en={join(h.specialFor)} tr={join(t?.specialFor)} /> : <Text style={[ui.muted, { fontSize: 12 }]}>{biLabel(lang, 'publicNA')}</Text>}
+        <Text style={[ui.muted, { marginTop: 6 }]}>👩‍⚕️ {biLabel(lang, 'doctors')}</Text>
+        {h.doctors && h.doctors.length ? (
+          h.doctors.map((d, i) => {
+            const td = t?.doctors?.[i];
+            return (
+              <View key={`${d.name}${i}`} style={{ marginTop: 4 }}>
+                <Bi en={[d.name, d.qualification].filter(Boolean).join(', ')} tr={td ? [td.name, td.qualification].filter(Boolean).join(', ') : undefined} style={[ui.body, { fontWeight: '700' }]} />
+                {d.speciality ? <Bi en={d.speciality} tr={td?.speciality} style={ui.muted} /> : null}
+                <Text style={[ui.muted, { fontSize: 12 }]}>
+                  {T('experience')}: {d.experience || civicText(lang, 'publicNA')}
                 </Text>
-              </TouchableOpacity>
-            ))
-          ) : (
-            <Text style={[ui.muted, { fontSize: 12 }]}>{biLabel(lang, 'publicNA')}</Text>
-          )}
-        </View>
-      ) : null}
-      <View style={[ui.row, { marginTop: 6, flexWrap: 'wrap' }]}>
-        {h.phone ? (
-          <TouchableOpacity style={[ui.btnGhost, { marginRight: 8, marginTop: 4 }]} onPress={() => callNumber(h.phone)}>
-            <Text style={ui.btnGhostText}>📞 {h.phone}</Text>
-          </TouchableOpacity>
-        ) : null}
-        {h.mapUrl ? (
-          <TouchableOpacity style={[ui.btnGhost, { marginRight: 8, marginTop: 4 }]} onPress={() => openLink(h.mapUrl as string)}>
-            <Text style={ui.btnGhostText}>🗺️ {T('map')}</Text>
-          </TouchableOpacity>
-        ) : null}
-        {h.website ? (
-          <TouchableOpacity style={[ui.btnGhost, { marginTop: 4 }]} onPress={() => openLink(h.website)}>
-            <Text style={ui.btnGhostText}>🔗 {T('open')}</Text>
-          </TouchableOpacity>
-        ) : null}
-      </View>
-      {open ? <ReviewsBox lang={lang} item={item} userName={userName} myUid={myUid} /> : null}
+                <TouchableOpacity onPress={() => openLink(d.source)}>
+                  <Text style={[ui.muted, { fontSize: 12, color: colors.primary }]}>🔗 {host(d.source)}</Text>
+                </TouchableOpacity>
+              </View>
+            );
+          })
+        ) : (
+          <Text style={[ui.muted, { fontSize: 12 }]}>{biLabel(lang, 'publicNA')}</Text>
+        )}
+        <Text style={[ui.muted, { marginTop: 6 }]}>🏥 {biLabel(lang, 'facilities')}</Text>
+        {h.facilities && h.facilities.length ? <Bi en={join(h.facilities)} tr={join(t?.facilities)} /> : <Text style={[ui.muted, { fontSize: 12 }]}>{biLabel(lang, 'publicNA')}</Text>}
+        <Text style={[ui.muted, { marginTop: 6 }]}>📚 {biLabel(lang, 'sources')}</Text>
+        {h.sources && h.sources.length ? (
+          h.sources.map(u => (
+            <TouchableOpacity key={u} onPress={() => openLink(u)}>
+              <Text style={[ui.muted, { fontSize: 12, color: colors.primary }]} numberOfLines={1}>
+                🔗 {host(u)}
+              </Text>
+            </TouchableOpacity>
+          ))
+        ) : (
+          <Text style={[ui.muted, { fontSize: 12 }]}>{biLabel(lang, 'publicNA')}</Text>
+        )}
+        <ReviewsBox lang={lang} item={item} userName={userName} myUid={myUid} />
+      </HeadlineCard>
     </CivicCard>
   );
 }

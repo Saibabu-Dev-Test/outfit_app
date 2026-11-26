@@ -180,6 +180,8 @@ export type CivicKey =
   | 'address'
   | 'phone'
   | 'englishToggle'
+  | 'tapDetails'
+  | 'hideDetails'
   | 'aiBusy'
   | 'aiQuota'
   | 'aiLimit'
@@ -389,6 +391,8 @@ export const CIVIC_LABELS: Record<StaticLanguage, Record<CivicKey, string>> = {
     address: 'Address',
     phone: 'Phone',
     englishToggle: 'English',
+    tapDetails: 'Tap for details',
+    hideDetails: 'Hide details',
     aiBusy: 'AI is busy right now (free limit). Saved info is shown; please try again in a few minutes.',
     aiQuota: 'AI is paused for today (free AI limit used up). Saved info still works.',
     aiLimit: "You've used today's AI questions. Please come back tomorrow.",
@@ -597,6 +601,8 @@ export const CIVIC_LABELS: Record<StaticLanguage, Record<CivicKey, string>> = {
     address: 'చిరునామా',
     phone: 'ఫోన్',
     englishToggle: 'English',
+    tapDetails: 'వివరాల కోసం నొక్కండి',
+    hideDetails: 'వివరాలు దాచు',
     aiBusy: 'AI ఇప్పుడు బిజీగా ఉంది (ఉచిత పరిమితి). సేవ్ చేసిన సమాచారం చూపిస్తున్నాం; కొన్ని నిమిషాల తర్వాత మళ్ళీ ప్రయత్నించండి.',
     aiQuota: 'ఈ రోజుకు AI ఆగింది (ఉచిత AI పరిమితి పూర్తయింది). సేవ్ చేసిన సమాచారం పనిచేస్తుంది.',
     aiLimit: 'ఈ రోజు AI ప్రశ్నలు పూర్తయ్యాయి. రేపు మళ్ళీ రండి.',
@@ -805,6 +811,8 @@ export const CIVIC_LABELS: Record<StaticLanguage, Record<CivicKey, string>> = {
     address: 'पता',
     phone: 'फ़ोन',
     englishToggle: 'English',
+    tapDetails: 'विवरण के लिए टैप करें',
+    hideDetails: 'विवरण छिपाएँ',
     aiBusy: 'AI अभी व्यस्त है (मुफ़्त सीमा)। सहेजी गई जानकारी दिखाई जा रही है; कुछ मिनट बाद फिर कोशिश करें।',
     aiQuota: 'आज के लिए AI रुका है (मुफ़्त AI सीमा खत्म)। सहेजी गई जानकारी काम करती है।',
     aiLimit: 'आज के AI सवाल पूरे हो गए। कल फिर आइए।',

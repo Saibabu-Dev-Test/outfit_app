@@ -19,6 +19,8 @@
 // mandal shows its own facts (Wikipedia summary, assembly constituencies named after it) above the
 // district's; nothing public for the mandal = the note "No data for <mandal>, showing <district>
 // district" (state-wide with a note when the district has nothing either).
+// Offices / schemes / grievance / departments / services rows are HeadlineCards: bold name, 2-line
+// summary (what it is / benefit / how), tap = the rest; phone / website links stay visible.
 import React from 'react';
 import { RefreshControl, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -42,6 +44,7 @@ import GovtCompareBox from './GovtCompareBox';
 import GovtPromisesBox from './GovtPromisesBox';
 import LanguageChip from './LanguageChip';
 import { SrcLine, districtSiteOf } from './civicFreeParts';
+import HeadlineCard from '../../components/HeadlineCard';
 
 const Links = ({ phone, website, lang }: { phone?: string; website?: string; lang: ReturnType<typeof useAppLanguage> }) =>
   phone || website ? (
@@ -249,12 +252,18 @@ export default function GovtScreen() {
               <CivicCard lang={lang} hasTranslation={!!t}>
                 <Text style={ui.h2}>🏢 {L('offices')}</Text>
                 {d.offices.map((x, i) => (
-                  <View key={`${x.name}${i}`} style={{ marginTop: 10 }}>
-                    <Bi en={x.name} tr={t?.offices?.[i]?.name} style={[ui.body, { fontWeight: '700' }]} />
-                    {x.what ? <Bi en={x.what} tr={t?.offices?.[i]?.what} /> : null}
+                  <HeadlineCard
+                    key={`${x.name}${i}`}
+                    divided
+                    lang={lang}
+                    headline={x.name}
+                    headlineTr={t?.offices?.[i]?.name}
+                    summary={x.what}
+                    summaryTr={t?.offices?.[i]?.what}
+                    footer={<Links phone={x.phone} website={x.website} lang={lang} />}
+                  >
                     {x.address ? <Bi prefix="📍 " en={x.address} tr={t?.offices?.[i]?.address} style={ui.muted} /> : null}
-                    <Links phone={x.phone} website={x.website} lang={lang} />
-                  </View>
+                  </HeadlineCard>
                 ))}
               </CivicCard>
             ) : null}
@@ -265,14 +274,21 @@ export default function GovtScreen() {
                 {d.schemes.map((x, i) => {
                   const ts = t?.schemes?.[i];
                   return (
-                    <View key={`${x.name}${i}`} style={{ marginTop: 12 }}>
-                      <Bi en={x.name} tr={ts?.name} style={[ui.body, { fontWeight: '700' }]} />
-                      {x.level ? <Text style={ui.muted}>{L(x.level === 'central' ? 'centralScheme' : 'stateScheme')}</Text> : null}
+                    <HeadlineCard
+                      key={`${x.name}${i}`}
+                      divided
+                      lang={lang}
+                      headline={x.name}
+                      headlineTr={ts?.name}
+                      summaryPrefix={x.benefit ? `🎁 ${civicText(lang, 'benefit')}: ` : ''}
+                      summary={x.benefit}
+                      summaryTr={x.benefit ? ts?.benefit : null}
+                      extra={x.level ? <Text style={ui.muted}>{L(x.level === 'central' ? 'centralScheme' : 'stateScheme')}</Text> : null}
+                      footer={<Links website={x.website} lang={lang} />}
+                    >
                       {x.who ? <Bi prefix={`👤 ${civicText(lang, 'eligibility')}: `} en={x.who} tr={ts?.who} /> : null}
-                      {x.benefit ? <Bi prefix={`🎁 ${civicText(lang, 'benefit')}: `} en={x.benefit} tr={ts?.benefit} /> : null}
                       {x.apply ? <Bi prefix={`📝 ${civicText(lang, 'howApply')}: `} en={x.apply} tr={ts?.apply} /> : null}
-                      <Links website={x.website} lang={lang} />
-                    </View>
+                    </HeadlineCard>
                   );
                 })}
                 <SrcLine lang={lang} src={src?.schemes} />
@@ -284,11 +300,16 @@ export default function GovtScreen() {
               <CivicCard lang={lang} hasTranslation={!!t}>
                 <Text style={ui.h2}>📣 {L('grievance')}</Text>
                 {d.grievance.map((x, i) => (
-                  <View key={`${x.name}${i}`} style={{ marginTop: 10 }}>
-                    <Bi en={x.name} tr={t?.grievance?.[i]?.name} style={[ui.body, { fontWeight: '700' }]} />
-                    {x.how ? <Bi en={x.how} tr={t?.grievance?.[i]?.how} /> : null}
-                    <Links phone={x.phone} website={x.website} lang={lang} />
-                  </View>
+                  <HeadlineCard
+                    key={`${x.name}${i}`}
+                    divided
+                    lang={lang}
+                    headline={x.name}
+                    headlineTr={t?.grievance?.[i]?.name}
+                    summary={x.how}
+                    summaryTr={t?.grievance?.[i]?.how}
+                    footer={<Links phone={x.phone} website={x.website} lang={lang} />}
+                  />
                 ))}
                 <SrcLine lang={lang} src={src?.schemes} />
                 {res?.aiConfigured ? <ExplainButton lang={lang} onExplain={explain('grievance')} /> : null}
@@ -315,11 +336,16 @@ export default function GovtScreen() {
               <CivicCard lang={lang} hasTranslation={!!t}>
                 <Text style={ui.h2}>🗂️ {L('departments')}</Text>
                 {d.departments.map((x, i) => (
-                  <View key={`${x.name}${i}`} style={{ marginTop: 8 }}>
-                    <Bi en={x.name} tr={t?.departments?.[i]?.name} style={[ui.body, { fontWeight: '700' }]} />
-                    {x.what ? <Bi en={x.what} tr={t?.departments?.[i]?.what} /> : null}
-                    <Links phone={x.helpline} website={x.website} lang={lang} />
-                  </View>
+                  <HeadlineCard
+                    key={`${x.name}${i}`}
+                    divided
+                    lang={lang}
+                    headline={x.name}
+                    headlineTr={t?.departments?.[i]?.name}
+                    summary={x.what}
+                    summaryTr={t?.departments?.[i]?.what}
+                    footer={<Links phone={x.helpline} website={x.website} lang={lang} />}
+                  />
                 ))}
               </CivicCard>
             ) : null}
@@ -328,11 +354,16 @@ export default function GovtScreen() {
               <CivicCard lang={lang} hasTranslation={!!t}>
                 <Text style={ui.h2}>🧾 {L('services')}</Text>
                 {d.services.map((x, i) => (
-                  <View key={`${x.name}${i}`} style={{ marginTop: 8 }}>
-                    <Bi en={x.name} tr={t?.services?.[i]?.name} style={[ui.body, { fontWeight: '700' }]} />
-                    {x.how ? <Bi en={x.how} tr={t?.services?.[i]?.how} /> : null}
-                    <Links website={x.website} lang={lang} />
-                  </View>
+                  <HeadlineCard
+                    key={`${x.name}${i}`}
+                    divided
+                    lang={lang}
+                    headline={x.name}
+                    headlineTr={t?.services?.[i]?.name}
+                    summary={x.how}
+                    summaryTr={t?.services?.[i]?.how}
+                    footer={<Links website={x.website} lang={lang} />}
+                  />
                 ))}
                 <SrcLine lang={lang} src={src?.schemes} />
                 {res?.aiConfigured ? <ExplainButton lang={lang} onExplain={explain('services')} /> : null}

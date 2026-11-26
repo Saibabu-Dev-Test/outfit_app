@@ -4,6 +4,7 @@
 // no verdict, rating or "which is best" anywhere. Collapsed until the user opens it, so research is
 // only asked for when someone wants it (same per-user / daily caps on the Worker).
 // Each item in the app language with an English toggle (civic_i18n / civic_data.i18n).
+// Each row is a HeadlineCard: bold topic, 2-line summary of both sides; tap = side-by-side facts + dates + sources.
 import React, { useState } from 'react';
 import { Text, TouchableOpacity, View } from 'react-native';
 import { ui } from '../Earn/earnUi';
@@ -15,6 +16,7 @@ import { CivicStatus, SourcesBox, openLink } from './civicParts';
 import { Bi, CivicCard, biLabel } from './bi';
 import { stateByCodeApp } from './stateName';
 import { useCivicData } from './useCivicData';
+import HeadlineCard from '../../components/HeadlineCard';
 
 export const AREA_LABEL: Record<CompareArea, CivicKey> = {
   schemes: 'schemes',
@@ -23,6 +25,10 @@ export const AREA_LABEL: Record<CompareArea, CivicKey> = {
   started: 'areaStarted',
   stopped: 'areaStopped',
 };
+
+// Row summary: both sides' own facts (a side with no sourced fact is left out, nothing invented)
+const sideBySide = (lang: AppLanguage, prev?: string, pres?: string): string =>
+  [prev ? `${civicText(lang, 'previousGovt')}: ${prev}` : '', pres ? `${civicText(lang, 'presentGovt')}: ${pres}` : ''].filter(Boolean).join(' · ');
 
 const host = (u: string) => u.replace(/^https:\/\//, '').split('/')[0];
 
@@ -110,8 +116,15 @@ export default function GovtCompareBox({ lang, state }: { lang: AppLanguage; sta
                     {rows.map(({ r, i }) => {
                       const tr2 = t?.rows?.[i];
                       return (
-                        <View key={`${area}${i}`} style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 6 }}>
-                          <Bi en={r.topic} tr={tr2?.topic} style={[ui.body, { fontWeight: '700' }]} />
+                        <HeadlineCard
+                          key={`${area}${i}`}
+                          divided
+                          lang={lang}
+                          headline={r.topic}
+                          headlineTr={tr2?.topic}
+                          summary={sideBySide(lang, r.previous?.text, r.present?.text)}
+                          summaryTr={t ? sideBySide(lang, tr2?.previous?.text || r.previous?.text, tr2?.present?.text || r.present?.text) : null}
+                        >
                           <View style={[ui.row, { alignItems: 'flex-start', marginTop: 4 }]}>
                             <View style={[ui.flex1, { paddingRight: 6 }]}>
                               <Text style={[ui.muted, { fontSize: 11 }]}>{civicText(lang, 'previousGovt')}</Text>
@@ -122,7 +135,7 @@ export default function GovtCompareBox({ lang, state }: { lang: AppLanguage; sta
                               <FactCell f={r.present} tf={tr2?.present} lang={lang} />
                             </View>
                           </View>
-                        </View>
+                        </HeadlineCard>
                       );
                     })}
                   </View>

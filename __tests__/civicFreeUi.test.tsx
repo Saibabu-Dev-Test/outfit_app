@@ -82,6 +82,13 @@ const textOf = (r: ReactTestRenderer.ReactTestRenderer) =>
     .map(n => [].concat(n.props.children ?? '').join(''))
     .join('\n');
 
+// HeadlineCard rows open their details (sources, dates, ...) on tap: open every row
+const expandAll = async (r: ReactTestRenderer.ReactTestRenderer) => {
+  const fns = new Set<() => void>();
+  r.root.findAll(n => n.props.testID === 'headline-toggle' && typeof n.type !== 'string' && typeof n.props.onPress === 'function' && !n.props.disabled).forEach(n => fns.add(n.props.onPress));
+  await ReactTestRenderer.act(async () => fns.forEach(f => f()));
+};
+
 const mounted: ReactTestRenderer.ReactTestRenderer[] = [];
 const mount = async (el: React.ReactElement) => {
   let r!: ReactTestRenderer.ReactTestRenderer;
@@ -157,6 +164,7 @@ describe('free-source hospital rows', () => {
     const spy = jest.spyOn(Linking, 'openURL').mockResolvedValue(true as any);
     const { FreeHospitalRow } = require('../src/screens/Civic/civicFreeParts');
     const r = await mount(<FreeHospitalRow h={FREE_HOSP.hospitals[0]} lang="English" />);
+    await expandAll(r);
     const txt = textOf(r);
     expect(txt).toMatch(/Government General Hospital Kurnool/);
     expect(txt).toMatch(/Hospital Rd, Kurnool/);
@@ -180,6 +188,7 @@ describe('free-source hospital rows', () => {
     expect(hospTypeKey({ name: 'Sunrise Clinic' })).toBe('typeNotListed'); // no OSM ownership field
     expect(hospTypeKey({})).toBe('typeNotListed');
     const r = await mount(<FreeHospitalRow h={FREE_HOSP.hospitals[1]} lang="English" />);
+    await expandAll(r);
     const txt = textOf(r);
     expect(txt).toMatch(/Likely private · ownership not confirmed/);
     expect(txt).not.toMatch(/🏷️ Private\b/);

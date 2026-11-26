@@ -13,6 +13,13 @@ const textOf = (r: ReactTestRenderer.ReactTestRenderer) =>
     .map(n => [].concat(n.props.children ?? '').join(''))
     .join('\n');
 
+// HeadlineCard rows open their details (sources, dates, ...) on tap: open every row
+const expandAll = async (r: ReactTestRenderer.ReactTestRenderer) => {
+  const fns = new Set<() => void>();
+  r.root.findAll(n => n.props.testID === 'headline-toggle' && typeof n.type !== 'string' && typeof n.props.onPress === 'function' && !n.props.disabled).forEach(n => fns.add(n.props.onPress));
+  await ReactTestRenderer.act(async () => fns.forEach(f => f()));
+};
+
 const mounted: ReactTestRenderer.ReactTestRenderer[] = [];
 const mount = async (el: React.ReactElement) => {
   let r!: ReactTestRenderer.ReactTestRenderer;
@@ -31,6 +38,7 @@ afterEach(async () => {
 describe('BestInIndiaBox', () => {
   it('kidney stone (English): departments, top 5 by NIRF rank, source + note, no emergency', async () => {
     const r = await mount(<BestInIndiaBox lang="English" query="kidney stone" />);
+    await expandAll(r);
     const txt = textOf(r);
     expect(txt).toMatch(/Best in India for Kidney stone/);
     expect(txt).toMatch(/^Urology$/m);

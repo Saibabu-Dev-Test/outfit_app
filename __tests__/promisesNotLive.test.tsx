@@ -33,6 +33,13 @@ const textOf = (r: ReactTestRenderer.ReactTestRenderer) =>
 
 const flush = () => ReactTestRenderer.act(async () => new Promise<void>(res => setTimeout(() => res(), 0)));
 
+// HeadlineCard rows open their details (sources, dates, ...) on tap: open every row
+const expandAll = async (r: ReactTestRenderer.ReactTestRenderer) => {
+  const fns = new Set<() => void>();
+  r.root.findAll(n => n.props.testID === 'headline-toggle' && typeof n.type !== 'string' && typeof n.props.onPress === 'function' && !n.props.disabled).forEach(n => fns.add(n.props.onPress));
+  await ReactTestRenderer.act(async () => fns.forEach(f => f()));
+};
+
 const openBox = async () => {
   const GovtPromisesBox = require('../src/screens/Civic/GovtPromisesBox').default;
   let r!: ReactTestRenderer.ReactTestRenderer;
@@ -112,6 +119,7 @@ describe('GovtPromisesBox with promises from the free Wikipedia fallback', () =>
     };
     workerFetch.mockImplementation(async () => ({ kind: 'gprm', state: 'AP', district: '', variant: '', data, i18n: { te: null, hi: null }, sources: [], aiStars: null, status: 'ok', updatedAt: 1, aiConfigured: true, researchConfigured: true }));
     const r = await openBox();
+    await expandAll(r);
     const txt = textOf(r);
     expect(txt).toMatch(/Wikipedia article on this election \(free source\)/);
     expect(txt).toMatch(/Farmers will receive ₹15,000 each year\./);

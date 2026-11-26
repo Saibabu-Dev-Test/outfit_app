@@ -114,6 +114,13 @@ const pressByText = async (r: ReactTestRenderer.ReactTestRenderer, re: RegExp) =
   });
 };
 
+// HeadlineCard rows open their details (sources, dates, ...) on tap: open every row
+const expandAll = async (r: ReactTestRenderer.ReactTestRenderer) => {
+  const fns = new Set<() => void>();
+  r.root.findAll(n => n.props.testID === 'headline-toggle' && typeof n.type !== 'string' && typeof n.props.onPress === 'function' && !n.props.disabled).forEach(n => fns.add(n.props.onPress));
+  await ReactTestRenderer.act(async () => fns.forEach(f => f()));
+};
+
 const mounted: ReactTestRenderer.ReactTestRenderer[] = [];
 const mount = async (el: React.ReactElement) => {
   let r!: ReactTestRenderer.ReactTestRenderer;
@@ -165,6 +172,7 @@ describe('civic screens render', () => {
     expect(workerFetch.mock.calls.some((c: any[]) => String(c[0]).includes('kind=gcmp'))).toBe(false); // closed: no request
     await pressByText(r, /Show comparison/);
     await flush();
+    await expandAll(r);
     const txt = textOf(r);
     expect(txt).toMatch(/Previous government/);
     expect(txt).toMatch(/Rs 3,000 a month/);
@@ -184,6 +192,7 @@ describe('civic screens render', () => {
     expect(workerFetch.mock.calls.some((c: any[]) => String(c[0]).includes('kind=gprm'))).toBe(false); // closed: no request
     await pressByText(r, /Show promises/);
     await flush();
+    await expandAll(r);
     let txt = textOf(r);
     expect(txt).toMatch(/Party X alliance/);
     expect(txt).toMatch(/Leader Y/);
@@ -210,6 +219,7 @@ describe('civic screens render', () => {
     const HospitalsScreen = require('../src/screens/Civic/HospitalsScreen').default;
     const r = await mount(<HospitalsScreen />);
     await flush();
+    await expandAll(r);
     let txt = textOf(r);
     expect(txt).toMatch(/GGH Kurnool/);
     expect(txt).not.toMatch(/City Eye Care/);
