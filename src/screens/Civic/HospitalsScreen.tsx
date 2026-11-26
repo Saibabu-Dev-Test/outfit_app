@@ -16,6 +16,18 @@
 // Free sources (Worker origin 'free', OpenStreetMap): compact rows (civicFreeParts.tsx) with name,
 // address, tap-to-call phone, map link, Govt / Private / "Type not listed" label and source + date.
 // Header language chip (LanguageChip): app language picker + "Also show English".
+// The search goes through the disease dictionary first (services/diseaseSearch.ts: EN / everyday
+// words / Telugu / Hindi, misspellings -> departments -> speciality words), falling back to the old
+// word expansion, and shows "Best in India for <disease>" (BestInIndiaBox: NIRF 2025 Medical ranks,
+// a teaching + research ranking, never a treatment rating; 108 / 112 for red-flag conditions).
+// When no hospital in the list states the searched speciality ("ear" -> ENT), the general /
+// multi-speciality GOVT hospitals in the list (AIIMS, medical colleges, GGH, district / area hospitals;
+// hospitalSearch.generalGovtHospitals) are shown labelled "May treat this — call to confirm" (never a claim).
+// Location: State -> District -> Mandal chosen from the official LGD lists (LocationPicker). The list is
+// for the picked mandal; a mandal with no hospital found shows the district's list with the note "No
+// data for <mandal>, showing <district> district" (state-wide when the district is empty too).
+// Each hospital is a HeadlineCard: bold name, 2-line type + address; tap = timings, specialities,
+// schemes, doctors, facilities, sources and reviews. Call / map / website buttons stay visible.
 import React, { useState } from 'react';
 import { RefreshControl, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -27,17 +39,25 @@ import { isOwnerUser } from '../../services/adminSystem';
 import { useAppLanguage } from '../../i18n/appLanguage';
 import { civicText } from '../../i18n/civicLabels';
 import { HospData, HospVariant, Hospital, civicItem, getHospData } from '../../services/civicApi';
-import { factsCount, searchHospitals, sortByFacts } from '../../services/hospitalSearch';
+import { factsCount, generalGovtHospitals, searchHospitals, sortByFacts, uniqueRowKeys } from '../../services/hospitalSearch';
 import { askHospitals } from '../../services/civicAi';
 import { useCivicLabels } from '../../services/civicI18n';
 import { CivicAskBox, Turn } from './civicAiParts';
-import { CivicStatus, PlacePicker, ReviewsBox, SourcesBox, callNumber, openLink, useCivicPlace } from './civicParts';
+import { AnsweredByLine, CivicStatus, PlacePicker, ReviewsBox, ScopeNoteLine, SourcesBox, callNumber, openLink, scopeNote, useCivicPlace } from './civicParts';
+import { answerFor, shownLevel, useFallbackWhen, useScopeLevel } from './useScopeLevel';
+import { stateByCodeApp } from './stateName';
 import { Bi, CivicCard, biLabel } from './bi';
 import { useCivicData } from './useCivicData';
 import LanguageChip from './LanguageChip';
 import { FreeHospitalRow, isFreeHospital } from './civicFreeParts';
+import { hospitalTermsFor, specialitiesFor } from '../../services/diseaseSearch';
+import BestInIndiaBox from './BestInIndiaBox';
+import HeadlineCard from '../../components/HeadlineCard';
 
 type HospFilter = HospVariant | 'all';
+
+// Card summary: the hospital's own type + address (nothing when neither is listed)
+const summaryOf = (h: Pick<Hospital, 'type' | 'address'>): string => [h.type, h.address].filter(Boolean).join(' · ');
 
 // "Label: Public info not available" when a public source did not state the value
 function NA({ lang, label }: { lang: ReturnType<typeof useAppLanguage>; label: Parameters<typeof civicText>[1] }) {
@@ -58,6 +78,7 @@ function HospitalCard({
   kindLabel,
   matched,
   showCount,
+  maybe,
 }: {
   h: Hospital;
   t?: Hospital | null;
@@ -68,29 +89,59 @@ function HospitalCard({
   kindLabel?: string;
   matched?: string[];
   showCount?: boolean;
+  maybe?: string;
 }) {
   const T = (k: Parameters<typeof civicText>[1]) => civicText(lang, k);
-  const [open, setOpen] = useState(false);
   const join = (xs?: string[]) => (xs && xs.length ? xs.join(' • ') : '');
   const host = (u: string) => u.replace(/^https:\/\//, '').split('/')[0];
   const n = factsCount(h);
   return (
     <CivicCard lang={lang} hasTranslation={!!t}>
-      <TouchableOpacity onPress={() => setOpen(v => !v)} activeOpacity={0.8}>
-        <Bi en={h.name} tr={t?.name} style={ui.h2} />
-        {kindLabel ? <Text style={[ui.muted, { fontSize: 12 }]}>🏷️ {kindLabel}</Text> : null}
-        {h.type ? <Bi en={h.type} tr={t?.type} style={ui.muted} /> : null}
-        {matched && matched.length ? (
-          <Text style={[ui.good, { marginTop: 2 }]}>
-            🔎 {T('matches')}: {matched.join(' • ')}
-          </Text>
-        ) : null}
-        {showCount ? (
-          <Text style={[ui.muted, { fontSize: 12 }]}>
-            🩺 {n.specialities} {T('specialities')} · 🏥 {n.facilities} {T('facilities')}
-          </Text>
-        ) : null}
-        {h.emergency24x7 ? <Text style={ui.good}>🚑 24x7 {biLabel(lang, 'emergency')}</Text> : <NA lang={lang} label="emergency24" />}
+      <HeadlineCard
+        lang={lang}
+        testID="hosp-card"
+        headline={h.name}
+        headlineTr={t?.name}
+        summary={summaryOf(h)}
+        summaryTr={t ? summaryOf({ type: t.type || h.type, address: t.address || h.address }) : null}
+        extra={
+          <>
+            {kindLabel ? <Text style={[ui.muted, { fontSize: 12 }]}>🏷️ {kindLabel}</Text> : null}
+            {maybe ? <Text testID="hosp-may-treat" style={[ui.bad, { fontSize: 12 }]}>📞 {maybe}</Text> : null}
+            {matched && matched.length ? (
+              <Text style={[ui.good, { marginTop: 2 }]}>
+                🔎 {T('matches')}: {matched.join(' • ')}
+              </Text>
+            ) : null}
+            {showCount ? (
+              <Text style={[ui.muted, { fontSize: 12 }]}>
+                🩺 {n.specialities} {T('specialities')} · 🏥 {n.facilities} {T('facilities')}
+              </Text>
+            ) : null}
+            {h.emergency24x7 ? <Text style={ui.good}>🚑 24x7 {biLabel(lang, 'emergency')}</Text> : null}
+          </>
+        }
+        footer={
+          <View style={[ui.row, { marginTop: 6, flexWrap: 'wrap' }]}>
+            {h.phone ? (
+              <TouchableOpacity style={[ui.btnGhost, { marginRight: 8, marginTop: 4 }]} onPress={() => callNumber(h.phone)}>
+                <Text style={ui.btnGhostText}>📞 {h.phone}</Text>
+              </TouchableOpacity>
+            ) : null}
+            {h.mapUrl ? (
+              <TouchableOpacity style={[ui.btnGhost, { marginRight: 8, marginTop: 4 }]} onPress={() => openLink(h.mapUrl as string)}>
+                <Text style={ui.btnGhostText}>🗺️ {T('map')}</Text>
+              </TouchableOpacity>
+            ) : null}
+            {h.website ? (
+              <TouchableOpacity style={[ui.btnGhost, { marginTop: 4 }]} onPress={() => openLink(h.website)}>
+                <Text style={ui.btnGhostText}>🔗 {T('open')}</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        }
+      >
+        {!h.emergency24x7 ? <NA lang={lang} label="emergency24" /> : null}
         {h.timings ? <Bi prefix={`🕒 ${T('timings')}: `} en={h.timings} tr={t?.timings} /> : <NA lang={lang} label="timings" />}
         {h.address ? <Bi prefix="📍 " en={h.address} tr={t?.address} /> : <NA lang={lang} label="address" />}
         {h.specialities.length ? <Bi prefix="🩺 " en={join(h.specialities)} tr={join(t?.specialities)} style={ui.muted} /> : <NA lang={lang} label="specialities" />}
@@ -104,74 +155,58 @@ function HospitalCard({
         )}
         {h.note ? <Bi en={h.note} tr={t?.note} style={ui.muted} /> : null}
         {!h.phone ? <NA lang={lang} label="phone" /> : null}
-      </TouchableOpacity>
-      {open ? (
-        <View style={{ marginTop: 6 }}>
-          <Text style={[ui.muted, { marginTop: 4 }]}>⭐ {biLabel(lang, 'specialFor')}</Text>
-          {h.specialFor && h.specialFor.length ? <Bi en={join(h.specialFor)} tr={join(t?.specialFor)} /> : <Text style={[ui.muted, { fontSize: 12 }]}>{biLabel(lang, 'publicNA')}</Text>}
-          <Text style={[ui.muted, { marginTop: 6 }]}>👩‍⚕️ {biLabel(lang, 'doctors')}</Text>
-          {h.doctors && h.doctors.length ? (
-            h.doctors.map((d, i) => {
-              const td = t?.doctors?.[i];
-              return (
-                <View key={`${d.name}${i}`} style={{ marginTop: 4 }}>
-                  <Bi en={[d.name, d.qualification].filter(Boolean).join(', ')} tr={td ? [td.name, td.qualification].filter(Boolean).join(', ') : undefined} style={[ui.body, { fontWeight: '700' }]} />
-                  {d.speciality ? <Bi en={d.speciality} tr={td?.speciality} style={ui.muted} /> : null}
-                  <Text style={[ui.muted, { fontSize: 12 }]}>
-                    {T('experience')}: {d.experience || civicText(lang, 'publicNA')}
-                  </Text>
-                  <TouchableOpacity onPress={() => openLink(d.source)}>
-                    <Text style={[ui.muted, { fontSize: 12, color: colors.primary }]}>🔗 {host(d.source)}</Text>
-                  </TouchableOpacity>
-                </View>
-              );
-            })
-          ) : (
-            <Text style={[ui.muted, { fontSize: 12 }]}>{biLabel(lang, 'publicNA')}</Text>
-          )}
-          <Text style={[ui.muted, { marginTop: 6 }]}>🏥 {biLabel(lang, 'facilities')}</Text>
-          {h.facilities && h.facilities.length ? <Bi en={join(h.facilities)} tr={join(t?.facilities)} /> : <Text style={[ui.muted, { fontSize: 12 }]}>{biLabel(lang, 'publicNA')}</Text>}
-          <Text style={[ui.muted, { marginTop: 6 }]}>📚 {biLabel(lang, 'sources')}</Text>
-          {h.sources && h.sources.length ? (
-            h.sources.map(u => (
-              <TouchableOpacity key={u} onPress={() => openLink(u)}>
-                <Text style={[ui.muted, { fontSize: 12, color: colors.primary }]} numberOfLines={1}>
-                  🔗 {host(u)}
+        <Text style={[ui.muted, { marginTop: 4 }]}>⭐ {biLabel(lang, 'specialFor')}</Text>
+        {h.specialFor && h.specialFor.length ? <Bi en={join(h.specialFor)} tr={join(t?.specialFor)} /> : <Text style={[ui.muted, { fontSize: 12 }]}>{biLabel(lang, 'publicNA')}</Text>}
+        <Text style={[ui.muted, { marginTop: 6 }]}>👩‍⚕️ {biLabel(lang, 'doctors')}</Text>
+        {h.doctors && h.doctors.length ? (
+          h.doctors.map((d, i) => {
+            const td = t?.doctors?.[i];
+            return (
+              <View key={`${d.name}${i}`} style={{ marginTop: 4 }}>
+                <Bi en={[d.name, d.qualification].filter(Boolean).join(', ')} tr={td ? [td.name, td.qualification].filter(Boolean).join(', ') : undefined} style={[ui.body, { fontWeight: '700' }]} />
+                {d.speciality ? <Bi en={d.speciality} tr={td?.speciality} style={ui.muted} /> : null}
+                <Text style={[ui.muted, { fontSize: 12 }]}>
+                  {T('experience')}: {d.experience || civicText(lang, 'publicNA')}
                 </Text>
-              </TouchableOpacity>
-            ))
-          ) : (
-            <Text style={[ui.muted, { fontSize: 12 }]}>{biLabel(lang, 'publicNA')}</Text>
-          )}
-        </View>
-      ) : null}
-      <View style={[ui.row, { marginTop: 6, flexWrap: 'wrap' }]}>
-        {h.phone ? (
-          <TouchableOpacity style={[ui.btnGhost, { marginRight: 8, marginTop: 4 }]} onPress={() => callNumber(h.phone)}>
-            <Text style={ui.btnGhostText}>📞 {h.phone}</Text>
-          </TouchableOpacity>
-        ) : null}
-        {h.mapUrl ? (
-          <TouchableOpacity style={[ui.btnGhost, { marginRight: 8, marginTop: 4 }]} onPress={() => openLink(h.mapUrl as string)}>
-            <Text style={ui.btnGhostText}>🗺️ {T('map')}</Text>
-          </TouchableOpacity>
-        ) : null}
-        {h.website ? (
-          <TouchableOpacity style={[ui.btnGhost, { marginTop: 4 }]} onPress={() => openLink(h.website)}>
-            <Text style={ui.btnGhostText}>🔗 {T('open')}</Text>
-          </TouchableOpacity>
-        ) : null}
-      </View>
-      {open ? <ReviewsBox lang={lang} item={item} userName={userName} myUid={myUid} /> : null}
+                <TouchableOpacity onPress={() => openLink(d.source)}>
+                  <Text style={[ui.muted, { fontSize: 12, color: colors.primary }]}>🔗 {host(d.source)}</Text>
+                </TouchableOpacity>
+              </View>
+            );
+          })
+        ) : (
+          <Text style={[ui.muted, { fontSize: 12 }]}>{biLabel(lang, 'publicNA')}</Text>
+        )}
+        <Text style={[ui.muted, { marginTop: 6 }]}>🏥 {biLabel(lang, 'facilities')}</Text>
+        {h.facilities && h.facilities.length ? <Bi en={join(h.facilities)} tr={join(t?.facilities)} /> : <Text style={[ui.muted, { fontSize: 12 }]}>{biLabel(lang, 'publicNA')}</Text>}
+        <Text style={[ui.muted, { marginTop: 6 }]}>📚 {biLabel(lang, 'sources')}</Text>
+        {h.sources && h.sources.length ? (
+          h.sources.map(u => (
+            <TouchableOpacity key={u} onPress={() => openLink(u)}>
+              <Text style={[ui.muted, { fontSize: 12, color: colors.primary }]} numberOfLines={1}>
+                🔗 {host(u)}
+              </Text>
+            </TouchableOpacity>
+          ))
+        ) : (
+          <Text style={[ui.muted, { fontSize: 12 }]}>{biLabel(lang, 'publicNA')}</Text>
+        )}
+        <ReviewsBox lang={lang} item={item} userName={userName} myUid={myUid} />
+      </HeadlineCard>
     </CivicCard>
   );
 }
 
 // OpenStreetMap row + people's reviews behind a small toggle
-function FreeHospitalCard({ h, t, lang, item, userName, myUid }: { h: Hospital; t?: Hospital | null; lang: ReturnType<typeof useAppLanguage>; item: string; userName?: string; myUid?: string }) {
+function FreeHospitalCard({ h, t, lang, item, userName, myUid, maybe }: { h: Hospital; t?: Hospital | null; lang: ReturnType<typeof useAppLanguage>; item: string; userName?: string; myUid?: string; maybe?: string }) {
   const [open, setOpen] = useState(false);
   return (
     <FreeHospitalRow h={h} t={t} lang={lang}>
+      {maybe ? (
+        <Text testID="hosp-may-treat" style={[ui.bad, { fontSize: 12, marginTop: 4 }]}>
+          📞 {maybe}
+        </Text>
+      ) : null}
       <TouchableOpacity onPress={() => setOpen(v => !v)} style={{ marginTop: 6 }}>
         <Text style={[ui.muted, { color: colors.primary }]}>
           ⭐ {civicText(lang, 'reviews')} {open ? '▴' : '▾'}
@@ -195,33 +230,56 @@ export default function HospitalsScreen() {
   // One loader per kind; a loader whose kind is filtered out gets state '' (no request at all)
   const useGovt = variant === 'govt' || variant === 'all';
   const usePriv = variant === 'private' || variant === 'all';
-  const gov = useCivicData<HospData>('hosp', useGovt ? place.state : '', place.district, 'govt', lang, c => getHospData(place.state, 'govt', place.district, c));
-  const priv = useCivicData<HospData>('hosp', usePriv ? place.state : '', place.district, 'private', lang, c =>
-    getHospData(place.state, 'private', place.district, c),
+  // Scope: the picked mandal, else (empty answer) the district, else the state (useScopeLevel)
+  const { req, fallback: scopeDown } = useScopeLevel(place);
+  const gov = useCivicData<HospData>('hosp', useGovt ? place.state : '', req.district, 'govt', lang, c => getHospData(place.state, 'govt', req.district, c, req.mandal), req.mandal);
+  const priv = useCivicData<HospData>('hosp', usePriv ? place.state : '', req.district, 'private', lang, c =>
+    getHospData(place.state, 'private', req.district, c, req.mandal), req.mandal,
+  );
+  const loaders = [...(useGovt ? [gov] : []), ...(usePriv ? [priv] : [])];
+  useFallbackWhen(
+    !!place.state && loaders.length > 0 && loaders.every(l => l.phase === 'ready' && answerFor(l.res, place.state, req) && !(l.res?.data?.hospitals || []).length),
+    req,
+    scopeDown,
   );
   const active = [...(useGovt ? [{ v: 'govt' as HospVariant, d: gov }] : []), ...(usePriv ? [{ v: 'private' as HospVariant, d: priv }] : [])];
   const refresh = () => active.forEach(a => a.d.refresh());
   const phase = active.some(a => a.d.phase === 'loading') ? 'loading' : active[0]?.d.phase;
   const anyRes = active.some(a => !!a.d.res);
-  const placeKey = `${place.state}|${place.district}|${variant}`;
+  const placeKey = `${place.state}|${req.district}|${req.mandal}|${variant}`;
+  // Level shown: the least specific level among the lists that have rows (Worker data.scope)
+  const withRows = active.filter(a => (a.d.res?.data?.hospitals || []).length > 0);
+  const levels = withRows.map(a => shownLevel(req, a.d.res?.data?.scope));
+  const shownLv = levels.includes('state') ? 'state' : levels.includes('district') ? 'district' : levels.length ? 'mandal' : req.level;
+  const note = withRows.length ? scopeNote(lang, place, shownLv, stateByCodeApp(place.state)) : '';
+  const shownDistrict = shownLv === 'state' ? '' : place.district;
 
-  const rows = active.flatMap(a => {
-    const hs = a.d.res?.data?.hospitals || [];
+  const raw = active.flatMap(a => {
+    const hs = (a.d.res?.data?.hospitals || []).filter(h => !!h && typeof h === 'object' && !!h.name);
     const trs = (a.d.tr && a.d.res?.i18n?.[a.d.tr]?.hospitals) || [];
     const origin = a.d.res?.data?.origin;
     return hs.map((h, i) => ({ h, t: trs[i] || null, v: a.v, free: isFreeHospital(h, origin) }));
   });
+  // One unique, stable key per row, fixed before search / sort (uniqueRowKeys: Fabric addViewAt crash)
+  const keys = uniqueRowKeys(raw);
+  const rows = raw.map((r, i) => ({ ...r, key: keys[i] }));
   const list = rows.map(r => r.h);
-  const found = where.trim() ? searchHospitals(list, where).map(m => ({ ...rows[list.indexOf(m.h)], matched: m.matched })) : rows.map(r => ({ ...r, matched: [] as string[] }));
-  const shown = byFacts ? sortByFacts(found) : found;
+  const found = where.trim() ? searchHospitals(list, where, hospitalTermsFor(where)).map(m => ({ ...rows[list.indexOf(m.h)], matched: m.matched })) : rows.map(r => ({ ...r, matched: [] as string[] }));
+  // Nothing in the list states the searched speciality: general / multi-speciality govt hospitals
+  // (AIIMS, medical colleges, GGH, district / area hospitals) as "may treat this — call to confirm"
+  const searching = !!where.trim() && list.length > 0 && !found.length;
+  const needSp = searching ? specialitiesFor(where) : [];
+  const fallback = needSp.length ? generalGovtHospitals(rows).map(r => ({ ...r, matched: [] as string[] })) : [];
+  const maybe = fallback.length > 0;
+  const shown = maybe ? fallback : byFacts ? sortByFacts(found) : found;
   const workerAi = active.some(a => !!a.d.res?.aiConfigured);
 
   // Hospital AI runs only on the Worker (its AI fallback chain); no on-phone AI key
-  const ask = (q: string, history: Turn[]) => askHospitals(place.state, place.district, active.map(a => a.v), q, lang, history);
+  const ask = (q: string, history: Turn[]) => askHospitals(place.state, shownDistrict, active.map(a => a.v), q, lang, history);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top']}>
-      <ScrollView contentContainerStyle={ui.scroll} keyboardShouldPersistTaps="handled" refreshControl={<RefreshControl refreshing={phase === 'loading' && anyRes} onRefresh={refresh} />}>
+      <ScrollView testID="hosp-scroll" contentContainerStyle={ui.scroll} keyboardShouldPersistTaps="handled" removeClippedSubviews={false} refreshControl={<RefreshControl refreshing={phase === 'loading' && anyRes} onRefresh={refresh} />}>
         <View style={[ui.row, { marginBottom: 8 }]}>
           <Text style={[ui.h1, ui.flex1]}>{T('hospTitle')}</Text>
           <LanguageChip lang={lang} />
@@ -250,86 +308,109 @@ export default function HospitalsScreen() {
             </TouchableOpacity>
           ))}
         </View>
-        {place.state
-          ? active.map(a => (
-              <View key={a.v}>
-                {variant === 'all' && a.d.phase !== 'ready' && a.d.phase !== 'idle' ? (
-                  <Text style={[ui.muted, { fontSize: 12 }]}>{a.v === 'govt' ? T('govtHosp') : T('privateHosp')}</Text>
-                ) : null}
-                <CivicStatus
-                  lang={lang}
-                  phase={a.d.phase}
-                  hasData={(a.d.res?.data?.hospitals || []).length > 0}
-                  aiConfigured={!!(a.d.res?.researchConfigured ?? a.d.res?.aiConfigured)}
-                  errorText={a.d.errorText}
-                  aiNote={a.d.aiNote}
-                  fromCache={a.d.fromCache}
-                />
-              </View>
-            ))
-          : null}
-        {list.length ? (
-          <View style={ui.card}>
-            <Text style={ui.h2}>🔎 {biLabel(lang, 'whereToGo')}</Text>
-            <TextInput
-              style={ui.input}
-              value={where}
-              onChangeText={setWhere}
-              placeholder={T('whereHint')}
-              placeholderTextColor={colors.textMuted}
-              autoCorrect={false}
-              maxLength={60}
-              returnKeyType="search"
-            />
+        {/* Stable containers (collapsable={false}, always mounted): the ScrollView's direct children keep
+            the same count and order whatever the filter / results (Fabric "addViewAt" crash). */}
+        <View collapsable={false} testID="hosp-scope">
+          <ScopeNoteLine text={note} />
+        </View>
+        <View collapsable={false} testID="hosp-status">
+          {place.state
+            ? active.map(a => (
+                <View key={`status-${a.v}`} collapsable={false}>
+                  {variant === 'all' && a.d.phase !== 'ready' && a.d.phase !== 'idle' ? (
+                    <Text style={[ui.muted, { fontSize: 12 }]}>{a.v === 'govt' ? T('govtHosp') : T('privateHosp')}</Text>
+                  ) : null}
+                  <CivicStatus
+                    lang={lang}
+                    phase={a.d.phase}
+                    hasData={(a.d.res?.data?.hospitals || []).length > 0}
+                    aiConfigured={!!(a.d.res?.researchConfigured ?? a.d.res?.aiConfigured)}
+                    errorText={a.d.errorText}
+                    aiNote={a.d.aiNote}
+                    fromCache={a.d.fromCache}
+                  />
+                  {(a.d.res?.data?.hospitals || []).length ? <AnsweredByLine lang={lang} by={a.d.answeredBy} updatedAt={a.d.res?.updatedAt} /> : null}
+                </View>
+              ))
+            : null}
+        </View>
+        <View style={ui.card}>
+          <Text style={ui.h2}>🔎 {biLabel(lang, 'whereToGo')}</Text>
+          <TextInput
+            style={ui.input}
+            value={where}
+            onChangeText={setWhere}
+            placeholder={T('whereHint')}
+            placeholderTextColor={colors.textMuted}
+            autoCorrect={false}
+            maxLength={60}
+            returnKeyType="search"
+          />
+          {list.length > 0 ? (
             <TouchableOpacity style={[ui.chip, byFacts && ui.chipOn, { alignSelf: 'flex-start' }]} onPress={() => setByFacts(v => !v)}>
               <Text style={[ui.chipText, byFacts && ui.chipTextOn]}>📊 {T('sortFacts')}</Text>
             </TouchableOpacity>
-            {byFacts ? <Text style={[ui.muted, { fontSize: 12 }]}>{biLabel(lang, 'factsNote')}</Text> : null}
-            {where.trim() && !found.length ? <Text style={[ui.muted, { marginTop: 6 }]}>{T('noMatch')}</Text> : null}
-          </View>
-        ) : null}
-        {list.length ? (
-          <>
-            <Text style={[ui.muted, { marginBottom: 8 }]}>
-              ⚠️ {T('verify')}
-              {lang !== 'English' && T('verify') !== civicText('English', 'verify') ? `\n${civicText('English', 'verify')}` : ''}
-            </Text>
-            {workerAi ? (
-              <CivicAskBox key={placeKey} lang={lang} title={T('askHospAi')} note={T('hospAiNote')} hint={T('askHospHint')} onAsk={ask} />
-            ) : null}
-            {shown.map(r =>
-              r.free ? (
-                <FreeHospitalCard
-                  key={`${r.v}:${r.h.slug}`}
-                  h={r.h}
-                  t={r.t}
-                  lang={lang}
-                  item={civicItem('hosp', place.state, place.district, r.h.slug)}
-                  userName={user?.name}
-                  myUid={user?.id}
-                />
-              ) : (
-                <HospitalCard
-                  key={`${r.v}:${r.h.slug}`}
-                  h={r.h}
-                  t={r.t}
-                  lang={lang}
-                  item={civicItem('hosp', place.state, place.district, r.h.slug)}
-                  userName={user?.name}
-                  myUid={user?.id}
-                  kindLabel={variant === 'all' ? (r.v === 'govt' ? T('govtHosp') : T('privateHosp')) : undefined}
-                  matched={r.matched}
-                  showCount={byFacts}
-                />
-              ),
-            )}
-            {active.map(a =>
-              a.d.res?.data ? (
-                <SourcesBox key={`src-${a.v}`} lang={lang} sources={a.d.res?.sources} updatedAt={a.d.res?.updatedAt || 0} asOf={a.d.res?.data?.asOf} />
-              ) : null,
-            )}
-          </>
-        ) : null}
+          ) : null}
+          {byFacts && list.length > 0 ? <Text style={[ui.muted, { fontSize: 12 }]}>{biLabel(lang, 'factsNote')}</Text> : null}
+          {searching && !maybe ? <Text style={[ui.muted, { marginTop: 6 }]}>{T('noMatch')}</Text> : null}
+          {maybe ? (
+            <View testID="hosp-maybe" style={{ marginTop: 6 }}>
+              <Text style={ui.bad}>⚠️ {biLabel(lang, 'mayTreatTitle')}</Text>
+              <Text style={[ui.muted, { marginTop: 2 }]}>
+                🩺 {T('seeSpecialities')}: {needSp.join(' • ')}
+              </Text>
+            </View>
+          ) : null}
+        </View>
+        <View collapsable={false} testID="hosp-best">
+          <BestInIndiaBox lang={lang} query={where} state={place.state} />
+        </View>
+        <View collapsable={false} testID="hosp-list">
+          {list.length ? (
+            <View collapsable={false}>
+              <Text style={[ui.muted, { marginBottom: 8 }]}>
+                ⚠️ {T('verify')}
+                {lang !== 'English' && T('verify') !== civicText('English', 'verify') ? `\n${civicText('English', 'verify')}` : ''}
+              </Text>
+              {workerAi ? (
+                <CivicAskBox key={placeKey} lang={lang} title={T('askHospAi')} note={T('hospAiNote')} hint={T('askHospHint')} onAsk={ask} />
+              ) : null}
+              {shown.map(r =>
+                r.free ? (
+                  <FreeHospitalCard
+                    key={r.key}
+                    maybe={maybe ? biLabel(lang, 'mayTreat') : undefined}
+                    h={r.h}
+                    t={r.t}
+                    lang={lang}
+                    item={civicItem('hosp', place.state, shownDistrict, r.h.slug)}
+                    userName={user?.name}
+                    myUid={user?.id}
+                  />
+                ) : (
+                  <HospitalCard
+                    key={r.key}
+                    maybe={maybe ? biLabel(lang, 'mayTreat') : undefined}
+                    h={r.h}
+                    t={r.t}
+                    lang={lang}
+                    item={civicItem('hosp', place.state, shownDistrict, r.h.slug)}
+                    userName={user?.name}
+                    myUid={user?.id}
+                    kindLabel={variant === 'all' ? (r.v === 'govt' ? T('govtHosp') : T('privateHosp')) : undefined}
+                    matched={r.matched}
+                    showCount={byFacts}
+                  />
+                ),
+              )}
+              {active.map(a =>
+                a.d.res?.data ? (
+                  <SourcesBox key={`src-${a.v}`} lang={lang} sources={a.d.res?.sources} updatedAt={a.d.res?.updatedAt || 0} asOf={a.d.res?.data?.asOf} />
+                ) : null,
+              )}
+            </View>
+          ) : null}
+        </View>
       </ScrollView>
     </SafeAreaView>
   );

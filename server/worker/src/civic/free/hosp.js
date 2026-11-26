@@ -31,16 +31,23 @@ export const mapUrlOf = (lat, lon) => `https://www.openstreetmap.org/?mlat=${lat
 export const osmUrlOf = (type, id) => `https://www.openstreetmap.org/${type}/${id}`;
 
 const GOVT_RE =
-  /\b(government|govt\.?|gov\.?|ggh|phc|chc|uphc|cphc|area hospital|district hospital|general hospital|primary health|community health|urban health|health (sub )?centre|sub[- ]?centre|esic?|railway hospital|teaching hospital|medical college hospital|aiims|civil hospital|taluk hospital|mandal hospital)(?![a-z])/i;
+  /\b(government|govt\.?|gov\.?|ggh|phc|chc|uphc|cphc|area hospital|district hospital|general hospital|primary health|community health|urban health|health (sub )?centre|sub[- ]?centre|esic?|railway hospital|teaching hospital|medical college hospital|government medical college|aiims|civil hospital|taluk hospital|mandal hospital|cghs|apsrtc hospital|tsrtc hospital|police hospital|military hospital|naval hospital|army hospital)(?![a-z])/i;
 const PRIVATE_RE = /\b(pvt\.?|private|ltd\.?|llp)\b/i;
+const OP_GOVT = /^(government|public|state|national|municipal|military)$/;
+const OP_PRIVATE = /^(private|private_non_profit|business|charity|ngo|religious|community|cooperative)$/;
 
-/** govt | private | unknown from the OSM tags (operator:type) or the name / description (pure: tested). */
+/**
+ * govt | private | unknown from the OSM tags (operator:type, healthcare:operator:type,
+ * ownership), then the name / description / operator text (pure: tested). 'unknown' = no tag and
+ * no govt / private word: the app shows those under Private as "Likely private · ownership not
+ * confirmed", never as a confirmed private hospital.
+ */
 export function classifyHospital(name, tags = {}) {
   const t = tags || {};
-  const op = String(t['operator:type'] || '').toLowerCase();
-  if (/^(government|public|state|national|municipal)$/.test(op)) return 'govt';
-  if (/^(private|private_non_profit|business|charity|ngo|religious|community)$/.test(op)) return 'private';
-  const text = [name, t.description, t.operator].filter(Boolean).join(' ');
+  const ops = [t['operator:type'], t['healthcare:operator:type'], t.ownership].map(v => String(v || '').toLowerCase().trim()).filter(Boolean);
+  if (ops.some(op => OP_GOVT.test(op))) return 'govt';
+  if (ops.some(op => OP_PRIVATE.test(op))) return 'private';
+  const text = [name, t.description, t.operator, t['healthcare:operator']].filter(Boolean).join(' ');
   if (GOVT_RE.test(text)) return 'govt';
   if (PRIVATE_RE.test(text)) return 'private';
   return 'unknown';
@@ -63,7 +70,9 @@ const GENERIC = /^(hospital|government hospital|govt\.? hospital|primary health 
 export function nominatimItem(x, today) {
   if (!x || !x.osm_type || !x.osm_id) return null;
   const tags = x.extratags || {};
-  let name = String(x.name || (x.namedetails && x.namedetails.name) || '').trim();
+  let name = String(x.name || (x.namedetails && x.namedetails.name) || '')
+    .trim()
+    .replace(/^[^\p{L}\p{N}]+/u, '');
   if (!name) return null;
   const town = townOf(x.address);
   // "Government Hospital" alone says nothing about where: add the town ("Government Hospital, Adoni")
@@ -90,15 +99,38 @@ export function nominatimItem(x, today) {
   };
 }
 
-/** Results of several searches -> one list, deduped by OSM id (pure: tested). Govt first, then by name. */
-export function mergeHospitals(lists, today, max = 60) {
+const rankType = t => (t === 'govt' ? 0 : t === 'private' ? 1 : 2);
+const normState = v =>
+  String(v || '')
+    .toLowerCase()
+    .replace(/&/g, 'and')
+    .replace(/[^a-z]/g, '');
+
+/**
+ * Sorted (govt, private, not stated; then by name) and capped PER SIDE: up to `max` govt and up to
+ * `max` others. One global cap after a govt-first sort used to leave the Private list empty for a
+ * whole state (Andhra Pradesh: 79 govt of 119 results -> top 60 all govt). (pure: tested)
+ */
+export function capBySide(items, max = 60) {
+  const sorted = [...items].sort((a, b) => rankType(a.type) - rankType(b.type) || a.name.localeCompare(b.name));
+  return [...sorted.filter(h => h.type === 'govt').slice(0, max), ...sorted.filter(h => h.type !== 'govt').slice(0, max)];
+}
+
+/**
+ * Results of several searches -> one list, deduped by OSM id (pure: tested). Results whose address
+ * names another state are dropped (a state / district bounding box is a rectangle that reaches into
+ * neighbours: "Hospital, Hyderabad" in Andhra Pradesh). Govt first, then by name; capped per side.
+ */
+export function mergeHospitals(lists, today, max = 60, stateName = '') {
+  const want = normState(stateName);
   const seen = new Map();
   lists.flat().forEach(x => {
+    const st = normState(x && x.address && x.address.state);
+    if (want && st && st !== want) return;
     const it = nominatimItem(x, today);
     if (it && !seen.has(it.id)) seen.set(it.id, it);
   });
-  const rank = t => (t === 'govt' ? 0 : t === 'private' ? 1 : 2);
-  return [...seen.values()].sort((a, b) => rank(a.type) - rank(b.type) || a.name.localeCompare(b.name)).slice(0, max);
+  return capBySide([...seen.values()], max);
 }
 
 // Nominatim boundingbox ["south","north","west","east"] -> { south, north, west, east } numbers
@@ -112,12 +144,17 @@ export const viewboxOf = b => `${b.west},${b.north},${b.east},${b.south}`;
 
 const nomUrl = params => `${NOMINATIM}?${new URLSearchParams({ format: 'jsonv2', ...params }).toString()}`;
 
-/** Bounding box of the district (or of the state when no district) via Nominatim. */
-export async function lookupArea(stateName, districtName, opts) {
+/** Bounding box of the mandal (sub-district) / district / state via Nominatim (pure query list: tested). */
+export const areaQueries = (stateName, districtName, mandalName = '') =>
+  mandalName && districtName
+    ? [`${mandalName}, ${districtName} district, ${stateName}, India`, `${mandalName}, ${districtName}, ${stateName}, India`]
+    : districtName
+      ? [`${districtName} district, ${stateName}, India`, `${districtName}, ${stateName}, India`]
+      : [`${stateName}, India`];
+
+export async function lookupArea(stateName, districtName, opts, mandalName = '') {
   const { fetchImpl, timeoutMs, gapMs, sleepImpl } = opts;
-  const tries = districtName
-    ? [`${districtName} district, ${stateName}, India`, `${districtName}, ${stateName}, India`]
-    : [`${stateName}, India`];
+  const tries = areaQueries(stateName, districtName, mandalName);
   for (let i = 0; i < tries.length; i += 1) {
     if (i > 0) await sleepImpl(gapMs);
     const r = await getJson(nomUrl({ q: tries[i], limit: '3', countrycodes: 'in' }), { fetchImpl, timeoutMs });
@@ -134,7 +171,9 @@ export async function lookupArea(stateName, districtName, opts) {
 /**
  * Hospitals of a district (fast path, Nominatim only). state: { name } or a state name; district:
  * slug or name (optional). opts: fetchImpl, now, timeoutMs (per request), gapMs (between
- * requests, >= 1000 for the public Nominatim), sleepImpl, queries, max.
+ * requests, >= 1000 for the public Nominatim), sleepImpl, queries, max, mandal (sub-district slug or
+ * name: the search is bounded to the mandal's area, looked up as "<mandal>, <district> district,
+ * <state>"; no area found = "hospital in <mandal>, <district>, <state>").
  */
 export async function fetchHospFree(state, district, opts = {}) {
   const {
@@ -146,14 +185,16 @@ export async function fetchHospFree(state, district, opts = {}) {
     queries = HOSP_QUERIES,
     max = 60,
     bbox = null, // cached district bbox (civic_geo): skips the area lookup
+    mandal = '',
   } = opts;
   const today = isoDay(now);
   const stateName = nameOf(state).trim();
   if (!stateName) return { ok: false, hospitals: [], error: 'no state' };
   const districtName = titleCase(district);
+  const mandalName = districtName ? titleCase(mandal) : '';
   const o = { fetchImpl, timeoutMs, gapMs, sleepImpl };
-  const area = bbox ? { ok: true, bbox, requests: 0 } : await lookupArea(stateName, districtName, o);
-  const place = [districtName, stateName].filter(Boolean).join(', ');
+  const area = bbox ? { ok: true, bbox, requests: 0 } : await lookupArea(stateName, districtName, o, mandalName);
+  const place = [mandalName, districtName, stateName].filter(Boolean).join(', ');
   if (area.unreachable) return { ok: false, hospitals: [], bbox: null, place, error: area.error };
   const lists = [];
   const errors = [];
@@ -163,12 +204,12 @@ export async function fetchHospFree(state, district, opts = {}) {
     made = true;
     const params = { q, addressdetails: '1', extratags: '1', limit: '40', countrycodes: 'in' };
     if (area.ok) Object.assign(params, { viewbox: viewboxOf(area.bbox), bounded: '1' });
-    else params.q = `${q} in ${[districtName, stateName].filter(Boolean).join(', ')}`;
+    else params.q = `${q} in ${place}`;
     const r = await getJson(nomUrl(params), { fetchImpl, timeoutMs });
     if (r.ok && Array.isArray(r.data)) lists.push(r.data);
     else errors.push(`${q}: ${r.error || 'bad response'}`);
   }
-  const hospitals = mergeHospitals(lists, today, max);
+  const hospitals = mergeHospitals(lists, today, max, stateName);
   const src = { name: OSM_SRC, url: 'https://www.openstreetmap.org/copyright', date: today };
   if (!hospitals.length) return { ok: false, hospitals: [], bbox: area.ok ? area.bbox : null, place, src, error: errors[0] || area.error || 'no hospitals found' };
   return { ok: true, hospitals, bbox: area.ok ? area.bbox : null, place, src, errors };
@@ -216,7 +257,7 @@ export async function fetchHospOverpass(state, district, opts = {}) {
   const today = isoDay(now);
   let bbox = opts.bbox || null;
   if (!bbox) {
-    const area = await lookupArea(nameOf(state).trim(), titleCase(district), { fetchImpl, timeoutMs: Math.min(timeoutMs, 8000), gapMs, sleepImpl });
+    const area = await lookupArea(nameOf(state).trim(), titleCase(district), { fetchImpl, timeoutMs: Math.min(timeoutMs, 8000), gapMs, sleepImpl }, district ? titleCase(opts.mandal || '') : '');
     if (!area.ok) return { ok: false, hospitals: [], error: area.error };
     bbox = area.bbox;
   }
@@ -233,7 +274,6 @@ export async function fetchHospOverpass(state, district, opts = {}) {
     const it = overpassItem(el, today);
     if (it && !seen.has(it.id)) seen.set(it.id, it);
   });
-  const rank = t => (t === 'govt' ? 0 : t === 'private' ? 1 : 2);
-  const hospitals = [...seen.values()].sort((a, b) => rank(a.type) - rank(b.type) || a.name.localeCompare(b.name)).slice(0, max);
+  const hospitals = capBySide([...seen.values()], max);
   return { ok: hospitals.length > 0, hospitals, bbox, mirror: r.url, src: { name: 'OpenStreetMap (Overpass)', url: 'https://www.openstreetmap.org/copyright', date: today }, ...(hospitals.length ? {} : { error: 'no hospitals found' }) };
 }

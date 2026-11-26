@@ -35,6 +35,10 @@ export const lightColors = {
   error: '#EF4444',
   info: '#3B82F6',
 
+  // Civic lists (HeadlineCard): bold headline + 1-2 line summary, distinct hues, AA contrast on surface
+  civicHeadline: '#1E3A8A',
+  civicSummary: '#0F766E',
+
   // Tab Bar
   tabActive: '#2D1F6E',
   tabInactive: '#A0A0BF',
@@ -75,6 +79,9 @@ export const darkColors: Palette = {
   warning: '#FBBF24',
   error: '#F87171',
   info: '#60A5FA',
+
+  civicHeadline: '#A5B4FC',
+  civicSummary: '#5EEAD4',
 
   tabActive: '#C4B5FD',
   tabInactive: '#7D7896',

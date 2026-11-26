@@ -24,24 +24,48 @@
 // Kind 'gcmp' = neutral "previous vs present government" comparison per state + centre ('IN'):
 // schemes, budgets, major projects, schemes started / stopped, side by side; every point needs its
 // own https source URL + date or it is dropped; evaluative words are dropped; no verdict field exists.
-// AI fallback (llm.js): grounded research uses Gemini only (every key in turn). When every key is
-// used up the stored data is kept as it is and the run reports status 'paused' (RESEARCH_PAUSED)
-// instead of asking an ungrounded model, which would invent facts. Translation of stored data goes
-// through the whole chain (Gemini keys -> Groq -> Workers AI), so it keeps working.
+// Kind 'gprm' = promises tracker per state + centre ('IN'): the PRESENT government's election
+// manifesto promises, each with a status (done | in_progress | not_done | no_update). A status other
+// than no_update needs a dated https public source or it is forced to no_update; summary counts are
+// computed by the cleaner (never taken from the model); evaluative words are dropped. Every
+// promise also carries ref + refDate: where the promise itself is stated (its cited source, else the
+// manifesto URL + manifesto year); a promise without both is dropped.
+// Promises FREE FALLBACK (researchPromisesFallback = researchKeyless + researchGroq for gprm; the
+// comparison 'gcmp' has the same, free/compare.js): when every Gemini key is out of free quota
+// (or no Gemini key is set), the promises are read from the keyless MediaWiki API (free/promises.js:
+// the present government's election article, its manifesto section, each promise with the cited
+// source + date, status always "no_update"), saved with origin 'free'. Only if that finds nothing
+// AND the GROQ_API_KEY secret is set, Groq Compound (built-in web search) is asked with the same
+// prompt; its answer goes through the same cleaner. Nothing found = nothing saved ("no data yet").
+// Output size: one grounded call asks for at most PRM_PER_REQUEST promises (well under maxTokens),
+// and parseJsonLoose keeps the complete items of a cut-off (truncated) JSON answer.
+// NEVER-STOP CHAIN (researchFallbackChain): grounded research uses Gemini (every key x every model
+// in GEMINI_MODELS, Flash-Lite first, gemini.js). When every key is used up the run never stops at
+// "paused" and never asks an ungrounded model (it would invent facts); it goes on:
+//   1. keyless free sources: Govt / Hospitals free/govt.js + free/hosp.js (Wikidata, Wikipedia,
+//      OSM), Promises free/promises.js (Wikipedia), Comparison free/compare.js (Wikidata + Wikipedia);
+//   2. Groq Compound (built-in web search) ONLY if the GROQ_API_KEY secret is set (never required);
+//   3. the last saved data of the row: { ok: true, status: 'saved' } (nothing changed, nothing
+//      marked failed, the cron tries again after the reset);
+//   4. nothing at all: { ok: false, status: 'none' } (the app shows "no data yet").
+// Translation of stored data goes through the whole chain (Gemini keys -> Groq -> Workers AI).
 // FREE SOURCES FIRST (civic/free, migration 0008): Govt and Hospitals are served from keyless public
 // sources (Wikidata + Wikipedia, OpenStreetMap Nominatim, official .gov.in info) with NO AI call:
-// on demand the free fetch answers status 'ready' (never 'paused' for AI limits), saved in
+// on demand the free fetch answers status 'ready' (never stopped by AI limits), saved in
 // civic_data with origin 'free'. The Overpass upgrade of a hospital list runs after the response
 // (ctx.waitUntil) and in a gentle cron refresh (runFreeRefresh), never on the request path.
 // Grounded Gemini research stays as the fallback when the free sources fail; Gemini / Groq are
 // otherwise only optional extras (translation, Explain simply). OSM rows never translate proper
 // names or addresses (FREE_HOSP_FIXED).
-import { CENTRE, STATES, placeByCode } from './states.js';
-import { fetchGovtFree } from './free/govt.js';
+import { CENTRE, CENTRE_KINDS, STATES, placeByCode } from './states.js';
+import { fetchGovtFree, fetchMandalFree } from './free/govt.js';
+import { levelOf, splitPlace, subLevelWord } from './place.js';
 import { fetchHospFree, fetchHospOverpass, titleCase } from './free/hosp.js';
+import { fetchPromisesFree } from './free/promises.js';
+import { fetchCompareFree } from './free/compare.js';
 import { sleep } from './free/http.js';
 import { geminiReady, isGeminiConfigured, parseJsonLoose } from './gemini.js';
-import { aiGenerate, isAiConfigured } from './llm.js';
+import { aiGenerate, groqSearchGenerate, isAiConfigured, isGroqConfigured } from './llm.js';
 import { addUsage, usageFor } from '../db.js';
 import { utcDay } from '../days.js';
 import { SEED_DISTRICTS } from './districts.js';
@@ -59,7 +83,8 @@ export const CIVIC_REFRESH_MS = 7 * 24 * 3600 * 1000;
 export const CIVIC_RETRY_MS = 20 * 60 * 1000;
 export const CIVIC_LOCK_MS = 3 * 60 * 1000;
 export const CIVIC_MAX_PENDING = 200;
-export const RESEARCH_PAUSED = 'research paused, showing saved info';
+// Cron summary only (never sent to the app): every Gemini key is cooling down
+export const AI_KEYS_OUT = 'gemini keys out of free quota';
 // Kinds served from the free, keyless sources first (no AI needed)
 export const FREE_KINDS = new Set(['govt', 'hosp']);
 export const CIVIC_FREE_DAILY_MAX = 800; // free-source place fetches per UTC day (usage key 'civic_free')
@@ -73,10 +98,10 @@ const isExhausted = code => code === 'quota' || code === 'billing';
 export const CIVIC_CRON_LANGS = ['te', 'hi'];
 // Translation chunk: arrays longer than this are split, each chunk one small parallel call
 export const TR_CHUNK = 6;
-export const KINDS = { govt: [''], hosp: ['govt', 'private'], gcmp: [''] };
+export const KINDS = { govt: [''], hosp: ['govt', 'private'], gcmp: [''], gprm: [''] };
 // Data-shape version per kind (civic_data.schema_v). hosp 2 = timings, specialFor, doctors,
 // facilities, per-hospital sources. Older rows are re-researched by the cron (data kept until then).
-export const CIVIC_SCHEMA = { govt: 1, hosp: 2, gcmp: 1 };
+export const CIVIC_SCHEMA = { govt: 1, hosp: 2, gcmp: 1, gprm: 1 };
 // App language codes (src/i18n/appLanguage.ts) -> name used in prompts. English is the stored data.
 export const TR_LANGS = {
   te: 'Telugu',
@@ -211,7 +236,29 @@ export function cleanGovt(raw) {
       .map(d => ({ name: s(obj(d).name, 100), number: phone(obj(d).number) }))
       .filter(d => d.name && d.number),
     ...(o.origin === 'free' ? { origin: 'free', src: cleanSrc(o.src) } : {}),
+    ...cleanScope(o),
   };
+}
+
+const SCOPES = new Set(['mandal', 'district', 'state']);
+// A wider level answered than the one asked (mandal -> district -> state): a short note says so (pure: tested)
+export const scopeNote = (asked, got) => (asked && got && asked !== got ? { note: `nothing public for the ${asked} yet: showing the ${got}` } : {});
+// Mandal rows (place.js): the level the data covers + Govt's mandal block (free sources only)
+function cleanScope(o) {
+  const out = {};
+  if (SCOPES.has(o.scope)) {
+    out.scope = o.scope;
+  }
+  const m = o.mandal && typeof o.mandal === 'object' ? o.mandal : null;
+  if (m) {
+    out.mandal = {
+      name: s(m.name, 80),
+      overview: s(m.overview, 800),
+      mlas: arr(m.mlas, 10).map(rep).filter(p => p.name),
+      src: srcItem(m.src),
+    };
+  }
+  return out;
 }
 
 // Google Maps search link from the hospital's own name + address (a search, not a guessed place)
@@ -277,7 +324,7 @@ export function cleanHosp(raw, where = '') {
       return item.name && slug && !seen.has(slug) && seen.add(slug) ? item : null;
     })
     .filter(Boolean);
-  return { asOf: s(o.asOf, 40), hospitals, ...(free ? { origin: 'free', src: srcItem(o.src) } : {}) };
+  return { asOf: s(o.asOf, 40), hospitals, ...(free ? { origin: 'free', src: srcItem(o.src) } : {}), ...(SCOPES.has(o.scope) ? { scope: o.scope } : {}) };
 }
 
 // ── Previous vs present government (kind 'gcmp') ──
@@ -311,11 +358,89 @@ export function cleanCompare(raw) {
       return { area: CMP_AREAS.includes(area) ? area : '', topic: s(x.topic, 140), previous: cmpFact(x.previous), present: cmpFact(x.present) };
     })
     .filter(r => r.area && r.topic && !OPINION_RE.test(r.topic) && (r.previous || r.present));
-  return { asOf: s(o.asOf, 40), previous: cmpGovt(o.previous), present: cmpGovt(o.present), rows };
+  return { asOf: s(o.asOf, 40), ...(o.origin === 'free' ? { origin: 'free' } : {}), previous: cmpGovt(o.previous), present: cmpGovt(o.present), rows };
 }
 
-const placeName = (state, district) =>
-  state.type === 'centre' ? 'the Union Government of India (the Centre)' : `${district ? `${district.replace(/-/g, ' ')} district, ` : ''}${state.name}, India`;
+// ── Promises tracker (kind 'gprm') ──
+export const PRM_AREAS = ['welfare', 'farmers', 'women', 'youth', 'health', 'education', 'infrastructure', 'other'];
+export const PRM_STATUS = ['done', 'in_progress', 'not_done', 'no_update'];
+export const PRM_MAX = 80;
+// Promises asked for per AI call: ~40 x ~150 output tokens stays far below the 24k maxTokens, so the
+// JSON is not cut off (a truncated answer still keeps its complete items: parseJsonLoose)
+export const PRM_PER_REQUEST = 40;
+const prmArea = v => {
+  const a = s(v, 30).toLowerCase();
+  if (PRM_AREAS.includes(a)) {
+    return a;
+  }
+  return /youth|job|employ/.test(a) ? 'youth' : /farm|agri/.test(a) ? 'farmers' : /infra|road|water|power|housing/.test(a) ? 'infrastructure' : 'other';
+};
+const prmStatus = v => {
+  const x = s(v, 20).toLowerCase().replace(/[\s-]+/g, '_');
+  return PRM_STATUS.includes(x) ? x : 'no_update';
+};
+export const promiseSummary = promises => ({
+  total: promises.length,
+  done: promises.filter(p => p.status === 'done').length,
+  inProgress: promises.filter(p => p.status === 'in_progress').length,
+  notDone: promises.filter(p => p.status === 'not_done').length,
+  noUpdate: promises.filter(p => p.status === 'no_update').length,
+});
+
+export function cleanPromises(raw) {
+  const o = obj(raw);
+  const g = obj(o.govt);
+  const seen = new Set();
+  // Real data only: without a public https URL of the manifesto no promise is kept (an empty list is
+  // never saved, the app shows "collecting / no data yet"), so counts come only from sourced promises
+  const manifesto = url(g.source);
+  const year = (/\b(19|20)\d{2}\b/.exec(s(g.year || g.manifestoYear, 40)) || [''])[0];
+  const promises = arr(manifesto ? o.promises : [], PRM_MAX * 2)
+    .map(p => {
+      const x = obj(p);
+      const text = s(x.text || x.promise, 300);
+      // evidence = one neutral fact with its own https source + date, else none
+      const fact = s(x.fact || x.evidence, 300);
+      const source = url(x.source);
+      const d = date(x.date);
+      const evidence = fact && source && d && !OPINION_RE.test(fact);
+      const status = evidence ? prmStatus(x.status) : 'no_update';
+      // where the promise itself is stated: its own cited source, else the manifesto + its year
+      const ref = url(x.ref) || manifesto;
+      const refDate = date(x.refDate) || year;
+      return { area: prmArea(x.area), text, status, fact: evidence ? fact : '', source: evidence ? source : '', date: evidence ? d : '', ref, refDate };
+    })
+    .filter(p => {
+      const k = p.text.toLowerCase();
+      return p.text && p.ref && p.refDate && !OPINION_RE.test(p.text) && !seen.has(k) && seen.add(k);
+    })
+    .slice(0, PRM_MAX);
+  return {
+    asOf: s(o.asOf, 40),
+    ...(o.origin === 'free' ? { origin: 'free' } : {}),
+    govt: { party: s(g.party, 160), head: s(g.head, 100), year, term: s(g.term, 40), source: manifesto },
+    promises,
+    // computed here, never trusted from the model
+    summary: promiseSummary(promises),
+  };
+}
+
+// district may be a mandal key ("ranga-reddy~shamshabad", place.js): "shamshabad mandal, ranga reddy district, ..."
+const placeName = (state, district) => {
+  if (state.type === 'centre') return 'the Union Government of India (the Centre)';
+  const p = splitPlace(district);
+  const m = p.mandal ? `${p.mandal.replace(/-/g, ' ')} ${subLevelWord(state.code)}, ` : '';
+  return `${m}${p.district ? `${p.district.replace(/-/g, ' ')} district, ` : ''}${state.name}, India`;
+};
+
+// Which source answered a stored row (GET /data answeredBy; the app shows it as a source label)
+export const answeredByOf = (origin, model) => {
+  const m = String(model || '');
+  if (origin === 'free' || m === 'free') return 'free';
+  if (/^@cf\//.test(m)) return 'workers-ai';
+  if (/groq|compound|gpt-oss|llama/i.test(m)) return 'groq';
+  return 'gemini';
+};
 
 const STATE_SCHEMES = {
   AP: 'Dr NTR Vaidya Seva (Aarogyasri AP)',
@@ -339,6 +464,23 @@ export function researchPrompt(kind, variant, state, district) {
       '"rows":[{"area":"schemes|budget|projects|started|stopped","topic":"short neutral topic, e.g. Old-age pension amount","previous":{"text":"fact","source":"https://","date":"YYYY-MM-DD"},"present":{"text":"fact","source":"https://","date":"YYYY-MM-DD"}}]}',
     ].join('\n');
   }
+  if (kind === 'gprm') {
+    const who = state.type === 'centre' ? 'the Union Government of India (Prime Minister and Union Cabinet)' : `the ${state.name} state government (Chief Minister and cabinet)`;
+    const head = state.type === 'centre' ? 'Prime Minister' : 'Chief Minister';
+    return [
+      `Today is ${today}. Using Google Search, find the election manifesto of the party / alliance that CURRENTLY rules ${who}, for the PRESENT term (the manifesto released for the election that brought this government to power).`,
+      `Give the ruling party / alliance, the current ${head}, the manifesto year and a public URL of the manifesto (party site, ECI, or a reputed news copy).`,
+      `List the concrete promises in that manifesto (at most ${PRM_PER_REQUEST}, the main ones first), each with its text as stated in the manifesto (short, max 140 characters) and one area: welfare, farmers, women, youth (youth / jobs), health, education, infrastructure, other.`,
+      'Only promises that are really in that manifesto: never invent, guess or give sample promises or numbers. If you cannot find the manifesto and its URL, reply with "promises":[].',
+      'For each promise give its CURRENT status: "done", "in_progress", "not_done" or "no_update".',
+      'STRICT RULES: facts only. No opinion, no verdict, no praise or criticism, no adjectives like best, failed, historic, corrupt.',
+      '"done", "in_progress" or "not_done" ONLY when a public source supports it: a government order, budget document, PIB / .gov.in / .nic.in page, official gazette, or a reputed news report of official figures. Otherwise status MUST be "no_update".',
+      'Keep "fact" under 160 characters. For every status other than "no_update" give "fact" = ONE neutral line of what the source says (e.g. "Pension raised to Rs 4,000 a month from July 2024 by GO 43"), "source" = that https URL and "date" = the date of the source (YYYY-MM-DD, or YYYY-MM / YYYY). Without a source URL and a date the status is "no_update".',
+      'Reply with ONLY this JSON (no markdown):',
+      `{"asOf":"YYYY-MM","govt":{"party":"ruling party or alliance","head":"${head} name","year":"YYYY manifesto year","term":"e.g. 2024-2029","source":"https:// manifesto URL"},`,
+      '"promises":[{"area":"welfare|farmers|women|youth|health|education|infrastructure|other","text":"promise as stated","status":"done|in_progress|not_done|no_update","fact":"one neutral fact","source":"https://","date":"YYYY-MM-DD"}]}',
+    ].join('\n');
+  }
   if (kind === 'govt') {
     return [
       `Today is ${today}. Using Google Search, collect current, factual public information for ${where}.`,
@@ -346,7 +488,7 @@ export function researchPrompt(kind, variant, state, district) {
       'Prefer official sources (.gov.in, .nic.in, ap.gov.in style state portals, district NIC sites, ECI). Use the CURRENT office holders as of today.',
       'If you are not sure of a value (a name, a phone number, a website), leave it empty "" instead of guessing. Never invent phone numbers.',
       district
-        ? `Include the state leaders AND the ${district.replace(/-/g, ' ')} district: District Collector, Superintendent of Police (or Commissioner of Police if a commissionerate), the Lok Sabha MP(s) whose constituency covers the district, and ALL MLAs of assembly constituencies in the district.`
+        ? `Include the state leaders AND the ${splitPlace(district).district.replace(/-/g, ' ')} district: District Collector, Superintendent of Police (or Commissioner of Police if a commissionerate), the Lok Sabha MP(s) whose constituency covers the district, and ALL MLAs of assembly constituencies in the district.`
         : 'District fields may stay empty (state-level summary).',
       'Schemes: the major state AND central welfare schemes people here use (health, pensions, farmers, housing, education, women, food), with eligibility and how to apply.',
       'Grievance: CM helpline / state grievance portal (for example PGRS / Meeseva / Spandana-type portals as they exist in this state now), CPGRAMS (pgportal.gov.in), and district grievance day details if found.',
@@ -386,7 +528,7 @@ export const GOVT_PARTS = [
     ask: (district) => [
       'Collect: a short neutral overview, the state leaders (Governor, Chief Minister, Deputy CMs, ministers with portfolios), elections, and',
       district
-        ? `the ${district.replace(/-/g, ' ')} district: District Collector, Superintendent of Police (or Commissioner of Police if a commissionerate), the Lok Sabha MP(s) whose constituency covers the district, and ALL MLAs of assembly constituencies in the district.`
+        ? `the ${splitPlace(district).district.replace(/-/g, ' ')} district: District Collector, Superintendent of Police (or Commissioner of Police if a commissionerate), the Lok Sabha MP(s) whose constituency covers the district, and ALL MLAs of assembly constituencies in the district.`
         : 'district fields may stay empty (state-level summary).',
       'Reply with ONLY this JSON (no markdown):',
       '{"asOf":"YYYY-MM","overview":"3-4 neutral sentences about the place (district HQ, population, main languages)",',
@@ -478,7 +620,11 @@ const ALIGN_FIXED = new Set([...FIXED_KEYS, 'level', 'number', 'helpline', 'vote
 // OpenStreetMap hospital rows: proper names and addresses stay exactly as mapped (never translated)
 export const FREE_HOSP_FIXED = new Set([...ALIGN_FIXED, 'name', 'address', 'district']);
 // The fixed (never translated) keys for one row's English data
-export const fixedFor = (kind, data) => (kind === 'hosp' && obj(data).origin === 'free' ? FREE_HOSP_FIXED : ALIGN_FIXED);
+// Promises tracker: status codes, manifesto year and the computed counts stay as in English
+export const PRM_FIXED = new Set([...ALIGN_FIXED, 'status', 'year', 'term', 'summary', 'ref', 'refDate', 'origin']);
+export const fixedFor = (kind, data) => (kind === 'hosp' && obj(data).origin === 'free' ? FREE_HOSP_FIXED : kind === 'gprm' ? PRM_FIXED : ALIGN_FIXED);
+// A promises list is long: bigger translation chunks (fewer calls on the free tier)
+const trChunkFor = kind => (kind === 'gprm' ? 12 : TR_CHUNK);
 // The English data without its fixed keys: what is sent for translation (smaller prompt; the fixed
 // values are copied back from English by alignTranslation)
 export const stripFixed = (v, fixed = ALIGN_FIXED) =>
@@ -568,7 +714,7 @@ export async function translateData(env, kind, data, lang, { fetchImpl = fetch, 
     // Nothing to translate (e.g. a Govt part with empty lists): no call
     return { ok: true, data: alignTranslation(data, {}, fixed), calls: 0 };
   }
-  const chunks = splitForTranslation(data).filter(c => textCount(c, fixed) > 0);
+  const chunks = splitForTranslation(data, trChunkFor(kind)).filter(c => textCount(c, fixed) > 0);
   const results = await Promise.all(
     chunks.map(async chunk => {
       const r = await aiGenerate(env, { prompt: translatePrompt(kind, stripFixed(chunk, fixed), TR_LANGS[lang]), jsonOut: true, maxTokens: 8000, temperature: 0.1 }, { fetchImpl, now });
@@ -587,12 +733,14 @@ export async function translateData(env, kind, data, lang, { fetchImpl = fetch, 
   return { ok: true, data: tr, calls: chunks.length, model: results[0] && results[0].r.model };
 }
 
-const cleanFor = (kind, parsed, where = '') => (kind === 'govt' ? cleanGovt(parsed) : kind === 'gcmp' ? cleanCompare(parsed) : cleanHosp(parsed, where));
+const cleanFor = (kind, parsed, where = '') =>
+  kind === 'govt' ? cleanGovt(parsed) : kind === 'gcmp' ? cleanCompare(parsed) : kind === 'gprm' ? cleanPromises(parsed) : cleanHosp(parsed, where);
 
 const isEmpty = (kind, data) =>
   !data ||
   (kind === 'hosp' && !data.hospitals.length) ||
   (kind === 'gcmp' && !data.rows.length) ||
+  (kind === 'gprm' && !data.promises.length) ||
   (kind === 'govt' && !data.overview && !data.departments.length && !data.leaders.chiefMinister.name && !data.schemes.length);
 
 const where4 = 'kind = ? AND state = ? AND district = ? AND variant = ?';
@@ -709,7 +857,7 @@ export async function startTranslate(db, env, t, lang, { fetchImpl = fetch, now 
  */
 export async function researchOne(db, env, { kind, state, district = '', variant = '' }, { fetchImpl = fetch, now = Date.now(), translate = false, langs = null, free = true, waitUntil = null } = {}) {
   const st = placeByCode(state, kind);
-  if (!st || !KINDS[kind] || !KINDS[kind].includes(variant) || (kind === 'gcmp' && district)) {
+  if (!st || !KINDS[kind] || !KINDS[kind].includes(variant) || (CENTRE_KINDS.has(kind) && district)) {
     return { ok: false, error: 'bad target' };
   }
   const t = { kind, state, district, variant };
@@ -762,7 +910,7 @@ export async function researchOne(db, env, { kind, state, district = '', variant
   };
   const parts = await Promise.all(
     prompts.map(async (prompt, i) => {
-      const r = await aiGenerate(env, { prompt, grounded: true, maxTokens: kind === 'govt' ? 8000 : 16000 }, { fetchImpl, now });
+      const r = await aiGenerate(env, { prompt, grounded: true, maxTokens: kind === 'govt' ? 8000 : kind === 'gprm' ? 24000 : 16000 }, { fetchImpl, now });
       const parsed = r.ok ? parseJsonLoose(r.text) : null;
       const gp = kind === 'govt' ? GOVT_PARTS[i] : null;
       const raw = parsed && gp ? Object.fromEntries(gp.raw.filter(k => k in obj(parsed)).map(k => [k, parsed[k]])) : parsed;
@@ -804,9 +952,11 @@ export async function researchOne(db, env, { kind, state, district = '', variant
     data = null;
     error = failed ? (failed.r.ok ? 'empty or unreadable answer' : failed.r.error) : 'empty or unreadable answer';
     if (failed && !failed.r.ok && isExhausted(failed.r.code) && parts.every(p => !p.r.ok)) {
-      // Every Gemini key is out of free quota: keep the row exactly as it is (saved data, or still
-      // 'pending' so the cron picks it up after the reset) and never fall back to invented data
-      return { ok: false, status: 'paused', paused: true, error: RESEARCH_PAUSED, code: failed.r.code };
+      // Every Gemini key x model is out of free quota: the never-stop chain (keyless free sources ->
+      // Groq if set -> saved data -> none). Govt / Hospitals free sources were already tried above (or
+      // skipped on purpose to keep grounded AI data). The row is never marked failed (cron retries).
+      const fc = await researchFallbackChain(db, env, t, { fetchImpl, now, request: false, waitUntil, keyless: !FREE_KINDS.has(kind), code: failed.r.code });
+      return { ...fc, aiOut: true };
     }
   }
   if (data) {
@@ -852,6 +1002,127 @@ export async function researchOne(db, env, { kind, state, district = '', variant
   return { ok: false, error, code: failed && failed.r.code };
 }
 
+/**
+ * Promises (kind 'gprm') when grounded Gemini cannot run (free quota used up / no key): keyless
+ * Wikipedia first (free/promises.js, usage key 'civic_free', same daily cap as the free Govt /
+ * Hospitals fetches), then Groq Compound web search ONLY if GROQ_API_KEY is set. Saved like the
+ * other rows (civic_data, refreshed weekly by the cron); nothing found = nothing saved.
+ * -> { ok: true, origin: 'free' | 'groq', model, translated: [] } | { ok: false, error, code }
+ */
+export async function researchPromisesFallback(db, env, t, { fetchImpl = fetch, now = Date.now(), request = true } = {}) {
+  if (t.kind !== 'gprm' || !placeByCode(t.state, t.kind)) {
+    return { ok: false, error: 'no fallback for this kind' };
+  }
+  const k = await researchKeyless(db, env, t, { fetchImpl, now, request });
+  if (k.ok || !isGroqConfigured(env)) {
+    return k.ok ? k : { ok: false, error: k.error, code: 'source' };
+  }
+  const g = await researchGroq(db, env, t, { fetchImpl, now });
+  return g.ok ? g : { ok: false, error: `${k.error}; ${g.error}`, code: g.code };
+}
+
+// Kinds whose keyless fallback runs when Gemini cannot (Govt / Hospitals use free sources FIRST)
+export const KEYLESS_KINDS = new Set(['gprm', 'gcmp']);
+
+/**
+ * Keyless free sources for one target (no AI, no key; usage key 'civic_free', same daily cap):
+ * Govt / Hospitals researchFree, Promises free/promises.js, Comparison free/compare.js. Saved with
+ * origin 'free'; nothing found = nothing saved.
+ * -> { ok: true, origin: 'free', model: 'free', translated: [], count? } | { ok: false, error, code: 'source' }
+ */
+export async function researchKeyless(db, env, t, { fetchImpl = fetch, now = Date.now(), request = true, waitUntil = null } = {}) {
+  if (FREE_KINDS.has(t.kind)) {
+    return researchFree(db, env, t, { fetchImpl, now, waitUntil, request });
+  }
+  const st = placeByCode(t.state, t.kind);
+  if (!st || !KEYLESS_KINDS.has(t.kind)) {
+    return { ok: false, error: 'no free source for this kind', code: 'source' };
+  }
+  const day = utcDay(now);
+  if ((await usageFor(db, day, ['civic_free'])).civic_free >= civicCaps(env).freeDailyMax) {
+    return { ok: false, error: 'daily free-source cap reached', code: 'cap' };
+  }
+  await addUsage(db, day, 'civic_free', 1);
+  const timeoutMs = request ? FREE_REQ_TIMEOUT_MS : 8000;
+  if (t.kind === 'gprm') {
+    const r = await fetchPromisesFree(st, { fetchImpl, now, timeoutMs });
+    const data = r.ok ? cleanPromises(r.data) : null;
+    if (data && data.promises.length) {
+      await saveFree(db, t, data, r.sources, now);
+      return { ok: true, origin: 'free', model: 'free', translated: [], count: data.promises.length };
+    }
+    return { ok: false, error: r.ok ? 'no promises in the free source' : r.error || 'free source unavailable', code: 'source' };
+  }
+  const r = await fetchCompareFree(st, { fetchImpl, now, timeoutMs });
+  const data = r.ok ? cleanCompare(r.data) : null;
+  if (data && data.rows.length) {
+    await saveFree(db, t, data, r.sources, now);
+    return { ok: true, origin: 'free', model: 'free', translated: [], count: data.rows.length };
+  }
+  return { ok: false, error: r.ok ? 'no sourced facts in the free source' : r.error || 'free source unavailable', code: 'source' };
+}
+
+/**
+ * Groq Compound (built-in web search) with the same research prompt and cleaner, ONLY when the
+ * GROQ_API_KEY secret is set (never required). Saved with origin 'ai', model 'groq/compound'.
+ * -> { ok: true, origin: 'groq', model, translated: [] } | { ok: false, error, code }
+ */
+export async function researchGroq(db, env, t, { fetchImpl = fetch, now = Date.now() } = {}) {
+  if (!isGroqConfigured(env)) {
+    return { ok: false, error: 'groq: not configured', code: 'config' };
+  }
+  const st = placeByCode(t.state, t.kind);
+  if (!st) {
+    return { ok: false, error: 'bad target', code: 'other' };
+  }
+  const g = await groqSearchGenerate(env, { prompt: researchPrompt(t.kind, t.variant, st, t.district), maxTokens: 8000 }, { fetchImpl, now });
+  await addUsage(db, utcDay(now), 'civic_groq', 1);
+  const data = g.ok ? cleanFor(t.kind, parseJsonLoose(g.text), placeName(st, t.district)) : null;
+  if (!data || isEmpty(t.kind, data)) {
+    return { ok: false, error: g.ok ? 'groq: no sourced data' : g.error, code: g.ok ? 'source' : g.code };
+  }
+  await db.run(
+    `INSERT INTO civic_data (kind, state, district, variant, data, sources, ai_stars, status, error, model, updated_at, i18n, schema_v, origin)
+     VALUES (?, ?, ?, ?, ?, ?, NULL, 'ok', NULL, ?, ?, NULL, ?, 'ai')
+     ON CONFLICT (kind, state, district, variant) DO UPDATE SET data = excluded.data, sources = excluded.sources,
+       ai_stars = NULL, status = 'ok', error = NULL, model = excluded.model, updated_at = excluded.updated_at, i18n = NULL,
+       schema_v = excluded.schema_v, origin = 'ai'`,
+    ...binds4(t), JSON.stringify(data), JSON.stringify(g.sources || []), g.model, now, CIVIC_SCHEMA[t.kind] || 1,
+  );
+  await db.run(`DELETE FROM civic_i18n WHERE ${where4}`, ...binds4(t));
+  return { ok: true, origin: 'groq', model: g.model, translated: [] };
+}
+
+/**
+ * The never-stop chain after every Gemini key x model is out of free quota (see the header):
+ * keyless free sources (opts.keyless) -> Groq if set (opts.groq) -> the row's saved data -> none.
+ * Never writes an error and never touches saved data on a miss.
+ * -> { ok: true, origin, model, translated } (fresh data) | { ok: true, status: 'saved', origin,
+ *    answeredBy } | { ok: false, status: 'none', error, code }
+ */
+export async function researchFallbackChain(db, env, t, { fetchImpl = fetch, now = Date.now(), request = true, waitUntil = null, keyless = true, groq = true, code = 'quota' } = {}) {
+  const errors = [];
+  if (keyless) {
+    const k = await researchKeyless(db, env, t, { fetchImpl, now, request, waitUntil });
+    if (k.ok) {
+      return k;
+    }
+    errors.push(`free: ${k.error}`);
+  }
+  if (groq && isGroqConfigured(env)) {
+    const g = await researchGroq(db, env, t, { fetchImpl, now });
+    if (g.ok) {
+      return g;
+    }
+    errors.push(g.error);
+  }
+  const row = await db.first(`SELECT data, origin, model, status FROM civic_data WHERE ${where4}`, ...binds4(t));
+  if (row && row.data) {
+    return { ok: true, status: 'saved', origin: row.origin || 'ai', answeredBy: answeredByOf(row.origin, row.model), translated: [] };
+  }
+  return { ok: false, status: 'none', error: errors.length ? errors.join('; ').slice(0, 300) : 'no data yet', code };
+}
+
 // On demand (a user opened a place): research it now (with the user's language in the same run) if
 // it has no data, else translate the missing language. Locked per row (one run at a time) and inside
 // the same daily caps as the cron.
@@ -867,7 +1138,7 @@ export async function researchNow(db, env, t, lang, { fetchImpl = fetch, now = D
   let freeError = '';
   if (!hasData && FREE_KINDS.has(t.kind)) {
     // Govt / Hospitals: free, keyless sources first. No AI key, cap or cool-down is involved, so this
-    // never answers 'paused'; the asked language is translated afterwards in the background.
+    // never stops on AI limits; the asked language is translated afterwards in the background.
     if (!(await lockRow(db, t, now))) {
       return { ok: true, status: 'running', did: 'already running' };
     }
@@ -878,7 +1149,7 @@ export async function researchNow(db, env, t, lang, { fetchImpl = fetch, now = D
       await unlock(db, t);
     }
     if (fr.ok) {
-      const out = { ok: true, status: 'ready', did: 'research', origin: 'free', model: 'free', translated: [] };
+      const out = { ok: true, status: 'ready', did: 'research', origin: 'free', model: 'free', translated: [], ...(fr.scope ? { scope: fr.scope } : {}), ...(fr.note ? { note: fr.note } : {}) };
       if (TR_LANGS[lang] && isAiConfigured(env) && waitUntil) {
         const k = await startTranslate(db, env, t, lang, { fetchImpl, now, waitUntil });
         if (k.started) {
@@ -889,6 +1160,29 @@ export async function researchNow(db, env, t, lang, { fetchImpl = fetch, now = D
     }
     freeError = fr.error || 'free sources unavailable';
   }
+  let chainDone = FREE_KINDS.has(t.kind) && !hasData; // keyless step already run just above
+  if (!hasData && KEYLESS_KINDS.has(t.kind) && (!isGeminiConfigured(env) || !(await geminiReady(env, { now })))) {
+    // Promises / Comparison with no Gemini key, or every key cooling down (free quota used up):
+    // keyless free sources, then Groq only if set
+    if (!(await lockRow(db, t, now))) {
+      return { ok: true, status: 'running', did: 'already running' };
+    }
+    let fb;
+    try {
+      fb = await researchKeyless(db, env, t, { fetchImpl, now, request: true });
+      if (!fb.ok && isGroqConfigured(env)) {
+        const g = await researchGroq(db, env, t, { fetchImpl, now });
+        fb = g.ok ? g : { ...fb, error: `${fb.error}; ${g.error}` };
+      }
+    } finally {
+      await unlock(db, t);
+    }
+    if (fb.ok) {
+      return { ...fb, status: 'ready', did: 'research' };
+    }
+    freeError = fb.error || 'free sources unavailable';
+    chainDone = true;
+  }
   if (!isAiConfigured(env)) {
     return { ok: false, status: 'ai_off', error: 'no AI provider set (GEMINI_API_KEY)', code: 'config', ...(freeError ? { freeError } : {}) };
   }
@@ -898,8 +1192,17 @@ export async function researchNow(db, env, t, lang, { fetchImpl = fetch, now = D
     return { ok: false, status: 'ai_off', error: 'GEMINI_API_KEY not set', code: 'config' };
   }
   if (!hasData && !(await geminiReady(env, { now }))) {
-    // Every key is cooling down: nothing to call, the saved info (if any) stays on screen
-    return { ok: false, status: 'paused', paused: true, error: RESEARCH_PAUSED, code: 'quota' };
+    // Every key x model is cooling down: never stop. Keyless sources and Groq (where not run just
+    // above), then the saved data ('saved') or nothing ('none')
+    if (!(await lockRow(db, t, now))) {
+      return { ok: true, status: 'running', did: 'already running' };
+    }
+    try {
+      const fc = await researchFallbackChain(db, env, t, { fetchImpl, now, request: true, waitUntil, keyless: !chainDone, groq: !chainDone || FREE_KINDS.has(t.kind), code: 'quota' });
+      return { ...fc, status: fc.status || (fc.ok ? 'ready' : 'none'), did: fc.status === 'saved' ? 'saved' : 'research', ...(freeError && !fc.ok ? { freeError } : {}) };
+    } finally {
+      await unlock(db, t);
+    }
   }
   if (row && row.status === 'error' && !hasData && now - Number(row.updated_at) < CIVIC_RETRY_MS) {
     return { ok: false, status: 'error', error: 'research failed recently, retrying later' };
@@ -921,7 +1224,7 @@ export async function researchNow(db, env, t, lang, { fetchImpl = fetch, now = D
     const withLang = TR_LANGS[lang] && used.civic_tr < caps.trDailyMax ? [lang] : [];
     // free sources were tried just above (kinds that have them): grounded AI research only
     const r = await researchOne(db, env, t, { fetchImpl, now, langs: withLang, free: false });
-    return { ...r, status: r.ok ? 'ok' : r.status || 'error', did: 'research' };
+    return { ...r, status: r.status || (r.ok ? (r.origin ? 'ready' : 'ok') : 'error'), did: r.status === 'saved' ? 'saved' : 'research' };
   } finally {
     await unlock(db, t);
   }
@@ -943,10 +1246,12 @@ export function pickTargets(rows, now, n, seeds = SEED_DISTRICTS) {
       }),
     ),
   );
-  // The centre's comparison (after all states)
-  if (!byKey.has(key('gcmp', CENTRE.code, '', ''))) {
-    missing.push({ kind: 'gcmp', state: CENTRE.code, district: '', variant: '' });
-  }
+  // The centre's comparison + promises tracker (after all states)
+  CENTRE_KINDS.forEach(kind => {
+    if (!byKey.has(key(kind, CENTRE.code, '', ''))) {
+      missing.push({ kind, state: CENTRE.code, district: '', variant: '' });
+    }
+  });
   // Prefill: districts of the app's bundled cities (Govt + both hospital lists), state by state
   STATES.forEach(st =>
     ((seeds && seeds[st.code]) || []).forEach(district =>
@@ -1012,8 +1317,9 @@ export async function runCivicResearch(db, env, { fetchImpl = fetch, now = Date.
       const tr = translate && trUsed < caps.trDailyMax;
       const r = await researchOne(db, env, t, { fetchImpl, now, translate: tr });
       results.push({ ...t, ...r });
-      if (r.paused) {
-        // Keys ran out mid-run: stop researching until they reset (saved data stays as it is)
+      if (r.aiOut) {
+        // Keys ran out mid-run (that place went through the never-stop chain): stop grounded
+        // research until they reset (saved data stays as it is)
         paused = true;
         break;
       }
@@ -1042,9 +1348,9 @@ export async function runCivicResearch(db, env, { fetchImpl = fetch, now = Date.
     }
   }
   if (!results.length) {
-    return { ran: 0, skipped: paused ? RESEARCH_PAUSED : aiLeft <= 0 ? 'daily cap reached' : 'nothing to do' };
+    return { ran: 0, skipped: paused ? AI_KEYS_OUT : aiLeft <= 0 ? 'daily cap reached' : 'nothing to do' };
   }
-  return { ran: results.length, results, ...(paused ? { paused: true } : {}) };
+  return { ran: results.length, results, ...(paused ? { aiOut: true } : {}) };
 }
 
 // Missing cron-language (te / hi) copies of rows with English data, best first (see runCivicResearch)
@@ -1136,8 +1442,8 @@ const rankOwn = h => (h.ownership === 'govt' ? 0 : h.ownership === 'private' ? 1
 
 /**
  * One variant's stored hospital list from free OSM items (pure: tested). govt = items classed
- * government; private = every other item (private + not stated; ownership 'unknown' is not called
- * private in the app). Shape = cleanHosp with origin 'free'.
+ * government; private = every other item (private + not stated; ownership 'unknown' is shown in
+ * the app as "Likely private · ownership not confirmed", never as confirmed private). Shape = cleanHosp with origin 'free'.
  */
 export function freeHospData(items, variant, { district = '', today = '', src = null, where = '' } = {}) {
   const pick = (items || []).filter(h => (variant === 'govt' ? h.type === 'govt' : h.type !== 'govt'));
@@ -1184,43 +1490,94 @@ export async function researchFree(db, env, t, { fetchImpl = fetch, now = Date.n
   }
   await addUsage(db, day, 'civic_free', 1);
   const today = new Date(now).toISOString().slice(0, 10);
+  const place = splitPlace(t.district);
+  const asked = levelOf(t.district);
+  const timeoutMs = request ? FREE_REQ_TIMEOUT_MS : 8000;
   if (t.kind === 'govt') {
     const gov = await cachedGovernors(db, st.type, now);
-    const r = await fetchGovtFree(st, t.district, { fetchImpl, now, timeoutMs: request ? FREE_REQ_TIMEOUT_MS : 8000, governors: gov || undefined });
+    const r = await fetchGovtFree(st, place.district, { fetchImpl, now, timeoutMs, governors: gov || undefined });
     if (!gov && r.governors && Object.keys(r.governors).length) {
       await saveGovernors(db, st.type, r.governors, now);
     }
     if (!r.ok) {
       return { ok: false, error: r.error || 'free sources unavailable', code: 'source' };
     }
-    await saveFree(db, t, cleanGovt(r.data), r.sources, now);
-    return { ok: true, origin: 'free', model: 'free', translated: [] };
+    const data = { ...r.data };
+    if (place.mandal) {
+      // The mandal's own facts on top of the district's (nothing public = scope 'district')
+      const m = await fetchMandalFree(st, titleCase(place.district), titleCase(place.mandal), {
+        fetchImpl,
+        now,
+        timeoutMs,
+        level: subLevelWord(st.code),
+        mlas: (r.data.district && r.data.district.mlas) || [],
+      }).catch(() => null);
+      data.mandal = m;
+      if (m && m.src && m.src.url) {
+        r.sources = [...(r.sources || []), { url: m.src.url, title: `Wikipedia: ${m.name}` }];
+      }
+    }
+    const d = data.district || {};
+    const hasDistrict = !!(d.headquarters || (d.mlas || []).length || (d.mps || []).length);
+    const hasMandal = !!(data.mandal && (data.mandal.overview || data.mandal.mlas.length));
+    data.scope = asked === 'mandal' ? (hasMandal ? 'mandal' : hasDistrict ? 'district' : 'state') : asked === 'district' ? (hasDistrict || data.overview ? 'district' : 'state') : 'state';
+    await saveFree(db, t, cleanGovt(data), r.sources, now);
+    return { ok: true, origin: 'free', model: 'free', translated: [], scope: data.scope, ...scopeNote(asked, data.scope) };
   }
-  const where = placeName(st, t.district);
-  const geo = await cachedGeo(db, t);
-  const r = await fetchHospFree(st, t.district, {
-    fetchImpl,
-    now,
-    timeoutMs: request ? FREE_REQ_TIMEOUT_MS : 6000,
-    gapMs: caps.freeGapMs,
-    sleepImpl,
-    bbox: geo ? geo.bbox : null,
-  });
-  if (r.bbox && !geo) {
-    await saveGeo(db, t, r.bbox, r.place, now);
+  // Hospitals: the mandal's area first, then the district's, then the state's (data.scope says which)
+  const levels = asked === 'mandal' ? ['mandal', 'district', 'state'] : asked === 'district' ? ['district', 'state'] : ['state'];
+  let r = null;
+  let got = '';
+  let gt = t;
+  for (const lv of levels) {
+    gt = { ...t, district: lv === 'mandal' ? t.district : lv === 'district' ? place.district : '' };
+    if (lv !== asked) {
+      // a wider level already saved from free sources: reuse it (no extra Nominatim requests)
+      const wide = await db.first(`SELECT data, origin FROM civic_data WHERE ${where4}`, ...binds4({ ...gt, variant: 'govt' }));
+      const wideP = await db.first(`SELECT data FROM civic_data WHERE ${where4}`, ...binds4({ ...gt, variant: 'private' }));
+      const wg = wide && wide.origin === 'free' ? parseJsonCol(wide.data, null) : null;
+      const wp = wideP ? parseJsonCol(wideP.data, null) : null;
+      if (wg && wp && (wg.hospitals || []).length + (wp.hospitals || []).length > 0) {
+        for (const [variant, dv] of [['govt', wg], ['private', wp]]) {
+          await saveFree(db, { ...t, variant }, cleanHosp({ ...dv, origin: 'free', scope: lv }, placeName(st, gt.district)), OSM_SOURCES, now);
+        }
+        return { ok: true, origin: 'free', model: 'free', translated: [], count: (wg.hospitals || []).length + (wp.hospitals || []).length, scope: lv, ...scopeNote(asked, lv) };
+      }
+    }
+    const geo = await cachedGeo(db, gt);
+    r = await fetchHospFree(st, splitPlace(gt.district).district, {
+      fetchImpl,
+      now,
+      timeoutMs: request ? FREE_REQ_TIMEOUT_MS : 6000,
+      gapMs: caps.freeGapMs,
+      sleepImpl,
+      bbox: geo ? geo.bbox : null,
+      mandal: splitPlace(gt.district).mandal,
+    });
+    if (r.bbox && !geo) {
+      await saveGeo(db, gt, r.bbox, r.place, now);
+    }
+    if (r.ok) {
+      got = lv;
+      break;
+    }
+    if (!r.bbox && /unreachable|timeout|network/i.test(String(r.error || ''))) {
+      break; // Nominatim is down: a wider level would fail the same way
+    }
   }
-  if (!r.ok) {
-    return { ok: false, error: r.error || 'free sources unavailable', code: 'source' };
+  if (!r || !r.ok) {
+    return { ok: false, error: (r && r.error) || 'free sources unavailable', code: 'source' };
   }
-  const district = t.district ? titleCase(t.district) : '';
+  const where = placeName(st, gt.district);
+  const district = place.district ? titleCase(place.district) : '';
   for (const variant of KINDS.hosp) {
-    await saveFree(db, { ...t, variant }, freeHospData(r.hospitals, variant, { district, today, src: r.src, where }), OSM_SOURCES, now);
+    await saveFree(db, { ...t, variant }, { ...freeHospData(r.hospitals, variant, { district, today, src: r.src, where }), ...(got !== 'state' || asked !== 'state' ? { scope: got } : {}) }, OSM_SOURCES, now);
   }
-  if (waitUntil && r.bbox) {
+  if (waitUntil && r.bbox && got === asked) {
     // every hospital / health centre of the area, after the response (never on the request path)
     waitUntil(upgradeHospOverpass(db, env, t, { fetchImpl, now, bbox: r.bbox, sleepImpl }).catch(() => undefined));
   }
-  return { ok: true, origin: 'free', model: 'free', translated: [], count: r.hospitals.length };
+  return { ok: true, origin: 'free', model: 'free', translated: [], count: r.hospitals.length, scope: got, ...scopeNote(asked, got) };
 }
 
 /**
@@ -1238,7 +1595,8 @@ export async function upgradeHospOverpass(db, env, t, { fetchImpl = fetch, now =
     const geo = await cachedGeo(db, t);
     box = geo ? geo.bbox : null;
   }
-  const r = await fetchHospOverpass(st, t.district, { fetchImpl, now, bbox: box, sleepImpl, gapMs: civicCaps(env).freeGapMs, timeoutMs: 25000 });
+  const pl = splitPlace(t.district);
+  const r = await fetchHospOverpass(st, pl.district, { fetchImpl, now, bbox: box, sleepImpl, gapMs: civicCaps(env).freeGapMs, timeoutMs: 25000, mandal: pl.mandal });
   const place = geoKey(t);
   if (r.bbox && !box) {
     await saveGeo(db, t, r.bbox, '', now);
@@ -1248,15 +1606,16 @@ export async function upgradeHospOverpass(db, env, t, { fetchImpl = fetch, now =
     return { ok: false, error: r.error };
   }
   const today = new Date(now).toISOString().slice(0, 10);
-  const district = t.district ? titleCase(t.district) : '';
+  const district = pl.district ? titleCase(pl.district) : '';
   const where = placeName(st, t.district);
+  const lv = levelOf(t.district);
   let saved = 0;
   for (const variant of KINDS.hosp) {
     const vt = { kind: 'hosp', state: t.state, district: t.district || '', variant };
     const row = await db.first(`SELECT data, origin FROM civic_data WHERE ${where4}`, ...binds4(vt));
     const cur = row ? parseJsonCol(row.data, null) : null;
-    if (row && row.data && row.origin !== 'free') {
-      continue;
+    if ((row && row.data && row.origin !== 'free') || (cur && cur.scope && cur.scope !== lv)) {
+      continue; // AI data, or a mandal / district row showing a wider level's list
     }
     const have = cur && Array.isArray(cur.hospitals) ? cur.hospitals : [];
     const known = new Set(have.map(h => h.osmUrl).filter(Boolean));
@@ -1265,7 +1624,7 @@ export async function upgradeHospOverpass(db, env, t, { fetchImpl = fetch, now =
       continue;
     }
     const hospitals = [...have, ...add].sort((a, b) => rankOwn(a) - rankOwn(b) || a.name.localeCompare(b.name));
-    const data = cleanHosp({ origin: 'free', asOf: today, src: (cur && cur.src) || r.src, hospitals: hospitals.map(h => ({ ...h, id: h.osmUrl })) }, where);
+    const data = cleanHosp({ origin: 'free', asOf: today, src: (cur && cur.src) || r.src, hospitals: hospitals.map(h => ({ ...h, id: h.osmUrl })), ...(cur && cur.scope ? { scope: cur.scope } : {}) }, where);
     await saveFree(db, vt, data, OSM_SOURCES, now);
     saved += 1;
   }

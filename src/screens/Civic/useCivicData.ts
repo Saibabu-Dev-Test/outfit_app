@@ -4,20 +4,23 @@
 //  3. a place not researched yet is researched on demand (POST /v1/civic/research) WITH the app
 //     language in the same run; data present but the language missing = translation on demand.
 // While a run is going it polls every POLL_MS for a short window (MAX_POLLS). Never loops: each
-// place + language is requested at most once per screen visit. AI failures (free-tier limit, credits
-// used up) give a clear message while saved / cached info stays on screen. Status 'paused' (every
-// Worker Gemini key out of free quota) = "research paused, showing saved info": no retry, no poll.
-// Research that fails (error, timeout, daily cap, busy) or polls that run out never leave the spinner
-// on: saved / English info shows ('ready'), else 'error' with the pull-to-retry message (refresh asks
-// again). Govt status 'partial' = the parts finished so far show at once while the rest is polled for.
+// place + language is requested at most once per screen visit.
+// Never stops: the Worker runs a fallback chain (every Gemini key + free model -> keyless free
+// sources -> Groq if set -> last saved data). Status 'saved' (and 'paused' from older Workers) =
+// the last saved data stands: shown with its source label, no "research paused" message, no poll.
+// 'none' = every source failed and nothing is saved: "no data yet". Research that fails (error,
+// timeout, daily cap, busy) or polls that run out never leave the spinner on: saved / English info
+// shows ('ready'), else 'error' with the pull-to-retry message (refresh asks again). Govt status
+// 'partial' = the parts finished so far show at once while the rest is polled for.
 // Translation status 'translating' = the Worker started it in the background: English shows, poll.
 // Free sources (data reply freeSources: true; Govt / Hospitals from Wikidata / Wikipedia / OSM): a
-// research reply with status 'ready' (origin 'free') is success, the saved rows are read at once;
-// 'paused' is never shown for them (only AI translation can hit a limit: "translation on the way").
+// research reply with status 'ready' (origin 'free') is success, the saved rows are read at once.
+// mandal (optional): the picked sub-district; the Worker answers for it, or for the district / state
+// when it has nothing there (data.scope says which).
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppLanguage, langCode } from '../../i18n/appLanguage';
 import type { CivicKey } from '../../i18n/civicLabels';
-import { CivicDataResponse, CivicKind, TrCode, researchCivic } from '../../services/civicApi';
+import { AnsweredBy, CivicDataResponse, CivicKind, TrCode, researchCivic } from '../../services/civicApi';
 import { civicCacheKey, readCivicCache, writeCivicCache } from '../../services/civicCache';
 import { aiErrorKey } from '../../services/civicAi';
 import { WorkerError } from '../../services/workerApi';
@@ -26,6 +29,12 @@ import { WorkerError } from '../../services/workerApi';
 export const trCode = (lang: AppLanguage): TrCode | null => {
   const c = langCode(lang);
   return c === 'en' ? null : c;
+};
+
+// Older Workers send no answeredBy: the data's own origin says free vs AI (Gemini researched it)
+const originAnswer = (d: unknown): AnsweredBy | undefined => {
+  const o = d && typeof d === 'object' ? (d as { origin?: string }).origin : undefined;
+  return o === 'free' ? 'free' : o === 'ai' ? 'gemini' : undefined;
 };
 
 export type CivicPhase = 'idle' | 'loading' | 'collecting' | 'translating' | 'ready' | 'error' | 'serverOld';
@@ -40,6 +49,7 @@ export function useCivicData<T>(
   variant: string,
   lang: AppLanguage,
   fetcher: (tr: TrCode | null) => Promise<CivicDataResponse<T>>,
+  mandal = '',
 ) {
   const [res, setRes] = useState<CivicDataResponse<T> | null>(null);
   const [phase, setPhase] = useState<CivicPhase>('idle');
@@ -53,9 +63,10 @@ export function useCivicData<T>(
   const live = useRef(false); // a Worker answer arrived for this place (cache must not replace it)
   const lastGood = useRef<CivicDataResponse<T> | null>(null); // last complete answer (phone cache or Worker)
   const stopped = useRef(false); // research gave up for this visit: late polls must not restart the spinner
-  const key = `${kind}|${state}|${district.trim().toLowerCase()}|${variant}`;
+  const m = district.trim() ? mandal.trim().toLowerCase() : '';
+  const key = `${kind}|${state}|${district.trim().toLowerCase()}${m ? `~${m}` : ''}|${variant}`;
   const tr = trCode(lang);
-  const cacheKey = civicCacheKey(kind, state, district, variant, tr);
+  const cacheKey = civicCacheKey(kind, state, m ? `${district}~${m}` : district, variant, tr);
 
   useEffect(() => {
     alive.current = true;
@@ -103,13 +114,17 @@ export function useCivicData<T>(
       };
       const free = !!r.freeSources;
       const note = (out: { ok: boolean; status?: string; code?: any; error?: string }, translate = false) => {
-        if (free) {
-          // free-source data never pauses; an AI translation hiccup only delays the translated copy
-          if (translate && (out.status === 'paused' || (!out.ok && out.code))) setAiNote('trLater');
+        if (translate) {
+          // an AI translation hiccup only delays the translated copy (English shows meanwhile)
+          if (out.status === 'paused' || out.status === 'saved' || (!out.ok && out.code)) setAiNote('trLater');
           return;
         }
-        if (out.status === 'paused') setAiNote('researchPaused');
-        else if (!out.ok && out.code) setAiNote(aiErrorKey(null, out.code));
+        // never "research paused": the saved data / source label tells what answered
+        if (free || out.status === 'paused' || out.status === 'saved' || out.status === 'none') return;
+        if (!out.ok && out.code) {
+          const n = aiErrorKey(null, out.code);
+          if (n !== 'researchPaused') setAiNote(n);
+        }
       };
       // Research of a new place: free sources (Govt / Hospitals) or grounded Gemini on the Worker;
       // older Workers only send aiConfigured
@@ -141,7 +156,7 @@ export function useCivicData<T>(
           // The run takes seconds; poll meanwhile so another runner's result shows as soon as it lands
           schedulePoll();
           try {
-            const out = await researchCivic(kind, state, district, variant, tr);
+            const out = await researchCivic(kind, state, district, variant, tr, m);
             if (!alive.current) return;
             note(out);
             if ((out.did === 'research' && out.ok) || (out.ok && out.status === 'ready')) {
@@ -150,10 +165,15 @@ export function useCivicData<T>(
               load(true);
               return;
             }
-            if (out.status === 'paused' && !free) {
-              // Out of free quota: show what is saved (cache / nothing yet) and stop polling
+            if (out.status === 'saved' || out.status === 'paused' || out.status === 'none') {
+              // Every live source failed: the last saved data stands (cache / nothing yet = "no data
+              // yet"); stop polling
               stopped.current = true;
               if (timer.current) clearTimeout(timer.current);
+              if (!r.data && lastGood.current && lastGood.current.data) {
+                setRes(lastGood.current);
+                setFromCache(true);
+              }
               setPhase('ready');
               return;
             }
@@ -166,7 +186,7 @@ export function useCivicData<T>(
           } catch (e) {
             if (!alive.current) return;
             const n = aiErrorKey(e);
-            if (n !== 'error' && !(free && n === 'researchPaused')) setAiNote(n);
+            if (n !== 'error' && n !== 'researchPaused') setAiNote(n);
             if (e instanceof WorkerError) {
               // the Worker answered with an error (busy 429, limit, server error): nothing is running
               giveUp();
@@ -186,21 +206,21 @@ export function useCivicData<T>(
         if (!asked.current.has(k)) {
           asked.current.add(k);
           try {
-            const out = await researchCivic(kind, state, district, variant, tr);
+            const out = await researchCivic(kind, state, district, variant, tr, m);
             if (!alive.current) return;
             note(out, true);
             if (out.did === 'translate' && out.ok && out.status !== 'translating') {
               load(true);
               return;
             }
-            if (!out.ok && (out.code || out.status === 'paused')) {
+            if (!out.ok && (out.code || out.status === 'paused' || out.status === 'saved')) {
               setPhase('ready'); // English shows; the note says why
               return;
             }
           } catch (e) {
             if (!alive.current) return;
             const n = aiErrorKey(e);
-            if (n !== 'error') setAiNote(free ? 'trLater' : n);
+            if (n !== 'error') setAiNote(free || n === 'researchPaused' ? 'trLater' : n);
             setPhase('ready');
             return;
           }
@@ -257,5 +277,7 @@ export function useCivicData<T>(
     load();
   }, [load, key, tr]);
 
-  return { res, phase, errorText, refresh, tr, aiNote, fromCache };
+  // Which source the shown data came from (the phone's saved copy, else what the Worker reports)
+  const answeredBy: AnsweredBy | undefined = res && res.data ? (fromCache ? 'saved' : res.answeredBy || originAnswer(res.data)) : undefined;
+  return { res, phase, errorText, refresh, tr, aiNote, fromCache, answeredBy };
 }

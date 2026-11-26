@@ -118,17 +118,35 @@ describe('useCivicData: collecting always ends', () => {
     act(() => r2.unmount());
   });
 
-  it('research paused (free quota used up): saved info + paused note, no retry, no poll', async () => {
+  it("older Worker 'paused' reply: saved info, never a 'research paused' note, no retry, no poll", async () => {
     researchCivic.mockResolvedValueOnce({ ok: false, status: 'paused', paused: true, code: 'quota' });
     const fetcher = jest.fn(async () => empty());
     const r = await mount(fetcher);
     expect(hook.phase).toBe('ready');
-    expect(hook.aiNote).toBe('researchPaused');
+    expect(hook.aiNote).not.toBe('researchPaused');
     const calls = fetcher.mock.calls.length;
     await tick(MAX_POLLS);
     expect(fetcher.mock.calls.length).toBe(calls);
     expect(researchCivic).toHaveBeenCalledTimes(1);
     act(() => r.unmount());
+  });
+
+  it("never-stop chain: 'saved' = the last saved data stands (no note, no poll); 'none' = no data yet", async () => {
+    researchCivic.mockResolvedValueOnce({ ok: true, status: 'saved', did: 'saved', origin: 'saved' });
+    const fetcher = jest.fn(async () => empty());
+    const r = await mount(fetcher);
+    expect(hook.phase).toBe('ready');
+    expect(hook.aiNote).toBeNull();
+    const calls = fetcher.mock.calls.length;
+    await tick(MAX_POLLS);
+    expect(fetcher.mock.calls.length).toBe(calls);
+    act(() => r.unmount());
+    researchCivic.mockResolvedValueOnce({ ok: false, status: 'none', code: 'other' });
+    const r2 = await mount(jest.fn(async () => empty()));
+    expect(hook.phase).toBe('ready');
+    expect(hook.aiNote).toBeNull();
+    expect(hook.res?.data).toBeNull();
+    act(() => r2.unmount());
   });
 
   it('busy: a 429 from the Worker or the daily cap ends the spinner with the busy note', async () => {

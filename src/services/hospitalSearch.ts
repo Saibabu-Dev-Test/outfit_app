@@ -66,8 +66,9 @@ const fieldsOf = (h: Hospital): [string, number][] => [
   [h.note || '', 1],
 ];
 
-export function searchHospitals<T extends Hospital>(list: T[], query: string): HospMatch<T>[] {
-  const terms = expandQuery(query);
+// `terms` (optional): search terms already worked out for the query, e.g. by the disease search
+// (services/diseaseSearch.hospitalTermsFor); default is expandQuery(query).
+export function searchHospitals<T extends Hospital>(list: T[], query: string, terms: string[] = expandQuery(query)): HospMatch<T>[] {
   if (!terms.length) return list.map(h => ({ h, matched: [], score: 0 }));
   const out: HospMatch<T>[] = [];
   list.forEach(h => {
@@ -97,5 +98,50 @@ export function sortByFacts<T extends { h: Hospital }>(rows: T[]): T[] {
   return rows
     .map((r, i) => ({ r, i, n: factsCount(r.h).total }))
     .sort((a, b) => b.n - a.n || a.i - b.i)
+    .map(x => x.r);
+}
+
+// React keys for the hospital rows: `${variant}:${slug}` (falls back to the OSM page / name / index),
+// made unique with a "#n" suffix when two rows share one. Duplicate keys make React re-order native
+// children, which on Fabric (Android) crashes with "addViewAt: failed to insert view into parent".
+export function uniqueRowKeys<T extends { v: string; h: Pick<Hospital, 'slug' | 'name'> & { osmUrl?: string } }>(rows: T[]): string[] {
+  const seen = new Map<string, number>();
+  return rows.map((r, i) => {
+    const base = `${r.v}:${r.h.slug || r.h.osmUrl || r.h.name || `row${i}`}`;
+    const n = seen.get(base) || 0;
+    seen.set(base, n + 1);
+    return n ? `${base}#${n}` : base;
+  });
+}
+
+// Fallback when no hospital's public data states the searched speciality ("ear" -> ENT): the
+// general / multi-speciality GOVERNMENT hospitals already in the list (AIIMS, medical college /
+// teaching hospitals, GGH, district / area / general / civil hospitals). They are shown as "may treat
+// this — call to confirm", never as a claim that they do. Chosen only from the name / type / ownership
+// the source gives; PHCs / CHCs / sub-centres are left out. Most comprehensive kind first.
+const GENERAL_KINDS: RegExp[] = [
+  /\baiims\b|all india institute of medical sciences/,
+  /medical college|teaching hospital|institute of medical sciences|\bgovernment medical\b|\bgmc\b/,
+  /\bggh\b|government general hospital|govt\.? general hospital/,
+  /district hospital|district headquarters hospital/,
+  /area hospital|general hospital|civil hospital|government hospital|govt\.? hospital|\besic?\b.*hospital|multi[- ]?speciality|super[- ]?speciality|multispeciality|superspeciality/,
+];
+const SMALL_CENTRE = /\b(phc|chc|uphc|cphc|primary health|community health|urban health|health (sub )?cent(re|er)|sub[- ]?cent(re|er)|dispensary|wellness)\b/;
+const GOVT_WORDS = /\b(government|govt\.?|ggh|aiims|district|area hospital|civil hospital|esic?|medical college)\b/;
+
+const isGovtRow = (h: Hospital, variant?: string): boolean =>
+  h.ownership === 'govt' || (variant ? variant === 'govt' : h.ownership === undefined && GOVT_WORDS.test(low(`${h.name} ${h.type || ''}`)));
+
+export function generalGovtHospitals<R extends { h: Hospital; v?: string }>(rows: R[], max = 10): R[] {
+  const out: { r: R; rank: number; i: number }[] = [];
+  rows.forEach((r, i) => {
+    const text = low(`${r.h.name} ${r.h.type || ''}`);
+    if (!isGovtRow(r.h, r.v) || SMALL_CENTRE.test(text)) return;
+    const rank = GENERAL_KINDS.findIndex(re => re.test(text));
+    if (rank >= 0) out.push({ r, rank, i });
+  });
+  return out
+    .sort((a, b) => a.rank - b.rank || a.i - b.i)
+    .slice(0, max)
     .map(x => x.r);
 }

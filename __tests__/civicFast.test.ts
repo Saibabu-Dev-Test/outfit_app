@@ -273,20 +273,33 @@ describe('research: Govt in 3 parallel parts + translation in the same run', () 
     expect(Number(e.DB.raw.prepare('SELECT COUNT(*) AS n FROM civic_i18n').get().n)).toBe(0);
   });
 
-  it('on-demand research out of Gemini quota = paused (saved row kept), with the free-tier reason', async () => {
+  it('on-demand research out of Gemini quota never stops: none (nothing saved anywhere), saved (last data stands), never paused', async () => {
     const e = env({ GEMINI_API_KEY: 'k' });
+    // free sources unreachable (this fake answers only Gemini), no Groq key, nothing saved: 'none'
     const r = await call(e, 'POST', '/v1/civic/research', { body: { kind: 'hosp', state: 'TG', variant: 'govt', lang: 'ta' }, fetchImpl: makeFetch({ status: 402 }).f });
-    expect(r.json).toMatchObject({ ok: false, status: 'paused', code: 'billing', error: research.RESEARCH_PAUSED });
+    expect(r.json).toMatchObject({ ok: false, status: 'none', code: 'billing' });
+    expect(r.json.status).not.toBe('paused');
+    expect(r.json.paused).toBeUndefined();
+    expect(JSON.stringify(r.json)).not.toMatch(/paused/i);
     // nothing written as an error: the row is not marked failed, so it is retried after the reset
     expect(e.DB.raw.prepare("SELECT COUNT(*) AS n FROM civic_data WHERE status = 'error'").get().n).toBe(0);
-    // next call: the key is cooling down, so no request at all
+    // next call: the key is cooling down, so no Gemini request at all; still 'none', never 'paused'
     const again = makeFetch();
     const r1 = await call(e, 'POST', '/v1/civic/research', { body: { kind: 'hosp', state: 'TG', variant: 'govt' }, fetchImpl: again.f });
-    expect(r1.json).toMatchObject({ ok: false, status: 'paused', code: 'quota' });
+    expect(r1.json).toMatchObject({ ok: false, status: 'none', code: 'quota' });
     expect(again.calls).toHaveLength(0);
     const e2 = env({ GEMINI_API_KEY: 'k' });
     const r2 = await call(e2, 'POST', '/v1/civic/research', { body: { kind: 'hosp', state: 'TG', variant: 'govt' }, fetchImpl: makeFetch({ status: 429 }).f });
-    expect(r2.json).toMatchObject({ ok: false, code: 'quota' });
+    expect(r2.json).toMatchObject({ ok: false, status: 'none', code: 'quota' });
+    // saved AI data + keys out of quota: the refresh keeps it and answers 'saved' (data unchanged)
+    const e3 = env({ GEMINI_API_KEY: 'k' });
+    const saved = JSON.stringify({ asOf: '2026-10', hospitals: [{ name: 'NIMS', type: 'Government' }] });
+    e3.DB.raw
+      .prepare("INSERT INTO civic_data (kind, state, district, variant, data, sources, status, model, updated_at, schema_v, origin) VALUES ('hosp', 'TG', '', 'govt', ?, '[]', 'ok', 'gemini-3.5-flash-lite', ?, 2, 'ai')")
+      .run(saved, NOW - 30 * 24 * 3600 * 1000);
+    const r3 = await research.researchOne(new Db(e3.DB), e3, { kind: 'hosp', state: 'TG', district: '', variant: 'govt' }, { fetchImpl: makeFetch({ status: 402 }).f, now: NOW });
+    expect(r3).toMatchObject({ ok: true, status: 'saved', origin: 'ai', answeredBy: 'gemini' });
+    expect(e3.DB.raw.prepare("SELECT data, status FROM civic_data WHERE kind='hosp' AND state='TG'").get()).toEqual({ data: saved, status: 'ok' });
   });
 
   it('data route: aiConfigured = any provider (Workers AI alone counts), researchConfigured = free sources (Govt / Hospitals) or Gemini key', async () => {
@@ -294,8 +307,12 @@ describe('research: Govt in 3 parallel parts + translation in the same run', () 
     const g = await call(onlyCf, 'GET', '/v1/civic/data?kind=hosp&state=TG&variant=govt');
     // Hospitals / Govt are researched from free, keyless sources (no Gemini needed)
     expect(g.json).toMatchObject({ aiConfigured: true, researchConfigured: true, freeSources: true });
+    // comparison: grounded Gemini, else the keyless Wikidata + Wikipedia fallback (free/compare.js)
     const cmp = await call(onlyCf, 'GET', '/v1/civic/data?kind=gcmp&state=TG');
-    expect(cmp.json).toMatchObject({ aiConfigured: true, researchConfigured: false, freeSources: false });
+    expect(cmp.json).toMatchObject({ aiConfigured: true, researchConfigured: true, freeSources: false });
+    // promises tracker: grounded Gemini, else the keyless Wikipedia fallback, so research is always possible
+    const prm = await call(onlyCf, 'GET', '/v1/civic/data?kind=gprm&state=TG');
+    expect(prm.json).toMatchObject({ aiConfigured: true, researchConfigured: true, freeSources: false, data: null });
     // free sources unreachable (this fake answers only Gemini) and no Gemini key: ai_off as before
     const r = await call(onlyCf, 'POST', '/v1/civic/research', { body: { kind: 'hosp', state: 'TG', variant: 'govt' } });
     expect(r.json).toMatchObject({ ok: false, status: 'ai_off', code: 'config' });
@@ -306,7 +323,8 @@ describe('research: Govt in 3 parallel parts + translation in the same run', () 
   it('prefill: bundled-city districts come after missing states, before stale rows; file is up to date', () => {
     const t = research.pickTargets([], NOW, 5000);
     const firstDistrict = t.findIndex((x: any) => x.district);
-    expect(firstDistrict).toBe(36 * 4 + 1);
+    // 36 states x (govt + 2 hosp + gcmp + gprm) + the centre's gcmp + gprm
+    expect(firstDistrict).toBe(36 * 5 + 2);
     expect(t.slice(firstDistrict, firstDistrict + 3)).toEqual([
       { kind: 'govt', state: 'AP', district: SEED_DISTRICTS.AP[0], variant: '' },
       { kind: 'hosp', state: 'AP', district: SEED_DISTRICTS.AP[0], variant: 'govt' },

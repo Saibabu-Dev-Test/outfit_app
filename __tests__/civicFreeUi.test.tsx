@@ -1,6 +1,6 @@
 // Civic client for free sources + languages: header language chip (Govt / Hospitals / Laws) with the
 // 12 app languages and "Also show English"; OpenStreetMap hospital rows (name, address, tap-to-call,
-// map link, Govt / Private / "Type not listed", source + date); Govt Collector / SP "Public info not
+// map link, Govt / Private / "Likely private · ownership not confirmed" / "Type not listed", source + date); Govt Collector / SP "Public info not
 // available" + district website; Laws Telugu / Hindi static text filled. Worker calls are mocked.
 import React from 'react';
 import ReactTestRenderer from 'react-test-renderer';
@@ -82,6 +82,13 @@ const textOf = (r: ReactTestRenderer.ReactTestRenderer) =>
     .map(n => [].concat(n.props.children ?? '').join(''))
     .join('\n');
 
+// HeadlineCard rows open their details (sources, dates, ...) on tap: open every row
+const expandAll = async (r: ReactTestRenderer.ReactTestRenderer) => {
+  const fns = new Set<() => void>();
+  r.root.findAll(n => n.props.testID === 'headline-toggle' && typeof n.type !== 'string' && typeof n.props.onPress === 'function' && !n.props.disabled).forEach(n => fns.add(n.props.onPress));
+  await ReactTestRenderer.act(async () => fns.forEach(f => f()));
+};
+
 const mounted: ReactTestRenderer.ReactTestRenderer[] = [];
 const mount = async (el: React.ReactElement) => {
   let r!: ReactTestRenderer.ReactTestRenderer;
@@ -157,6 +164,7 @@ describe('free-source hospital rows', () => {
     const spy = jest.spyOn(Linking, 'openURL').mockResolvedValue(true as any);
     const { FreeHospitalRow } = require('../src/screens/Civic/civicFreeParts');
     const r = await mount(<FreeHospitalRow h={FREE_HOSP.hospitals[0]} lang="English" />);
+    await expandAll(r);
     const txt = textOf(r);
     expect(txt).toMatch(/Government General Hospital Kurnool/);
     expect(txt).toMatch(/Hospital Rd, Kurnool/);
@@ -169,21 +177,29 @@ describe('free-source hospital rows', () => {
     spy.mockRestore();
   });
 
-  it('unknown ownership = "Type not listed"; private = Private; no phone = public info not available', async () => {
+  it('unknown ownership = "Likely private · ownership not confirmed" (govt-looking name = "Type not listed"); private = Private; no phone = public info not available', async () => {
     const { FreeHospitalRow, hospTypeKey } = require('../src/screens/Civic/civicFreeParts');
     expect(hospTypeKey({ ownership: 'govt' })).toBe('typeGovt');
     expect(hospTypeKey({ ownership: 'private' })).toBe('typePrivate');
     expect(hospTypeKey({ ownership: 'unknown' })).toBe('typeNotListed');
+    expect(hospTypeKey({ ownership: 'unknown', name: 'Sunrise Clinic' })).toBe('typePrivateLikely');
+    expect(hospTypeKey({ ownership: 'unknown', name: 'Area Hospital, Tenali' })).toBe('typeNotListed');
+    expect(hospTypeKey({ ownership: 'unknown', name: 'Vijaya PHC' })).toBe('typeNotListed');
+    expect(hospTypeKey({ name: 'Sunrise Clinic' })).toBe('typeNotListed'); // no OSM ownership field
     expect(hospTypeKey({})).toBe('typeNotListed');
     const r = await mount(<FreeHospitalRow h={FREE_HOSP.hospitals[1]} lang="English" />);
+    await expandAll(r);
     const txt = textOf(r);
-    expect(txt).toMatch(/Type not listed/);
+    expect(txt).toMatch(/Likely private · ownership not confirmed/);
+    expect(txt).not.toMatch(/🏷️ Private\b/);
     expect(txt).toMatch(/Phone: Public info not available/);
     expect(byId(r, 'hosp-call')).toHaveLength(0);
     expect(txt).toMatch(/openstreetmap\.org/); // OSM page as the source when no src
     const { CIVIC_LABELS } = require('../src/i18n/civicLabels');
     expect(CIVIC_LABELS.Telugu.typeNotListed).toBeTruthy();
     expect(CIVIC_LABELS.Hindi.typeNotListed).toBeTruthy();
+    expect(CIVIC_LABELS.Telugu.typePrivateLikely).not.toBe(CIVIC_LABELS.English.typePrivateLikely);
+    expect(CIVIC_LABELS.Hindi.typePrivateLikely).not.toBe(CIVIC_LABELS.English.typePrivateLikely);
   });
 
   it('Hospitals screen renders free rows (no "Research paused")', async () => {
@@ -193,7 +209,7 @@ describe('free-source hospital rows', () => {
     const txt = textOf(r);
     expect(txt).toMatch(/Government General Hospital Kurnool/);
     expect(txt).toMatch(/Sunrise Clinic/);
-    expect(txt).toMatch(/Type not listed/);
+    expect(txt).toMatch(/Likely private · ownership not confirmed/);
     expect(txt).not.toMatch(/Research paused/);
     expect(txt).not.toMatch(/Timings: Public info not available/); // compact free row, not the AI card
   });

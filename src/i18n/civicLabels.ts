@@ -12,6 +12,31 @@ export type CivicKey =
   | 'district'
   | 'districtHint'
   | 'pickState'
+  | 'pickDistrict'
+  | 'pickSub'
+  | 'optional'
+  | 'filterList'
+  | 'change'
+  | 'noSubdistricts'
+  | 'noMatchList'
+  | 'lvMandal'
+  | 'lvTehsil'
+  | 'lvTaluk'
+  | 'lvTaluka'
+  | 'lvBlock'
+  | 'lvCircle'
+  | 'lvSubdivision'
+  | 'lvDistrict'
+  | 'scopeDistrict'
+  | 'scopeState'
+  | 'scopeStateFromSub'
+  | 'srcAnswered'
+  | 'srcSaved'
+  | 'srcFree'
+  | 'srcGemini'
+  | 'srcGroq'
+  | 'srcWorkersAi'
+  | 'mandalInfo'
   | 'loading'
   | 'noData'
   | 'pending'
@@ -104,6 +129,22 @@ export type CivicKey =
   | 'areaStarted'
   | 'areaStopped'
   | 'notListed'
+  | 'prmTitle'
+  | 'prmNote'
+  | 'prmShow'
+  | 'prmManifesto'
+  | 'prmTotal'
+  | 'prmDone'
+  | 'prmInProgress'
+  | 'prmNotDone'
+  | 'prmNoUpdate'
+  | 'prmAll'
+  | 'prmNoData'
+  | 'prmHead'
+  | 'prmNoneInFilter'
+  | 'prmNotLive'
+  | 'prmNoDataYet'
+  | 'prmFreeNote'
   | 'date'
   | 'allHosp'
   | 'publicNA'
@@ -139,6 +180,8 @@ export type CivicKey =
   | 'address'
   | 'phone'
   | 'englishToggle'
+  | 'tapDetails'
+  | 'hideDetails'
   | 'aiBusy'
   | 'aiQuota'
   | 'aiLimit'
@@ -155,7 +198,21 @@ export type CivicKey =
   | 'typeNotListed'
   | 'districtSite'
   | 'trLater'
-  | 'sourceOne';
+  | 'sourceOne'
+  | 'bestInIndia'
+  | 'nirfRank'
+  | 'nirfNote'
+  | 'specialistInst'
+  | 'seeSpecialities'
+  | 'diseaseEmergency'
+  | 'notDiagnosis'
+  | 'didYouMean'
+  | 'govtRates'
+  | 'govtRatesNote'
+  | 'cityTiers'
+  | 'mayTreatTitle'
+  | 'mayTreat'
+  | 'typePrivateLikely';
 
 export const CIVIC_LABELS: Record<StaticLanguage, Record<CivicKey, string>> = {
   English: {
@@ -166,6 +223,31 @@ export const CIVIC_LABELS: Record<StaticLanguage, Record<CivicKey, string>> = {
     district: 'District',
     districtHint: 'District (optional, e.g. Hyderabad)',
     pickState: 'Pick your state',
+    pickDistrict: 'Choose district',
+    pickSub: 'Choose {level}',
+    optional: 'optional',
+    filterList: 'Type to filter the list',
+    change: 'Change',
+    noSubdistricts: 'No {level} list for this district in the official directory',
+    noMatchList: 'Nothing in the list matches',
+    lvMandal: 'Mandal',
+    lvTehsil: 'Tehsil',
+    lvTaluk: 'Taluk',
+    lvTaluka: 'Taluka',
+    lvBlock: 'Block',
+    lvCircle: 'Circle',
+    lvSubdivision: 'Sub-division',
+    lvDistrict: 'District',
+    scopeDistrict: 'No data for {m}, showing {d} district',
+    scopeState: 'No data for {d} district, showing {s}',
+    scopeStateFromSub: 'No data for {m} or {d} district, showing {s}',
+    srcAnswered: 'Answered by',
+    srcSaved: 'Saved copy',
+    srcFree: 'Free public sources',
+    srcGemini: 'Gemini (Google Search)',
+    srcGroq: 'Groq web search',
+    srcWorkersAi: 'Workers AI',
+    mandalInfo: 'About',
     loading: 'Loading…',
     noData: 'No information yet for this place.',
     pending: 'We are collecting information for this place. Check back in a few hours.',
@@ -258,6 +340,22 @@ export const CIVIC_LABELS: Record<StaticLanguage, Record<CivicKey, string>> = {
     areaStarted: 'Schemes started',
     areaStopped: 'Schemes stopped / merged / renamed',
     notListed: 'No matching item with a public source',
+    prmTitle: 'Promises: what was promised, done, pending',
+    prmNote: 'Status is taken only from public sources (government orders, budgets, official sites, news of official figures), each with its date. No source = "No update". No verdict or opinion.',
+    prmShow: 'Show promises',
+    prmManifesto: 'Manifesto',
+    prmTotal: 'Total',
+    prmDone: 'Done',
+    prmInProgress: 'In progress',
+    prmNotDone: 'Not done',
+    prmNoUpdate: 'No update',
+    prmAll: 'All',
+    prmNoData: 'No researched promises yet for this government. Researching from public sources, check back in a few minutes.',
+    prmHead: 'Head of government',
+    prmNoneInFilter: 'No promise with this status.',
+    prmNotLive: 'Promises feature is not live on the server yet. No data yet: it will show here once the server is updated.',
+    prmNoDataYet: 'No data yet for this government. Pull down to try again later.',
+    prmFreeNote: 'Promises read from the Wikipedia article on this election (free source). Status shows only when a public source states it.',
     date: 'Date',
     allHosp: 'All',
     publicNA: 'Public info not available',
@@ -293,6 +391,8 @@ export const CIVIC_LABELS: Record<StaticLanguage, Record<CivicKey, string>> = {
     address: 'Address',
     phone: 'Phone',
     englishToggle: 'English',
+    tapDetails: 'Tap for details',
+    hideDetails: 'Hide details',
     aiBusy: 'AI is busy right now (free limit). Saved info is shown; please try again in a few minutes.',
     aiQuota: 'AI is paused for today (free AI limit used up). Saved info still works.',
     aiLimit: "You've used today's AI questions. Please come back tomorrow.",
@@ -310,6 +410,20 @@ export const CIVIC_LABELS: Record<StaticLanguage, Record<CivicKey, string>> = {
     districtSite: 'District website',
     trLater: 'Translation is on the way; showing English for now.',
     sourceOne: 'Source',
+    bestInIndia: 'Best in India for',
+    nirfRank: 'NIRF rank',
+    nirfNote: 'NIRF rank (teaching + research ranking, not a treatment-quality rating)',
+    specialistInst: 'Specialist institute',
+    seeSpecialities: 'Departments to see',
+    diseaseEmergency: 'This can be an emergency. Call 108 or 112 now, or go to the nearest emergency department.',
+    notDiagnosis: 'A guide to which department to visit, not a diagnosis. Please see a doctor.',
+    didYouMean: 'Showing results for',
+    govtRates: 'Govt package rates (what PM-JAY / CGHS pay a hospital)',
+    govtRatesNote: "Official scheme rates for comparing a private hospital's quote. Not what every hospital charges; implants, medicines and room upgrades can be extra. Confirm with the hospital.",
+    cityTiers: 'X = Tier 1 city, Y = Tier 2, Z = Tier 3. CGHS shown for NABH hospitals, semi-private ward.',
+    mayTreatTitle: 'No hospital in this list states this in public sources. General / multi-speciality government hospitals that may treat this',
+    mayTreat: 'May treat this — call to confirm (no public source states it)',
+    typePrivateLikely: 'Likely private · ownership not confirmed',
   },
   Telugu: {
     govtTitle: '🏛️ ప్రభుత్వం',
@@ -319,6 +433,31 @@ export const CIVIC_LABELS: Record<StaticLanguage, Record<CivicKey, string>> = {
     district: 'జిల్లా',
     districtHint: 'జిల్లా (ఐచ్ఛికం, ఉదా. హైదరాబాద్)',
     pickState: 'మీ రాష్ట్రాన్ని ఎంచుకోండి',
+    pickDistrict: 'జిల్లా ఎంచుకోండి',
+    pickSub: '{level} ఎంచుకోండి',
+    optional: 'ఐచ్ఛికం',
+    filterList: 'జాబితాలో వెతకడానికి టైప్ చేయండి',
+    change: 'మార్చు',
+    noSubdistricts: 'అధికారిక జాబితాలో ఈ జిల్లాకు {level} జాబితా లేదు',
+    noMatchList: 'జాబితాలో ఏదీ సరిపోలలేదు',
+    lvMandal: 'మండలం',
+    lvTehsil: 'తహసీల్',
+    lvTaluk: 'తాలూకా',
+    lvTaluka: 'తాలూకా',
+    lvBlock: 'బ్లాక్',
+    lvCircle: 'సర్కిల్',
+    lvSubdivision: 'ఉప విభాగం',
+    lvDistrict: 'జిల్లా',
+    scopeDistrict: '{m} కు సమాచారం లేదు, {d} జిల్లా సమాచారం చూపిస్తున్నాం',
+    scopeState: '{d} జిల్లాకు సమాచారం లేదు, {s} సమాచారం చూపిస్తున్నాం',
+    scopeStateFromSub: '{m} లేదా {d} జిల్లాకు సమాచారం లేదు, {s} సమాచారం చూపిస్తున్నాం',
+    srcAnswered: 'సమాధానం ఇచ్చింది',
+    srcSaved: 'సేవ్ చేసిన కాపీ',
+    srcFree: 'ఉచిత పబ్లిక్ సోర్సులు',
+    srcGemini: 'Gemini (Google Search)',
+    srcGroq: 'Groq వెబ్ సెర్చ్',
+    srcWorkersAi: 'Workers AI',
+    mandalInfo: 'గురించి',
     loading: 'లోడ్ అవుతోంది…',
     noData: 'ఈ ప్రాంతానికి ఇంకా సమాచారం లేదు.',
     pending: 'ఈ ప్రాంతం సమాచారం సేకరిస్తున్నాం. కొన్ని గంటల తర్వాత చూడండి.',
@@ -411,6 +550,22 @@ export const CIVIC_LABELS: Record<StaticLanguage, Record<CivicKey, string>> = {
     areaStarted: 'ప్రారంభించిన పథకాలు',
     areaStopped: 'నిలిపివేసిన / విలీనం / పేరు మార్చిన పథకాలు',
     notListed: 'పబ్లిక్ మూలంతో సరిపోలే అంశం లేదు',
+    prmTitle: 'హామీలు: ఏమి హామీ ఇచ్చారు, ఏమి చేశారు, ఏమి పెండింగ్',
+    prmNote: 'స్థితి కేవలం పబ్లిక్ మూలాల నుండి (ప్రభుత్వ ఉత్తర్వులు, బడ్జెట్, అధికారిక సైట్లు, అధికారిక గణాంకాల వార్తలు), ప్రతిదానికి తేదీతో. మూలం లేకపోతే "అప్\u200cడేట్ లేదు". తీర్పు లేదా అభిప్రాయం లేదు.',
+    prmShow: 'హామీలు చూపించు',
+    prmManifesto: 'మేనిఫెస్టో',
+    prmTotal: 'మొత్తం',
+    prmDone: 'పూర్తయింది',
+    prmInProgress: 'జరుగుతోంది',
+    prmNotDone: 'చేయలేదు',
+    prmNoUpdate: 'అప్\u200cడేట్ లేదు',
+    prmAll: 'అన్నీ',
+    prmNoData: 'ఈ ప్రభుత్వానికి ఇంకా పరిశోధించిన హామీలు లేవు. పబ్లిక్ మూలాల నుండి సేకరిస్తున్నాం, కొన్ని నిమిషాల తర్వాత చూడండి.',
+    prmHead: 'ప్రభుత్వ అధిపతి',
+    prmNoneInFilter: 'ఈ స్థితితో హామీ లేదు.',
+    prmNotLive: 'హామీల ఫీచర్ ఇంకా సర్వర్‌లో అందుబాటులోకి రాలేదు. ఇంకా డేటా లేదు: సర్వర్ అప్‌డేట్ అయిన తర్వాత ఇక్కడ కనిపిస్తుంది.',
+    prmNoDataYet: 'ఈ ప్రభుత్వానికి ఇంకా డేటా లేదు. కాసేపటి తర్వాత కిందికి లాగి మళ్లీ ప్రయత్నించండి.',
+    prmFreeNote: 'ఈ ఎన్నికపై వికీపీడియా వ్యాసం నుండి తీసుకున్న హామీలు (ఉచిత మూలం). పబ్లిక్ మూలం చెప్పినప్పుడే స్థితి చూపిస్తాం.',
     date: 'తేదీ',
     allHosp: 'అన్నీ',
     publicNA: 'పబ్లిక్ సమాచారం అందుబాటులో లేదు',
@@ -446,6 +601,8 @@ export const CIVIC_LABELS: Record<StaticLanguage, Record<CivicKey, string>> = {
     address: 'చిరునామా',
     phone: 'ఫోన్',
     englishToggle: 'English',
+    tapDetails: 'వివరాల కోసం నొక్కండి',
+    hideDetails: 'వివరాలు దాచు',
     aiBusy: 'AI ఇప్పుడు బిజీగా ఉంది (ఉచిత పరిమితి). సేవ్ చేసిన సమాచారం చూపిస్తున్నాం; కొన్ని నిమిషాల తర్వాత మళ్ళీ ప్రయత్నించండి.',
     aiQuota: 'ఈ రోజుకు AI ఆగింది (ఉచిత AI పరిమితి పూర్తయింది). సేవ్ చేసిన సమాచారం పనిచేస్తుంది.',
     aiLimit: 'ఈ రోజు AI ప్రశ్నలు పూర్తయ్యాయి. రేపు మళ్ళీ రండి.',
@@ -463,6 +620,20 @@ export const CIVIC_LABELS: Record<StaticLanguage, Record<CivicKey, string>> = {
     districtSite: 'జిల్లా వెబ్‌సైట్',
     trLater: 'అనువాదం వస్తోంది; ప్రస్తుతానికి English చూపిస్తున్నాం.',
     sourceOne: 'మూలం',
+    bestInIndia: 'భారతదేశంలో ఉత్తమమైనవి:',
+    nirfRank: 'NIRF ర్యాంక్',
+    nirfNote: 'NIRF ర్యాంక్ (బోధన + పరిశోధన ర్యాంకింగ్, చికిత్స నాణ్యత రేటింగ్ కాదు)',
+    specialistInst: 'స్పెషాలిటీ సంస్థ',
+    seeSpecialities: 'చూపించుకోవాల్సిన విభాగాలు',
+    diseaseEmergency: 'ఇది అత్యవసర పరిస్థితి కావచ్చు. వెంటనే 108 లేదా 112కి కాల్ చేయండి, లేదా దగ్గరలోని ఎమర్జెన్సీ విభాగానికి వెళ్లండి.',
+    notDiagnosis: 'ఏ విభాగానికి వెళ్లాలో చెప్పే మార్గదర్శి మాత్రమే, ఇది రోగ నిర్ధారణ కాదు. దయచేసి డాక్టర్‌ను సంప్రదించండి.',
+    didYouMean: 'దీని కోసం ఫలితాలు',
+    govtRates: 'ప్రభుత్వ ప్యాకేజీ ధరలు (PM-JAY / CGHS ఆసుపత్రికి చెల్లించేవి)',
+    govtRatesNote: 'ప్రైవేట్ ఆసుపత్రి చెప్పిన ధరతో పోల్చుకోవడానికి అధికారిక పథకం ధరలు. ప్రతి ఆసుపత్రి ఇదే వసూలు చేయదు; ఇంప్లాంట్లు, మందులు, గది అప్\u200cగ్రేడ్ అదనం కావచ్చు. ఆసుపత్రితో నిర్ధారించుకోండి.',
+    cityTiers: 'X = టైర్ 1 నగరం, Y = టైర్ 2, Z = టైర్ 3. CGHS ధరలు NABH ఆసుపత్రులకు, సెమీ-ప్రైవేట్ వార్డ్.',
+    mayTreatTitle: 'ఈ జాబితాలో ఏ ఆసుపత్రీ పబ్లిక్ మూలాల్లో దీన్ని పేర్కొనలేదు. దీనికి చికిత్స చేయగల సాధారణ / మల్టీ-స్పెషాలిటీ ప్రభుత్వ ఆసుపత్రులు',
+    mayTreat: 'చికిత్స చేయవచ్చు — ఫోన్ చేసి నిర్ధారించుకోండి (పబ్లిక్ మూలం పేర్కొనలేదు)',
+    typePrivateLikely: 'ప్రైవేట్ కావచ్చు · యాజమాన్యం నిర్ధారించలేదు',
   },
   Hindi: {
     govtTitle: '🏛️ सरकार',
@@ -472,6 +643,31 @@ export const CIVIC_LABELS: Record<StaticLanguage, Record<CivicKey, string>> = {
     district: 'ज़िला',
     districtHint: 'ज़िला (वैकल्पिक, जैसे हैदराबाद)',
     pickState: 'अपना राज्य चुनें',
+    pickDistrict: 'ज़िला चुनें',
+    pickSub: '{level} चुनें',
+    optional: 'वैकल्पिक',
+    filterList: 'सूची में खोजने के लिए लिखें',
+    change: 'बदलें',
+    noSubdistricts: 'आधिकारिक सूची में इस ज़िले की {level} सूची नहीं है',
+    noMatchList: 'सूची में कुछ नहीं मिला',
+    lvMandal: 'मंडल',
+    lvTehsil: 'तहसील',
+    lvTaluk: 'तालुक',
+    lvTaluka: 'तालुका',
+    lvBlock: 'ब्लॉक',
+    lvCircle: 'सर्किल',
+    lvSubdivision: 'उपमंडल',
+    lvDistrict: 'ज़िला',
+    scopeDistrict: '{m} का डेटा नहीं है, {d} ज़िले का दिखा रहे हैं',
+    scopeState: '{d} ज़िले का डेटा नहीं है, {s} का दिखा रहे हैं',
+    scopeStateFromSub: '{m} या {d} ज़िले का डेटा नहीं है, {s} का दिखा रहे हैं',
+    srcAnswered: 'जवाब स्रोत',
+    srcSaved: 'सहेजी गई कॉपी',
+    srcFree: 'मुफ़्त सार्वजनिक स्रोत',
+    srcGemini: 'Gemini (Google Search)',
+    srcGroq: 'Groq वेब सर्च',
+    srcWorkersAi: 'Workers AI',
+    mandalInfo: 'जानकारी',
     loading: 'लोड हो रहा है…',
     noData: 'इस जगह की जानकारी अभी नहीं है।',
     pending: 'इस जगह की जानकारी इकट्ठा हो रही है। कुछ घंटों बाद देखें।',
@@ -564,6 +760,22 @@ export const CIVIC_LABELS: Record<StaticLanguage, Record<CivicKey, string>> = {
     areaStarted: 'शुरू की गई योजनाएँ',
     areaStopped: 'बंद / विलय / नाम बदली गई योजनाएँ',
     notListed: 'सार्वजनिक स्रोत के साथ कोई मिलता-जुलता बिंदु नहीं',
+    prmTitle: 'वादे: क्या वादा किया, क्या पूरा हुआ, क्या बाकी',
+    prmNote: 'स्थिति सिर्फ़ सार्वजनिक स्रोतों से (सरकारी आदेश, बजट, आधिकारिक साइटें, आधिकारिक आँकड़ों की ख़बरें), हर एक की तारीख़ के साथ। स्रोत नहीं = "कोई अपडेट नहीं"। कोई फ़ैसला या राय नहीं।',
+    prmShow: 'वादे दिखाएँ',
+    prmManifesto: 'घोषणापत्र',
+    prmTotal: 'कुल',
+    prmDone: 'पूरा हुआ',
+    prmInProgress: 'काम जारी',
+    prmNotDone: 'पूरा नहीं हुआ',
+    prmNoUpdate: 'कोई अपडेट नहीं',
+    prmAll: 'सभी',
+    prmNoData: 'इस सरकार के लिए अभी कोई शोधित वादा नहीं। सार्वजनिक स्रोतों से जानकारी जुटाई जा रही है, कुछ मिनट बाद देखें।',
+    prmHead: 'सरकार प्रमुख',
+    prmNoneInFilter: 'इस स्थिति वाला कोई वादा नहीं।',
+    prmNotLive: 'वादों की सुविधा अभी सर्वर पर चालू नहीं हुई है। अभी कोई डेटा नहीं: सर्वर अपडेट होने के बाद यहाँ दिखेगा।',
+    prmNoDataYet: 'इस सरकार के लिए अभी कोई डेटा नहीं। थोड़ी देर बाद नीचे खींचकर दोबारा कोशिश करें।',
+    prmFreeNote: 'वादे इस चुनाव पर विकिपीडिया लेख से लिए गए (मुफ़्त स्रोत)। स्थिति तभी दिखती है जब कोई सार्वजनिक स्रोत उसे बताए।',
     date: 'तारीख़',
     allHosp: 'सभी',
     publicNA: 'सार्वजनिक जानकारी उपलब्ध नहीं',
@@ -599,6 +811,8 @@ export const CIVIC_LABELS: Record<StaticLanguage, Record<CivicKey, string>> = {
     address: 'पता',
     phone: 'फ़ोन',
     englishToggle: 'English',
+    tapDetails: 'विवरण के लिए टैप करें',
+    hideDetails: 'विवरण छिपाएँ',
     aiBusy: 'AI अभी व्यस्त है (मुफ़्त सीमा)। सहेजी गई जानकारी दिखाई जा रही है; कुछ मिनट बाद फिर कोशिश करें।',
     aiQuota: 'आज के लिए AI रुका है (मुफ़्त AI सीमा खत्म)। सहेजी गई जानकारी काम करती है।',
     aiLimit: 'आज के AI सवाल पूरे हो गए। कल फिर आइए।',
@@ -616,6 +830,20 @@ export const CIVIC_LABELS: Record<StaticLanguage, Record<CivicKey, string>> = {
     districtSite: 'ज़िले की वेबसाइट',
     trLater: 'अनुवाद आ रहा है; अभी English दिखा रहे हैं।',
     sourceOne: 'स्रोत',
+    bestInIndia: 'भारत में सबसे अच्छे:',
+    nirfRank: 'NIRF रैंक',
+    nirfNote: 'NIRF रैंक (पढ़ाई + रिसर्च की रैंकिंग, इलाज की गुणवत्ता की रेटिंग नहीं)',
+    specialistInst: 'स्पेशलिटी संस्थान',
+    seeSpecialities: 'किस विभाग में दिखाएँ',
+    diseaseEmergency: 'यह इमरजेंसी हो सकती है। अभी 108 या 112 पर कॉल करें, या पास के इमरजेंसी विभाग में जाएँ।',
+    notDiagnosis: 'यह सिर्फ़ बताता है कि किस विभाग में जाएँ, यह बीमारी की जाँच (डायग्नोसिस) नहीं है। कृपया डॉक्टर को दिखाएँ।',
+    didYouMean: 'इसके नतीजे दिखा रहे हैं',
+    govtRates: 'सरकारी पैकेज दरें (PM-JAY / CGHS अस्पताल को जो देते हैं)',
+    govtRatesNote: 'प्राइवेट अस्पताल के बताए खर्च से तुलना के लिए योजना की आधिकारिक दरें। हर अस्पताल यही नहीं लेता; इम्प्लांट, दवाइयाँ और कमरे का अपग्रेड अलग हो सकता है। अस्पताल से पुष्टि करें।',
+    cityTiers: 'X = टियर 1 शहर, Y = टियर 2, Z = टियर 3। CGHS दरें NABH अस्पतालों के लिए, सेमी-प्राइवेट वार्ड।',
+    mayTreatTitle: 'इस सूची में किसी अस्पताल ने सार्वजनिक स्रोतों में यह नहीं बताया। सामान्य / मल्टी-स्पेशियलिटी सरकारी अस्पताल जो इसका इलाज कर सकते हैं',
+    mayTreat: 'इलाज कर सकते हैं — फ़ोन करके पुष्टि करें (किसी सार्वजनिक स्रोत में दर्ज नहीं)',
+    typePrivateLikely: 'संभवतः प्राइवेट · स्वामित्व की पुष्टि नहीं',
   },
 };
 

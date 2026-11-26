@@ -389,8 +389,10 @@ describe('research cron', () => {
     expect(t[0]).toEqual({ kind: 'govt', state: 'TG', district: 'hyderabad', variant: '' });
     expect(t[1]).toEqual({ kind: 'hosp', state: 'AP', district: '', variant: 'govt' }); // AP govt row exists
     expect(t[t.length - 1]).toEqual({ kind: 'govt', state: 'AP', district: '', variant: '' });
-    // 36 states x (govt + 2 hosp + gcmp) + the centre's gcmp, minus the AP govt row that exists
-    expect(t).toHaveLength(1 + 36 * 4 + 1 - 1 + 1);
+    // 36 states x (govt + 2 hosp + gcmp + gprm) + the centre's gcmp + gprm, minus the AP govt row that exists
+    expect(t).toHaveLength(1 + 36 * 5 + 2 - 1 + 1);
+    expect(t).toContainEqual({ kind: 'gprm', state: 'IN', district: '', variant: '' });
+    expect(t).toContainEqual({ kind: 'gprm', state: 'TG', district: '', variant: '' });
   });
 
   it('civic cron: skips without key; runs CIVIC_PER_RUN; stops at the daily cap; never touches earn', async () => {
@@ -412,10 +414,11 @@ describe('research cron', () => {
     expect(i18n.map((x: any) => x.lang)).toEqual(['hi', 'te']);
 
     const db = new Db(e.DB);
-    // 2 calls left today: AP comparison (1 call) fits, AR govt (3 calls) does not
+    // 2 calls left today: AP comparison + AP promises (1 call each) fit, AR govt (3 calls) does not
     const r = await research.runCivicResearch(db, e, { fetchImpl: f, now: NOW, perRun: 100, dailyMax: 7, translate: false });
-    expect(r.ran).toBe(1);
+    expect(r.ran).toBe(2);
     expect(r.results[0]).toMatchObject({ kind: 'gcmp', state: 'AP' });
+    expect(r.results[1]).toMatchObject({ kind: 'gprm', state: 'AP' });
     expect((await research.runCivicResearch(db, e, { fetchImpl: f, now: NOW, dailyMax: 6, translate: false })).skipped).toBe('daily cap reached');
   });
 
@@ -539,6 +542,128 @@ describe('previous vs present government (gcmp)', () => {
   });
 });
 
+// ── Promises tracker (kind 'gprm') ── test fixture only, never app data
+const PRM = {
+  asOf: '2026-11',
+  govt: { party: 'Party X alliance', head: 'Leader Y', year: 'Manifesto 2024', term: '2024-2029', source: 'https://example.org/manifesto.pdf' },
+  summary: { total: 120, done: 100, inProgress: 0, notDone: 0, noUpdate: 20 },
+  verdict: 'mostly kept',
+  promises: [
+    { area: 'welfare', text: 'Old-age pension Rs 4,000 a month', status: 'done', fact: 'Pension raised to Rs 4,000 from July 2024 by GO 43', source: 'https://example.gov.in/go43', date: '2024-07-01' },
+    { area: 'Youth / Jobs', text: '20 lakh jobs in five years', status: 'in progress', fact: 'Skill census started', source: 'https://example.gov.in/skill', date: '2025-03' },
+    { area: 'farmers', text: 'Rs 20,000 a year input aid to farmers', status: 'done', fact: 'Said to be paid', date: '2025-01-01' },
+    { area: 'women', text: 'Free bus travel for women', status: 'not_done', fact: 'Not started yet', source: 'http://insecure.example/x', date: '2025-05' },
+    { area: 'health', text: 'Health cover Rs 25 lakh per family', status: 'done', fact: 'A historic and visionary scheme', source: 'https://example.gov.in/h', date: '2025-02' },
+    { area: 'education', text: 'The best schools in India', status: 'in_progress', fact: 'Works started', source: 'https://example.gov.in/e', date: '2025-06' },
+    { area: 'other', text: '', status: 'done', fact: 'x', source: 'https://example.gov.in/y', date: '2025-01' },
+    { area: 'infrastructure', text: 'Capital city works', status: 'finished!', fact: 'Works resumed', source: 'https://example.gov.in/c', date: '2024-10' },
+    { area: 'weird', text: 'Capital city works', status: 'done', fact: 'dup', source: 'https://example.gov.in/c', date: '2024-10' },
+    { area: 'women', text: 'Mega DSC for teachers', status: 'not_done', fact: 'No recruitment notification as of Nov 2026', source: 'https://example.gov.in/dsc', date: '2026-11-01' },
+  ],
+};
+
+describe('promises tracker (gprm)', () => {
+  it('cleaner: status forced to no_update without a dated https source; opinion + empty + duplicate promises dropped; counts computed', () => {
+    const c = research.cleanPromises(PRM);
+    expect(c).not.toHaveProperty('verdict');
+    expect(c.govt).toEqual({ party: 'Party X alliance', head: 'Leader Y', year: '2024', term: '2024-2029', source: 'https://example.org/manifesto.pdf' });
+    // "The best schools" (opinion), empty text and the duplicate are dropped
+    expect(c.promises.map((p: any) => p.text)).toEqual([
+      'Old-age pension Rs 4,000 a month',
+      '20 lakh jobs in five years',
+      'Rs 20,000 a year input aid to farmers',
+      'Free bus travel for women',
+      'Health cover Rs 25 lakh per family',
+      'Capital city works',
+      'Mega DSC for teachers',
+    ]);
+    const st = Object.fromEntries(c.promises.map((p: any) => [p.text, p.status]));
+    expect(st['Old-age pension Rs 4,000 a month']).toBe('done');
+    expect(st['20 lakh jobs in five years']).toBe('in_progress'); // "in progress" normalised
+    expect(st['Rs 20,000 a year input aid to farmers']).toBe('no_update'); // no source URL
+    expect(st['Free bus travel for women']).toBe('no_update'); // http source
+    expect(st['Health cover Rs 25 lakh per family']).toBe('no_update'); // evaluative evidence dropped
+    expect(st['Capital city works']).toBe('no_update'); // unknown status
+    expect(st['Mega DSC for teachers']).toBe('not_done');
+    const farm = c.promises.find((p: any) => p.text.startsWith('Rs 20,000'));
+    expect(farm).toMatchObject({ fact: '', source: '', date: '' });
+    expect(c.promises[1].area).toBe('youth');
+    // counts from the cleaned list, never the model's summary
+    expect(c.summary).toEqual({ total: 7, done: 1, inProgress: 1, notDone: 1, noUpdate: 4 });
+    expect(research.promiseSummary([])).toEqual({ total: 0, done: 0, inProgress: 0, notDone: 0, noUpdate: 0 });
+  });
+
+  it('cleaner: no manifesto URL = no promises (real data only, nothing saved)', () => {
+    const c = research.cleanPromises({ ...PRM, govt: { ...PRM.govt, source: '' } });
+    expect(c.promises).toEqual([]);
+    expect(c.summary.total).toBe(0);
+    expect(research.cleanPromises(null).promises).toEqual([]);
+    const many = { govt: PRM.govt, promises: Array.from({ length: 200 }, (_, i) => ({ area: 'other', text: `Promise ${i}`, status: 'no_update' })) };
+    expect(research.cleanPromises(many).promises).toHaveLength(research.PRM_MAX);
+  });
+
+  it('prompt: present manifesto, sourced status only, no opinion, state or centre', () => {
+    const p = research.researchPrompt('gprm', '', STATES.find((x: any) => x.code === 'AP'), '');
+    expect(p).toMatch(/election manifesto/);
+    expect(p).toMatch(/CURRENTLY rules the Andhra Pradesh state government/);
+    expect(p).toMatch(/ONLY when a public source supports it/);
+    expect(p).toMatch(/no_update/);
+    expect(p).toMatch(/No opinion, no verdict/);
+    expect(p).toMatch(/never invent/);
+    expect(research.researchPrompt('gprm', '', { code: 'IN', name: 'Union', type: 'centre' }, '')).toMatch(/Union Government of India[\s\S]*Prime Minister/);
+  });
+
+  it('routes: gprm for a state or the centre (IN), state level only, no reviews', async () => {
+    const e = env();
+    expect((await call(e, 'GET', '/v1/civic/data?kind=gprm&state=TG')).json).toMatchObject({ kind: 'gprm', state: 'TG', status: 'pending', data: null });
+    expect((await call(e, 'GET', '/v1/civic/data?kind=gprm&state=IN')).json).toMatchObject({ kind: 'gprm', state: 'IN', status: 'pending' });
+    expect((await call(e, 'GET', '/v1/civic/data?kind=gprm&state=TG&district=hyderabad')).status).toBe(400);
+    expect(routes.parseItem('gprm:TG')).toBeNull();
+  });
+
+  it('research + translation: statuses, sources, dates and counts stay as in English; empty answer saves nothing', async () => {
+    const e = env({ GEMINI_API_KEY: 'k' });
+    const f = jest.fn(async (url: string, init?: any) => {
+      if (url === JWKS_URL) {
+        return { ok: true, status: 200, headers: { get: () => 'public, max-age=3600' }, json: async () => ({ keys: [jwk] }) };
+      }
+      const prompt = JSON.parse(init.body).contents[0].parts[0].text;
+      if (prompt.startsWith('Translate the text values')) {
+        const j = JSON.parse(prompt.slice(prompt.lastIndexOf('\n') + 1));
+        if (j.promises) {
+          j.promises = j.promises.map((p: any) => ({ ...p, text: `TR ${p.text}`, status: 'done', source: 'https://wrong.example', date: 'x' }));
+        }
+        if (j.govt) {
+          j.govt = { ...j.govt, party: `TR ${j.govt.party}` };
+        }
+        return { ok: true, status: 200, json: async () => gemini(j) };
+      }
+      return { ok: true, status: 200, json: async () => gemini(PRM) };
+    });
+    const r = await call(e, 'POST', '/v1/admin/civic/refresh', { tok: OWNER(), body: { kind: 'gprm', state: 'IN' }, fetchImpl: f });
+    expect(r.json).toMatchObject({ ok: true, kind: 'gprm', state: 'IN' });
+    const g = await call(e, 'GET', '/v1/civic/data?kind=gprm&state=IN');
+    expect(g.json.data.summary).toEqual({ total: 7, done: 1, inProgress: 1, notDone: 1, noUpdate: 4 });
+    const te = g.json.i18n.te;
+    expect(te.promises).toHaveLength(7);
+    expect(te.promises[0]).toMatchObject({ text: 'TR Old-age pension Rs 4,000 a month', status: 'done', source: 'https://example.gov.in/go43', date: '2024-07-01' });
+    expect(te.promises[2]).toMatchObject({ status: 'no_update', source: '' });
+    expect(te.summary).toEqual(g.json.data.summary);
+    expect(te.govt.year).toBe('2024');
+
+    // a model answer with no manifesto URL keeps nothing (no fake rows / numbers saved)
+    const e2 = env({ GEMINI_API_KEY: 'k' });
+    const f2 = jest.fn(async (url: string) =>
+      url === JWKS_URL
+        ? { ok: true, status: 200, headers: { get: () => 'public, max-age=3600' }, json: async () => ({ keys: [jwk] }) }
+        : { ok: true, status: 200, json: async () => gemini({ ...PRM, govt: { ...PRM.govt, source: '' } }) },
+    );
+    await call(e2, 'POST', '/v1/admin/civic/refresh', { tok: OWNER(), body: { kind: 'gprm', state: 'TG' }, fetchImpl: f2 });
+    const g2 = await call(e2, 'GET', '/v1/civic/data?kind=gprm&state=TG');
+    expect(g2.json.data).toBeNull();
+  });
+});
+
 describe('hospitals v2 fields (public-source only)', () => {
   const RAW = {
     hospitals: [
@@ -618,5 +743,187 @@ describe('hospitals v2 fields (public-source only)', () => {
     expect(research.civicCaps({ CIVIC_PER_RUN: '99' }).perRun).toBe(8);
     const { GEMINI_MODELS } = require('../server/worker/src/civic/gemini.js');
     expect(GEMINI_MODELS).toEqual(['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-3.6-flash', 'gemini-flash-latest', 'gemini-3.8-flash']);
+  });
+});
+
+// ── Promises free fallback (Gemini out of free quota): keyless Wikipedia, then Groq only with a key ──
+const freePrm = require('../server/worker/src/civic/free/promises.js');
+const TG_TITLE = '2023 Telangana Legislative Assembly election';
+const TG_INFOBOX = [
+  '{{Infobox election',
+  '| election_date = 30 November 2023',
+  '| party1 = [[Indian National Congress|INC]]',
+  '| alliance1 = ',
+  '| party2 = [[Bharat Rashtra Samithi|BRS]]',
+  '| after_party = [[Indian National Congress|INC]]',
+  '| after_election = [[Revanth Reddy|A. Revanth Reddy]]',
+  '}}',
+].join('\n');
+const TG_SECTIONS = [
+  { index: '1', level: '2', line: 'Background', anchor: 'Background' },
+  { index: '12', level: '2', line: 'Campaigns', anchor: 'Campaigns' },
+  { index: '13', level: '3', line: 'Bharat Rashtra Samithi', anchor: 'Bharat_Rashtra_Samithi' },
+  { index: '14', level: '4', line: 'Manifesto', anchor: 'Manifesto' },
+  { index: '15', level: '3', line: 'Indian National Congress', anchor: 'Indian_National_Congress' },
+  { index: '16', level: '4', line: 'Manifesto', anchor: 'Manifesto_2' },
+  { index: 'T-1', level: '3', line: 'Seat summary', anchor: 'Seat_summary' },
+  { index: '22', level: '2', line: 'Results', anchor: 'Results' },
+];
+const TG_MANIFESTO = [
+  "Former Congress president [[Sonia Gandhi]] unveiled the party's six guarantees at a rally on 17 September 2023.<ref name=\":0\">{{Cite web |title=6 guarantees by Congress |url=https://www.indiatoday.in/six-guarantees |archive-url=https://web.archive.org/x |date=17 September 2023}}</ref>",
+  '',
+  "'''Agriculture''': Farmers will receive {{INR}}15,000 in financial assistance each year.<ref name=\":0\" /> Bonus of ₹500 per quintal for paddy.",
+  '',
+  "'''Women''': Under the Mahalakshmi scheme, women shall receive ₹2,500 every month and free travel in [[Telangana State Road Transport Corporation|RTC]] buses.",
+  '',
+  "'''Housing''': 250 sq. yards plot for families of martyrs of the [[Telangana movement]].",
+].join('\n');
+const BRS_MANIFESTO = 'The BRS promised ₹5,000 a month to every family.';
+
+const wikiFetch = (opts: { manifesto?: string; groq?: any } = {}) =>
+  jest.fn(async (url: string, _init?: any) => {
+    if (url === JWKS_URL) {
+      return { ok: true, status: 200, headers: { get: () => 'public, max-age=3600' }, json: async () => ({ keys: [jwk] }) };
+    }
+    if (url.includes('generativelanguage.googleapis.com')) {
+      return { ok: false, status: 429, headers: { get: () => '' }, json: async () => ({ error: { message: 'Quota exceeded per day' } }) };
+    }
+    if (url.includes('api.groq.com')) {
+      return { ok: true, status: 200, json: async () => opts.groq };
+    }
+    if (url.startsWith('https://en.wikipedia.org/w/api.php')) {
+      const u = new URL(url);
+      const titles = u.searchParams.get('titles') || '';
+      const body = (d: any) => ({ ok: true, status: 200, text: async () => JSON.stringify(d) });
+      if (u.searchParams.get('action') === 'parse') {
+        return body({ parse: { title: TG_TITLE, sections: TG_SECTIONS } });
+      }
+      const sec = u.searchParams.get('rvsection');
+      if (sec === null) {
+        return body({ query: { pages: titles.split('|').map(t => (t === TG_TITLE ? { pageid: 1, title: t } : { title: t, missing: true })) } });
+      }
+      const content = sec === '0' ? TG_INFOBOX : sec === '16' ? (opts.manifesto ?? TG_MANIFESTO) : sec === '14' ? BRS_MANIFESTO : '';
+      return body({ query: { pages: [{ pageid: 1, title: TG_TITLE, revisions: [{ timestamp: '2026-11-20T10:00:00Z', slots: { main: { content } } }] }] } });
+    }
+    throw new Error('unexpected fetch ' + url);
+  });
+
+describe('promises free fallback (gprm)', () => {
+  it('parsers: infobox winner + alliance, the party\'s own manifesto section, sentences with their cited source + date', () => {
+    expect(freePrm.normDate('17 September 2023')).toBe('2023-09-17');
+    expect(freePrm.normDate('September 17, 2023')).toBe('2023-09-17');
+    expect(freePrm.normDate('2024-05-01')).toBe('2024-05-01');
+    expect(freePrm.normDate('someday')).toBe('');
+    const info = freePrm.parseInfobox(TG_INFOBOX);
+    expect(info).toMatchObject({ party: 'INC', head: 'A. Revanth Reddy' });
+    expect(info.names).toEqual(expect.arrayContaining(['Indian National Congress', 'INC']));
+    expect(freePrm.parseInfobox('{{Infobox election | party1 = X }}')).toBeNull(); // not held yet
+    // the INC manifesto only (BRS manifesto, results and transcluded sections never)
+    expect(freePrm.pickSections(TG_SECTIONS, info.names).map((x: any) => x.index)).toEqual(['16']);
+    expect(freePrm.splitSentences('Given to N. Chandrababu Naidu. A 250 sq. yards plot. Next one.')).toEqual(['Given to N. Chandrababu Naidu.', 'A 250 sq. yards plot.', 'Next one.']);
+    const items = freePrm.extractPromises(TG_MANIFESTO, { url: 'https://en.wikipedia.org/wiki/X#Manifesto_2', date: '2026-11-20' });
+    expect(items.map((p: any) => p.text)).toEqual([
+      'Farmers will receive ₹15,000 in financial assistance each year.',
+      'Bonus of ₹500 per quintal for paddy.',
+      'Under the Mahalakshmi scheme, women shall receive ₹2,500 every month and free travel in RTC buses.',
+      '250 sq. yards plot for families of martyrs of the Telangana movement.',
+    ]);
+    // the reused named ref gives the cited news source + its date; uncited lines = the Wikipedia section + its edit date
+    expect(items[0]).toMatchObject({ area: 'farmers', status: 'no_update', ref: 'https://www.indiatoday.in/six-guarantees', refDate: '2023-09-17' });
+    expect(items[2]).toMatchObject({ area: 'women', ref: 'https://en.wikipedia.org/wiki/X#Manifesto_2', refDate: '2026-11-20' });
+    items.forEach((p: any) => expect(p.status).toBe('no_update'));
+  });
+
+  it('Gemini 429 (free quota used up): promises from Wikipedia, every item with source + date, status never guessed; cached', async () => {
+    const e = env({ GEMINI_API_KEY: 'k' });
+    const f = wikiFetch();
+    const r = await call(e, 'POST', '/v1/civic/research', { body: { kind: 'gprm', state: 'TG' }, fetchImpl: f });
+    expect(r.json).toMatchObject({ ok: true, did: 'research', origin: 'free', status: 'ready' });
+    const g = await call(e, 'GET', '/v1/civic/data?kind=gprm&state=TG');
+    const d = g.json.data;
+    expect(d.origin).toBe('free');
+    expect(d.govt).toMatchObject({ party: 'INC', head: 'A. Revanth Reddy', year: '2023', source: 'https://en.wikipedia.org/wiki/2023_Telangana_Legislative_Assembly_election#Manifesto_2' });
+    expect(d.promises).toHaveLength(4);
+    d.promises.forEach((p: any) => {
+      expect(p.status).toBe('no_update');
+      expect(p.ref).toMatch(/^https:\/\//);
+      expect(p.refDate).toMatch(/^\d{4}/);
+    });
+    expect(d.summary).toEqual({ total: 4, done: 0, inProgress: 0, notDone: 0, noUpdate: 4 });
+    expect(g.json.researchConfigured).toBe(true);
+    expect(g.json.sources[0].url).toMatch(/wikipedia\.org/);
+    expect(f.mock.calls.some((c: any[]) => String(c[0]).includes('api.groq.com'))).toBe(false); // no key = never called
+    // saved: a second open is one D1 read, no new fetch
+    const n = f.mock.calls.length;
+    expect((await call(e, 'POST', '/v1/civic/research', { body: { kind: 'gprm', state: 'TG' }, fetchImpl: f })).json).toMatchObject({ did: 'nothing' });
+    expect(f.mock.calls.length).toBe(n);
+  });
+
+  it('nothing in the free source and no GROQ_API_KEY: nothing saved ("no data yet"), no Groq call', async () => {
+    const e = env(); // no Gemini key either
+    const f = wikiFetch({ manifesto: 'The manifesto was released at a rally.' });
+    const r = await call(e, 'POST', '/v1/civic/research', { body: { kind: 'gprm', state: 'TG' }, fetchImpl: f });
+    expect(r.json.ok).toBe(false);
+    const g = await call(e, 'GET', '/v1/civic/data?kind=gprm&state=TG');
+    expect(g.json.data).toBeNull();
+    expect(f.mock.calls.some((c: any[]) => String(c[0]).includes('api.groq.com'))).toBe(false);
+  });
+
+  it('GROQ_API_KEY set + nothing in the free source: groq/compound web search, same strict cleaner', async () => {
+    const e = env({ GROQ_API_KEY: 'gk' });
+    const ans = {
+      govt: { party: 'INC', head: 'A. Revanth Reddy', year: '2023', term: '2023-2028', source: 'https://inc.in/manifesto-tg.pdf' },
+      promises: [
+        { area: 'women', text: 'Free bus travel for women', status: 'done', fact: 'Mahalakshmi free travel started 9 Dec 2023', source: 'https://tgsrtc.telangana.gov.in/x', date: '2023-12-09' },
+        { area: 'farmers', text: 'Rs 15,000 a year to farmers', status: 'done', fact: 'Said to be paid' }, // no source = no_update
+      ],
+    };
+    const groq = { choices: [{ message: { content: JSON.stringify(ans), executed_tools: [{ search_results: { results: [{ url: 'https://tgsrtc.telangana.gov.in/x', title: 'TGSRTC' }] } }] } }] };
+    const f = wikiFetch({ manifesto: 'The manifesto was released at a rally.', groq });
+    const r = await call(e, 'POST', '/v1/civic/research', { body: { kind: 'gprm', state: 'TG' }, fetchImpl: f });
+    expect(r.json).toMatchObject({ ok: true, origin: 'groq', model: 'groq/compound' });
+    const sent = JSON.parse((f.mock.calls.find((c: any[]) => String(c[0]).includes('api.groq.com')) as any[])[1].body);
+    expect(sent.model).toBe('groq/compound');
+    const d = (await call(e, 'GET', '/v1/civic/data?kind=gprm&state=TG')).json.data;
+    expect(d.promises.map((p: any) => p.status)).toEqual(['done', 'no_update']);
+    expect(d.promises[1]).toMatchObject({ ref: 'https://inc.in/manifesto-tg.pdf', refDate: '2023', source: '' });
+  });
+});
+
+describe('promises output size: capped per request, truncated JSON keeps complete items', () => {
+  it('prompt asks for at most PRM_PER_REQUEST promises, far below the output-token budget', () => {
+    expect(research.PRM_PER_REQUEST).toBeLessThanOrEqual(40);
+    const p = research.researchPrompt('gprm', '', STATES.find((x: any) => x.code === 'TG'), '');
+    expect(p).toMatch(new RegExp(`at most ${research.PRM_PER_REQUEST}`));
+    expect(p).not.toMatch(/up to 80/);
+  });
+
+  it('parseJsonLoose: a cut-off answer keeps only whole items (half item / key / string dropped, never finished)', () => {
+    const full = JSON.stringify(PRM);
+    const cutMid = full.slice(0, full.indexOf('Free bus travel') + 6); // inside the 4th promise's text
+    const v = parseJsonLoose('```json\n' + cutMid);
+    expect(v.promises.map((p: any) => p.text)).toEqual(['Old-age pension Rs 4,000 a month', '20 lakh jobs in five years', 'Rs 20,000 a year input aid to farmers']);
+    expect(v.govt.source).toBe('https://example.org/manifesto.pdf');
+    const c = research.cleanPromises(v);
+    expect(c.summary).toEqual({ total: 3, done: 1, inProgress: 1, notDone: 0, noUpdate: 1 });
+    expect(parseJsonLoose('[{"a":1},{"a":2},{"a"')).toEqual([{ a: 1 }, { a: 2 }]);
+    expect(parseJsonLoose('{"a":"unfinished')).toBeNull();
+    expect(parseJsonLoose('nope')).toBeNull();
+    expect(parseJsonLoose('{"a":1} trailing')).toEqual({ a: 1 });
+  });
+
+  it('research: a truncated grounded answer saves its complete promises only', async () => {
+    const e = env({ GEMINI_API_KEY: 'k' });
+    const full = JSON.stringify(PRM);
+    const cutMid = full.slice(0, full.indexOf('Free bus travel') + 6);
+    const f = jest.fn(async (url: string) =>
+      url === JWKS_URL
+        ? { ok: true, status: 200, headers: { get: () => 'public, max-age=3600' }, json: async () => ({ keys: [jwk] }) }
+        : { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: cutMid }] }, finishReason: 'MAX_TOKENS' }] }) },
+    );
+    await call(e, 'POST', '/v1/admin/civic/refresh', { tok: OWNER(), body: { kind: 'gprm', state: 'TG' }, fetchImpl: f });
+    const d = (await call(e, 'GET', '/v1/civic/data?kind=gprm&state=TG')).json.data;
+    expect(d.promises).toHaveLength(3);
+    expect(d.summary.total).toBe(3);
   });
 });
