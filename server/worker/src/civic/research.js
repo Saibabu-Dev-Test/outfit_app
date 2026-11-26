@@ -30,7 +30,8 @@
 // computed by the cleaner (never taken from the model); evaluative words are dropped. Every
 // promise also carries ref + refDate: where the promise itself is stated (its cited source, else the
 // manifesto URL + manifesto year); a promise without both is dropped.
-// Promises FREE FALLBACK (researchPromisesFallback): when every Gemini key is out of free quota
+// Promises FREE FALLBACK (researchPromisesFallback = researchKeyless + researchGroq for gprm; the
+// comparison 'gcmp' has the same, free/compare.js): when every Gemini key is out of free quota
 // (or no Gemini key is set), the promises are read from the keyless MediaWiki API (free/promises.js:
 // the present government's election article, its manifesto section, each promise with the cited
 // source + date, status always "no_update"), saved with origin 'free'. Only if that finds nothing
@@ -38,13 +39,19 @@
 // prompt; its answer goes through the same cleaner. Nothing found = nothing saved ("no data yet").
 // Output size: one grounded call asks for at most PRM_PER_REQUEST promises (well under maxTokens),
 // and parseJsonLoose keeps the complete items of a cut-off (truncated) JSON answer.
-// AI fallback (llm.js): grounded research uses Gemini only (every key in turn). When every key is
-// used up the stored data is kept as it is and the run reports status 'paused' (RESEARCH_PAUSED)
-// instead of asking an ungrounded model, which would invent facts. Translation of stored data goes
-// through the whole chain (Gemini keys -> Groq -> Workers AI), so it keeps working.
+// NEVER-STOP CHAIN (researchFallbackChain): grounded research uses Gemini (every key x every model
+// in GEMINI_MODELS, Flash-Lite first, gemini.js). When every key is used up the run never stops at
+// "paused" and never asks an ungrounded model (it would invent facts); it goes on:
+//   1. keyless free sources: Govt / Hospitals free/govt.js + free/hosp.js (Wikidata, Wikipedia,
+//      OSM), Promises free/promises.js (Wikipedia), Comparison free/compare.js (Wikidata + Wikipedia);
+//   2. Groq Compound (built-in web search) ONLY if the GROQ_API_KEY secret is set (never required);
+//   3. the last saved data of the row: { ok: true, status: 'saved' } (nothing changed, nothing
+//      marked failed, the cron tries again after the reset);
+//   4. nothing at all: { ok: false, status: 'none' } (the app shows "no data yet").
+// Translation of stored data goes through the whole chain (Gemini keys -> Groq -> Workers AI).
 // FREE SOURCES FIRST (civic/free, migration 0008): Govt and Hospitals are served from keyless public
 // sources (Wikidata + Wikipedia, OpenStreetMap Nominatim, official .gov.in info) with NO AI call:
-// on demand the free fetch answers status 'ready' (never 'paused' for AI limits), saved in
+// on demand the free fetch answers status 'ready' (never stopped by AI limits), saved in
 // civic_data with origin 'free'. The Overpass upgrade of a hospital list runs after the response
 // (ctx.waitUntil) and in a gentle cron refresh (runFreeRefresh), never on the request path.
 // Grounded Gemini research stays as the fallback when the free sources fail; Gemini / Groq are
@@ -55,6 +62,7 @@ import { fetchGovtFree, fetchMandalFree } from './free/govt.js';
 import { levelOf, splitPlace, subLevelWord } from './place.js';
 import { fetchHospFree, fetchHospOverpass, titleCase } from './free/hosp.js';
 import { fetchPromisesFree } from './free/promises.js';
+import { fetchCompareFree } from './free/compare.js';
 import { sleep } from './free/http.js';
 import { geminiReady, isGeminiConfigured, parseJsonLoose } from './gemini.js';
 import { aiGenerate, groqSearchGenerate, isAiConfigured, isGroqConfigured } from './llm.js';
@@ -75,7 +83,8 @@ export const CIVIC_REFRESH_MS = 7 * 24 * 3600 * 1000;
 export const CIVIC_RETRY_MS = 20 * 60 * 1000;
 export const CIVIC_LOCK_MS = 3 * 60 * 1000;
 export const CIVIC_MAX_PENDING = 200;
-export const RESEARCH_PAUSED = 'research paused, showing saved info';
+// Cron summary only (never sent to the app): every Gemini key is cooling down
+export const AI_KEYS_OUT = 'gemini keys out of free quota';
 // Kinds served from the free, keyless sources first (no AI needed)
 export const FREE_KINDS = new Set(['govt', 'hosp']);
 export const CIVIC_FREE_DAILY_MAX = 800; // free-source place fetches per UTC day (usage key 'civic_free')
@@ -349,7 +358,7 @@ export function cleanCompare(raw) {
       return { area: CMP_AREAS.includes(area) ? area : '', topic: s(x.topic, 140), previous: cmpFact(x.previous), present: cmpFact(x.present) };
     })
     .filter(r => r.area && r.topic && !OPINION_RE.test(r.topic) && (r.previous || r.present));
-  return { asOf: s(o.asOf, 40), previous: cmpGovt(o.previous), present: cmpGovt(o.present), rows };
+  return { asOf: s(o.asOf, 40), ...(o.origin === 'free' ? { origin: 'free' } : {}), previous: cmpGovt(o.previous), present: cmpGovt(o.present), rows };
 }
 
 // ── Promises tracker (kind 'gprm') ──
@@ -943,16 +952,11 @@ export async function researchOne(db, env, { kind, state, district = '', variant
     data = null;
     error = failed ? (failed.r.ok ? 'empty or unreadable answer' : failed.r.error) : 'empty or unreadable answer';
     if (failed && !failed.r.ok && isExhausted(failed.r.code) && parts.every(p => !p.r.ok)) {
-      // Every Gemini key is out of free quota. Promises: the free (keyless) fallback first. Else keep
-      // the row exactly as it is (saved data, or still 'pending' so the cron picks it up after the
-      // reset) and never fall back to invented data
-      if (kind === 'gprm') {
-        const fb = await researchPromisesFallback(db, env, t, { fetchImpl, now, request: false });
-        if (fb.ok) {
-          return fb;
-        }
-      }
-      return { ok: false, status: 'paused', paused: true, error: RESEARCH_PAUSED, code: failed.r.code };
+      // Every Gemini key x model is out of free quota: the never-stop chain (keyless free sources ->
+      // Groq if set -> saved data -> none). Govt / Hospitals free sources were already tried above (or
+      // skipped on purpose to keep grounded AI data). The row is never marked failed (cron retries).
+      const fc = await researchFallbackChain(db, env, t, { fetchImpl, now, request: false, waitUntil, keyless: !FREE_KINDS.has(kind), code: failed.r.code });
+      return { ...fc, aiOut: true };
     }
   }
   if (data) {
@@ -1006,33 +1010,76 @@ export async function researchOne(db, env, { kind, state, district = '', variant
  * -> { ok: true, origin: 'free' | 'groq', model, translated: [] } | { ok: false, error, code }
  */
 export async function researchPromisesFallback(db, env, t, { fetchImpl = fetch, now = Date.now(), request = true } = {}) {
-  const st = placeByCode(t.state, t.kind);
-  if (!st || t.kind !== 'gprm') {
+  if (t.kind !== 'gprm' || !placeByCode(t.state, t.kind)) {
     return { ok: false, error: 'no fallback for this kind' };
   }
+  const k = await researchKeyless(db, env, t, { fetchImpl, now, request });
+  if (k.ok || !isGroqConfigured(env)) {
+    return k.ok ? k : { ok: false, error: k.error, code: 'source' };
+  }
+  const g = await researchGroq(db, env, t, { fetchImpl, now });
+  return g.ok ? g : { ok: false, error: `${k.error}; ${g.error}`, code: g.code };
+}
+
+// Kinds whose keyless fallback runs when Gemini cannot (Govt / Hospitals use free sources FIRST)
+export const KEYLESS_KINDS = new Set(['gprm', 'gcmp']);
+
+/**
+ * Keyless free sources for one target (no AI, no key; usage key 'civic_free', same daily cap):
+ * Govt / Hospitals researchFree, Promises free/promises.js, Comparison free/compare.js. Saved with
+ * origin 'free'; nothing found = nothing saved.
+ * -> { ok: true, origin: 'free', model: 'free', translated: [], count? } | { ok: false, error, code: 'source' }
+ */
+export async function researchKeyless(db, env, t, { fetchImpl = fetch, now = Date.now(), request = true, waitUntil = null } = {}) {
+  if (FREE_KINDS.has(t.kind)) {
+    return researchFree(db, env, t, { fetchImpl, now, waitUntil, request });
+  }
+  const st = placeByCode(t.state, t.kind);
+  if (!st || !KEYLESS_KINDS.has(t.kind)) {
+    return { ok: false, error: 'no free source for this kind', code: 'source' };
+  }
   const day = utcDay(now);
-  const caps = civicCaps(env);
-  let error = '';
-  if ((await usageFor(db, day, ['civic_free'])).civic_free >= caps.freeDailyMax) {
-    error = 'daily free-source cap reached';
-  } else {
-    await addUsage(db, day, 'civic_free', 1);
-    const r = await fetchPromisesFree(st, { fetchImpl, now, timeoutMs: request ? FREE_REQ_TIMEOUT_MS : 8000 });
+  if ((await usageFor(db, day, ['civic_free'])).civic_free >= civicCaps(env).freeDailyMax) {
+    return { ok: false, error: 'daily free-source cap reached', code: 'cap' };
+  }
+  await addUsage(db, day, 'civic_free', 1);
+  const timeoutMs = request ? FREE_REQ_TIMEOUT_MS : 8000;
+  if (t.kind === 'gprm') {
+    const r = await fetchPromisesFree(st, { fetchImpl, now, timeoutMs });
     const data = r.ok ? cleanPromises(r.data) : null;
     if (data && data.promises.length) {
       await saveFree(db, t, data, r.sources, now);
       return { ok: true, origin: 'free', model: 'free', translated: [], count: data.promises.length };
     }
-    error = r.ok ? 'no promises in the free source' : r.error || 'free source unavailable';
+    return { ok: false, error: r.ok ? 'no promises in the free source' : r.error || 'free source unavailable', code: 'source' };
   }
+  const r = await fetchCompareFree(st, { fetchImpl, now, timeoutMs });
+  const data = r.ok ? cleanCompare(r.data) : null;
+  if (data && data.rows.length) {
+    await saveFree(db, t, data, r.sources, now);
+    return { ok: true, origin: 'free', model: 'free', translated: [], count: data.rows.length };
+  }
+  return { ok: false, error: r.ok ? 'no sourced facts in the free source' : r.error || 'free source unavailable', code: 'source' };
+}
+
+/**
+ * Groq Compound (built-in web search) with the same research prompt and cleaner, ONLY when the
+ * GROQ_API_KEY secret is set (never required). Saved with origin 'ai', model 'groq/compound'.
+ * -> { ok: true, origin: 'groq', model, translated: [] } | { ok: false, error, code }
+ */
+export async function researchGroq(db, env, t, { fetchImpl = fetch, now = Date.now() } = {}) {
   if (!isGroqConfigured(env)) {
-    return { ok: false, error, code: 'source' };
+    return { ok: false, error: 'groq: not configured', code: 'config' };
   }
-  const g = await groqSearchGenerate(env, { prompt: researchPrompt('gprm', '', st, ''), maxTokens: 8000 }, { fetchImpl, now });
-  await addUsage(db, day, 'civic_groq', 1);
-  const data = g.ok ? cleanPromises(parseJsonLoose(g.text)) : null;
-  if (!data || !data.promises.length) {
-    return { ok: false, error: g.ok ? `${error}; groq: no sourced promises` : `${error}; ${g.error}`, code: g.ok ? 'source' : g.code };
+  const st = placeByCode(t.state, t.kind);
+  if (!st) {
+    return { ok: false, error: 'bad target', code: 'other' };
+  }
+  const g = await groqSearchGenerate(env, { prompt: researchPrompt(t.kind, t.variant, st, t.district), maxTokens: 8000 }, { fetchImpl, now });
+  await addUsage(db, utcDay(now), 'civic_groq', 1);
+  const data = g.ok ? cleanFor(t.kind, parseJsonLoose(g.text), placeName(st, t.district)) : null;
+  if (!data || isEmpty(t.kind, data)) {
+    return { ok: false, error: g.ok ? 'groq: no sourced data' : g.error, code: g.ok ? 'source' : g.code };
   }
   await db.run(
     `INSERT INTO civic_data (kind, state, district, variant, data, sources, ai_stars, status, error, model, updated_at, i18n, schema_v, origin)
@@ -1043,7 +1090,37 @@ export async function researchPromisesFallback(db, env, t, { fetchImpl = fetch, 
     ...binds4(t), JSON.stringify(data), JSON.stringify(g.sources || []), g.model, now, CIVIC_SCHEMA[t.kind] || 1,
   );
   await db.run(`DELETE FROM civic_i18n WHERE ${where4}`, ...binds4(t));
-  return { ok: true, origin: 'groq', model: g.model, translated: [], count: data.promises.length };
+  return { ok: true, origin: 'groq', model: g.model, translated: [] };
+}
+
+/**
+ * The never-stop chain after every Gemini key x model is out of free quota (see the header):
+ * keyless free sources (opts.keyless) -> Groq if set (opts.groq) -> the row's saved data -> none.
+ * Never writes an error and never touches saved data on a miss.
+ * -> { ok: true, origin, model, translated } (fresh data) | { ok: true, status: 'saved', origin,
+ *    answeredBy } | { ok: false, status: 'none', error, code }
+ */
+export async function researchFallbackChain(db, env, t, { fetchImpl = fetch, now = Date.now(), request = true, waitUntil = null, keyless = true, groq = true, code = 'quota' } = {}) {
+  const errors = [];
+  if (keyless) {
+    const k = await researchKeyless(db, env, t, { fetchImpl, now, request, waitUntil });
+    if (k.ok) {
+      return k;
+    }
+    errors.push(`free: ${k.error}`);
+  }
+  if (groq && isGroqConfigured(env)) {
+    const g = await researchGroq(db, env, t, { fetchImpl, now });
+    if (g.ok) {
+      return g;
+    }
+    errors.push(g.error);
+  }
+  const row = await db.first(`SELECT data, origin, model, status FROM civic_data WHERE ${where4}`, ...binds4(t));
+  if (row && row.data) {
+    return { ok: true, status: 'saved', origin: row.origin || 'ai', answeredBy: answeredByOf(row.origin, row.model), translated: [] };
+  }
+  return { ok: false, status: 'none', error: errors.length ? errors.join('; ').slice(0, 300) : 'no data yet', code };
 }
 
 // On demand (a user opened a place): research it now (with the user's language in the same run) if
@@ -1061,7 +1138,7 @@ export async function researchNow(db, env, t, lang, { fetchImpl = fetch, now = D
   let freeError = '';
   if (!hasData && FREE_KINDS.has(t.kind)) {
     // Govt / Hospitals: free, keyless sources first. No AI key, cap or cool-down is involved, so this
-    // never answers 'paused'; the asked language is translated afterwards in the background.
+    // never stops on AI limits; the asked language is translated afterwards in the background.
     if (!(await lockRow(db, t, now))) {
       return { ok: true, status: 'running', did: 'already running' };
     }
@@ -1083,14 +1160,20 @@ export async function researchNow(db, env, t, lang, { fetchImpl = fetch, now = D
     }
     freeError = fr.error || 'free sources unavailable';
   }
-  if (!hasData && t.kind === 'gprm' && (!isGeminiConfigured(env) || !(await geminiReady(env, { now })))) {
-    // Promises with no Gemini key, or every key cooling down (free quota used up): the free fallback
+  let chainDone = FREE_KINDS.has(t.kind) && !hasData; // keyless step already run just above
+  if (!hasData && KEYLESS_KINDS.has(t.kind) && (!isGeminiConfigured(env) || !(await geminiReady(env, { now })))) {
+    // Promises / Comparison with no Gemini key, or every key cooling down (free quota used up):
+    // keyless free sources, then Groq only if set
     if (!(await lockRow(db, t, now))) {
       return { ok: true, status: 'running', did: 'already running' };
     }
     let fb;
     try {
-      fb = await researchPromisesFallback(db, env, t, { fetchImpl, now, request: true });
+      fb = await researchKeyless(db, env, t, { fetchImpl, now, request: true });
+      if (!fb.ok && isGroqConfigured(env)) {
+        const g = await researchGroq(db, env, t, { fetchImpl, now });
+        fb = g.ok ? g : { ...fb, error: `${fb.error}; ${g.error}` };
+      }
     } finally {
       await unlock(db, t);
     }
@@ -1098,6 +1181,7 @@ export async function researchNow(db, env, t, lang, { fetchImpl = fetch, now = D
       return { ...fb, status: 'ready', did: 'research' };
     }
     freeError = fb.error || 'free sources unavailable';
+    chainDone = true;
   }
   if (!isAiConfigured(env)) {
     return { ok: false, status: 'ai_off', error: 'no AI provider set (GEMINI_API_KEY)', code: 'config', ...(freeError ? { freeError } : {}) };
@@ -1108,8 +1192,17 @@ export async function researchNow(db, env, t, lang, { fetchImpl = fetch, now = D
     return { ok: false, status: 'ai_off', error: 'GEMINI_API_KEY not set', code: 'config' };
   }
   if (!hasData && !(await geminiReady(env, { now }))) {
-    // Every key is cooling down: nothing to call, the saved info (if any) stays on screen
-    return { ok: false, status: 'paused', paused: true, error: RESEARCH_PAUSED, code: 'quota' };
+    // Every key x model is cooling down: never stop. Keyless sources and Groq (where not run just
+    // above), then the saved data ('saved') or nothing ('none')
+    if (!(await lockRow(db, t, now))) {
+      return { ok: true, status: 'running', did: 'already running' };
+    }
+    try {
+      const fc = await researchFallbackChain(db, env, t, { fetchImpl, now, request: true, waitUntil, keyless: !chainDone, groq: !chainDone || FREE_KINDS.has(t.kind), code: 'quota' });
+      return { ...fc, status: fc.status || (fc.ok ? 'ready' : 'none'), did: fc.status === 'saved' ? 'saved' : 'research', ...(freeError && !fc.ok ? { freeError } : {}) };
+    } finally {
+      await unlock(db, t);
+    }
   }
   if (row && row.status === 'error' && !hasData && now - Number(row.updated_at) < CIVIC_RETRY_MS) {
     return { ok: false, status: 'error', error: 'research failed recently, retrying later' };
@@ -1131,7 +1224,7 @@ export async function researchNow(db, env, t, lang, { fetchImpl = fetch, now = D
     const withLang = TR_LANGS[lang] && used.civic_tr < caps.trDailyMax ? [lang] : [];
     // free sources were tried just above (kinds that have them): grounded AI research only
     const r = await researchOne(db, env, t, { fetchImpl, now, langs: withLang, free: false });
-    return { ...r, status: r.ok ? (r.origin ? 'ready' : 'ok') : r.status || 'error', did: 'research' };
+    return { ...r, status: r.status || (r.ok ? (r.origin ? 'ready' : 'ok') : 'error'), did: r.status === 'saved' ? 'saved' : 'research' };
   } finally {
     await unlock(db, t);
   }
@@ -1224,8 +1317,9 @@ export async function runCivicResearch(db, env, { fetchImpl = fetch, now = Date.
       const tr = translate && trUsed < caps.trDailyMax;
       const r = await researchOne(db, env, t, { fetchImpl, now, translate: tr });
       results.push({ ...t, ...r });
-      if (r.paused) {
-        // Keys ran out mid-run: stop researching until they reset (saved data stays as it is)
+      if (r.aiOut) {
+        // Keys ran out mid-run (that place went through the never-stop chain): stop grounded
+        // research until they reset (saved data stays as it is)
         paused = true;
         break;
       }
@@ -1254,9 +1348,9 @@ export async function runCivicResearch(db, env, { fetchImpl = fetch, now = Date.
     }
   }
   if (!results.length) {
-    return { ran: 0, skipped: paused ? RESEARCH_PAUSED : aiLeft <= 0 ? 'daily cap reached' : 'nothing to do' };
+    return { ran: 0, skipped: paused ? AI_KEYS_OUT : aiLeft <= 0 ? 'daily cap reached' : 'nothing to do' };
   }
-  return { ran: results.length, results, ...(paused ? { paused: true } : {}) };
+  return { ran: results.length, results, ...(paused ? { aiOut: true } : {}) };
 }
 
 // Missing cron-language (te / hi) copies of rows with English data, best first (see runCivicResearch)

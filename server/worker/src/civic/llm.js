@@ -11,8 +11,8 @@
 //
 // Grounded calls (Google-Search-grounded research of government / hospital facts) use Gemini ONLY:
 // the other providers cannot search the web, and an ungrounded model would invent facts. When every
-// Gemini key is used up, research.js keeps the stored data and reports status 'paused'
-// ("research paused, showing saved info") instead.
+// Gemini key is used up, research.js never stops: keyless free sources, then Groq Compound (web
+// search, only with GROQ_API_KEY), then the saved data (status 'saved') or 'none' (researchFallbackChain).
 // Everything else (translation, Explain simply, Laws AI, Hospital AI) answers from text the Worker
 // already has, so any provider in the chain may answer it.
 import { GEMINI_MODELS, geminiCoolId, geminiGenerate, geminiKeys, isGeminiConfigured, post } from './gemini.js';

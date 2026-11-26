@@ -18,11 +18,13 @@
 //   POST /v1/civic/research {kind, state, district, variant, lang}   on demand: research the place
 //        now (translated into lang in the same run) if it has no data, else translate the missing
 //        language (any TR_LANGS code). Capped per user + per day. `code` on failure: quota | billing |
-//        cap | timeout | config (the app shows a clear message). status 'paused' = every Gemini key
-//        is out of free quota: research paused, the saved info is kept and shown.
+//        cap | timeout | config (the app shows a clear message). Never stops on AI limits (research.js
+//        researchFallbackChain): every Gemini key x model out of free quota -> keyless free sources ->
+//        Groq if GROQ_API_KEY is set -> status 'saved' {ok: true} (the last saved data stands) ->
+//        status 'none' {ok: false} (nothing anywhere: "no data yet").
 //        Govt / Hospitals are researched from the FREE, keyless sources first (research.js
 //        researchFree: Wikidata, Wikipedia, OpenStreetMap; no AI): {ok: true, status: 'ready',
-//        did: 'research', origin: 'free'}, never 'paused' for AI limits. AI research is only the
+//        did: 'research', origin: 'free'}, never stopped by AI limits. AI research is only the
 //        fallback when the free sources fail. (Stored rows keep status 'ok' in GET /data.)
 //   POST /v1/civic/ask, /v1/civic/translate   civic AI answers + cached AI translations (ask.js)
 //   GET  /v1/civic/reviews?item=&limit=     visible reviews + average + my review
@@ -40,7 +42,7 @@ import { MANDAL_KINDS, placeKey, publicTarget } from './place.js';
 import { cleanReviewText, hasProfanity } from './moderation.js';
 import { isGeminiConfigured } from './gemini.js';
 import { aiProviderStatus, isAiConfigured } from './llm.js';
-import { CIVIC_LOCK_MS, CIVIC_MAX_PENDING, FREE_KINDS, answeredByOf, KINDS, TR_LANGS, civicCaps, readI18n, researchFree, researchNow, researchOne, startTranslate } from './research.js';
+import { CIVIC_LOCK_MS, CIVIC_MAX_PENDING, FREE_KINDS, KEYLESS_KINDS, answeredByOf, KINDS, TR_LANGS, civicCaps, readI18n, researchFree, researchNow, researchOne, startTranslate } from './research.js';
 
 export const MAX_REVIEWS_PER_DAY = 20; // per user (new or edited)
 export const MAX_REPORTS_PER_DAY = 30; // per user
@@ -142,8 +144,8 @@ export async function getCivicData({ db, env, url, now, fetchImpl, ctx }) {
     // researchConfigured: new places can be researched: always for Govt / Hospitals (free sources,
     // no key), else grounded research (needs a Gemini key)
     aiConfigured: isAiConfigured(env),
-    // gprm: the keyless Wikipedia fallback (research.js researchPromisesFallback) always works
-    researchConfigured: FREE_KINDS.has(t.kind) || t.kind === 'gprm' || isGeminiConfigured(env),
+    // gprm / gcmp: the keyless Wikipedia / Wikidata fallback (research.js researchKeyless) always works
+    researchConfigured: FREE_KINDS.has(t.kind) || KEYLESS_KINDS.has(t.kind) || isGeminiConfigured(env),
     freeSources: FREE_KINDS.has(t.kind),
     ...(data ? { answeredBy: answeredByOf(row.origin, row.model) } : {}),
   };
