@@ -7,6 +7,9 @@
 // Collapsed until the user opens it, so research is only asked for when someone wants it (same
 // per-user / daily caps on the Worker). Each item in the app language with an English toggle.
 // Each promise is a HeadlineCard: status badge, bold promise text, 2-line fact; tap = source + dates.
+// Audit India items (free source, auditindia.org, reuse with attribution): the badge shows their own
+// status wording, the details say "Source: Audit India (auditindia.org)" with the primary source link,
+// and items Audit India marks "graded, evidence not yet sourced" carry a small note.
 import React, { useMemo, useState } from 'react';
 import { Text, TouchableOpacity, View } from 'react-native';
 import { ui } from '../Earn/earnUi';
@@ -32,6 +35,15 @@ const statusColor = (st: PromiseStatus): string =>
 
 const host = (u: string) => u.replace(/^https:\/\//, '').split('/')[0];
 
+export const isAuditIndia = (p: PromiseItem): boolean => p.by === 'auditindia';
+// Badge text: Audit India's own wording (kept in English, as they publish it), our status in the app
+// language after it when that differs
+export const badgeText = (p: PromiseItem, lang: AppLanguage): string => {
+  const ours = civicText(lang, STATUS_LABEL[p.status]);
+  if (!isAuditIndia(p) || !p.statusLabel) return ours;
+  return lang === 'English' || ours === p.statusLabel ? p.statusLabel : `${p.statusLabel} · ${ours}`;
+};
+
 // A Worker deployed before kind 'gprm' answers 400 "bad kind / state / district / variant" (or 404 =
 // 'serverOld'): the feature is simply not live there yet. Any other failure with nothing saved is
 // "no data yet". Never a raw error text on screen, never numbers without researched promises.
@@ -51,10 +63,10 @@ export const countPromises = (list: PromiseItem[]) => ({
   no_update: list.filter(p => p.status === 'no_update').length,
 });
 
-function Badge({ status, lang }: { status: PromiseStatus; lang: AppLanguage }) {
+function Badge({ p, lang }: { p: PromiseItem; lang: AppLanguage }) {
   return (
-    <View style={{ alignSelf: 'flex-start', backgroundColor: statusColor(status), borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2, marginBottom: 4 }}>
-      <Text style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '700' }}>{civicText(lang, STATUS_LABEL[status])}</Text>
+    <View style={{ alignSelf: 'flex-start', backgroundColor: statusColor(p.status), borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2, marginBottom: 4 }}>
+      <Text style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '700' }}>{badgeText(p, lang)}</Text>
     </View>
   );
 }
@@ -74,6 +86,9 @@ export default function GovtPromisesBox({ lang, state }: { lang: AppLanguage; st
   const shown = list.map((p, i) => ({ p, i })).filter(x => filter === 'all' || x.p.status === filter);
   const pct = (k: number) => (n.total ? `${(k / n.total) * 100}%` : '0%');
   const notice = promisesNotice(phase, errorText, hasData);
+  const audit = d && Array.isArray(d.credits) ? d.credits.find(c => c && /auditindia\.org/.test(c.url || '')) : undefined;
+  const hasAudit = list.some(isAuditIndia);
+  const hasWiki = list.some(p => !isAuditIndia(p));
 
   return (
     <CivicCard lang={lang} hasTranslation={!!t}>
@@ -132,7 +147,12 @@ export default function GovtPromisesBox({ lang, state }: { lang: AppLanguage; st
                     </Text>
                   </TouchableOpacity>
                 ) : null}
-                {d.origin === 'free' ? <Text testID="prm-free" style={[ui.muted, { fontSize: 12 }]}>{biLabel(lang, 'prmFreeNote')}</Text> : null}
+                {hasAudit ? (
+                  <TouchableOpacity testID="prm-audit-credit" onPress={() => openLink((audit && audit.url) || 'https://auditindia.org/')}>
+                    <Text style={[ui.muted, { fontSize: 12, color: colors.primary }]}>🔗 {civicText(lang, 'prmAuditSource')}</Text>
+                  </TouchableOpacity>
+                ) : null}
+                {d.origin === 'free' && hasWiki ? <Text testID="prm-free" style={[ui.muted, { fontSize: 12 }]}>{biLabel(lang, 'prmFreeNote')}</Text> : null}
                 {d.asOf ? (
                   <Text style={[ui.muted, { fontSize: 12 }]}>
                     {civicText(lang, 'asOf')}: {d.asOf}
@@ -163,13 +183,35 @@ export default function GovtPromisesBox({ lang, state }: { lang: AppLanguage; st
                     key={`p${i}`}
                     divided
                     lang={lang}
-                    badge={<Badge status={p.status} lang={lang} />}
+                    badge={<Badge p={p} lang={lang} />}
                     headline={p.text}
                     headlineTr={tp?.text}
                     summary={p.fact}
                     summaryTr={tp?.fact}
+                    extra={
+                      isAuditIndia(p) && p.graded ? (
+                        <Text testID={`prm-graded-${i}`} style={[ui.muted, { fontSize: 11, fontStyle: 'italic', marginTop: 2 }]}>
+                          ◌ {civicText(lang, 'prmAuditGraded')}
+                        </Text>
+                      ) : undefined
+                    }
                   >
-                    {p.source ? (
+                    {isAuditIndia(p) ? (
+                      <TouchableOpacity testID={`prm-audit-src-${i}`} onPress={() => openLink(p.source || (audit && audit.url) || 'https://auditindia.org/')}>
+                        <Text style={[ui.muted, { fontSize: 12, color: colors.primary }]} numberOfLines={1}>
+                          🔗 {civicText(lang, 'prmAuditSource')}
+                          {p.date ? ` · 📅 ${p.date}` : ''}
+                        </Text>
+                      </TouchableOpacity>
+                    ) : null}
+                    {isAuditIndia(p) && p.primary ? (
+                      <TouchableOpacity testID={`prm-primary-${i}`} onPress={() => openLink(p.primary || '')}>
+                        <Text style={[ui.muted, { fontSize: 12, color: colors.primary }]} numberOfLines={1}>
+                          📄 {civicText(lang, 'prmPrimary')}: {host(p.primary)}
+                        </Text>
+                      </TouchableOpacity>
+                    ) : null}
+                    {p.source && !isAuditIndia(p) ? (
                       <TouchableOpacity onPress={() => openLink(p.source)}>
                         <Text style={[ui.muted, { fontSize: 12, color: colors.primary }]} numberOfLines={1}>
                           🔗 {host(p.source)}
@@ -177,7 +219,7 @@ export default function GovtPromisesBox({ lang, state }: { lang: AppLanguage; st
                         </Text>
                       </TouchableOpacity>
                     ) : null}
-                    {p.ref && p.ref !== p.source ? (
+                    {p.ref && p.ref !== p.source && !(isAuditIndia(p) && (p.ref === p.primary || /auditindia\.org/.test(p.ref))) ? (
                       <TouchableOpacity onPress={() => openLink(p.ref || '')}>
                         <Text style={[ui.muted, { fontSize: 12, color: colors.primary }]} numberOfLines={1}>
                           📄 {host(p.ref)}

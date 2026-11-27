@@ -202,9 +202,18 @@ describe('moderation + gemini helpers', () => {
       n++;
       return n === 1 ? { ok: false, status: 429, json: async () => ({}) } : { ok: true, status: 200, json: async () => GEMINI_GOVT };
     });
-    const r = await geminiGenerate({ GEMINI_API_KEY: 'k' }, { prompt: 'x', grounded: true }, { fetchImpl: f });
+    const r = await geminiGenerate({ GEMINI_API_KEY: 'k' }, { prompt: 'x' }, { fetchImpl: f });
     expect(r.ok).toBe(true);
-    expect(JSON.parse(f.mock.calls[0][1].body).tools).toEqual([{ google_search: {} }]);
+    expect(f).toHaveBeenCalledTimes(2);
+    // grounded: Google Search tool, on the free grounded model only (gemini-2.5-flash-lite)
+    const g = jest.fn(async (url: string, init: any) => {
+      expect(init.headers['x-goog-api-key']).toBe('k');
+      return { ok: true, status: 200, json: async () => GEMINI_GOVT };
+    });
+    const rg = await geminiGenerate({ GEMINI_API_KEY: 'k' }, { prompt: 'x', grounded: true }, { fetchImpl: g });
+    expect(rg.ok).toBe(true);
+    expect(g.mock.calls[0][0]).toContain('/models/gemini-2.5-flash-lite:');
+    expect(JSON.parse(g.mock.calls[0][1].body).tools).toEqual([{ google_search: {} }]);
   });
 });
 
@@ -742,7 +751,8 @@ describe('hospitals v2 fields (public-source only)', () => {
     expect(research.civicCaps({ CIVIC_DAILY_MAX: '200', CIVIC_PER_RUN: 'x', CIVIC_TR_DAILY_MAX: '' })).toMatchObject({ dailyMax: 200, perRun: 3, trDailyMax: 300 });
     expect(research.civicCaps({ CIVIC_PER_RUN: '99' }).perRun).toBe(8);
     const { GEMINI_MODELS } = require('../server/worker/src/civic/gemini.js');
-    expect(GEMINI_MODELS).toEqual(['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-3.6-flash', 'gemini-flash-latest', 'gemini-3.8-flash']);
+    // FREE TIER ONLY: allow-listed free models, Flash-Lite first, never an alias like gemini-flash-latest
+    expect(GEMINI_MODELS).toEqual(['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-2.5-flash-lite', 'gemini-3.6-flash', 'gemini-3.8-flash']);
   });
 });
 
@@ -869,7 +879,7 @@ describe('promises free fallback (gprm)', () => {
     expect(f.mock.calls.some((c: any[]) => String(c[0]).includes('api.groq.com'))).toBe(false);
   });
 
-  it('GROQ_API_KEY set + nothing in the free source: groq/compound web search, same strict cleaner', async () => {
+  it('GROQ_API_KEY set + nothing in the free source: Groq is never asked (groq/compound decommissioned, browser search is paid)', async () => {
     const e = env({ GROQ_API_KEY: 'gk' });
     const ans = {
       govt: { party: 'INC', head: 'A. Revanth Reddy', year: '2023', term: '2023-2028', source: 'https://inc.in/manifesto-tg.pdf' },
@@ -881,12 +891,9 @@ describe('promises free fallback (gprm)', () => {
     const groq = { choices: [{ message: { content: JSON.stringify(ans), executed_tools: [{ search_results: { results: [{ url: 'https://tgsrtc.telangana.gov.in/x', title: 'TGSRTC' }] } }] } }] };
     const f = wikiFetch({ manifesto: 'The manifesto was released at a rally.', groq });
     const r = await call(e, 'POST', '/v1/civic/research', { body: { kind: 'gprm', state: 'TG' }, fetchImpl: f });
-    expect(r.json).toMatchObject({ ok: true, origin: 'groq', model: 'groq/compound' });
-    const sent = JSON.parse((f.mock.calls.find((c: any[]) => String(c[0]).includes('api.groq.com')) as any[])[1].body);
-    expect(sent.model).toBe('groq/compound');
-    const d = (await call(e, 'GET', '/v1/civic/data?kind=gprm&state=TG')).json.data;
-    expect(d.promises.map((p: any) => p.status)).toEqual(['done', 'no_update']);
-    expect(d.promises[1]).toMatchObject({ ref: 'https://inc.in/manifesto-tg.pdf', refDate: '2023', source: '' });
+    expect(r.json.ok).toBe(false);
+    expect(f.mock.calls.some((c: any[]) => String(c[0]).includes('api.groq.com'))).toBe(false);
+    expect((await call(e, 'GET', '/v1/civic/data?kind=gprm&state=TG')).json.data).toBeNull();
   });
 });
 

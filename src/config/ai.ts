@@ -9,15 +9,18 @@ export const GEMINI_API_KEY: string = String(GENERATED_KEY || '').trim();
 //  - gemini-3.6-flash: stable Flash, free tier, balanced (fast enough for chat)
 //  - gemini-3.5-flash-lite: stable, fastest and cheapest, free tier
 //  - gemini-3.8-flash: newest Flash, free tier, uses more thinking tokens
-//  - gemini-flash-latest: alias that always points at the current Flash release
 //  - gemini-3.1-flash-lite: stable, shutdown date May 7, 2027 (deprecations page)
+//  - gemini-2.5-flash-lite: stable Flash-Lite, free tier
+// FREE TIER ONLY: the same allow-list as the Worker (server/worker/src/civic/gemini.js
+// GEMINI_FREE_MODELS). Never an alias like gemini-flash-latest: it can move to a model without a
+// free tier. No "-pro" model is ever used.
 // gemini-2.0-flash was shut down on 2026-06-01 and gemini-2.5-flash is limited to existing users.
 export const GEMINI_MODELS = [
   'gemini-3.6-flash',
   'gemini-3.5-flash-lite',
   'gemini-3.8-flash',
-  'gemini-flash-latest',
   'gemini-3.1-flash-lite',
+  'gemini-2.5-flash-lite',
 ];
 
 // REST: POST {endpoint}/{model}:generateContent with the key in the x-goog-api-key header

@@ -12,17 +12,47 @@
 // Speed (free tier): the fastest free models first (Flash-Lite), no / minimal thinking, and a
 // per-call timeout so a slow model falls through to the next one within seconds.
 // Errors carry a short `code` the app turns into a clear message:
-//   'quota'   every key / model answered 429 or is cooling down (free-tier per-minute / per-day limit)
-//   'billing' 402 on every key (AI Studio prepaid credits used up: use free-tier keys, no billing)
+//   'quota'   every key / model answered 429 or is cooling down (free-tier per-minute / per-day limit),
+//             or the Worker's own daily cap (aiBudget.js) is reached
+//   'billing' 402 / a billing or payment-required answer on every key (never retried: the call falls
+//             to the next FREE step; no paid setting is ever tried)
 //   'key'     400 / 401 / 403 key or request refused
 //   'timeout' every model was too slow
 //   'config'  no key
 import { md5Hex } from '../md5.js';
 import { HOUR_MS, MINUTE_MS, coolView, cooldownFor, nextGeminiReset } from './aiCooldown.js';
+import { GEMINI_DAILY_CAP_PER_KEY, GEMINI_GROUNDED_DAILY_CAP_PER_KEY, budgetFor, geminiDay, hasRoom, keyHash, spend } from './aiBudget.js';
 
 export const GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models';
+// FREE TIER ONLY (Sai's rule). Checked 2026-11-26 against https://ai.google.dev/gemini-api/docs/pricing
+// and https://ai.google.dev/gemini-api/docs/rate-limits:
+//   Free tier "Free of charge" (text): gemini-3.8-flash, gemini-3.6-flash, gemini-3.5-flash-lite,
+//     gemini-3.1-flash-lite, gemini-2.5-flash-lite (also gemini-4-hydrogen, gemma-4: not used here).
+//   Grounding with Google Search on the free tier: ONLY Gemini 2.5 Flash / Flash-Lite ("Free of
+//     charge, up to 500 RPD, limit shared"); every Gemini 3.x model says "Not available" on the free
+//     tier (paid: 5,000 searches / month then $14 / 1,000). gemini-2.5-flash is deprecated and from
+//     2026-12-01 routes to (and bills as) gemini-3.5-flash-lite, so grounded calls use 2.5 Flash-Lite only.
+//   NOT free / banned: gemini-4-carbon, gemini-4-argon, gemini-4-neon, gemini-3.1-pro-preview, every
+//     "-pro" model, image / video / music models, and aliases like gemini-flash-latest (an alias can
+//     move to a model without a free tier, so it is never used).
+// The Worker never sends a request to a model outside these lists (freeModels() filters any list).
+export const GEMINI_FREE_MODELS = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-2.5-flash-lite', 'gemini-3.6-flash', 'gemini-3.8-flash'];
+export const GEMINI_FREE_GROUNDED_MODELS = ['gemini-2.5-flash-lite'];
+export const GEMINI_BANNED_RE = /pro|latest|gemini-4-(?:carbon|argon|neon)|image|omni|genie|lyria|tts|live|nano-banana/i;
 // Fastest free-tier models first (Flash-Lite: highest free requests per day), then the Flash ones
-export const GEMINI_MODELS = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-3.6-flash', 'gemini-flash-latest', 'gemini-3.8-flash'];
+export const GEMINI_MODELS = [...GEMINI_FREE_MODELS];
+// Google-Search-grounded research (civic research.js): free grounding only on 2.5 Flash-Lite
+export const GEMINI_GROUNDED_MODELS = [...GEMINI_FREE_GROUNDED_MODELS];
+// Only allow-listed free-tier models, in the given order (pure: tested)
+export const freeModels = (models, grounded = false) =>
+  (Array.isArray(models) ? models : []).filter(m => (grounded ? GEMINI_FREE_GROUNDED_MODELS : GEMINI_FREE_MODELS).includes(m) && !GEMINI_BANNED_RE.test(m));
+// A billing / payment-required answer (pure: tested): never retried, the call moves on. A plain
+// free-tier 429 says "check your plan and billing details" too: that one is a quota (cooled per
+// model / minute / day), only a 429 about a spend limit counts as billing.
+export const BILLING_RE =
+  /billing|prepaid|payment|credits? (?:are |have been )?(?:depleted|exhausted|used up)|spend(?:ing)?[- ]based|spend (?:cap|limit)|upgrade to (?:a )?paid|requires? (?:a )?paid|not available (?:on|in) the free tier|free tier is not (?:available|supported)/i;
+export const isBillingAnswer = (status, body = '') =>
+  status === 402 || (status === 429 ? /spend(?:ing)?[- ]based|spend (?:cap|limit)/i.test(body) : status >= 400 && status < 500 && status !== 404 && BILLING_RE.test(body));
 // Per-call time limits (ms): grounded research searches the web, so it gets longer
 export const GEMINI_TIMEOUT_MS = 15000;
 export const GEMINI_GROUNDED_TIMEOUT_MS = 30000;
@@ -70,8 +100,9 @@ export function geminiQuotaCooldown(bodyText, now, retryAfter = '') {
   return { until: now + Math.min(600, Math.max(5, secs)) * 1000, reason: 'minute' };
 }
 
-// Is at least one key + model not cooling down right now? (grounded research needs Gemini)
-export async function geminiReady(env, { now = Date.now(), cooldown, models = GEMINI_MODELS } = {}) {
+// Is at least one key + model not cooling down right now? (grounded research needs Gemini, so the
+// default list is the free grounded one)
+export async function geminiReady(env, { now = Date.now(), cooldown, models = GEMINI_GROUNDED_MODELS } = {}) {
   const keys = geminiKeys(env);
   if (!keys.length) {
     return false;
@@ -259,13 +290,19 @@ export const post = async (fetchImpl, url, init, timeoutMs) => {
  */
 export async function geminiGenerate(
   env,
-  { prompt, system = '', grounded = false, maxTokens = 2048, temperature = 0.2, jsonOut = false, timeoutMs = 0, budgetMs = 0, models = GEMINI_MODELS } = {},
-  { fetchImpl = fetch, now, cooldown } = {},
+  { prompt, system = '', grounded = false, maxTokens = 2048, temperature = 0.2, jsonOut = false, timeoutMs = 0, budgetMs = 0, models: asked = null } = {},
+  { fetchImpl = fetch, now, cooldown, budget } = {},
 ) {
   const keys = geminiKeys(env);
   if (!keys.length) {
     return { ok: false, error: 'not configured', code: 'config' };
   }
+  // FREE TIER ONLY: whatever list is asked for, only allow-listed free models are ever called
+  const models = freeModels(asked || (grounded ? GEMINI_GROUNDED_MODELS : GEMINI_MODELS), grounded);
+  if (!models.length) {
+    return { ok: false, error: 'no free-tier model for this call', code: 'config' };
+  }
+  const store = budgetFor(env, { budget });
   const base = {
     contents: [{ role: 'user', parts: [{ text: String(prompt || '') }] }],
     generationConfig: { temperature, maxOutputTokens: maxTokens },
@@ -280,7 +317,7 @@ export async function geminiGenerate(
     base.generationConfig.responseMimeType = 'application/json';
   }
   const limit = timeoutMs || (grounded ? GEMINI_GROUNDED_TIMEOUT_MS : GEMINI_TIMEOUT_MS);
-  const budget = budgetMs || (grounded ? GEMINI_GROUNDED_BUDGET_MS : GEMINI_BUDGET_MS);
+  const timeBudget = budgetMs || (grounded ? GEMINI_GROUNDED_BUDGET_MS : GEMINI_BUDGET_MS);
   const t0 = now === undefined ? Date.now() : now;
   const started = Date.now();
   const view = await coolView(cooldownFor(env, { cooldown }), t0);
@@ -294,6 +331,15 @@ export async function geminiGenerate(
       lastError = `key ${ki + 1}: cooling down`;
       continue;
     }
+    // The Worker's own daily cap per key (below the free daily limits, aiBudget.js)
+    const day = geminiDay(t0);
+    const capKey = `ai_gem:${keyHash(key)}`;
+    const capKeyG = `ai_gemg:${keyHash(key)}`;
+    if (!(await hasRoom(store, day, capKey, GEMINI_DAILY_CAP_PER_KEY)) || (grounded && !(await hasRoom(store, day, capKeyG, GEMINI_GROUNDED_DAILY_CAP_PER_KEY)))) {
+      statuses.push(429);
+      lastError = `key ${ki + 1}: daily free-tier cap reached`;
+      continue;
+    }
     for (const model of models) {
       if (slow.has(model)) {
         continue;
@@ -303,7 +349,7 @@ export async function geminiGenerate(
         lastError = `key ${ki + 1} model ${model}: cooling down`;
         continue;
       }
-      if (Date.now() - started > budget) {
+      if (Date.now() - started > timeBudget) {
         statuses.push('timeout');
         lastError = 'gemini time budget used';
         break keyLoop;
@@ -328,13 +374,29 @@ export async function geminiGenerate(
           lastError = e && e.timeout ? `model ${model}: timeout` : 'network error';
           break;
         }
+        // every answer counts against the free requests per day
+        await spend(store, day, capKey, 1);
+        if (grounded) {
+          await spend(store, day, capKeyG, 1);
+        }
+        const errText = !res.ok && res.status !== 404 && res.status < 500 ? await bodyText(res) : '';
+        if (isBillingAnswer(res.status, errText)) {
+          // Billing / payment required (prepaid credits used up, a spend cap, a model that needs a
+          // paid tier): never retried with other settings; this key waits for the daily reset and the
+          // call moves on to the next key, then to the next FREE provider / step
+          await view.cool(geminiCoolId(key), nextGeminiReset(t0), 'billing');
+          statuses.push(402);
+          lastError = `key ${ki + 1}: gemini billing / payment required (http ${res.status}): not used (free tier only)`;
+          nextKey = true;
+          break;
+        }
         if (res.status === 400 && thinking && attempt === 0) {
           // Most likely the thinking field: retry this model once without it
           thinking = null;
           continue;
         }
         if (res.status === 429) {
-          const c = geminiQuotaCooldown(await bodyText(res), t0, header(res, 'retry-after'));
+          const c = geminiQuotaCooldown(errText, t0, header(res, 'retry-after'));
           await view.cool(geminiCoolId(key, model), c.until, c.reason);
           statuses.push(429);
           lastError = `key ${ki + 1} model ${model}: http 429 (${c.reason})`;
@@ -352,17 +414,8 @@ export async function geminiGenerate(
           lastError = `model ${model}: http ${res.status}`;
           break;
         }
-        if (res.status === 402) {
-          // AI Studio prepaid credits used up on this key's project: next key, retry after the daily reset
-          await view.cool(geminiCoolId(key), nextGeminiReset(t0), 'billing');
-          statuses.push(402);
-          lastError = `key ${ki + 1}: gemini billing: prepaid credits depleted (http 402)`;
-          nextKey = true;
-          break;
-        }
         if (!res.ok) {
-          const text = res.status === 400 ? await bodyText(res) : '';
-          if (res.status === 401 || res.status === 403 || KEY_PROBLEM_RE.test(text)) {
+          if (res.status === 401 || res.status === 403 || (res.status === 400 && KEY_PROBLEM_RE.test(errText))) {
             // This key is refused (invalid / revoked / restricted): next key, look again in 10 min
             await view.cool(geminiCoolId(key), t0 + 10 * MINUTE_MS, 'key');
             statuses.push('key');

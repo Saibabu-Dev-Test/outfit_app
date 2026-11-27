@@ -32,19 +32,29 @@
 // manifesto URL + manifesto year); a promise without both is dropped.
 // Promises FREE FALLBACK (researchPromisesFallback = researchKeyless + researchGroq for gprm; the
 // comparison 'gcmp' has the same, free/compare.js): when every Gemini key is out of free quota
-// (or no Gemini key is set), the promises are read from the keyless MediaWiki API (free/promises.js:
-// the present government's election article, its manifesto section, each promise with the cited
-// source + date, status always "no_update"), saved with origin 'free'. Only if that finds nothing
-// AND the GROQ_API_KEY secret is set, Groq Compound (built-in web search) is asked with the same
-// prompt; its answer goes through the same cleaner. Nothing found = nothing saved ("no data yet").
+// (or no Gemini key is set), the promises come from keyless public sources, saved with origin 'free':
+//   a. Audit India (free/auditindia.js, auditindia.org, reuse with attribution under its Terms of Use):
+//      the present government's promises with Audit India's delivery status (Delivered -> done,
+//      Partly delivered -> in_progress, Not delivered -> not_done; their wording kept in statusLabel),
+//      the Audit India page as source and the primary source when given. State grades carry
+//      Audit India's flag "graded, evidence not yet sourced" (graded: true; the app shows a note).
+//   b. Wikipedia (free/promises.js, MediaWiki API: the present government's election article, its
+//      manifesto section, each promise with the cited source + date, status always "no_update"),
+//      merged after the Audit India items with duplicates dropped (free/auditindia.js mergePromises).
+//      Audit India items are only used when they are for the same (or a newer) term than Wikipedia's.
+// Only if that finds nothing AND the GROQ_API_KEY secret is set, the Groq step runs (llm.js
+// groqSearchGenerate; Groq's free plan has no web-search model since groq/compound was
+// decommissioned on 2026-09-21, so it answers 'not on the free plan' and the chain goes on).
+// Nothing found = nothing saved ("no data yet").
 // Output size: one grounded call asks for at most PRM_PER_REQUEST promises (well under maxTokens),
 // and parseJsonLoose keeps the complete items of a cut-off (truncated) JSON answer.
 // NEVER-STOP CHAIN (researchFallbackChain): grounded research uses Gemini (every key x every model
 // in GEMINI_MODELS, Flash-Lite first, gemini.js). When every key is used up the run never stops at
 // "paused" and never asks an ungrounded model (it would invent facts); it goes on:
 //   1. keyless free sources: Govt / Hospitals free/govt.js + free/hosp.js (Wikidata, Wikipedia,
-//      OSM), Promises free/promises.js (Wikipedia), Comparison free/compare.js (Wikidata + Wikipedia);
-//   2. Groq Compound (built-in web search) ONLY if the GROQ_API_KEY secret is set (never required);
+//      OSM), Promises free/auditindia.js (Audit India) + free/promises.js (Wikipedia), Comparison
+//      free/compare.js (Wikidata + Wikipedia);
+//   2. Groq ONLY if the GROQ_API_KEY secret is set (never required; free plan only, see llm.js);
 //   3. the last saved data of the row: { ok: true, status: 'saved' } (nothing changed, nothing
 //      marked failed, the cron tries again after the reset);
 //   4. nothing at all: { ok: false, status: 'none' } (the app shows "no data yet").
@@ -62,6 +72,8 @@ import { fetchGovtFree, fetchMandalFree } from './free/govt.js';
 import { levelOf, splitPlace, subLevelWord } from './place.js';
 import { fetchHospFree, fetchHospOverpass, titleCase } from './free/hosp.js';
 import { fetchPromisesFree } from './free/promises.js';
+import { AI_GAP_MS, fetchPromisesAuditIndia, mergePromises } from './free/auditindia.js';
+import { md5Hex } from '../md5.js';
 import { fetchCompareFree } from './free/compare.js';
 import { sleep } from './free/http.js';
 import { geminiReady, isGeminiConfigured, parseJsonLoose } from './gemini.js';
@@ -92,6 +104,10 @@ export const CIVIC_FREE_REFRESH_MS = 7 * 24 * 3600 * 1000; // free rows / Overpa
 export const CIVIC_FREE_GAP_MS = 1100; // between Nominatim requests (usage policy: max 1 / second)
 export const FREE_GOV_CACHE_MS = 3 * 24 * 3600 * 1000; // cached Wikipedia governors list
 export const FREE_REQ_TIMEOUT_MS = 3500; // per free request on the request path (first load target < 5 s)
+// Audit India Union Government promise pages read over the network per call (cached a week in
+// civic_text_cache ns 'aind'; the rest follow in later calls / the gentle cron refresh)
+export const AI_PAGES_REQUEST = 3;
+export const AI_PAGES_CRON = 15;
 // Grounded research failed because every Gemini key is out of free quota (not a data problem)
 const isExhausted = code => code === 'quota' || code === 'billing';
 // Languages the cron translates ahead of time (others are translated the first time someone asks)
@@ -408,18 +424,34 @@ export function cleanPromises(raw) {
       // where the promise itself is stated: its own cited source, else the manifesto + its year
       const ref = url(x.ref) || manifesto;
       const refDate = date(x.refDate) || year;
-      return { area: prmArea(x.area), text, status, fact: evidence ? fact : '', source: evidence ? source : '', date: evidence ? d : '', ref, refDate };
+      const out = { area: prmArea(x.area), text, status, fact: evidence ? fact : '', source: evidence ? source : '', date: evidence ? d : '', ref, refDate };
+      if (x.by === 'auditindia') {
+        // Audit India item: their own status wording, their flag, the primary source when given
+        out.by = 'auditindia';
+        out.statusLabel = s(x.statusLabel, 40);
+        out.graded = x.graded === true;
+        out.primary = url(x.primary);
+        if (!evidence && /auditindia\.org/.test(url(x.source))) {
+          out.source = url(x.source); // attribution link stays even when the status could not be kept
+        }
+      }
+      return out;
     })
     .filter(p => {
       const k = p.text.toLowerCase();
       return p.text && p.ref && p.refDate && !OPINION_RE.test(p.text) && !seen.has(k) && seen.add(k);
     })
     .slice(0, PRM_MAX);
+  const credits = arr(o.credits, 4)
+    .map(c => ({ name: s(obj(c).name, 60), url: url(obj(c).url), terms: url(obj(c).terms) }))
+    .filter(c => c.name && c.url);
   return {
     asOf: s(o.asOf, 40),
     ...(o.origin === 'free' ? { origin: 'free' } : {}),
     govt: { party: s(g.party, 160), head: s(g.head, 100), year, term: s(g.term, 40), source: manifesto },
     promises,
+    ...(credits.length && promises.some(p => p.by) ? { credits } : {}),
+    ...(o.aiPartial === true ? { aiPartial: true } : {}),
     // computed here, never trusted from the model
     summary: promiseSummary(promises),
   };
@@ -621,7 +653,7 @@ const ALIGN_FIXED = new Set([...FIXED_KEYS, 'level', 'number', 'helpline', 'vote
 export const FREE_HOSP_FIXED = new Set([...ALIGN_FIXED, 'name', 'address', 'district']);
 // The fixed (never translated) keys for one row's English data
 // Promises tracker: status codes, manifesto year and the computed counts stay as in English
-export const PRM_FIXED = new Set([...ALIGN_FIXED, 'status', 'year', 'term', 'summary', 'ref', 'refDate', 'origin']);
+export const PRM_FIXED = new Set([...ALIGN_FIXED, 'status', 'year', 'term', 'summary', 'ref', 'refDate', 'origin', 'statusLabel', 'by', 'graded', 'primary', 'credits', 'aiPartial']);
 export const fixedFor = (kind, data) => (kind === 'hosp' && obj(data).origin === 'free' ? FREE_HOSP_FIXED : kind === 'gprm' ? PRM_FIXED : ALIGN_FIXED);
 // A promises list is long: bigger translation chunks (fewer calls on the free tier)
 const trChunkFor = kind => (kind === 'gprm' ? 12 : TR_CHUNK);
@@ -1045,11 +1077,11 @@ export async function researchKeyless(db, env, t, { fetchImpl = fetch, now = Dat
   await addUsage(db, day, 'civic_free', 1);
   const timeoutMs = request ? FREE_REQ_TIMEOUT_MS : 8000;
   if (t.kind === 'gprm') {
-    const r = await fetchPromisesFree(st, { fetchImpl, now, timeoutMs });
+    const r = await fetchPromisesKeyless(db, st, { fetchImpl, now, timeoutMs, request });
     const data = r.ok ? cleanPromises(r.data) : null;
     if (data && data.promises.length) {
       await saveFree(db, t, data, r.sources, now);
-      return { ok: true, origin: 'free', model: 'free', translated: [], count: data.promises.length };
+      return { ok: true, origin: 'free', model: 'free', translated: [], count: data.promises.length, ...(r.by ? { by: r.by } : {}) };
     }
     return { ok: false, error: r.ok ? 'no promises in the free source' : r.error || 'free source unavailable', code: 'source' };
   }
@@ -1062,9 +1094,64 @@ export async function researchKeyless(db, env, t, { fetchImpl = fetch, now = Dat
   return { ok: false, error: r.ok ? 'no sourced facts in the free source' : r.error || 'free source unavailable', code: 'source' };
 }
 
+// Audit India page cache (civic_text_cache ns 'aind', h = md5 of the page key): { get, set }
+export const auditIndiaCache = (db, now) => ({
+  async get(key) {
+    const row = await db.first("SELECT text, updated_at FROM civic_text_cache WHERE ns = 'aind' AND lang = 'en' AND h = ?", md5Hex(String(key)));
+    return row ? { text: row.text, at: Number(row.updated_at) } : null;
+  },
+  set: (key, text) =>
+    db.run(
+      `INSERT INTO civic_text_cache (ns, lang, h, text, updated_at) VALUES ('aind', 'en', ?, ?, ?)
+       ON CONFLICT (ns, lang, h) DO UPDATE SET text = excluded.text, updated_at = excluded.updated_at`,
+      md5Hex(String(key)), String(text), now,
+    ),
+});
+
 /**
- * Groq Compound (built-in web search) with the same research prompt and cleaner, ONLY when the
- * GROQ_API_KEY secret is set (never required). Saved with origin 'ai', model 'groq/compound'.
+ * Promises from the keyless sources (no AI): Audit India first, then Wikipedia merged in (see the
+ * header). Both are asked in parallel. Audit India is used only for the same or a newer term than
+ * the Wikipedia article's present government (an older Audit India term would be a past government).
+ * -> { ok: true, data (raw promises shape), sources, by: 'auditindia+wikipedia' | 'auditindia' | 'wikipedia' } | { ok: false, error }
+ */
+export async function fetchPromisesKeyless(db, st, { fetchImpl = fetch, now = Date.now(), timeoutMs = 8000, request = true, sleepImpl = sleep } = {}) {
+  const [a, w] = await Promise.all([
+    fetchPromisesAuditIndia(st, {
+      fetchImpl,
+      now,
+      timeoutMs,
+      cache: db ? auditIndiaCache(db, now) : null,
+      maxPages: request ? AI_PAGES_REQUEST : AI_PAGES_CRON,
+      gapMs: request ? 300 : AI_GAP_MS,
+      sleepImpl,
+    }).catch(e => ({ ok: false, error: `auditindia: ${String((e && e.message) || e).slice(0, 80)}` })),
+    fetchPromisesFree(st, { fetchImpl, now, timeoutMs }).catch(e => ({ ok: false, error: `wikipedia: ${String((e && e.message) || e).slice(0, 80)}` })),
+  ]);
+  const wYear = w.ok ? Number(w.data.govt.year) || 0 : 0;
+  const useA = a.ok && a.data.promises.length && (!wYear || Number(a.year) >= wYear);
+  if (!useA) {
+    return w.ok ? { ...w, by: 'wikipedia' } : { ok: false, error: [a.ok ? 'auditindia: older term than the present government' : a.error, w.error].filter(Boolean).join('; ') };
+  }
+  const same = w.ok && wYear === Number(a.year);
+  const promises = mergePromises(a.data.promises, same ? w.data.promises : [], PRM_MAX);
+  const sources = [...a.sources];
+  (same ? w.sources : []).forEach(x => !sources.some(y => y.url === x.url) && sources.length < 12 && sources.push(x));
+  return {
+    ok: true,
+    by: same && promises.length > a.data.promises.length ? 'auditindia+wikipedia' : 'auditindia',
+    sources,
+    data: {
+      ...a.data,
+      // Wikipedia's infobox names the party in full and the head of government (Audit India gives neither)
+      govt: { ...a.data.govt, party: same && w.data.govt.party ? w.data.govt.party : a.data.govt.party, head: same ? w.data.govt.head || '' : '' },
+      promises,
+    },
+  };
+}
+
+/**
+ * Groq (free plan only, see llm.js groqSearchGenerate) with the same research prompt and cleaner, ONLY when the
+ * GROQ_API_KEY secret is set (never required). Saved with origin 'ai'. Off while Groq's free plan has no web-search model.
  * -> { ok: true, origin: 'groq', model, translated: [] } | { ok: false, error, code }
  */
 export async function researchGroq(db, env, t, { fetchImpl = fetch, now = Date.now() } = {}) {
@@ -1076,6 +1163,10 @@ export async function researchGroq(db, env, t, { fetchImpl = fetch, now = Date.n
     return { ok: false, error: 'bad target', code: 'other' };
   }
   const g = await groqSearchGenerate(env, { prompt: researchPrompt(t.kind, t.variant, st, t.district), maxTokens: 8000 }, { fetchImpl, now });
+  if (!g.ok && g.code === 'config') {
+    // no free Groq web-search model (llm.js): nothing was asked, nothing counted
+    return { ok: false, error: g.error, code: 'config' };
+  }
   await addUsage(db, utcDay(now), 'civic_groq', 1);
   const data = g.ok ? cleanFor(t.kind, parseJsonLoose(g.text), placeName(st, t.district)) : null;
   if (!data || isEmpty(t.kind, data)) {
@@ -1660,6 +1751,23 @@ export async function runFreeRefresh(db, env, { fetchImpl = fetch, now = Date.no
     if (await lockRow(db, t, now)) {
       try {
         const r = await researchFree(db, env, t, { fetchImpl, now, request: false, sleepImpl });
+        out.push({ ...t, ok: r.ok });
+      } finally {
+        await unlock(db, t);
+      }
+    }
+  }
+  // Audit India Union Government list still filling up (data.aiPartial): read the next pages
+  const part = await db.first(
+    `SELECT kind, state, district, variant FROM civic_data WHERE kind = 'gprm' AND origin = 'free' AND data LIKE '%"aiPartial":true%'
+       AND (running_at IS NULL OR running_at < ?) LIMIT 1`,
+    now - CIVIC_LOCK_MS,
+  );
+  if (part) {
+    const t = { kind: 'gprm', state: part.state, district: '', variant: '' };
+    if (await lockRow(db, t, now)) {
+      try {
+        const r = await researchKeyless(db, env, t, { fetchImpl, now, request: false });
         out.push({ ...t, ok: r.ok });
       } finally {
         await unlock(db, t);
