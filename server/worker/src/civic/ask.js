@@ -28,6 +28,7 @@ import { aiGenerate, isAiConfigured } from './llm.js';
 import { TR_LANGS, civicCaps } from './research.js';
 import { placeByCode } from './states.js';
 import { SAFETY } from './safety.js';
+import { storedInState } from './free/scope.js';
 
 export const ASK_TOPICS = ['laws', 'govt', 'hosp'];
 export const GOVT_FOCUS = ['schemes', 'grievance', 'services', 'offices', 'departments', 'helplines', 'overview', 'leaders', 'district', 'election'];
@@ -213,7 +214,8 @@ export async function postCivicAsk({ db, env, user, body, now, fetchImpl }) {
     for (const v of [...new Set(variants)]) {
       const row = await db.first("SELECT data FROM civic_data WHERE kind = 'hosp' AND state = ? AND district = ? AND variant = ?", state, district, v);
       const d = row ? parseJson(row.data, null) : null;
-      ((d && d.hospitals) || []).forEach(h => list.push(h));
+      // only hospitals inside the state (rows saved before the state check are filtered here too)
+      ((d && d.hospitals) || []).filter(h => storedInState(h, state)).forEach(h => list.push(h));
     }
     if (!list.length) {
       throw new HttpError(404, 'no data yet');

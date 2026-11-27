@@ -42,7 +42,8 @@ import { MANDAL_KINDS, placeKey, publicTarget } from './place.js';
 import { cleanReviewText, hasProfanity } from './moderation.js';
 import { isGeminiConfigured } from './gemini.js';
 import { aiProviderStatus, isAiConfigured } from './llm.js';
-import { CIVIC_LOCK_MS, CIVIC_MAX_PENDING, FREE_KINDS, KEYLESS_KINDS, answeredByOf, KINDS, TR_LANGS, civicCaps, readI18n, researchFree, researchNow, researchOne, startTranslate } from './research.js';
+import { CIVIC_LOCK_MS, CIVIC_MAX_PENDING, FREE_KINDS, KEYLESS_KINDS, answeredByOf, isOutdatedFreeHosp, KINDS, TR_LANGS, civicCaps, readI18n, researchFree, researchNow, researchOne, startTranslate } from './research.js';
+import { scopeHospRow } from './free/scope.js';
 
 export const MAX_REVIEWS_PER_DAY = 20; // per user (new or edited)
 export const MAX_REPORTS_PER_DAY = 30; // per user
@@ -118,9 +119,15 @@ export async function getCivicData({ db, env, url, now, fetchImpl, ctx }) {
       queued = true;
     }
   }
-  const data = row ? parseJson(row.data, null) : null;
+  let data = row ? parseJson(row.data, null) : null;
   const running = !!(row && row.running_at && now - Number(row.running_at) < CIVIC_LOCK_MS);
-  const i18n = data ? await readI18n(db, t, ['te', 'hi', ...(lang ? [lang] : [])], row.i18n) : {};
+  let i18n = data ? await readI18n(db, t, ['te', 'hi', ...(lang ? [lang] : [])], row.i18n) : {};
+  // Hospitals: never show a row outside the picked state, also from data saved before the check
+  // (free/scope.js; translations are filtered at the same positions)
+  const outdated = !!row && isOutdatedFreeHosp(t.kind, row.origin, data);
+  if (data && t.kind === 'hosp') {
+    ({ data, i18n } = scopeHospRow(data, i18n, t.state));
+  }
   // English only for the asked language: start its translation in the background (never blocks)
   let translating = false;
   if (data && lang && !i18n[lang] && row.status === 'ok' && isAiConfigured(env)) {
@@ -137,7 +144,8 @@ export async function getCivicData({ db, env, url, now, fetchImpl, ctx }) {
     i18n: { te: i18n.te || null, hi: i18n.hi || null, ...(lang ? { [lang]: i18n[lang] || null } : {}) },
     sources: data ? cleanSources(parseJson(row.sources, [])) : [],
     aiStars: null, // no AI ratings (neutral information only)
-    status: row ? (running && !data ? 'pending' : translating ? 'translating' : row.status) : queued ? 'pending' : 'none',
+    // outdated free hospital row: 'partial' = shown now while the app asks for it to be re-researched
+    status: row ? (running && !data ? 'pending' : translating ? 'translating' : outdated && !running ? 'partial' : row.status) : queued ? 'pending' : 'none',
     running,
     updatedAt: row && data ? Number(row.updated_at) || 0 : 0,
     // aiConfigured: Ask AI / Explain simply / translation work (any provider in the fallback chain);
