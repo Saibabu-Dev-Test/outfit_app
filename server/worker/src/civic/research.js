@@ -60,7 +60,8 @@
 import { CENTRE, CENTRE_KINDS, STATES, placeByCode } from './states.js';
 import { fetchGovtFree, fetchMandalFree } from './free/govt.js';
 import { levelOf, splitPlace, subLevelWord } from './place.js';
-import { fetchHospFree, fetchHospOverpass, titleCase } from './free/hosp.js';
+import { OVERPASS_MIRRORS, fetchHospFree, fetchHospOverpass, titleCase } from './free/hosp.js';
+import { scopeHospRow } from './free/scope.js';
 import { fetchPromisesFree } from './free/promises.js';
 import { fetchCompareFree } from './free/compare.js';
 import { sleep } from './free/http.js';
@@ -92,6 +93,7 @@ export const CIVIC_FREE_REFRESH_MS = 7 * 24 * 3600 * 1000; // free rows / Overpa
 export const CIVIC_FREE_GAP_MS = 1100; // between Nominatim requests (usage policy: max 1 / second)
 export const FREE_GOV_CACHE_MS = 3 * 24 * 3600 * 1000; // cached Wikipedia governors list
 export const FREE_REQ_TIMEOUT_MS = 3500; // per free request on the request path (first load target < 5 s)
+export const FREE_AREA_REQ_TIMEOUT_MS = 20000; // Overpass boundary query (district / mandal hospitals) on the request path, per mirror
 // Grounded research failed because every Gemini key is out of free quota (not a data problem)
 const isExhausted = code => code === 'quota' || code === 'billing';
 // Languages the cron translates ahead of time (others are translated the first time someone asks)
@@ -102,6 +104,14 @@ export const KINDS = { govt: [''], hosp: ['govt', 'private'], gcmp: [''], gprm: 
 // Data-shape version per kind (civic_data.schema_v). hosp 2 = timings, specialFor, doctors,
 // facilities, per-hospital sources. Older rows are re-researched by the cron (data kept until then).
 export const CIVIC_SCHEMA = { govt: 1, hosp: 2, gcmp: 1, gprm: 1 };
+// Free (OpenStreetMap) hospital rows: data.v. 2 = every row checked to be inside the state and
+// district / mandal lists read from the exact OSM boundary (free/scope.js, free/hosp.js
+// fetchHospArea). A free hospital row below it (saved before, e.g. Andhra Pradesh lists holding
+// Bengaluru / Hosur rows, or an Anantapur mandal showing the state list) is filtered when read and
+// re-researched from the free sources (never by AI: CIVIC_SCHEMA is unchanged on purpose).
+export const FREE_HOSP_V = 2;
+/** A stored free hospital row saved before FREE_HOSP_V (pure: tested). */
+export const isOutdatedFreeHosp = (kind, origin, data) => kind === 'hosp' && origin === 'free' && !!data && Number(data.v || 0) < FREE_HOSP_V;
 // App language codes (src/i18n/appLanguage.ts) -> name used in prompts. English is the stored data.
 export const TR_LANGS = {
   te: 'Telugu',
@@ -324,7 +334,12 @@ export function cleanHosp(raw, where = '') {
       return item.name && slug && !seen.has(slug) && seen.add(slug) ? item : null;
     })
     .filter(Boolean);
-  return { asOf: s(o.asOf, 40), hospitals, ...(free ? { origin: 'free', src: srcItem(o.src) } : {}), ...(SCOPES.has(o.scope) ? { scope: o.scope } : {}) };
+  return {
+    asOf: s(o.asOf, 40),
+    hospitals,
+    ...(free ? { origin: 'free', src: srcItem(o.src), ...(Number(o.v) > 0 ? { v: Math.floor(Number(o.v)) } : {}) } : {}),
+    ...(SCOPES.has(o.scope) ? { scope: o.scope } : {}),
+  };
 }
 
 // ── Previous vs present government (kind 'gcmp') ──
@@ -733,8 +748,16 @@ export async function translateData(env, kind, data, lang, { fetchImpl = fetch, 
   return { ok: true, data: tr, calls: chunks.length, model: results[0] && results[0].r.model };
 }
 
-const cleanFor = (kind, parsed, where = '') =>
-  kind === 'govt' ? cleanGovt(parsed) : kind === 'gcmp' ? cleanCompare(parsed) : kind === 'gprm' ? cleanPromises(parsed) : cleanHosp(parsed, where);
+// state (code): AI hospital rows outside the state are dropped here, before they are translated or
+// saved (same check as the free rows: free/scope.js)
+const cleanFor = (kind, parsed, where = '', state = '') =>
+  kind === 'govt'
+    ? cleanGovt(parsed)
+    : kind === 'gcmp'
+      ? cleanCompare(parsed)
+      : kind === 'gprm'
+        ? cleanPromises(parsed)
+        : scopeHospRow(cleanHosp(parsed, where), null, state).data;
 
 const isEmpty = (kind, data) =>
   !data ||
@@ -916,7 +939,7 @@ export async function researchOne(db, env, { kind, state, district = '', variant
       const raw = parsed && gp ? Object.fromEntries(gp.raw.filter(k => k in obj(parsed)).map(k => [k, parsed[k]])) : parsed;
       const tr = {};
       if (raw && toLangs.length) {
-        const clean = cleanFor(kind, raw, where);
+        const clean = cleanFor(kind, raw, where, state);
         const en = gp ? Object.fromEntries(gp.keys.map(k => [k, clean[k]])) : clean;
         await Promise.all(
           toLangs.map(async lang => {
@@ -945,7 +968,7 @@ export async function researchOne(db, env, { kind, state, district = '', variant
     await addUsage(db, day, 'civic_tr', trCalls);
   }
   const okParts = parts.filter(p => p.raw);
-  let data = okParts.length ? cleanFor(kind, kind === 'govt' ? Object.assign({}, ...okParts.map(p => p.raw)) : okParts[0].raw, where) : null;
+  let data = okParts.length ? cleanFor(kind, kind === 'govt' ? Object.assign({}, ...okParts.map(p => p.raw)) : okParts[0].raw, where, state) : null;
   const failed = parts.find(p => !p.r.ok) || parts.find(p => !p.raw);
   let error = '';
   if (isEmpty(kind, data)) {
@@ -1077,7 +1100,7 @@ export async function researchGroq(db, env, t, { fetchImpl = fetch, now = Date.n
   }
   const g = await groqSearchGenerate(env, { prompt: researchPrompt(t.kind, t.variant, st, t.district), maxTokens: 8000 }, { fetchImpl, now });
   await addUsage(db, utcDay(now), 'civic_groq', 1);
-  const data = g.ok ? cleanFor(t.kind, parseJsonLoose(g.text), placeName(st, t.district)) : null;
+  const data = g.ok ? cleanFor(t.kind, parseJsonLoose(g.text), placeName(st, t.district), t.state) : null;
   if (!data || isEmpty(t.kind, data)) {
     return { ok: false, error: g.ok ? 'groq: no sourced data' : g.error, code: g.ok ? 'source' : g.code };
   }
@@ -1127,7 +1150,23 @@ export async function researchFallbackChain(db, env, t, { fetchImpl = fetch, now
 // it has no data, else translate the missing language. Locked per row (one run at a time) and inside
 // the same daily caps as the cron.
 export async function researchNow(db, env, t, lang, { fetchImpl = fetch, now = Date.now(), waitUntil = null } = {}) {
-  const row = await db.first(`SELECT data, i18n, status, updated_at, running_at FROM civic_data WHERE ${where4}`, ...binds4(t));
+  const row = await db.first(`SELECT data, i18n, status, updated_at, running_at, origin FROM civic_data WHERE ${where4}`, ...binds4(t));
+  // A free hospital row saved before the state / boundary check: research it again from the free
+  // sources; if they fail, the saved (read-time filtered) list stands ('saved'), never AI
+  if (row && row.data && isOutdatedFreeHosp(t.kind, row.origin, parseJsonCol(row.data, null))) {
+    if (!(await lockRow(db, t, now))) {
+      return { ok: true, status: 'running', did: 'already running' };
+    }
+    let fr;
+    try {
+      fr = await researchFree(db, env, t, { fetchImpl, now, waitUntil, request: true });
+    } finally {
+      await unlock(db, t);
+    }
+    return fr.ok
+      ? { ok: true, status: 'ready', did: 'research', origin: 'free', model: 'free', translated: [], ...(fr.scope ? { scope: fr.scope } : {}), ...(fr.note ? { note: fr.note } : {}) }
+      : { ok: true, status: 'saved', did: 'saved', freeError: fr.error || 'free sources unavailable' };
+  }
   // A 'partial' Govt row (some parts saved, run still going or cut off) still needs its research
   const hasData = !!(row && row.data) && row.status !== 'partial';
   const have = hasData && TR_LANGS[lang] ? await readI18n(db, t, [lang], row.i18n) : {};
@@ -1410,11 +1449,17 @@ const saveGovernors = (db, type, map, now) =>
 // Nominatim area lookup cache (civic_geo, migration 0008)
 export const geoKey = t => `${t.state}|${t.district || ''}`;
 
+// A district / mandal box is trusted only when it came from the OSM boundary itself (label
+// 'osm:relation/<id> ...'): older Nominatim boxes could be any feature sharing the name
+// ("Ananthapuramu district" -> a 5 km solar park). The state box from Nominatim is fine.
+export const GEO_OSM = 'osm:';
 async function cachedGeo(db, t) {
   const row = await db.first('SELECT bbox, lat, lon, label, fetched_at, overpass_at FROM civic_geo WHERE place = ?', geoKey(t));
   const bbox = row ? parseJsonCol(row.bbox, null) : null;
+  if (row && t.district && !String(row.label || '').startsWith(GEO_OSM)) return null;
   return bbox && ['south', 'north', 'west', 'east'].every(k => Number.isFinite(Number(bbox[k]))) ? { ...row, bbox } : null;
 }
+const geoLabel = (r, fallback = '') => (r && r.boundary ? `${GEO_OSM}relation/${r.boundary.id} ${r.boundary.name || ''}`.trim() : fallback);
 
 const saveGeo = (db, t, bbox, label, now) =>
   db.run(
@@ -1423,8 +1468,10 @@ const saveGeo = (db, t, bbox, label, now) =>
     geoKey(t), s(label, 200), JSON.stringify(bbox), (bbox.south + bbox.north) / 2, (bbox.west + bbox.east) / 2, now,
   );
 
-// Save one free row (origin 'free'); new English data drops the old translations (re-translated next)
-async function saveFree(db, t, data, sources, now) {
+// Save one free row (origin 'free'); new English data drops the old translations (re-translated next).
+// Hospitals: only rows inside the state are ever saved (free/scope.js), stamped FREE_HOSP_V.
+async function saveFree(db, t, rawData, sources, now) {
+  const data = t.kind === 'hosp' ? { ...scopeHospRow(rawData, null, t.state).data, v: FREE_HOSP_V } : rawData;
   await db.run(
     `INSERT INTO civic_data (kind, state, district, variant, data, sources, ai_stars, status, error, model, updated_at, i18n, schema_v, origin, free_at)
      VALUES (?, ?, ?, ?, ?, ?, NULL, 'ok', NULL, 'free', ?, NULL, ?, 'free', ?)
@@ -1534,10 +1581,12 @@ export async function researchFree(db, env, t, { fetchImpl = fetch, now = Date.n
     if (lv !== asked) {
       // a wider level already saved from free sources: reuse it (no extra Nominatim requests)
       const wide = await db.first(`SELECT data, origin FROM civic_data WHERE ${where4}`, ...binds4({ ...gt, variant: 'govt' }));
-      const wideP = await db.first(`SELECT data FROM civic_data WHERE ${where4}`, ...binds4({ ...gt, variant: 'private' }));
+      const wideP = await db.first(`SELECT data, origin FROM civic_data WHERE ${where4}`, ...binds4({ ...gt, variant: 'private' }));
       const wg = wide && wide.origin === 'free' ? parseJsonCol(wide.data, null) : null;
       const wp = wideP ? parseJsonCol(wideP.data, null) : null;
-      if (wg && wp && (wg.hospitals || []).length + (wp.hospitals || []).length > 0) {
+      // never copy a wider list saved before the state check (FREE_HOSP_V): fetch it again instead
+      const current = wg && wp && !isOutdatedFreeHosp('hosp', 'free', wg) && !isOutdatedFreeHosp('hosp', wideP.origin === 'free' ? 'free' : '', wp);
+      if (current && (wg.hospitals || []).length + (wp.hospitals || []).length > 0) {
         for (const [variant, dv] of [['govt', wg], ['private', wp]]) {
           await saveFree(db, { ...t, variant }, cleanHosp({ ...dv, origin: 'free', scope: lv }, placeName(st, gt.district)), OSM_SOURCES, now);
         }
@@ -1553,9 +1602,12 @@ export async function researchFree(db, env, t, { fetchImpl = fetch, now = Date.n
       sleepImpl,
       bbox: geo ? geo.bbox : null,
       mandal: splitPlace(gt.district).mandal,
+      // district / mandal: the exact OSM boundary via Overpass first (request path: 2 mirrors, 20 s each)
+      areaTimeoutMs: request ? FREE_AREA_REQ_TIMEOUT_MS : 30000,
+      mirrors: request ? OVERPASS_MIRRORS.slice(0, 2) : OVERPASS_MIRRORS,
     });
-    if (r.bbox && !geo) {
-      await saveGeo(db, gt, r.bbox, r.place, now);
+    if (r.bbox && (!geo || r.boundary)) {
+      await saveGeo(db, gt, r.bbox, geoLabel(r, r.place), now);
     }
     if (r.ok) {
       got = lv;
@@ -1573,7 +1625,11 @@ export async function researchFree(db, env, t, { fetchImpl = fetch, now = Date.n
   for (const variant of KINDS.hosp) {
     await saveFree(db, { ...t, variant }, { ...freeHospData(r.hospitals, variant, { district, today, src: r.src, where }), ...(got !== 'state' || asked !== 'state' ? { scope: got } : {}) }, OSM_SOURCES, now);
   }
-  if (waitUntil && r.bbox && got === asked) {
+  if (r.boundary) {
+    // read from the exact boundary by Overpass: already every hospital of the area
+    await db.run('UPDATE civic_geo SET overpass_at = ?, overpass_status = ? WHERE place = ?', now, 'ok', geoKey(gt));
+  } else if (waitUntil && got === asked) {
+    // Overpass was slow on the request path: the exact boundary's list after the response
     // every hospital / health centre of the area, after the response (never on the request path)
     waitUntil(upgradeHospOverpass(db, env, t, { fetchImpl, now, bbox: r.bbox, sleepImpl }).catch(() => undefined));
   }
@@ -1598,8 +1654,8 @@ export async function upgradeHospOverpass(db, env, t, { fetchImpl = fetch, now =
   const pl = splitPlace(t.district);
   const r = await fetchHospOverpass(st, pl.district, { fetchImpl, now, bbox: box, sleepImpl, gapMs: civicCaps(env).freeGapMs, timeoutMs: 25000, mandal: pl.mandal });
   const place = geoKey(t);
-  if (r.bbox && !box) {
-    await saveGeo(db, t, r.bbox, '', now);
+  if (r.bbox && (!box || r.boundary)) {
+    await saveGeo(db, t, r.bbox, geoLabel(r), now);
   }
   await db.run('UPDATE civic_geo SET overpass_at = ?, overpass_status = ? WHERE place = ?', now, r.ok ? 'ok' : s(r.error || 'error', 60), place);
   if (!r.ok) {
@@ -1651,9 +1707,13 @@ export async function runFreeRefresh(db, env, { fetchImpl = fetch, now = Date.no
   }
   const stale = await db.first(
     `SELECT kind, state, district, variant FROM civic_data WHERE origin = 'free' AND kind IN ('govt', 'hosp') AND variant IN ('', 'govt')
-       AND COALESCE(free_at, updated_at) < ? AND (running_at IS NULL OR running_at < ?) ORDER BY COALESCE(free_at, updated_at) LIMIT 1`,
+       AND (COALESCE(free_at, updated_at) < ? OR (kind = 'hosp' AND COALESCE(json_extract(data, '$.v'), 0) < ?))
+       AND (running_at IS NULL OR running_at < ?)
+     ORDER BY (kind = 'hosp' AND COALESCE(json_extract(data, '$.v'), 0) < ?) DESC, COALESCE(free_at, updated_at) LIMIT 1`,
     now - CIVIC_FREE_REFRESH_MS,
+    FREE_HOSP_V,
     now - CIVIC_LOCK_MS,
+    FREE_HOSP_V,
   );
   if (stale) {
     const t = { kind: stale.kind, state: stale.state, district: stale.district || '', variant: stale.variant || '' };

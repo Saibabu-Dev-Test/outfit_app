@@ -5,9 +5,16 @@
 //     identifying User-Agent, no bulk use; results are cached in D1 by the caller).
 //   Slow upgrade (optional, not awaited on the fast path): Overpass API, every hospital / clinic /
 //     health centre in the bounding box, first mirror that answers.
+//   District / mandal (state.code given): Overpass AREA query on the exact OSM boundary, found by
+//     its LGD code (ref:LGD:district / ref:LGD:subdistrict, free/scope.js lgdPlace) or, without a
+//     code, by name variants inside the state ("Ananthapuramu" ~ "Anantapuramu District"). Nominatim
+//     is the fallback when Overpass does not answer.
+// Every row is kept inside the picked state (free/scope.js inState: addr:state / ISO code / PIN /
+// address text): a bounding box reaches into the neighbours (AP's box holds Bengaluru and Hosur).
 // Each item: { name, type: govt|private|unknown, address, phone, lat, lon, mapUrl, osmUrl, src }.
 // Never throws: { ok, hospitals, bbox, place, src, error }.
 import { firstOk, getJson, isoDay, sleep } from './http.js';
+import { inState, isoCodesOf, lgdPlace, nameRegex, spellKey, stateCodeOfName } from './scope.js';
 
 export const NOMINATIM = 'https://nominatim.openstreetmap.org/search';
 export const OVERPASS_MIRRORS = [
@@ -100,11 +107,7 @@ export function nominatimItem(x, today) {
 }
 
 const rankType = t => (t === 'govt' ? 0 : t === 'private' ? 1 : 2);
-const normState = v =>
-  String(v || '')
-    .toLowerCase()
-    .replace(/&/g, 'and')
-    .replace(/[^a-z]/g, '');
+const codeOfState = state => (state && typeof state === 'object' && state.code ? state.code : stateCodeOfName(nameOf(state)));
 
 /**
  * Sorted (govt, private, not stated; then by name) and capped PER SIDE: up to `max` govt and up to
@@ -116,17 +119,34 @@ export function capBySide(items, max = 60) {
   return [...sorted.filter(h => h.type === 'govt').slice(0, max), ...sorted.filter(h => h.type !== 'govt').slice(0, max)];
 }
 
+// "Anantapuramu District" ~ "Ananthapuramu"; "Nellore District" ~ "Sri Potti Sriramulu Nellore" (pure)
+export const nameOverlap = (a, b) => {
+  const x = spellKey(a);
+  const y = spellKey(b);
+  return !x || !y || x.includes(y) || y.includes(x);
+};
+
+/** One Nominatim result inside the state (state / ISO3166-2-lvl4 / PIN / address text)? (pure) */
+export const nominatimInState = (x, code) => {
+  const a = (x && x.address) || {};
+  return inState({ state: a.state, iso: a['ISO3166-2-lvl4'], postcode: a.postcode, address: addressOf(a, x && x.display_name) }, code);
+};
+
 /**
- * Results of several searches -> one list, deduped by OSM id (pure: tested). Results whose address
- * names another state are dropped (a state / district bounding box is a rectangle that reaches into
- * neighbours: "Hospital, Hyderabad" in Andhra Pradesh). Govt first, then by name; capped per side.
+ * Results of several searches -> one list, deduped by OSM id (pure: tested). Results outside the
+ * state are dropped (free/scope.js inState; a state / district bounding box is a rectangle that
+ * reaches into neighbours: "Hospital, Hyderabad" or Bengaluru in Andhra Pradesh). district (name):
+ * a result whose Nominatim district (state_district) is another district is dropped too. Govt
+ * first, then by name; capped per side.
  */
-export function mergeHospitals(lists, today, max = 60, stateName = '') {
-  const want = normState(stateName);
+export function mergeHospitals(lists, today, max = 60, stateName = '', district = '') {
+  const code = typeof stateName === 'object' ? codeOfState(stateName) : stateCodeOfName(stateName);
   const seen = new Map();
   lists.flat().forEach(x => {
-    const st = normState(x && x.address && x.address.state);
-    if (want && st && st !== want) return;
+    if (!x) return;
+    if (code && !nominatimInState(x, code)) return;
+    const sd = x.address && x.address.state_district;
+    if (district && sd && !nameOverlap(sd, district)) return;
     const it = nominatimItem(x, today);
     if (it && !seen.has(it.id)) seen.set(it.id, it);
   });
@@ -161,7 +181,9 @@ export async function lookupArea(stateName, districtName, opts, mandalName = '')
     // no answer at all (network / timeout): Nominatim is unreachable, do not keep asking
     if (!r.ok && !r.status) return { ok: false, error: r.error || 'nominatim unreachable', unreachable: true, requests: i + 1 };
     if (!r.ok || !Array.isArray(r.data)) continue;
-    const hit = r.data.find(x => x && x.category === 'boundary') || r.data[0];
+    // an area only: a boundary (else a place). Never a landuse / amenity that shares the name
+    // ("Ananthapuramu district" once matched "Ananthapuramu Ultra Mega Solar Park": a 5 km box)
+    const hit = r.data.find(x => x && x.category === 'boundary') || r.data.find(x => x && x.category === 'place');
     const bbox = hit ? bboxOf(hit.boundingbox) : null;
     if (bbox) return { ok: true, bbox, label: hit.display_name || tries[i], requests: i + 1 };
   }
@@ -186,6 +208,10 @@ export async function fetchHospFree(state, district, opts = {}) {
     max = 60,
     bbox = null, // cached district bbox (civic_geo): skips the area lookup
     mandal = '',
+    // Overpass area query on the exact boundary first (district / mandal of a state with a code)
+    areaFirst = !!(state && typeof state === 'object' && state.code && district),
+    areaTimeoutMs = 20000,
+    mirrors = OVERPASS_MIRRORS,
   } = opts;
   const today = isoDay(now);
   const stateName = nameOf(state).trim();
@@ -193,8 +219,16 @@ export async function fetchHospFree(state, district, opts = {}) {
   const districtName = titleCase(district);
   const mandalName = districtName ? titleCase(mandal) : '';
   const o = { fetchImpl, timeoutMs, gapMs, sleepImpl };
-  const area = bbox ? { ok: true, bbox, requests: 0 } : await lookupArea(stateName, districtName, o, mandalName);
   const place = [mandalName, districtName, stateName].filter(Boolean).join(', ');
+  let areaBox = null;
+  if (areaFirst) {
+    const a = await fetchHospArea(state, district, mandal, { fetchImpl, now, timeoutMs: areaTimeoutMs, mirrors, max });
+    if (a.ok) return { ok: true, hospitals: a.hospitals, bbox: a.bbox, place, src: a.src, boundary: a.boundary, errors: [] };
+    // the boundary is mapped and holds no hospital: a wider level answers (no Nominatim guess)
+    if (a.boundary) return { ok: false, hospitals: [], bbox: a.bbox, place, boundary: a.boundary, error: 'no hospitals found' };
+    areaBox = a.bbox || null;
+  }
+  const area = bbox || areaBox ? { ok: true, bbox: bbox || areaBox, requests: 0 } : await lookupArea(stateName, districtName, o, mandalName);
   if (area.unreachable) return { ok: false, hospitals: [], bbox: null, place, error: area.error };
   const lists = [];
   const errors = [];
@@ -209,15 +243,55 @@ export async function fetchHospFree(state, district, opts = {}) {
     if (r.ok && Array.isArray(r.data)) lists.push(r.data);
     else errors.push(`${q}: ${r.error || 'bad response'}`);
   }
-  const hospitals = mergeHospitals(lists, today, max, stateName);
+  // strict: inside the state, and (district level) inside the district by Nominatim's own district
+  const lg = lgdPlace(codeOfState(state), district, '');
+  const hospitals = mergeHospitals(lists, today, max, { code: codeOfState(state), name: stateName }, districtName && !mandalName ? (lg.district && lg.district.name) || districtName : '');
   const src = { name: OSM_SRC, url: 'https://www.openstreetmap.org/copyright', date: today };
   if (!hospitals.length) return { ok: false, hospitals: [], bbox: area.ok ? area.bbox : null, place, src, error: errors[0] || area.error || 'no hospitals found' };
   return { ok: true, hospitals, bbox: area.ok ? area.bbox : null, place, src, errors };
 }
 
-// Overpass QL: hospitals / clinics / health centres in the bbox (south,west,north,east)
+// Overpass QL: hospitals / clinics / health centres in the bbox (south,west,north,east). Legacy:
+// only for a caller with no state code; a bbox always needs the state filter after it.
 export const overpassQuery = b =>
   `[out:json][timeout:25];(nwr["amenity"="hospital"](${b.south},${b.west},${b.north},${b.east});nwr["healthcare"~"^(hospital|centre)$"](${b.south},${b.west},${b.north},${b.east}););out center tags 300;`;
+
+const HOSP_IN_AREA = '(nwr["amenity"="hospital"](area.a);nwr["healthcare"~"^(hospital|centre)$"](area.a););out center tags 300;';
+const qv = v => String(v).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+// exact tag values (an indexed lookup; a regex on ISO3166-2 scans every boundary and times out)
+const stateRel = code => `(${isoCodesOf(code).map(c => `rel["ISO3166-2"="${c}"]["admin_level"="4"]["boundary"="administrative"];`).join('')})`;
+
+/**
+ * Overpass QL for the hospitals INSIDE one boundary (pure: tested). The boundary relation(s) are
+ * printed first with their bounds (`.b out tags bb`), then every hospital / health centre whose
+ * point lies in the boundary (`map_to_area`): never a bounding box, so nothing from a neighbour.
+ *   state:     rel admin_level 4 with the state's ISO 3166-2 code
+ *   district:  rel ref:LGD:district = code, else admin_level 5 named like the district inside the state
+ *   mandal:    rel ref:LGD:subdistrict = code, else admin_level 6 named like the mandal inside the district
+ * where = { code, district: { code?, name }?, mandal: { code?, name }? }. '' when nothing to ask.
+ */
+export function overpassAreaQuery(where) {
+  const w = where || {};
+  if (!w.code) return '';
+  const st = stateRel(w.code);
+  const dist = d =>
+    d.code ? `rel["boundary"="administrative"]["ref:LGD:district"="${Number(d.code)}"]` : `rel(area.st)["boundary"="administrative"]["admin_level"="5"]["name"~"${qv(nameRegex(d.name))}",i]`;
+  const sub = m =>
+    m.code ? `rel["boundary"="administrative"]["ref:LGD:subdistrict"="${Number(m.code)}"]` : `rel(area.d)["boundary"="administrative"]["admin_level"="6"]["name"~"${qv(nameRegex(m.name))}",i]`;
+  const parts = [`[out:json][timeout:${w.district ? 60 : 90}];`];
+  const needSt = !!(w.district && !w.district.code);
+  if (needSt) parts.push(`${st}->.s;.s map_to_area->.st;`);
+  if (w.mandal && w.district) {
+    if (!w.mandal.code) parts.push(`${dist(w.district)}->.dr;.dr map_to_area->.d;`);
+    parts.push(`${sub(w.mandal)}->.b;`);
+  } else if (w.district) {
+    parts.push(`${dist(w.district)}->.b;`);
+  } else {
+    parts.push(`${st}->.b;`);
+  }
+  parts.push('.b out tags bb;.b map_to_area->.a;', HOSP_IN_AREA);
+  return parts.join('');
+}
 
 /** Overpass element -> hospital item, or null (pure: tested). */
 export function overpassItem(el, today) {
@@ -228,15 +302,22 @@ export function overpassItem(el, today) {
   const lon = Number(el.lon !== undefined ? el.lon : el.center && el.center.lon);
   if (!name || !Number.isFinite(lat) || !Number.isFinite(lon)) return null;
   const town = tags['addr:city'] || tags['addr:town'] || tags['addr:village'] || '';
-  const fullName = GENERIC.test(name) ? (town ? `${name}, ${town}` : '') : name;
+  // "Government Hospital" alone says nothing about where: add the town (else the suburb / district)
+  const where = town || tags['addr:suburb'] || tags['addr:district'] || '';
+  const fullName = GENERIC.test(name) ? (where ? `${name}, ${where}` : '') : name;
   if (!fullName) return null;
   const osmUrl = osmUrlOf(el.type, el.id);
-  const addr = [tags['addr:housenumber'], tags['addr:street'], tags['addr:suburb'], town, tags['addr:postcode']].filter(Boolean).join(', ');
+  // addr:full is often only a door number ("11-106-1"): the rest of the address is added after it
+  // (district / state / PIN as tagged: what the state check and the user read)
+  const addr = [tags['addr:full'], tags['addr:housenumber'], tags['addr:place'], tags['addr:street'], tags['addr:suburb'], town, tags['addr:district'], tags['addr:state'], tags['addr:postcode']]
+    .map(x => String(x || '').trim())
+    .reduce((out, x) => (x && !out.some(y => y.toLowerCase().split(/,\s*/).includes(x.toLowerCase())) ? [...out, x] : out), [])
+    .join(', ');
   return {
     id: `${el.type}/${el.id}`,
     name: fullName,
     type: classifyHospital(fullName, tags),
-    address: tags['addr:full'] || addr,
+    address: addr,
     phone: String(tags.phone || tags['contact:phone'] || tags['contact:mobile'] || '').trim(),
     website: String(tags.website || tags['contact:website'] || '').trim(),
     lat,
@@ -247,6 +328,73 @@ export function overpassItem(el, today) {
   };
 }
 
+/** One Overpass element inside the state (addr:state / is_in:state / addr:postcode / address)? (pure) */
+export const overpassInState = (el, item, code) => {
+  const t = (el && el.tags) || {};
+  return inState({ state: t['addr:state'] || t['is_in:state'], postcode: t['addr:postcode'], address: [item && item.address, t['addr:district']].filter(Boolean).join(', ') }, code);
+};
+
+const BOUNDARY_TAGS = el => el && el.type === 'relation' && el.tags && el.tags.boundary === 'administrative' && el.bounds;
+const bboxOfBounds = b => (b && [b.minlat, b.maxlat, b.minlon, b.maxlon].every(Number.isFinite) ? { south: b.minlat, north: b.maxlat, west: b.minlon, east: b.maxlon } : null);
+
+/** Overpass answer of overpassAreaQuery -> { boundary, bbox, hospitals } inside the state (pure: tested). */
+export function parseAreaAnswer(data, code, today, max = 200) {
+  const els = (data && Array.isArray(data.elements) && data.elements) || [];
+  const rels = els.filter(BOUNDARY_TAGS);
+  const rel = rels[0] || null;
+  const boundary = rel ? { id: rel.id, name: rel.tags.name || '', level: rel.tags.admin_level || '', lgd: rel.tags['ref:LGD:subdistrict'] || rel.tags['ref:LGD:district'] || '' } : null;
+  const bbox = rel ? bboxOfBounds(rel.bounds) : null;
+  const seen = new Map();
+  els.forEach(el => {
+    if (BOUNDARY_TAGS(el)) return;
+    const it = overpassItem(el, today);
+    if (it && !seen.has(it.id) && (!code || overpassInState(el, it, code))) seen.set(it.id, it);
+  });
+  return { boundary, bbox, hospitals: capBySide([...seen.values()], max) };
+}
+
+/**
+ * Hospitals inside the exact OSM boundary of a state / district / mandal (Overpass area query,
+ * first mirror that answers). state: { code, name }. district / mandal: slugs or names. The LGD
+ * codes come from lgdPlace (the app's LGD picker data). Never throws:
+ * { ok, hospitals, bbox, boundary, mirror, src, error } (boundary null = no such boundary in OSM).
+ */
+export async function fetchHospArea(state, district, mandal, opts = {}) {
+  const { fetchImpl = fetch, now = Date.now(), timeoutMs = 25000, mirrors = OVERPASS_MIRRORS, max = 200 } = opts;
+  const code = codeOfState(state);
+  const today = isoDay(now);
+  if (!code) return { ok: false, hospitals: [], boundary: null, error: 'no state code' };
+  const lg = lgdPlace(code, district, mandal);
+  const dName = (lg.district && lg.district.name) || titleCase(district);
+  const where = { code };
+  if (district) where.district = lg.district ? { code: lg.district.code, name: dName } : { name: dName };
+  if (district && mandal) where.mandal = lg.mandal ? { code: lg.mandal.code, name: lg.mandal.name } : { name: titleCase(mandal) };
+  const ask = w =>
+    firstOk(mirrors, {
+      fetchImpl,
+      timeoutMs,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: `data=${encodeURIComponent(overpassAreaQuery(w))}`,
+    });
+  let r = await ask(where);
+  if (!r.ok || !r.data || !Array.isArray(r.data.elements)) return { ok: false, hospitals: [], boundary: null, error: r.error || 'overpass unavailable', unreachable: true };
+  let p = parseAreaAnswer(r.data, code, today, max);
+  const leaf = where.mandal || where.district;
+  if (!p.boundary && leaf && leaf.code) {
+    // no boundary carries that LGD code in OSM: once more by name (variants) inside the parent
+    const byName = { ...where, ...(where.mandal ? { mandal: { name: where.mandal.name } } : { district: { name: where.district.name } }) };
+    const r2 = await ask(byName);
+    if (r2.ok && r2.data && Array.isArray(r2.data.elements)) {
+      r = r2;
+      p = parseAreaAnswer(r2.data, code, today, max);
+    }
+  }
+  const src = { name: 'OpenStreetMap (Overpass)', url: 'https://www.openstreetmap.org/copyright', date: today };
+  if (!p.boundary) return { ok: false, hospitals: [], boundary: null, bbox: null, mirror: r.url, error: 'boundary not found' };
+  return { ok: p.hospitals.length > 0, hospitals: p.hospitals, bbox: p.bbox, boundary: p.boundary, mirror: r.url, src, ...(p.hospitals.length ? {} : { error: 'no hospitals found' }) };
+}
+
 /**
  * Slow upgrade: every hospital / health centre in the bbox from Overpass (first mirror that
  * answers). Pass the bbox from fetchHospFree, or state + district to look it up. Not for the
@@ -255,6 +403,12 @@ export function overpassItem(el, today) {
 export async function fetchHospOverpass(state, district, opts = {}) {
   const { fetchImpl = fetch, now = Date.now(), timeoutMs = 30000, gapMs = 1100, sleepImpl = sleep, mirrors = OVERPASS_MIRRORS, max = 200 } = opts;
   const today = isoDay(now);
+  const code = codeOfState(state);
+  if (state && typeof state === 'object' && state.code) {
+    // exact boundary (state / district / mandal), never a box
+    const a = await fetchHospArea(state, district, district ? opts.mandal || '' : '', { fetchImpl, now, timeoutMs, mirrors, max });
+    return { ...a, bbox: a.bbox || opts.bbox || null };
+  }
   let bbox = opts.bbox || null;
   if (!bbox) {
     const area = await lookupArea(nameOf(state).trim(), titleCase(district), { fetchImpl, timeoutMs: Math.min(timeoutMs, 8000), gapMs, sleepImpl }, district ? titleCase(opts.mandal || '') : '');
@@ -269,11 +423,8 @@ export async function fetchHospOverpass(state, district, opts = {}) {
     body: `data=${encodeURIComponent(overpassQuery(bbox))}`,
   });
   if (!r.ok || !r.data || !Array.isArray(r.data.elements)) return { ok: false, hospitals: [], bbox, error: r.error || 'overpass unavailable' };
-  const seen = new Map();
-  r.data.elements.forEach(el => {
-    const it = overpassItem(el, today);
-    if (it && !seen.has(it.id)) seen.set(it.id, it);
-  });
-  const hospitals = capBySide([...seen.values()], max);
+  // a box reaches into the neighbours: keep only rows inside the state
+  const p = parseAreaAnswer(r.data, code, today, max);
+  const hospitals = p.hospitals;
   return { ok: hospitals.length > 0, hospitals, bbox, mirror: r.url, src: { name: 'OpenStreetMap (Overpass)', url: 'https://www.openstreetmap.org/copyright', date: today }, ...(hospitals.length ? {} : { error: 'no hospitals found' }) };
 }

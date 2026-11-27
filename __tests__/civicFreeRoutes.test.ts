@@ -109,8 +109,12 @@ const AREA = [{ category: 'boundary', display_name: 'Kurnool District, Andhra Pr
 
 type Call = { url: string; init: any };
 // Every source answers (Wikidata, Wikipedia, Nominatim, Overpass); Gemini optional / failing
-const makeFetch = (opts: { gemini?: number; overpass?: boolean; overpassGate?: Promise<void> } = {}) => {
+// Overpass: the boundary relation (printed first by the area query) + the hospitals inside it.
+// overpassFailFirst: the first n Overpass calls time out (504), as a busy mirror does.
+const KURNOOL_REL = { type: 'relation', id: 2022291, bounds: { minlat: 15.13, minlon: 76.97, maxlat: 15.96, maxlon: 78.27 }, tags: { boundary: 'administrative', admin_level: '5', name: 'Kurnool District', 'ref:LGD:district': '511' } };
+const makeFetch = (opts: { gemini?: number; overpass?: boolean; overpassGate?: Promise<void>; overpassFailFirst?: number; extraOverpass?: any[] } = {}) => {
   const calls: Call[] = [];
+  let overpassCalls = 0;
   const f = jest.fn(async (url: string, init?: any) => {
     if (url === JWKS_URL) {
       return { ok: true, status: 200, headers: { get: () => 'public, max-age=3600' }, json: async () => ({ keys: [jwk] }) };
@@ -149,10 +153,14 @@ const makeFetch = (opts: { gemini?: number; overpass?: boolean; overpassGate?: P
       return res([nom('node', 4, 'Sai Clinic', { extratags: { 'operator:type': 'private' } })]);
     }
     if (hosp.OVERPASS_MIRRORS.includes(url)) {
+      overpassCalls += 1;
       if (!opts.overpass) return res('busy', 429);
+      if (overpassCalls <= (opts.overpassFailFirst || 0)) return res('gateway timeout', 504);
       if (opts.overpassGate) await opts.overpassGate;
       return res({
         elements: [
+          KURNOOL_REL,
+          ...(opts.extraOverpass || []),
           { type: 'node', id: 1, lat: 15.83, lon: 78.04, tags: { amenity: 'hospital', name: 'Government General Hospital' } }, // already known
           { type: 'node', id: 10, lat: 15.8, lon: 78.0, tags: { amenity: 'hospital', name: 'District Hospital', 'addr:city': 'Kurnool' } },
           { type: 'way', id: 11, center: { lat: 15.7, lon: 78.1 }, tags: { amenity: 'hospital', name: 'Medicover Hospitals', 'operator:type': 'private' } },
@@ -236,11 +244,40 @@ describe('Govt from free sources (no AI)', () => {
 });
 
 describe('Hospitals from free sources (no AI)', () => {
-  it('no AI key: ready; both lists saved from one fetch; OSM fields kept; area cached; Overpass only after the response', async () => {
+  it('district: hospitals from the exact OSM boundary (Overpass, LGD code), other-state rows dropped, no Nominatim guess', async () => {
+    const e = env();
+    const { f, calls } = makeFetch({
+      overpass: true,
+      extraOverpass: [
+        // inside the box, outside the state: dropped (PIN / addr:state)
+        { type: 'node', id: 90, lat: 15.2, lon: 77.0, tags: { amenity: 'hospital', name: 'Government Hospital, Bellary Road', 'addr:state': 'Karnataka' } },
+        { type: 'node', id: 91, lat: 15.3, lon: 77.1, tags: { amenity: 'hospital', name: 'Ballari Govt Hospital', 'addr:postcode': '583101' } },
+      ],
+    });
+    const r = await call(e, 'POST', '/v1/civic/research', { body: { kind: 'hosp', state: 'AP', district: 'kurnool', variant: 'govt' }, fetchImpl: f });
+    expect(r.json).toMatchObject({ ok: true, status: 'ready', did: 'research', origin: 'free', scope: 'district' });
+    const op = calls.filter(c => hosp.OVERPASS_MIRRORS.includes(c.url));
+    expect(op).toHaveLength(1);
+    expect(decodeURIComponent(op[0].init.body)).toContain('rel["boundary"="administrative"]["ref:LGD:district"="511"]');
+    expect(calls.some(c => c.url.includes('nominatim'))).toBe(false);
+    const g = await call(e, 'GET', '/v1/civic/data?kind=hosp&state=AP&district=kurnool&variant=govt', { fetchImpl: f });
+    expect(g.json.status).toBe('ok');
+    expect(g.json.data.v).toBe(research.FREE_HOSP_V);
+    expect(g.json.data.hospitals.map((h: any) => h.name)).toEqual(['District Hospital', 'Government General Hospital']);
+    const p = await call(e, 'GET', '/v1/civic/data?kind=hosp&state=AP&district=kurnool&variant=private', { fetchImpl: f });
+    expect(p.json.data.hospitals.map((h: any) => h.name)).toEqual(['Medicover Hospitals']);
+    const geo = e.DB.raw.prepare("SELECT * FROM civic_geo WHERE place='AP|kurnool'").get();
+    expect(geo.label).toBe('osm:relation/2022291 Kurnool District');
+    expect(JSON.parse(geo.bbox)).toEqual({ south: 15.13, north: 15.96, west: 76.97, east: 78.27 });
+    expect(geo.overpass_status).toBe('ok');
+  });
+
+  it('Overpass busy: Nominatim fallback (strict state filter); full boundary list after the response', async () => {
     const e = env();
     let release: () => void = () => undefined;
     const overpassGate = new Promise<void>(r0 => (release = r0));
-    const { f } = makeFetch({ overpass: true, overpassGate });
+    // the request path tries 2 mirrors: both time out; the background upgrade then gets an answer
+    const { f } = makeFetch({ overpass: true, overpassGate, overpassFailFirst: 2 });
     const waits: Promise<any>[] = [];
     // Overpass is held back: the response must not wait for it (upgrade runs in waitUntil)
     const r = await call(e, 'POST', '/v1/civic/research', { body: { kind: 'hosp', state: 'AP', district: 'kurnool', variant: 'govt' }, fetchImpl: f, waits });
@@ -272,6 +309,7 @@ describe('Hospitals from free sources (no AI)', () => {
     const geo = e.DB.raw.prepare("SELECT * FROM civic_geo WHERE place='AP|kurnool'").get();
     expect(JSON.parse(geo.bbox)).toEqual({ south: 15.13, north: 15.96, west: 76.97, east: 78.27 });
     expect(geo.overpass_at).toBeNull();
+    expect(geo.label.startsWith('osm:')).toBe(false); // a Nominatim box: not trusted for later lookups
     // now the background upgrade finishes: new OSM items added, known ones kept once
     release();
     await Promise.all(waits);
@@ -284,8 +322,9 @@ describe('Hospitals from free sources (no AI)', () => {
 
   it('cached area: no lookup, first search with no wait (fast first load)', async () => {
     const e = env({ CIVIC_FREE_GAP_MS: '1100' });
+    // a box from the OSM boundary itself (label osm:...): trusted; Overpass busy -> Nominatim in the box
     e.DB.raw
-      .prepare("INSERT INTO civic_geo (place, label, bbox, lat, lon, fetched_at) VALUES ('AP|kurnool', 'Kurnool', ?, 15.5, 77.6, ?)")
+      .prepare("INSERT INTO civic_geo (place, label, bbox, lat, lon, fetched_at) VALUES ('AP|kurnool', 'osm:relation/2022291 Kurnool District', ?, 15.5, 77.6, ?)")
       .run(JSON.stringify({ south: 15.13, north: 15.96, west: 76.97, east: 78.27 }), NOW);
     const { f, calls } = makeFetch();
     const gaps: number[] = [];
