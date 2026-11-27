@@ -15,7 +15,9 @@ const ts = require('typescript');
 
 const ROOT = path.join(__dirname, '..');
 const OUT = { en: 'src/data/laws/plain.en.ts', te: 'src/data/laws/plain.te.ts', hi: 'src/data/laws/plain.hi.ts' };
-const MODELS = ['gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-flash-latest', 'gemini-3.1-flash-lite'];
+// FREE TIER ONLY: the same allow-listed free models as the Worker (server/worker/src/civic/gemini.js
+// GEMINI_FREE_MODELS); never an alias like gemini-flash-latest (it can move to a model without a free tier)
+const MODELS = ['gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-2.5-flash-lite'];
 const ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models';
 
 // Load TS modules (laws.ts and its data) without a build step

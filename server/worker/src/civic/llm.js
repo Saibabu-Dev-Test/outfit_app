@@ -11,23 +11,47 @@
 //
 // Grounded calls (Google-Search-grounded research of government / hospital facts) use Gemini ONLY:
 // the other providers cannot search the web, and an ungrounded model would invent facts. When every
-// Gemini key is used up, research.js never stops: keyless free sources, then Groq Compound (web
-// search, only with GROQ_API_KEY), then the saved data (status 'saved') or 'none' (researchFallbackChain).
+// Gemini key is used up, research.js never stops: keyless free sources, then the Groq step (only with
+// GROQ_API_KEY; it has no free web-search model any more, see groqSearchGenerate), then the saved data
+// (status 'saved') or 'none' (researchFallbackChain).
+//
+// FREE TIER ONLY (Sai's rule), checked 2026-11-26:
+//   Groq free plan (https://console.groq.com/docs/rate-limits): only openai/gpt-oss-120b and
+//     openai/gpt-oss-20b are called (GROQ_FREE_MODELS; groq/compound was decommissioned on
+//     2026-09-21 and Groq's browser search is a paid tool, so web search through Groq is off).
+//     The Worker's own caps (aiBudget.js): GROQ_DAILY_CAP requests and GROQ_DAILY_TOKEN_CAP tokens
+//     per UTC day. A 402 / billing answer is never retried: the call falls through to the next step.
+//   Workers AI (https://developers.cloudflare.com/workers-ai/platform/pricing/): only the allow-listed
+//     model (WORKERS_AI_FREE_MODELS), at most WORKERS_AI_DAILY_NEURON_CAP estimated neurons per UTC day
+//     (below the 10,000 free neurons). A billing / paid-plan answer falls through the same way.
 // Everything else (translation, Explain simply, Laws AI, Hospital AI) answers from text the Worker
 // already has, so any provider in the chain may answer it.
-import { GEMINI_MODELS, geminiCoolId, geminiGenerate, geminiKeys, isGeminiConfigured, post } from './gemini.js';
+import { GEMINI_MODELS, geminiCoolId, geminiGenerate, geminiKeys, isBillingAnswer, isGeminiConfigured, post } from './gemini.js';
+import { GROQ_DAILY_CAP, GROQ_DAILY_TOKEN_CAP, WORKERS_AI_DAILY_NEURON_CAP, budgetFor, estNeurons, estTokens, hasRoom, spend, utcDayOf } from './aiBudget.js';
 import { MINUTE_MS, coolView, cooldownFor, nextUtcDay } from './aiCooldown.js';
 
 export const AI_CHAIN = ['gemini', 'groq', 'workers-ai'];
 
 // Groq (https://console.groq.com/docs/models, production models, Nov 2026)
 export const GROQ_ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions';
-export const GROQ_MODELS = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b'];
+// FREE TIER ONLY: the free-plan models; nothing outside this list is ever sent a request
+export const GROQ_FREE_MODELS = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b'];
+export const GROQ_MODELS = [...GROQ_FREE_MODELS];
+// Only allow-listed free Groq models, in the given order (pure: tested)
+export const groqFreeModels = models => (Array.isArray(models) ? models : []).filter(m => GROQ_FREE_MODELS.includes(m));
+// D1 usage keys of the Worker's own Groq caps (per UTC day)
+export const GROQ_CAP_REQ = 'ai_groq_req';
+export const GROQ_CAP_TOK = 'ai_groq_tok';
 export const GROQ_TIMEOUT_MS = 20000;
 
 // Workers AI (https://developers.cloudflare.com/workers-ai/models/): Gemma 4 (Google) instruct model,
 // multilingual (Indian languages included), 256k context, cheap MoE (4B active) for the free neurons.
 export const WORKERS_AI_MODEL = '@cf/google/gemma-4-26b-a4b-it';
+// FREE TIER ONLY: the models the Worker may run on its free daily neurons
+export const WORKERS_AI_FREE_MODELS = ['@cf/google/gemma-4-26b-a4b-it'];
+export const isWorkersAiFreeModel = m => WORKERS_AI_FREE_MODELS.includes(m);
+// D1 usage key of the Worker's own Workers AI neuron cap (per UTC day)
+export const WORKERS_AI_CAP_KEY = 'ai_wai_neurons';
 export const WORKERS_AI_TIMEOUT_MS = 30000;
 
 export const isGroqConfigured = env => !!(env && typeof env.GROQ_API_KEY === 'string' && env.GROQ_API_KEY.trim());
@@ -47,21 +71,42 @@ const stripThinking = t =>
  * groqGenerate(env, { prompt, system, maxTokens, temperature, timeoutMs }, { fetchImpl, now, cooldown })
  * -> { ok: true, text, model, provider: 'groq' } | { ok: false, error, code }
  */
-export async function groqGenerate(env, { prompt, system = '', maxTokens = 2048, temperature = 0.2, timeoutMs = 0 } = {}, { fetchImpl = fetch, now, cooldown } = {}) {
+export async function groqGenerate(
+  env,
+  { prompt, system = '', maxTokens = 2048, temperature = 0.2, timeoutMs = 0, groqModels = GROQ_MODELS } = {},
+  { fetchImpl = fetch, now, cooldown, budget } = {},
+) {
   if (!isGroqConfigured(env)) {
     return { ok: false, error: 'not configured', code: 'config' };
+  }
+  const models = groqFreeModels(groqModels);
+  if (!models.length) {
+    return { ok: false, error: 'groq: no free-plan model for this call', code: 'config' };
   }
   const t0 = now === undefined ? Date.now() : now;
   const view = await coolView(cooldownFor(env, { cooldown }), t0);
   if (view.isCool('groq:*')) {
     return { ok: false, error: 'groq: cooling down', code: 'quota' };
   }
+  // The Worker's own daily caps (below the free plan's limits): requests, and tokens with the whole
+  // asked output reserved so the token cap can never be passed by one call
+  const store = budgetFor(env, { budget });
+  const day = utcDayOf(t0);
+  const inTok = estTokens(`${system || ''}${prompt || ''}`);
+  if (!(await hasRoom(store, day, GROQ_CAP_REQ, GROQ_DAILY_CAP)) || !(await hasRoom(store, day, GROQ_CAP_TOK, GROQ_DAILY_TOKEN_CAP, inTok + maxTokens))) {
+    return { ok: false, error: 'groq: daily free-tier cap reached', code: 'quota' };
+  }
   const codes = [];
   let lastError = 'no groq model answered';
-  for (const model of GROQ_MODELS) {
+  for (const model of models) {
     if (view.isCool(`groq:${model}`)) {
       codes.push('quota');
       continue;
+    }
+    if (!(await hasRoom(store, day, GROQ_CAP_REQ, GROQ_DAILY_CAP)) || !(await hasRoom(store, day, GROQ_CAP_TOK, GROQ_DAILY_TOKEN_CAP, inTok + maxTokens))) {
+      codes.push('quota');
+      lastError = 'groq: daily free-tier cap reached';
+      break;
     }
     let extras = { reasoning_effort: 'low' };
     for (let attempt = 0; attempt < 2; attempt++) {
@@ -81,6 +126,22 @@ export async function groqGenerate(env, { prompt, system = '', maxTokens = 2048,
         codes.push(e && e.timeout ? 'timeout' : 'other');
         lastError = `groq ${model}: ${e && e.timeout ? 'timeout' : 'network error'}`;
         break;
+      }
+      // every answer counts against the free requests per day
+      await spend(store, day, GROQ_CAP_REQ, 1);
+      if (!res.ok && res.status !== 429) {
+        let errText = '';
+        try {
+          errText = typeof res.text === 'function' ? await res.text() : JSON.stringify(await res.json());
+        } catch (e) {
+          errText = '';
+        }
+        if (isBillingAnswer(res.status, errText)) {
+          // 402 / billing / paid-plan answer: never retried, Groq waits for the next UTC day and the
+          // call falls through to the next FREE step
+          await view.cool('groq:*', nextUtcDay(t0), 'billing');
+          return { ok: false, error: `groq: billing / payment required (http ${res.status}): not used (free tier only)`, code: 'billing' };
+        }
       }
       if (res.status === 400 && extras.reasoning_effort && attempt === 0) {
         extras = {}; // model without reasoning_effort: retry once plain
@@ -124,6 +185,8 @@ export async function groqGenerate(env, { prompt, system = '', maxTokens = 2048,
         break;
       }
       const msg = data && data.choices && data.choices[0] && data.choices[0].message;
+      const used = Number(data && data.usage && data.usage.total_tokens) || inTok + estTokens(msg && msg.content);
+      await spend(store, day, GROQ_CAP_TOK, used);
       const text = stripThinking(msg && msg.content);
       if (!text) {
         codes.push('other');
@@ -136,14 +199,16 @@ export async function groqGenerate(env, { prompt, system = '', maxTokens = 2048,
   return { ok: false, error: lastError, code: codes.includes('quota') ? 'quota' : codes.length && codes.every(c => c === 'timeout') ? 'timeout' : 'other' };
 }
 
-// Groq Compound (built-in web search; https://console.groq.com/docs/compound): the ONLY non-Gemini
-// model used for web research, and only when the GROQ_API_KEY secret is set (no key = never called).
-// Used by the promises tracker when every Gemini key is out of free quota and the keyless Wikipedia
-// source found nothing; its answer still goes through cleanPromises (dated https source or no_update).
-export const GROQ_SEARCH_MODEL = 'groq/compound';
-export const GROQ_SEARCH_TIMEOUT_MS = 45000;
+// Groq web search: OFF (free tier only). groq/compound (built-in web search) was decommissioned on
+// 2026-09-21, and Groq's browser search is a paid tool, so the free plan has no web-search model.
+// groqSearchGenerate never sends a request: it answers 'not on the free plan' (code 'config') and
+// the never-stop chain (research.js) goes on to the saved data. Ungrounded gpt-oss is never used for
+// research (it would invent facts).
+export const GROQ_SEARCH_MODEL = null;
+export const GROQ_SEARCH_ENABLED = false;
 
-// https source URLs of the searches Compound ran (pure: tested)
+// https source URLs of the searches a Groq search answer ran (pure: tested; kept for when a free
+// web-search model exists again)
 export function groqSearchSources(msg) {
   const out = [];
   const tools = (msg && Array.isArray(msg.executed_tools) && msg.executed_tools) || [];
@@ -160,64 +225,13 @@ export function groqSearchSources(msg) {
 }
 
 /**
- * groqSearchGenerate(env, { prompt, maxTokens, timeoutMs }, { fetchImpl, now, cooldown })
- * -> { ok: true, text, model, sources, provider: 'groq' } | { ok: false, error, code }
+ * groqSearchGenerate(env, opts, deps) -> { ok: false, error, code: 'config' } (always; no request)
  */
-export async function groqSearchGenerate(env, { prompt, maxTokens = 8000, timeoutMs = 0 } = {}, { fetchImpl = fetch, now, cooldown } = {}) {
+export async function groqSearchGenerate(env) {
   if (!isGroqConfigured(env)) {
     return { ok: false, error: 'not configured', code: 'config' };
   }
-  const t0 = now === undefined ? Date.now() : now;
-  const view = await coolView(cooldownFor(env, { cooldown }), t0);
-  const id = `groq:${GROQ_SEARCH_MODEL}`;
-  if (view.isCool('groq:*') || view.isCool(id)) {
-    return { ok: false, error: 'groq: cooling down', code: 'quota' };
-  }
-  let res;
-  try {
-    res = await post(
-      fetchImpl,
-      GROQ_ENDPOINT,
-      {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', authorization: `Bearer ${env.GROQ_API_KEY.trim()}` },
-        body: JSON.stringify({ model: GROQ_SEARCH_MODEL, messages: messagesFor('', prompt), temperature: 0.1, max_completion_tokens: maxTokens }),
-      },
-      timeoutMs || GROQ_SEARCH_TIMEOUT_MS,
-    );
-  } catch (e) {
-    return { ok: false, error: `groq compound: ${e && e.timeout ? 'timeout' : 'network error'}`, code: e && e.timeout ? 'timeout' : 'other' };
-  }
-  if (res.status === 429) {
-    let msg = '';
-    try {
-      msg = JSON.stringify(await res.json());
-    } catch (e) {
-      msg = '';
-    }
-    const daily = /per day|\bRPD\b|\bTPD\b/i.test(msg);
-    await view.cool(id, daily ? nextUtcDay(t0) : t0 + 60 * 1000, daily ? 'daily' : 'minute');
-    return { ok: false, error: 'groq compound: http 429', code: 'quota' };
-  }
-  if (res.status === 401 || res.status === 403) {
-    await view.cool('groq:*', t0 + 10 * MINUTE_MS, 'key');
-    return { ok: false, error: `groq: http ${res.status}`, code: 'key' };
-  }
-  if (!res.ok) {
-    return { ok: false, error: `groq compound: http ${res.status}`, code: 'other' };
-  }
-  let data;
-  try {
-    data = await res.json();
-  } catch (e) {
-    return { ok: false, error: 'groq compound: bad json', code: 'other' };
-  }
-  const msg = data && data.choices && data.choices[0] && data.choices[0].message;
-  const text = stripThinking(msg && msg.content);
-  if (!text) {
-    return { ok: false, error: 'groq compound: empty answer', code: 'other' };
-  }
-  return { ok: true, text, model: GROQ_SEARCH_MODEL, sources: groqSearchSources(msg), provider: 'groq' };
+  return { ok: false, error: 'groq: no web-search model on the free plan (groq/compound decommissioned 2026-09-21; browser search is paid)', code: 'config' };
 }
 
 // Text out of a Workers AI answer: classic { response } or OpenAI-style { choices } (pure: tested)
@@ -251,34 +265,57 @@ export function workersAiText(out) {
  * workersAiGenerate(env, { prompt, system, maxTokens, temperature, timeoutMs }, { now, cooldown })
  * -> { ok: true, text, model, provider: 'workers-ai' } | { ok: false, error, code }
  */
-export async function workersAiGenerate(env, { prompt, system = '', maxTokens = 2048, temperature = 0.2, timeoutMs = 0 } = {}, { now, cooldown } = {}) {
+export async function workersAiGenerate(
+  env,
+  { prompt, system = '', maxTokens = 2048, temperature = 0.2, timeoutMs = 0, workersAiModel = WORKERS_AI_MODEL } = {},
+  { now, cooldown, budget } = {},
+) {
   if (!isWorkersAiConfigured(env)) {
     return { ok: false, error: 'not configured', code: 'config' };
+  }
+  if (!isWorkersAiFreeModel(workersAiModel)) {
+    return { ok: false, error: 'workers ai: model not on the free allow-list', code: 'config' };
   }
   const t0 = now === undefined ? Date.now() : now;
   const view = await coolView(cooldownFor(env, { cooldown }), t0);
   if (view.isCool('workers-ai:*')) {
     return { ok: false, error: 'workers ai: cooling down', code: 'quota' };
   }
+  // The Worker's own daily neuron cap (below the 10,000 free neurons), the whole asked output reserved
+  const store = budgetFor(env, { budget });
+  const day = utcDayOf(t0);
+  const inTok = estTokens(`${system || ''}${prompt || ''}`);
+  if (!(await hasRoom(store, day, WORKERS_AI_CAP_KEY, WORKERS_AI_DAILY_NEURON_CAP, estNeurons(inTok, maxTokens)))) {
+    return { ok: false, error: 'workers ai: daily free-tier neuron cap reached', code: 'quota' };
+  }
   let timer = null;
   try {
     const out = await Promise.race([
-      env.AI.run(WORKERS_AI_MODEL, { messages: messagesFor(system, prompt), max_tokens: maxTokens, temperature }),
+      env.AI.run(workersAiModel, { messages: messagesFor(system, prompt), max_tokens: maxTokens, temperature }),
       new Promise((_, reject) => {
         timer = setTimeout(() => reject(Object.assign(new Error('timeout'), { timeout: true })), timeoutMs || WORKERS_AI_TIMEOUT_MS);
       }),
     ]);
     const text = workersAiText(out);
-    return text ? { ok: true, text, model: WORKERS_AI_MODEL, sources: [], provider: 'workers-ai' } : { ok: false, error: 'workers ai: empty answer', code: 'other' };
+    const u = (out && out.usage) || {};
+    await spend(store, day, WORKERS_AI_CAP_KEY, estNeurons(Number(u.prompt_tokens) || inTok, Number(u.completion_tokens) || estTokens(text)));
+    return text ? { ok: true, text, model: workersAiModel, sources: [], provider: 'workers-ai' } : { ok: false, error: 'workers ai: empty answer', code: 'other' };
   } catch (e) {
     const msg = String((e && e.message) || e || '');
     if (e && e.timeout) {
+      // a slow call may still have used neurons: count the asked output
+      await spend(store, day, WORKERS_AI_CAP_KEY, estNeurons(inTok, maxTokens));
       return { ok: false, error: 'workers ai: timeout', code: 'timeout' };
     }
     if (/4006|daily free allocation|neurons/i.test(msg)) {
       // Free daily neurons used up: resets 00:00 UTC
       await view.cool('workers-ai:*', nextUtcDay(t0), 'daily');
       return { ok: false, error: 'workers ai: daily free allocation used up', code: 'quota' };
+    }
+    if (/\b402\b|billing|payment|paid plan|workers paid|upgrade/i.test(msg)) {
+      // Billing / paid-plan answer: never retried, Workers AI waits for the next UTC day (free tier only)
+      await view.cool('workers-ai:*', nextUtcDay(t0), 'billing');
+      return { ok: false, error: 'workers ai: billing / paid plan required: not used (free tier only)', code: 'billing' };
     }
     if (/\b429\b|3040|capacity|rate limit|too many/i.test(msg)) {
       await view.cool('workers-ai:*', t0 + MINUTE_MS, 'minute');

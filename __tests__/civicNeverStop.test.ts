@@ -251,14 +251,16 @@ describe('free/compare.js (keyless previous vs present government)', () => {
 });
 
 describe('never-stop chain', () => {
-  it('order: every Gemini key x model (Flash-Lite included) first, then keyless sources -> ready from free data', async () => {
+  it('order: every Gemini key x free grounded model (2.5 Flash-Lite only) first, then keyless sources -> ready from free data', async () => {
     const e = env({ GEMINI_API_KEY: 'k1', GEMINI_API_KEY_2: 'k2' });
     const { f, calls } = makeFetch({ gemini: 429 });
     const r = await call(e, 'POST', '/v1/civic/research', { body: { kind: 'gcmp', state: 'AP' }, fetchImpl: f });
     expect(r.json).toMatchObject({ ok: true, status: 'ready', did: 'research', origin: 'free' });
     const g = calls.filter(isGemini);
     const tried = new Set(g.map(c => `${c.init.headers['x-goog-api-key']}|${c.url.split('/models/')[1].split(':')[0]}`));
-    const want = ['k1', 'k2'].flatMap(k => gemini.GEMINI_MODELS.map((m: string) => `${k}|${m}`));
+    // grounded research: only the free-tier grounded model (Grounding with Google Search is free only on 2.5 Flash / Flash-Lite)
+    expect(gemini.GEMINI_GROUNDED_MODELS).toEqual(['gemini-2.5-flash-lite']);
+    const want = ['k1', 'k2'].flatMap(k => gemini.GEMINI_GROUNDED_MODELS.map((m: string) => `${k}|${m}`));
     expect([...tried].sort()).toEqual(want.sort());
     expect(gemini.GEMINI_MODELS.some((m: string) => /flash-lite/.test(m))).toBe(true);
     const lastGemini = calls.map(isGemini).lastIndexOf(true);
@@ -279,7 +281,7 @@ describe('never-stop chain', () => {
     expect(calls.some(isGemini)).toBe(false);
   });
 
-  it('keys cooling + free sources down: Groq ONLY with GROQ_API_KEY (same strict cleaner); without it status none', async () => {
+  it('keys cooling + free sources down: Groq has no free web-search model (groq/compound decommissioned) -> never asked, status none with or without GROQ_API_KEY', async () => {
     const groqAns = JSON.stringify({
       asOf: '2026-11',
       previous: { label: 'YSRCP government', head: 'Y. S. Jagan Mohan Reddy', party: 'YSRCP', from: '2019-05-30', to: '2024-06-11', source: 'https://ap.gov.in/a' },
@@ -293,11 +295,10 @@ describe('never-stop chain', () => {
     coolAll(e);
     const a = makeFetch({ free: false, groq: groqAns });
     const r = await call(e, 'POST', '/v1/civic/research', { body: { kind: 'gcmp', state: 'AP' }, fetchImpl: a.f });
-    expect(r.json).toMatchObject({ ok: true, status: 'ready', origin: 'groq', model: 'groq/compound' });
+    expect(r.json).toMatchObject({ ok: false, status: 'none' });
     expect(a.calls.some(isGemini)).toBe(false);
-    const d = await call(e, 'GET', '/v1/civic/data?kind=gcmp&state=AP', { fetchImpl: a.f });
-    expect(d.json.answeredBy).toBe('groq');
-    expect(d.json.data.rows.map((x: any) => x.topic)).toEqual(['Pensions']);
+    expect(a.calls.some(isGroq)).toBe(false); // free tier only: no paid web search, never an ungrounded guess
+    expect(e.DB.raw.prepare("SELECT COUNT(*) AS n FROM civic_data WHERE data IS NOT NULL OR status = 'error'").get().n).toBe(0);
 
     const e2 = env({ GEMINI_API_KEY: 'k' });
     coolAll(e2);
@@ -309,14 +310,14 @@ describe('never-stop chain', () => {
     expect(e2.DB.raw.prepare("SELECT COUNT(*) AS n FROM civic_data WHERE data IS NOT NULL OR status = 'error'").get().n).toBe(0);
   });
 
-  it('Govt / Hospitals: keys out + free sources down + Groq set -> Groq answers', async () => {
+  it('Govt / Hospitals: keys out + free sources down + Groq set -> still none (no free Groq web search), Groq never asked', async () => {
     const e = env({ GEMINI_API_KEY: 'k', GROQ_API_KEY: 'gk' });
     coolAll(e);
     const ans = JSON.stringify({ asOf: '2026-11', hospitals: [{ name: 'Government General Hospital, Kurnool', type: 'Government', address: 'Kurnool' }] });
     const { f, calls } = makeFetch({ free: false, groq: ans });
     const r = await call(e, 'POST', '/v1/civic/research', { body: { kind: 'hosp', state: 'AP', district: 'kurnool', variant: 'govt' }, fetchImpl: f });
-    expect(r.json).toMatchObject({ ok: true, status: 'ready', origin: 'groq' });
-    expect(calls.filter(isGroq)).toHaveLength(1);
+    expect(r.json).toMatchObject({ ok: false, status: 'none' });
+    expect(calls.filter(isGroq)).toHaveLength(0);
   });
 
   it('saved data stands: refresh with every source failing answers saved (row unchanged, never marked failed); cron stops grounded research', async () => {

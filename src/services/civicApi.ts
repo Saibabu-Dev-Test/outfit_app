@@ -158,14 +158,31 @@ export interface PromiseItem {
   // where the promise itself is stated (its cited source, else the manifesto) + that date
   ref?: string;
   refDate?: string;
+  // Audit India items (free source, auditindia.org, reuse with attribution): by = 'auditindia', their
+  // own status wording (statusLabel, e.g. "Partly delivered"), graded = Audit India's flag "graded,
+  // evidence not yet sourced" (the app shows a small note), primary = the primary source when given
+  by?: 'auditindia';
+  statusLabel?: string;
+  graded?: boolean;
+  primary?: string;
+}
+
+// Attribution for a free source the promises came from (name + site + its terms page)
+export interface PromiseCredit {
+  name: string;
+  url: string;
+  terms?: string;
 }
 
 export interface PromisesData {
   asOf?: string;
-  // 'free' = read from Wikipedia's election article (Gemini free quota used up); statuses stay "no update"
+  // 'free' = read from keyless free sources (Audit India, Wikipedia's election article) when the Gemini
+  // free quota is used up; Wikipedia statuses stay "no update", Audit India keeps its own status
   origin?: 'free';
   govt: { party: string; head: string; year: string; term: string; source: string };
   promises: PromiseItem[];
+  // present when Audit India items are in the list
+  credits?: PromiseCredit[];
   summary: { total: number; done: number; inProgress: number; notDone: number; noUpdate: number };
 }
 

@@ -145,6 +145,9 @@ export type CivicKey =
   | 'prmNotLive'
   | 'prmNoDataYet'
   | 'prmFreeNote'
+  | 'prmAuditSource'
+  | 'prmAuditGraded'
+  | 'prmPrimary'
   | 'date'
   | 'allHosp'
   | 'publicNA'
@@ -356,6 +359,9 @@ export const CIVIC_LABELS: Record<StaticLanguage, Record<CivicKey, string>> = {
     prmNotLive: 'Promises feature is not live on the server yet. No data yet: it will show here once the server is updated.',
     prmNoDataYet: 'No data yet for this government. Pull down to try again later.',
     prmFreeNote: 'Promises read from the Wikipedia article on this election (free source). Status shows only when a public source states it.',
+    prmAuditSource: 'Source: Audit India (auditindia.org)',
+    prmAuditGraded: "Audit India's grade — evidence not yet sourced",
+    prmPrimary: 'Primary source',
     date: 'Date',
     allHosp: 'All',
     publicNA: 'Public info not available',
@@ -566,6 +572,9 @@ export const CIVIC_LABELS: Record<StaticLanguage, Record<CivicKey, string>> = {
     prmNotLive: 'హామీల ఫీచర్ ఇంకా సర్వర్‌లో అందుబాటులోకి రాలేదు. ఇంకా డేటా లేదు: సర్వర్ అప్‌డేట్ అయిన తర్వాత ఇక్కడ కనిపిస్తుంది.',
     prmNoDataYet: 'ఈ ప్రభుత్వానికి ఇంకా డేటా లేదు. కాసేపటి తర్వాత కిందికి లాగి మళ్లీ ప్రయత్నించండి.',
     prmFreeNote: 'ఈ ఎన్నికపై వికీపీడియా వ్యాసం నుండి తీసుకున్న హామీలు (ఉచిత మూలం). పబ్లిక్ మూలం చెప్పినప్పుడే స్థితి చూపిస్తాం.',
+    prmAuditSource: 'మూలం: ఆడిట్ ఇండియా (auditindia.org)',
+    prmAuditGraded: 'ఆడిట్ ఇండియా గ్రేడ్ — ఆధారాలు ఇంకా సేకరించలేదు',
+    prmPrimary: 'ప్రాథమిక మూలం',
     date: 'తేదీ',
     allHosp: 'అన్నీ',
     publicNA: 'పబ్లిక్ సమాచారం అందుబాటులో లేదు',
@@ -776,6 +785,9 @@ export const CIVIC_LABELS: Record<StaticLanguage, Record<CivicKey, string>> = {
     prmNotLive: 'वादों की सुविधा अभी सर्वर पर चालू नहीं हुई है। अभी कोई डेटा नहीं: सर्वर अपडेट होने के बाद यहाँ दिखेगा।',
     prmNoDataYet: 'इस सरकार के लिए अभी कोई डेटा नहीं। थोड़ी देर बाद नीचे खींचकर दोबारा कोशिश करें।',
     prmFreeNote: 'वादे इस चुनाव पर विकिपीडिया लेख से लिए गए (मुफ़्त स्रोत)। स्थिति तभी दिखती है जब कोई सार्वजनिक स्रोत उसे बताए।',
+    prmAuditSource: 'स्रोत: ऑडिट इंडिया (auditindia.org)',
+    prmAuditGraded: 'ऑडिट इंडिया का ग्रेड — सबूत अभी जुटाए नहीं गए',
+    prmPrimary: 'मूल स्रोत',
     date: 'तारीख़',
     allHosp: 'सभी',
     publicNA: 'सार्वजनिक जानकारी उपलब्ध नहीं',

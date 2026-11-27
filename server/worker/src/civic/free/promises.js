@@ -149,7 +149,7 @@ export function pickSections(sections, names) {
   return picked.slice(0, 4);
 }
 
-const area = (label, text) => {
+export const promiseArea = (label, text) => {
   const x = `${label} ${text}`.toLowerCase();
   if (/farm|agri|paddy|crop|kisan|annadata|msp\b/.test(x)) return 'farmers';
   if (/women|woman|girl|mahila|nari|mahalakshmi/.test(x)) return 'women';
@@ -223,7 +223,7 @@ export function extractPromises(wt, fallback, namedRefs = {}) {
       const ref = r && r.url ? r.url : fallback.url;
       const refDate = (r && r.url && r.date) || fallback.date;
       if (!ref || !refDate) continue;
-      out.push({ area: area(label, text), text, status: 'no_update', fact: '', source: '', date: '', ref, refDate });
+      out.push({ area: promiseArea(label, text), text, status: 'no_update', fact: '', source: '', date: '', ref, refDate });
     }
   }
   return out;
