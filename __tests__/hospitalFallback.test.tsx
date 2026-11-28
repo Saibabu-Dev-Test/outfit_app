@@ -122,8 +122,10 @@ describe('Hospitals: "ear" with the Government filter', () => {
     expect(txt).toMatch(/Departments to see: ENT/);
     expect(txt).toMatch(/Government General Hospital, Guntur/);
     expect(txt).toMatch(/Area Hospital, Tenali/);
-    expect(txt).not.toMatch(/Primary Health Centre, Chandur/);
     expect(txt).not.toMatch(/Try another word/);
+    // the PHC is not a "may treat" row, but stays in the place's list after them
+    expect(txt).toMatch(/Primary Health Centre, Chandur/);
+    expect(txt.indexOf('Area Hospital, Tenali')).toBeLessThan(txt.indexOf('Primary Health Centre, Chandur'));
     expect(r.root.findAll(n => n.props.testID === 'hosp-may-treat' && typeof n.type !== 'string').length).toBe(2);
     expect(txt).toMatch(/May treat this — call to confirm \(no public source states it\)/);
     expect(txt).not.toMatch(/Matches:/);
@@ -137,7 +139,8 @@ describe('Hospitals: "ear" with the Government filter', () => {
     const txt = textOf(r);
     expect(txt).toMatch(/Try another word/);
     expect(txt).not.toMatch(/may treat this/i);
-    expect(txt).not.toMatch(/Sai Hospital/);
+    // the Private list of the place is still shown under the note
+    expect(txt).toMatch(/Sai Hospital/);
   });
 
   it('an unknown word with no disease match keeps the plain "no match" note', async () => {

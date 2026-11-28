@@ -164,7 +164,9 @@ describe('Hospitals tab child structure', () => {
     expect(textOf(r)).toMatch(/Sai Hospital/);
     expect(scrollChildCount(r)).toBe(base);
     await ReactTestRenderer.act(async () => input.props.onChangeText('zzqqxx'));
-    expect(textOf(r)).not.toMatch(/Sai Hospital/);
+    // no match: the note, and the place's list stays (a search never empties it)
+    expect(textOf(r)).toMatch(/Try another word/);
+    expect(textOf(r)).toMatch(/Sai Hospital/);
     expect(scrollChildCount(r)).toBe(base);
     await ReactTestRenderer.act(async () => input.props.onChangeText(''));
     await pressByText(r, /^Government$/);

@@ -93,6 +93,8 @@ export const CIVIC_FREE_REFRESH_MS = 7 * 24 * 3600 * 1000; // free rows / Overpa
 export const CIVIC_FREE_GAP_MS = 1100; // between Nominatim requests (usage policy: max 1 / second)
 export const FREE_GOV_CACHE_MS = 3 * 24 * 3600 * 1000; // cached Wikipedia governors list
 export const FREE_REQ_TIMEOUT_MS = 3500; // per free request on the request path (first load target < 5 s)
+export const FREE_CRON_OVERPASS_TIMEOUT_MS = 90000; // cron Overpass upgrade, per mirror (a metro district answers in 30-60 s)
+export const FREE_OVERPASS_RETRY_MS = 3600 * 1000; // a failed Overpass upgrade is tried again after ~1 h, not a week
 export const FREE_AREA_REQ_TIMEOUT_MS = 20000; // Overpass boundary query (district / mandal hospitals) on the request path, per mirror
 // Grounded research failed because every Gemini key is out of free quota (not a data problem)
 const isExhausted = code => code === 'quota' || code === 'billing';
@@ -109,7 +111,11 @@ export const CIVIC_SCHEMA = { govt: 1, hosp: 2, gcmp: 1, gprm: 1 };
 // fetchHospArea). A free hospital row below it (saved before, e.g. Andhra Pradesh lists holding
 // Bengaluru / Hosur rows, or an Anantapur mandal showing the state list) is filtered when read and
 // re-researched from the free sources (never by AI: CIVIC_SCHEMA is unchanged on purpose).
-export const FREE_HOSP_V = 2;
+// 3 = govt ownership also from municipal / railway / ESIS / defence operators and well-known public
+// hospitals (Mumbai's KEM, Sion, Nair, JJ), hospital grounds (landuse=hospital), duplicates merged,
+// no cap at 300 rows, and Nominatim rows of a neighbouring district (Mumbai Suburban in Mumbai)
+// dropped: saved rows are re-fetched and re-classified.
+export const FREE_HOSP_V = 3;
 /** A stored free hospital row saved before FREE_HOSP_V (pure: tested). */
 export const isOutdatedFreeHosp = (kind, origin, data) => kind === 'hosp' && origin === 'free' && !!data && Number(data.v || 0) < FREE_HOSP_V;
 // App language codes (src/i18n/appLanguage.ts) -> name used in prompts. English is the stored data.
@@ -1641,7 +1647,7 @@ export async function researchFree(db, env, t, { fetchImpl = fetch, now = Date.n
  * area to the Nominatim list (Nominatim items kept, they carry the fuller address). Rows holding AI
  * data are not touched; a list whose items did not change is not re-saved (translations kept).
  */
-export async function upgradeHospOverpass(db, env, t, { fetchImpl = fetch, now = Date.now(), bbox = null, sleepImpl = sleep } = {}) {
+export async function upgradeHospOverpass(db, env, t, { fetchImpl = fetch, now = Date.now(), bbox = null, sleepImpl = sleep, timeoutMs = 25000 } = {}) {
   const st = placeByCode(t.state, 'hosp');
   if (!st) {
     return { ok: false, error: 'bad target' };
@@ -1652,7 +1658,7 @@ export async function upgradeHospOverpass(db, env, t, { fetchImpl = fetch, now =
     box = geo ? geo.bbox : null;
   }
   const pl = splitPlace(t.district);
-  const r = await fetchHospOverpass(st, pl.district, { fetchImpl, now, bbox: box, sleepImpl, gapMs: civicCaps(env).freeGapMs, timeoutMs: 25000, mandal: pl.mandal });
+  const r = await fetchHospOverpass(st, pl.district, { fetchImpl, now, bbox: box, sleepImpl, gapMs: civicCaps(env).freeGapMs, timeoutMs, mandal: pl.mandal });
   const place = geoKey(t);
   if (r.bbox && (!box || r.boundary)) {
     await saveGeo(db, t, r.bbox, geoLabel(r), now);
@@ -1673,10 +1679,12 @@ export async function upgradeHospOverpass(db, env, t, { fetchImpl = fetch, now =
     if ((row && row.data && row.origin !== 'free') || (cur && cur.scope && cur.scope !== lv)) {
       continue; // AI data, or a mandal / district row showing a wider level's list
     }
-    const have = cur && Array.isArray(cur.hospitals) ? cur.hospitals : [];
+    // a list saved before FREE_HOSP_V is replaced (its rows were classified / scoped by older rules)
+    const outdated = !!cur && isOutdatedFreeHosp('hosp', 'free', cur);
+    const have = cur && Array.isArray(cur.hospitals) && !outdated ? cur.hospitals : [];
     const known = new Set(have.map(h => h.osmUrl).filter(Boolean));
     const add = freeHospData(r.hospitals, variant, { district, today, src: r.src, where }).hospitals.filter(h => !known.has(h.osmUrl));
-    if (!add.length) {
+    if (!add.length && !outdated) {
       continue;
     }
     const hospitals = [...have, ...add].sort((a, b) => rankOwn(a) - rankOwn(b) || a.name.localeCompare(b.name));
@@ -1689,20 +1697,23 @@ export async function upgradeHospOverpass(db, env, t, { fetchImpl = fetch, now =
 
 /**
  * Gentle cron refresh of the free rows (no AI): at most one Overpass upgrade (a place whose
- * hospital lists came from Nominatim and were never upgraded, or a week ago) and one re-fetch of
+ * hospital lists came from Nominatim and were never upgraded, upgraded a week ago, or whose last
+ * upgrade failed ~1 h ago; 90 s per mirror) and one re-fetch of
  * the stalest free row (older than CIVIC_FREE_REFRESH_MS) per run.
  */
 export async function runFreeRefresh(db, env, { fetchImpl = fetch, now = Date.now(), sleepImpl = sleep } = {}) {
   const out = [];
   const geo = await db.first(
-    `SELECT g.place FROM civic_geo g WHERE (g.overpass_at IS NULL OR g.overpass_at < ?)
+    `SELECT g.place FROM civic_geo g WHERE (g.overpass_at IS NULL OR g.overpass_at < ?
+         OR (COALESCE(g.overpass_status, '') <> 'ok' AND g.overpass_at < ?))
        AND EXISTS (SELECT 1 FROM civic_data d WHERE d.kind = 'hosp' AND d.origin = 'free' AND d.state || '|' || d.district = g.place)
      ORDER BY COALESCE(g.overpass_at, 0) LIMIT 1`,
     now - CIVIC_FREE_REFRESH_MS,
+    now - FREE_OVERPASS_RETRY_MS,
   );
   if (geo) {
     const [state, district = ''] = String(geo.place).split('|');
-    const r = await upgradeHospOverpass(db, env, { state, district }, { fetchImpl, now, sleepImpl });
+    const r = await upgradeHospOverpass(db, env, { state, district }, { fetchImpl, now, sleepImpl, timeoutMs: FREE_CRON_OVERPASS_TIMEOUT_MS });
     out.push({ overpass: geo.place, ok: r.ok });
   }
   const stale = await db.first(

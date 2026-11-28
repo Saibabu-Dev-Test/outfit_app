@@ -145,3 +145,54 @@ export function generalGovtHospitals<R extends { h: Hospital; v?: string }>(rows
     .slice(0, max)
     .map(x => x.r);
 }
+
+// How a row got its place in the list (orderHospitalRows)
+export type HospRowKind = 'match' | 'maybe' | 'rest';
+
+export interface OrderedHospRows<R> {
+  rows: (R & { matched: string[]; kind: HospRowKind })[];
+  matches: number; // rows whose public data states the searched words
+  maybe: number; // general govt hospitals shown as "may treat this — call to confirm"
+}
+
+/**
+ * The Hospitals tab list, in order (pure: tested in __tests__/hospitalOrder.test.ts):
+ *   1. search matches (best first; by the facts count when byFacts),
+ *   2. when the query names a speciality (mayTreat) the general / multi-speciality government
+ *      hospitals not already matched ("may treat this — call to confirm", never a claim),
+ *   3. then every other hospital of the selected location, in the source order.
+ * Never empty when the location has hospitals: a search only re-orders the list ("location wise
+ * hospitals show cheyyali"), it never hides the area's hospitals. terms: the search terms already
+ * worked out for the query (diseaseSearch.hospitalTermsFor); default expandQuery(query).
+ */
+export function orderHospitalRows<R extends { h: Hospital; v?: string }>(
+  rows: R[],
+  query: string,
+  opts: { terms?: string[]; mayTreat?: boolean; byFacts?: boolean; maxMaybe?: number } = {},
+): OrderedHospRows<R> {
+  const { mayTreat = false, byFacts = false, maxMaybe = 10 } = opts;
+  const q = (query || '').trim();
+  const tag = (r: R, kind: HospRowKind, matched: string[] = []) => ({ ...r, matched, kind });
+  if (!q || !rows.length) {
+    const all = rows.map(r => tag(r, 'rest'));
+    return { rows: byFacts ? sortByFacts(all) : all, matches: 0, maybe: 0 };
+  }
+  const terms = opts.terms || expandQuery(q);
+  const list = rows.map(r => r.h);
+  const used = new Set<number>();
+  let matched = terms.length
+    ? searchHospitals(list, q, terms).map(m => {
+        const i = list.indexOf(m.h);
+        used.add(i);
+        return tag(rows[i], 'match', m.matched);
+      })
+    : [];
+  if (byFacts) matched = sortByFacts(matched);
+  // generalGovtHospitals returns the row objects it was given: pick them out by identity
+  const picked = new Set<R>(mayTreat ? generalGovtHospitals(rows.filter((_, i) => !used.has(i)), maxMaybe) : []);
+  const maybe = rows.filter(r => picked.has(r)).map(r => tag(r, 'maybe'));
+  rows.forEach((r, i) => picked.has(r) && used.add(i));
+  let others = rows.filter((_, i) => !used.has(i)).map(r => tag(r, 'rest'));
+  if (byFacts) others = sortByFacts(others);
+  return { rows: [...matched, ...maybe, ...others], matches: matched.length, maybe: maybe.length };
+}

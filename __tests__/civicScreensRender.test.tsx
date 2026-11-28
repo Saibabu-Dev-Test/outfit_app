@@ -235,8 +235,10 @@ describe('civic screens render', () => {
     });
     txt = textOf(r);
     expect(txt).toMatch(/City Eye Care/);
-    expect(txt).not.toMatch(/GGH Kurnool/);
     expect(txt).toMatch(/Matches: Ophthalmology/);
+    // the match comes first; the rest of the place's list stays below it (never hidden by a search)
+    expect(txt).toMatch(/GGH Kurnool/);
+    expect(txt.indexOf('City Eye Care')).toBeLessThan(txt.indexOf('GGH Kurnool'));
   });
 
   it('Telugu app language: offence guide shows Telugu AND English, labels too', async () => {

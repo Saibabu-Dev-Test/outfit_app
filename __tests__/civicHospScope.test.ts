@@ -203,7 +203,7 @@ describe('hosp.js: exact boundary (Overpass area query)', () => {
     const byName = hosp.overpassAreaQuery({ code: 'AP', district: { code: 502, name: 'Ananthapuramu' }, mandal: { name: 'Anantapur Urban' } });
     expect(byName).toContain('["ref:LGD:district"="502"]->.dr;.dr map_to_area->.d;rel(area.d)["boundary"="administrative"]["admin_level"="6"]["name"~"^(anantapur[ -]?urban');
     const dn = hosp.overpassAreaQuery({ code: 'AP', district: { name: 'Ananthapuramu' } });
-    expect(dn).toContain('rel(area.st)["boundary"="administrative"]["admin_level"="5"]["name"~"^(ananthapuramu|');
+    expect(dn).toContain('rel(area.st)["boundary"="administrative"]["admin_level"~"^(5|6|8)$"]["name"~"^(ananthapuramu|');
     [st, d, m, byName, dn].forEach(q => expect(q).not.toMatch(/\(\d+\.\d+,\d+\.\d+,/));
     expect(hosp.overpassAreaQuery({})).toBe('');
   });
