@@ -21,8 +21,10 @@
 // word expansion, and shows "Best in India for <disease>" (BestInIndiaBox: NIRF 2025 Medical ranks,
 // a teaching + research ranking, never a treatment rating; 108 / 112 for red-flag conditions).
 // When no hospital in the list states the searched speciality ("ear" -> ENT), the general /
-// multi-speciality GOVT hospitals in the list (AIIMS, medical colleges, GGH, district / area hospitals;
-// hospitalSearch.generalGovtHospitals) are shown labelled "May treat this — call to confirm" (never a claim).
+// multi-speciality government hospitals already in the list (AIIMS, medical colleges, GGH, district /
+// area hospitals: hospitalSearch.generalGovtHospitals) are shown labelled "May treat this — call to confirm" (never a claim).
+// List order (hospitalSearch.orderHospitalRows): matches, then those "may treat" rows, then the rest of
+// the picked place's hospitals, right under the search card (Best in India comes after the list).
 // Location: State -> District -> Mandal chosen from the official LGD lists (LocationPicker). The list is
 // for the picked mandal; a mandal with no hospital found shows the district's list with the note "No
 // data for <mandal>, showing <district> district" (state-wide when the district is empty too).
@@ -39,7 +41,7 @@ import { isOwnerUser } from '../../services/adminSystem';
 import { useAppLanguage } from '../../i18n/appLanguage';
 import { civicText } from '../../i18n/civicLabels';
 import { HospData, HospVariant, Hospital, civicItem, getHospData } from '../../services/civicApi';
-import { factsCount, generalGovtHospitals, searchHospitals, sortByFacts, uniqueRowKeys } from '../../services/hospitalSearch';
+import { factsCount, orderHospitalRows, uniqueRowKeys } from '../../services/hospitalSearch';
 import { askHospitals } from '../../services/civicAi';
 import { useCivicLabels } from '../../services/civicI18n';
 import { CivicAskBox, Turn } from './civicAiParts';
@@ -264,14 +266,16 @@ export default function HospitalsScreen() {
   const keys = uniqueRowKeys(raw);
   const rows = raw.map((r, i) => ({ ...r, key: keys[i] }));
   const list = rows.map(r => r.h);
-  const found = where.trim() ? searchHospitals(list, where, hospitalTermsFor(where)).map(m => ({ ...rows[list.indexOf(m.h)], matched: m.matched })) : rows.map(r => ({ ...r, matched: [] as string[] }));
-  // Nothing in the list states the searched speciality: general / multi-speciality govt hospitals
-  // (AIIMS, medical colleges, GGH, district / area hospitals) as "may treat this — call to confirm"
-  const searching = !!where.trim() && list.length > 0 && !found.length;
-  const needSp = searching ? specialitiesFor(where) : [];
-  const fallback = needSp.length ? generalGovtHospitals(rows).map(r => ({ ...r, matched: [] as string[] })) : [];
-  const maybe = fallback.length > 0;
-  const shown = maybe ? fallback : byFacts ? sortByFacts(found) : found;
+  // Search matches first, then general govt hospitals that "may treat this — call to confirm", then
+  // the rest of the selected location's hospitals: a search re-orders the list, never empties it
+  // (services/hospitalSearch.orderHospitalRows)
+  const whereQ = where.trim();
+  const needSp = whereQ && list.length > 0 ? specialitiesFor(where) : [];
+  const ordered = orderHospitalRows(rows, where, { terms: whereQ ? hospitalTermsFor(where) : [], mayTreat: needSp.length > 0, byFacts });
+  // nothing in the list states the searched words: the note above the (still full) list
+  const searching = !!whereQ && list.length > 0 && ordered.matches === 0;
+  const maybe = searching && ordered.maybe > 0;
+  const shown = ordered.rows;
   const workerAi = active.some(a => !!a.d.res?.aiConfigured);
 
   // Hospital AI runs only on the Worker (its AI fallback chain); no on-phone AI key
@@ -362,9 +366,6 @@ export default function HospitalsScreen() {
             </View>
           ) : null}
         </View>
-        <View collapsable={false} testID="hosp-best">
-          <BestInIndiaBox lang={lang} query={where} state={place.state} />
-        </View>
         <View collapsable={false} testID="hosp-list">
           {list.length ? (
             <View collapsable={false}>
@@ -379,7 +380,7 @@ export default function HospitalsScreen() {
                 r.free ? (
                   <FreeHospitalCard
                     key={r.key}
-                    maybe={maybe ? biLabel(lang, 'mayTreat') : undefined}
+                    maybe={r.kind === 'maybe' ? biLabel(lang, 'mayTreat') : undefined}
                     h={r.h}
                     t={r.t}
                     lang={lang}
@@ -390,7 +391,7 @@ export default function HospitalsScreen() {
                 ) : (
                   <HospitalCard
                     key={r.key}
-                    maybe={maybe ? biLabel(lang, 'mayTreat') : undefined}
+                    maybe={r.kind === 'maybe' ? biLabel(lang, 'mayTreat') : undefined}
                     h={r.h}
                     t={r.t}
                     lang={lang}
@@ -410,6 +411,10 @@ export default function HospitalsScreen() {
               )}
             </View>
           ) : null}
+        </View>
+        {/* after the location's list: the hospitals of the picked place come right under the search */}
+        <View collapsable={false} testID="hosp-best">
+          <BestInIndiaBox lang={lang} query={where} state={place.state} />
         </View>
       </ScrollView>
     </SafeAreaView>

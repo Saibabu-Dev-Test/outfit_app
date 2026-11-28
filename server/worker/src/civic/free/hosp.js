@@ -14,7 +14,7 @@
 // Each item: { name, type: govt|private|unknown, address, phone, lat, lon, mapUrl, osmUrl, src }.
 // Never throws: { ok, hospitals, bbox, place, src, error }.
 import { firstOk, getJson, isoDay, sleep } from './http.js';
-import { inState, isoCodesOf, lgdPlace, nameRegex, spellKey, stateCodeOfName } from './scope.js';
+import { inState, isoCodesOf, lgdPlace, nameRegex, otherDistrictOf, spellKey, stateCodeOfName } from './scope.js';
 
 export const NOMINATIM = 'https://nominatim.openstreetmap.org/search';
 export const OVERPASS_MIRRORS = [
@@ -22,7 +22,8 @@ export const OVERPASS_MIRRORS = [
   'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
   'https://overpass.kumi.systems/api/interpreter',
 ];
-export const HOSP_QUERIES = ['hospital', 'government hospital', 'primary health centre'];
+// "municipal hospital": city-corporation hospitals (Mumbai's BMC / MCGM) rarely say "government"
+export const HOSP_QUERIES = ['hospital', 'government hospital', 'municipal hospital', 'primary health centre'];
 const OSM_SRC = 'OpenStreetMap (Nominatim)';
 
 const nameOf = v => (v && typeof v === 'object' ? v.name || '' : String(v || ''));
@@ -38,24 +39,42 @@ export const mapUrlOf = (lat, lon) => `https://www.openstreetmap.org/?mlat=${lat
 export const osmUrlOf = (type, id) => `https://www.openstreetmap.org/${type}/${id}`;
 
 const GOVT_RE =
-  /\b(government|govt\.?|gov\.?|ggh|phc|chc|uphc|cphc|area hospital|district hospital|general hospital|primary health|community health|urban health|health (sub )?centre|sub[- ]?centre|esic?|railway hospital|teaching hospital|medical college hospital|government medical college|aiims|civil hospital|taluk hospital|mandal hospital|cghs|apsrtc hospital|tsrtc hospital|police hospital|military hospital|naval hospital|army hospital)(?![a-z])/i;
+  /\b(government|goverment|govermment|govt\.?|gov\.?|ggh|phc|chc|uphc|cphc|area hospital|district hospital|general hospital|primary health|community health|urban health|health (sub )?centre|sub[- ]?centre|esic?|esis|railway hospital|teaching hospital|medical college hospital|government medical college|aiims|civil hospital|taluk hospital|mandal hospital|cghs|apsrtc hospital|tsrtc hospital|police hospital|military hospital|naval hospital|army hospital|air force hospital|command hospital|base hospital|cantonment (general )?hospital|inhs)(?![a-z])/i;
+// Municipal / city-corporation hospitals: Mumbai's BMC (MCGM) runs KEM, Sion (LTMG), Nair, Cooper and
+// the "Municipal Maternity Homes"; OSM often tags them with no operator at all, only the name
+// ("L.T.Muncipal Medical College and Sion Hospital", "Welkarwadi BMC Hospital"). Also railway
+// (Central / Western Railway, "... Railway Hospital"), ESIS / ESIC and defence (INHS, Command Hospital).
+const CIVIC_RE =
+  /\b(municipal|muncipal|municiple|municipality|corporation hospital|nagar ?palika|nagar nigam|mahanagar ?palika|bmc|mcgm|ghmc|gvmc|bbmp|mcd|ndmc|kmc hospital|pmc hospital|central railway|western railway|southern railway|eastern railway|northern railway|south central railway|railway (general |divisional |central )?hospital|employees'? state insurance|cantonment board)(?![a-z])/i;
+// Public hospitals that OSM usually maps with no operator tag and no "government" in the name
+// (each is a state / municipal / central government hospital: names as mapped in OSM, checked
+// against the hospital's own site or the state / municipal health department list).
+const KNOWN_PUBLIC_RE =
+  /\b(k\.? ?e\.? ?m\.? hospital|king edward memorial hospital|seth g\.? ?s\.? medical|j\.? ?j\.? hospital|sir j\.? ?j\.?|grant medical college|st\.? george('?s)? hospital|gokuldas tejpal|g\.? ?t\.? hospital|cama (and alb(l)?ess? )?hospital|cooper hospital|nair hospital|b\.? ?y\.? ?l\.? nair|sion hospital|lokmanya tilak (municipal )?(general )?hospital|rajawadi hospital|bhabha hospital|sassoon|osmania general|gandhi hospital|niloufer|nizam'?s institute of medical sciences|stanley (medical college|hospital)|kilpauk medical|rajiv gandhi government general|sskm|r\.? ?g\.? kar|nil ratan sircar|n\.? ?r\.? ?s\.? medical|calcutta medical college|safdarjung|ram manohar lohia|dr\.? rml|lok nayak|g\.? ?t\.? ?b\.? hospital|guru teg bahadur hospital|lady hardinge|victoria hospital|bowring|vani vilas|king george'?s medical|kgmu|balrampur hospital|sms hospital|sawai man singh|pmch|patna medical college|igims)(?![a-z])/i;
 const PRIVATE_RE = /\b(pvt\.?|private|ltd\.?|llp)\b/i;
-const OP_GOVT = /^(government|public|state|national|municipal|military)$/;
-const OP_PRIVATE = /^(private|private_non_profit|business|charity|ngo|religious|community|cooperative)$/;
+const OP_GOVT = /^(government|governmental|public|state|state_government|central_government|national|municipal|municipality|local_government|military|railway|esi|esic)$/;
+const OP_PRIVATE = /^(private|private_non_profit|business|charity|ngo|religious|community|cooperative|trust)$/;
+// operator / healthcare:operator values that name a public body ("Brihanmumbai Municipal Corporation",
+// "Government of Maharashtra", "Indian Railways", "ESIC", "Indian Navy")
+const OP_NAME_GOVT =
+  /\b(municipal|corporation of|mahanagar|nagar ?(palika|nigam)|government|govt\.?|ministry|department of health|directorate of|state of|indian railways?|railway|esic|esis|employees'? state insurance|indian (army|navy|air force)|armed forces|defence|cantonment|bmc|mcgm|ghmc|bbmp|mcd|ndmc|nhm|national health mission)\b/i;
 
 /**
  * govt | private | unknown from the OSM tags (operator:type, healthcare:operator:type,
- * ownership), then the name / description / operator text (pure: tested). 'unknown' = no tag and
- * no govt / private word: the app shows those under Private as "Likely private · ownership not
- * confirmed", never as a confirmed private hospital.
+ * ownership), the operator name (a municipal corporation / government / railways / ESIC / defence),
+ * then the name / description text (pure: tested). 'unknown' = no tag and no govt / private word:
+ * the app shows those under Private as "Likely private · ownership not confirmed", never as a
+ * confirmed private hospital.
  */
 export function classifyHospital(name, tags = {}) {
   const t = tags || {};
   const ops = [t['operator:type'], t['healthcare:operator:type'], t.ownership].map(v => String(v || '').toLowerCase().trim()).filter(Boolean);
   if (ops.some(op => OP_GOVT.test(op))) return 'govt';
   if (ops.some(op => OP_PRIVATE.test(op))) return 'private';
-  const text = [name, t.description, t.operator, t['healthcare:operator']].filter(Boolean).join(' ');
-  if (GOVT_RE.test(text)) return 'govt';
+  const opName = [t.operator, t['healthcare:operator']].filter(Boolean).join(' ');
+  if (opName && OP_NAME_GOVT.test(opName)) return 'govt';
+  const text = [name, t.description, opName, t['name:en'], t.official_name].filter(Boolean).join(' ');
+  if (GOVT_RE.test(text) || CIVIC_RE.test(text) || KNOWN_PUBLIC_RE.test(text)) return 'govt';
   if (PRIVATE_RE.test(text)) return 'private';
   return 'unknown';
 }
@@ -146,7 +165,9 @@ export function mergeHospitals(lists, today, max = 60, stateName = '', district 
     if (!x) return;
     if (code && !nominatimInState(x, code)) return;
     const sd = x.address && x.address.state_district;
-    if (district && sd && !nameOverlap(sd, district)) return;
+    // another district: its name is not like the picked one, or it IS another LGD district of the
+    // state ("Mumbai Suburban District" overlaps "Mumbai" as text, but is its own district)
+    if (district && sd && (!nameOverlap(sd, district) || (code && otherDistrictOf(code, district, sd)))) return;
     const it = nominatimItem(x, today);
     if (it && !seen.has(it.id)) seen.set(it.id, it);
   });
@@ -254,9 +275,15 @@ export async function fetchHospFree(state, district, opts = {}) {
 // Overpass QL: hospitals / clinics / health centres in the bbox (south,west,north,east). Legacy:
 // only for a caller with no state code; a bbox always needs the state filter after it.
 export const overpassQuery = b =>
-  `[out:json][timeout:25];(nwr["amenity"="hospital"](${b.south},${b.west},${b.north},${b.east});nwr["healthcare"~"^(hospital|centre)$"](${b.south},${b.west},${b.north},${b.east}););out center tags 300;`;
+  `[out:json][timeout:25];(nwr["amenity"="hospital"](${b.south},${b.west},${b.north},${b.east});nwr["healthcare"~"^(hospital|centre)$"](${b.south},${b.west},${b.north},${b.east});wr["landuse"~"^hospital",i]["name"](${b.south},${b.west},${b.north},${b.east}););out center tags 1500;`;
 
-const HOSP_IN_AREA = '(nwr["amenity"="hospital"](area.a);nwr["healthcare"~"^(hospital|centre)$"](area.a););out center tags 300;';
+// Also the named hospital GROUNDS (landuse=hospital, also mistyped "hospital Grounds"): some big
+// public hospitals are mapped only as their campus (Mumbai's "King Edward Memorial Hospital" = KEM:
+// way 113561413, landuse="hospital Grounds", no amenity).
+// Duplicates (the campus + the building, a node + a way) are merged by dedupeNearby. Cap 1500: a
+// metro district holds 300+ rows (300 used to cut the list at an arbitrary point).
+export const HOSP_IN_AREA =
+  '(nwr["amenity"="hospital"](area.a);nwr["healthcare"~"^(hospital|centre)$"](area.a);wr["landuse"~"^hospital",i]["name"](area.a););out center tags 1500;';
 const qv = v => String(v).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 // exact tag values (an indexed lookup; a regex on ISO3166-2 scans every boundary and times out)
 const stateRel = code => `(${isoCodesOf(code).map(c => `rel["ISO3166-2"="${c}"]["admin_level"="4"]["boundary"="administrative"];`).join('')})`;
@@ -266,7 +293,8 @@ const stateRel = code => `(${isoCodesOf(code).map(c => `rel["ISO3166-2"="${c}"][
  * printed first with their bounds (`.b out tags bb`), then every hospital / health centre whose
  * point lies in the boundary (`map_to_area`): never a bounding box, so nothing from a neighbour.
  *   state:     rel admin_level 4 with the state's ISO 3166-2 code
- *   district:  rel ref:LGD:district = code, else admin_level 5 named like the district inside the state
+ *   district:  rel ref:LGD:district = code, else admin_level 5 / 6 / 8 named like the district inside
+ *              the state (a city district is sometimes mapped only as the city: level 6 / 8)
  *   mandal:    rel ref:LGD:subdistrict = code, else admin_level 6 named like the mandal inside the district
  * where = { code, district: { code?, name }?, mandal: { code?, name }? }. '' when nothing to ask.
  */
@@ -275,7 +303,7 @@ export function overpassAreaQuery(where) {
   if (!w.code) return '';
   const st = stateRel(w.code);
   const dist = d =>
-    d.code ? `rel["boundary"="administrative"]["ref:LGD:district"="${Number(d.code)}"]` : `rel(area.st)["boundary"="administrative"]["admin_level"="5"]["name"~"${qv(nameRegex(d.name))}",i]`;
+    d.code ? `rel["boundary"="administrative"]["ref:LGD:district"="${Number(d.code)}"]` : `rel(area.st)["boundary"="administrative"]["admin_level"~"^(5|6|8)$"]["name"~"${qv(nameRegex(d.name))}",i]`;
   const sub = m =>
     m.code ? `rel["boundary"="administrative"]["ref:LGD:subdistrict"="${Number(m.code)}"]` : `rel(area.d)["boundary"="administrative"]["admin_level"="6"]["name"~"${qv(nameRegex(m.name))}",i]`;
   const parts = [`[out:json][timeout:${w.district ? 60 : 90}];`];
@@ -345,12 +373,45 @@ export function parseAreaAnswer(data, code, today, max = 200) {
   const boundary = rel ? { id: rel.id, name: rel.tags.name || '', level: rel.tags.admin_level || '', lgd: rel.tags['ref:LGD:subdistrict'] || rel.tags['ref:LGD:district'] || '' } : null;
   const bbox = rel ? bboxOfBounds(rel.bounds) : null;
   const seen = new Map();
+  const grounds = new Set();
   els.forEach(el => {
     if (BOUNDARY_TAGS(el)) return;
     const it = overpassItem(el, today);
-    if (it && !seen.has(it.id) && (!code || overpassInState(el, it, code))) seen.set(it.id, it);
+    if (it && !seen.has(it.id) && (!code || overpassInState(el, it, code))) {
+      seen.set(it.id, it);
+      const t = el.tags || {};
+      if (/^hospital/i.test(String(t.landuse || '')) && t.amenity !== 'hospital' && !t.healthcare) grounds.add(it.id);
+    }
   });
-  return { boundary, bbox, hospitals: capBySide([...seen.values()], max) };
+  return { boundary, bbox, hospitals: capBySide(dedupeNearby([...seen.values()], grounds), max) };
+}
+
+// "Sion Hospital" mapped twice (a node and the building), or the campus (landuse=hospital) and the
+// hospital inside it: one row. Same name key within ~600 m; the hospital itself (not the grounds)
+// and the row with more details (phone / address) is kept, and its ownership is the stronger of
+// the two ('govt' / 'private' over 'unknown'). (pure: tested)
+const dupKey = n =>
+  String(n || '')
+    .toLowerCase()
+    .replace(/\b(hospital|hospitals|the|and|&|of|memorial|mumbai|ltd|pvt)\b/g, ' ')
+    .replace(/[^a-z0-9]/g, '');
+const near = (a, b) => Math.abs(a.lat - b.lat) < 0.0055 && Math.abs(a.lon - b.lon) < 0.0055;
+const detail = (h, grounds) => (grounds.has(h.id) ? 0 : 4) + (h.phone ? 1 : 0) + (h.address ? 1 : 0) + (h.website ? 1 : 0);
+export function dedupeNearby(items, grounds = new Set()) {
+  const out = [];
+  items.forEach(h => {
+    const k = dupKey(h.name);
+    const i = k.length >= 3 ? out.findIndex(o => dupKey(o.name) === k && near(o, h)) : -1;
+    if (i < 0) {
+      out.push(h);
+      return;
+    }
+    const o = out[i];
+    const keep = detail(h, grounds) > detail(o, grounds) ? h : o;
+    const other = keep === h ? o : h;
+    out[i] = keep.type === 'unknown' && other.type !== 'unknown' ? { ...keep, type: other.type } : keep;
+  });
+  return out;
 }
 
 /**

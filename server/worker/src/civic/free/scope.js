@@ -251,8 +251,21 @@ export function nameVariants(name) {
 }
 export const nameRegex = name => {
   const v = nameVariants(name).map(x => reEsc(x).replace(/ /g, '[ -]?'));
-  return v.length ? `^(${v.join('|')})( (district|mandal|taluka?|tehsil|block|circle))?$` : '';
+  // optional " city" before the level word: the app's "Mumbai" is OSM's "Mumbai City District"
+  return v.length ? `^(${v.join('|')})( city)?( (district|mandal|taluka?|tehsil|block|circle))?$` : '';
 };
+
+/**
+ * The LGD district of the state (other than `picked`) that a Nominatim / OSM district name is,
+ * spelt the same ("Mumbai Suburban District" when Mumbai was picked), or null (pure). A plain
+ * substring check let Mumbai Suburban rows into the Mumbai (City) list.
+ */
+export function otherDistrictOf(stateCode, picked, districtName) {
+  const st = LGD[stateCode];
+  if (!st || !districtName) return null;
+  const hit = Object.values(st.d).find(([, n]) => !sameName(n, picked) && sameName(n, districtName));
+  return hit ? { code: hit[0], name: hit[1] } : null;
+}
 
 /**
  * LGD codes of a picked place (pure). state code, district / mandal slug or name ->

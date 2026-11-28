@@ -1,0 +1,464 @@
+{
+ "note": "Real OpenStreetMap elements (Overpass area query of Mumbai City District, ref:LGD:district=482, fetched 2026-11-27/28), selected rows; ODbL (c) OpenStreetMap contributors",
+ "elements": [
+  {
+   "type": "relation",
+   "id": 7964376,
+   "bounds": {
+    "minlat": 18.8921596,
+    "minlon": 72.7916763,
+    "maxlat": 19.054999,
+    "maxlon": 72.9068144
+   },
+   "tags": {
+    "admin_level": "5",
+    "boundary": "administrative",
+    "name": "Mumbai City District",
+    "name:en": "Mumbai City District",
+    "name:kn": "ಮುಂಬೈ ನಗರ",
+    "name:mr": "मुंबई शहर जिल्हा",
+    "ref:LGD:district": "482",
+    "type": "boundary",
+    "wikidata": "Q2341660",
+    "wikipedia": "en:Mumbai City district"
+   }
+  },
+  {
+   "type": "node",
+   "id": 860315256,
+   "lat": 18.9599377,
+   "lon": 72.8314957,
+   "tags": {
+    "amenity": "hospital",
+    "healthcare": "hospital",
+    "name": "Saifee Ambulance",
+    "source": "GPS"
+   }
+  },
+  {
+   "type": "node",
+   "id": 7043090395,
+   "lat": 19.0190313,
+   "lon": 72.8639666,
+   "tags": {
+    "addr:district": "Mumbai",
+    "addr:full": "4, Margaret House, Opp Indian Oil, Wadala (E)",
+    "addr:postcode": "400037",
+    "addr:state": "Maharashtra",
+    "amenity": "hospital",
+    "name": "Genesis Speciality Center (Health-Check Up",
+    "source": "OpenGovernmentData"
+   }
+  },
+  {
+   "type": "node",
+   "id": 7045291440,
+   "lat": 19.0139586,
+   "lon": 72.8325856,
+   "tags": {
+    "addr:district": "Mumbai",
+    "addr:full": "Ishaan, 1st Floor, Khed Gully, Prabhadevi, Dadar West",
+    "addr:postcode": "400025",
+    "addr:state": "Maharashtra",
+    "amenity": "hospital",
+    "healthcare": "hospital",
+    "name": "Siddivinayak Healthcare Pvt Ltd",
+    "source": "OpenGovernmentData"
+   }
+  },
+  {
+   "type": "node",
+   "id": 7051070010,
+   "lat": 19.0050283,
+   "lon": 72.8225555,
+   "tags": {
+    "addr:district": "Mumbai",
+    "addr:full": "3Road Floor, Sadhana House Behind Mahindra Towers, Pandurang Budhkar Marg, Worli Mumbai",
+    "addr:postcode": "400018",
+    "addr:state": "Maharashtra",
+    "amenity": "hospital",
+    "name": "Reliance Life Sciences Pvt. Ltd",
+    "source": "OpenGovernmentData"
+   }
+  },
+  {
+   "type": "node",
+   "id": 7054423656,
+   "lat": 18.9747946,
+   "lon": 72.8128391,
+   "tags": {
+    "addr:district": "Mumbai",
+    "addr:full": "Between Cross Roads Shopping Centre And Tardeo A/C Market, 50, Tardeo Road",
+    "addr:postcode": "400034",
+    "addr:state": "Maharashtra",
+    "amenity": "hospital",
+    "name": "Shetty Nursing Home (Shetty Health Services Pvt. Ltd.)",
+    "source": "OpenGovernmentData"
+   }
+  },
+  {
+   "type": "node",
+   "id": 7080269652,
+   "lat": 19.0363697,
+   "lon": 72.8427344,
+   "tags": {
+    "addr:district": "Mumbai",
+    "addr:full": "Ganesh Apt. Ground Floor, L. J. Road, Opposite Sitladevi Temple, Mahim",
+    "addr:postcode": "400014",
+    "addr:state": "Maharashtra",
+    "amenity": "hospital",
+    "healthcare": "hospital",
+    "name": "Ashwini Accident Hospital and Poly Clinic",
+    "source": "OpenGovernmentData"
+   }
+  },
+  {
+   "type": "node",
+   "id": 7225067153,
+   "lat": 19.0017314,
+   "lon": 72.816903,
+   "tags": {
+    "addr:district": "Mumbai",
+    "addr:full": "BDD Chawls Worli, behind Poddar Hospital",
+    "addr:postcode": "400018",
+    "addr:state": "Maharashtra",
+    "amenity": "hospital",
+    "name": "ESIS Hospital WORLI",
+    "source": "OpenGovernmentData"
+   }
+  },
+  {
+   "type": "node",
+   "id": 7225067213,
+   "lat": 18.971194,
+   "lon": 72.820968,
+   "tags": {
+    "addr:district": "Mumbai",
+    "addr:full": "55, Dr Anandrao Nair Marg, Near Mumbai Central Railway Station, Mumbai",
+    "addr:postcode": "400008",
+    "addr:state": "Maharashtra",
+    "amenity": "hospital",
+    "description": "Medical Colleges Hospital",
+    "healthcare": "hospital",
+    "name": "Nair Hospital Dental College",
+    "source": "OpenGovernmentData"
+   }
+  },
+  {
+   "type": "node",
+   "id": 7225067271,
+   "lat": 19.0369195,
+   "lon": 72.8582046,
+   "tags": {
+    "addr:district": "Mumbai",
+    "addr:full": "Dr Babasaheb Ambedkar Road, Sion West, Sion",
+    "addr:postcode": "400022",
+    "addr:state": "Maharashtra",
+    "amenity": "hospital",
+    "check_date": "2026-03-20",
+    "description": "Medical Colleges Hospital",
+    "healthcare": "hospital",
+    "name": "L.T.Muncipal Medical College and Sion Hospital",
+    "source": "OpenGovernmentData"
+   }
+  },
+  {
+   "type": "node",
+   "id": 7225067284,
+   "lat": 18.9742153,
+   "lon": 72.8219188,
+   "tags": {
+    "addr:district": "Mumbai",
+    "addr:full": "Dr. A. L. Nair Road, Mumbai",
+    "addr:postcode": "400008",
+    "addr:state": "Maharashtra",
+    "amenity": "hospital",
+    "check_date": "2026-03-20",
+    "description": "Medical Colleges Hospital",
+    "healthcare": "hospital",
+    "name": "BYL Nair hospital",
+    "source": "OpenGovernmentData"
+   }
+  },
+  {
+   "type": "node",
+   "id": 7664032219,
+   "lat": 19.015443,
+   "lon": 72.8261774,
+   "tags": {
+    "addr:district": "Mumbai City",
+    "addr:full": "Old Prabhadevi Road, G-South Ward, Dadar West, Prabhadevi, Mumbai",
+    "addr:postcode": "400025",
+    "addr:state": "Maharastra",
+    "amenity": "hospital",
+    "healthcare": "hospital",
+    "healthcare:speciality": "general",
+    "name": "BMC Hospital",
+    "source": "Local Knowledge"
+   }
+  },
+  {
+   "type": "node",
+   "id": 7664032224,
+   "lat": 19.03978,
+   "lon": 72.840027,
+   "tags": {
+    "addr:district": "Mumbai City",
+    "addr:full": "Welkarwadi BMC Building, LJ Cross Road, Opp.Darga Sarff, Mahim West, Mahim, Mumbai",
+    "addr:postcode": "400016",
+    "addr:state": "Maharastra",
+    "amenity": "hospital",
+    "healthcare": "hospital",
+    "name": "Welkarwadi BMC Hospital",
+    "source": "Local Knowledge"
+   }
+  },
+  {
+   "type": "node",
+   "id": 7664032232,
+   "lat": 19.0363806,
+   "lon": 72.8598664,
+   "tags": {
+    "addr:district": "Mumbai City",
+    "addr:full": "RB2 Central Railway Quarters, Jain Society, Sion, Mumbai",
+    "addr:postcode": "400022",
+    "addr:state": "Maharastra",
+    "amenity": "hospital",
+    "check_date": "2026-03-20",
+    "healthcare": "hospital",
+    "name": "Sion Hospital",
+    "source": "Local Knowledge"
+   }
+  },
+  {
+   "type": "node",
+   "id": 7664032237,
+   "lat": 18.9730222,
+   "lon": 72.8219132,
+   "tags": {
+    "addr:district": "Mumbai City",
+    "addr:full": "43-A/43B, Dr Anandrao Nair Marg, RTO Colony, Mumbai Central, Mumbai",
+    "addr:postcode": "400008",
+    "addr:state": "Maharastra",
+    "amenity": "hospital",
+    "check_date": "2026-03-20",
+    "healthcare": "hospital",
+    "name": "Nair Hospital",
+    "source": "Local Knowledge"
+   }
+  },
+  {
+   "type": "way",
+   "id": 46715024,
+   "center": {
+    "lat": 18.9407819,
+    "lon": 72.8279199
+   },
+   "tags": {
+    "amenity": "hospital",
+    "healthcare": "hospital",
+    "name": "Bombay Hospital",
+    "name:en": "Bombay Hospital",
+    "name:hi": "बॉम्बे हॉस्पिटल",
+    "name:mr": "बॉम्बे हॉस्पिटल",
+    "source": "Yahoo",
+    "wikipedia": "en:Bombay Hospital"
+   }
+  },
+  {
+   "type": "way",
+   "id": 56199740,
+   "center": {
+    "lat": 18.9525375,
+    "lon": 72.8181834
+   },
+   "tags": {
+    "addr:city": "Mumbai",
+    "addr:district": "Mumbai",
+    "addr:full": "15/17, Maharshi Karve Marg",
+    "addr:postcode": "400004",
+    "addr:state": "Maharashtra",
+    "addr:street": "Maharshi Karve Road",
+    "amenity": "hospital",
+    "building": "yes",
+    "email": "write@saifeehospital.com",
+    "emergency": "yes",
+    "healthcare": "hospital",
+    "healthcare:speciality": "general;gynaecology;cardiology;surgery",
+    "name": "Saifee Hospital",
+    "name:en": "Saifee Hospital",
+    "name:etymology:wikidata": "Q7675438",
+    "operator:type": "private",
+    "source": "OpenGovernmentData",
+    "website": "https://www.saifeehospital.com/",
+    "wikidata": "Q7400018",
+    "wikimedia_commons": "Category:Saifee Hospital",
+    "wikipedia": "en:Saifee Hospital"
+   }
+  },
+  {
+   "type": "way",
+   "id": 150485811,
+   "center": {
+    "lat": 18.9715529,
+    "lon": 72.8099417
+   },
+   "tags": {
+    "addr:district": "Mumbai",
+    "addr:full": "15, Near Sophia College, Dr.G.Deshmukh Marg,Pedder Road, Cumballa Hill",
+    "addr:postcode": "400026",
+    "addr:state": "Maharashtra",
+    "addr:street": "Pedder Road (Gopalrao Deshmukh Marg)",
+    "amenity": "hospital",
+    "emergency": "yes",
+    "healthcare": "hospital",
+    "name": "Jaslok Hospital and Research Centre",
+    "name:hi": "जसलोक रुग्णालय",
+    "source": "OpenGovernmentData",
+    "wikidata": "Q6161662",
+    "wikipedia": "en:Jaslok Hospital"
+   }
+  },
+  {
+   "type": "way",
+   "id": 206806614,
+   "center": {
+    "lat": 18.9348027,
+    "lon": 72.831343
+   },
+   "tags": {
+    "addr:district": "Mumbai City",
+    "addr:full": "Maharshi Dadhichi Marg, Azad Maidan, Fort, Mumbai",
+    "addr:postcode": "400001",
+    "addr:state": "Maharastra",
+    "amenity": "hospital",
+    "building": "yes",
+    "healthcare": "hospital",
+    "name": "Atmasingh Jassasingh Bankebihar Municipal ENT Hospital",
+    "old_name": "Bombay City Improvement Trust Building",
+    "source": "Local Knowledge"
+   }
+  },
+  {
+   "type": "way",
+   "id": 207324961,
+   "center": {
+    "lat": 18.9410106,
+    "lon": 72.8274254
+   },
+   "tags": {
+    "addr:city": "Mumbai",
+    "addr:district": "Mumbai",
+    "addr:full": "12, New Marine Lines, Marine Lines",
+    "addr:postcode": "400020",
+    "addr:state": "Maharashtra",
+    "amenity": "hospital",
+    "building": "apartments",
+    "healthcare": "hospital",
+    "name": "Bombay Hospital and Medical Research Center",
+    "operator:type": "private",
+    "source": "OpenGovernmentData",
+    "website": "https://www.bombayhospital.com/",
+    "wikidata": "Q4940562",
+    "wikipedia": "en:Bombay Hospital"
+   }
+  },
+  {
+   "type": "way",
+   "id": 430223744,
+   "center": {
+    "lat": 18.9801469,
+    "lon": 72.8335812
+   },
+   "tags": {
+    "addr:district": "Mumbai",
+    "addr:full": "Dr. B.A.Ambedkar Central Railway Hospital, Opp. Ranibag, BYCULLA MUMBAI",
+    "addr:postcode": "400027",
+    "addr:state": "Maharashtra",
+    "amenity": "hospital",
+    "description": "Civil Hospital/General Hospital",
+    "healthcare": "hospital",
+    "name": "Dr. Babasaheb Ambedkar Memorial Central Railway Hospital",
+    "name:etymology:wikidata": "Q231690",
+    "source": "OpenGovernmentData",
+    "wheelchair": "yes"
+   }
+  },
+  {
+   "type": "way",
+   "id": 803325198,
+   "center": {
+    "lat": 18.9638574,
+    "lon": 72.8347891
+   },
+   "tags": {
+    "addr:city": "Mumbai",
+    "addr:district": "Mumbai City",
+    "addr:postcode": "400008",
+    "addr:state": "Maharastra",
+    "amenity": "hospital",
+    "beds": "2844",
+    "email": "info@ggmcjjh.com",
+    "health_amenity:type": "emergency_department;intensive_care_unit;operating_theater;ultrasound;x_ray",
+    "healthcare": "hospital",
+    "name": "J. J. Hospital",
+    "name:en": "Grant Medical College and Sir Jamshedjee Jeejeebhoy Group of Hospitals",
+    "name:etymology:wikidata": "Q13604560",
+    "phone": "+912223735555",
+    "source": "Local Knowledge",
+    "website": "https://ggmcjjh.com/"
+   }
+  },
+  {
+   "type": "way",
+   "id": 1288781456,
+   "center": {
+    "lat": 18.9002886,
+    "lon": 72.8149856
+   },
+   "tags": {
+    "addr:district": "Mumbai",
+    "addr:full": "Near RC Church, Navy Nagar, Colaba, Mumbai",
+    "addr:postcode": "400005",
+    "addr:state": "Maharashtra",
+    "amenity": "hospital",
+    "healthcare": "hospital",
+    "landuse": "Hospital",
+    "name": "INHS Asvini Naval Hospital",
+    "source": "OpenGovernmentData"
+   }
+  },
+  {
+   "type": "way",
+   "id": 1413471846,
+   "center": {
+    "lat": 19.0348447,
+    "lon": 72.8582306
+   },
+   "tags": {
+    "amenity": "hospital",
+    "check_date": "2026-03-20",
+    "healthcare": "hospital",
+    "name": "Sion Hospital"
+   }
+  },
+  {
+   "type": "way",
+   "id": 113561413,
+   "center": {
+    "lat": 19.0016045,
+    "lon": 72.841986
+   },
+   "tags": {
+    "addr:district": "Mumbai",
+    "addr:full": "National Institute of Immunohaematology, KEM Hospital Campus, Parel, Mumbai",
+    "addr:postcode": "400012",
+    "addr:state": "Maharashtra",
+    "alt_name:en": "KEM Hospital",
+    "landuse": "hospital Grounds",
+    "name": "King Edward Memorial Hospital",
+    "name:etymology:wikidata": "Q20875"
+   }
+  }
+ ]
+}

@@ -173,9 +173,9 @@ describe('civic free: hospitals (OpenStreetMap)', () => {
     expect(r.ok).toBe(true);
     expect(r.place).toBe('Kurnool, Andhra Pradesh');
     expect(r.bbox).toEqual({ south: 15.13, north: 15.96, west: 76.97, east: 78.27 });
-    // 1 area lookup + 3 searches, each search waits >= 1 s
-    expect(urls).toHaveLength(4);
-    expect(gaps).toEqual([1100, 1100, 1100]);
+    // 1 area lookup + 4 searches, each search waits >= 1 s
+    expect(urls).toHaveLength(5);
+    expect(gaps).toEqual([1100, 1100, 1100, 1100]);
     urls.slice(1).forEach(x => {
       const u = new URL(x);
       expect(u.origin + u.pathname).toBe(hosp.NOMINATIM);
@@ -210,7 +210,7 @@ describe('civic free: hospitals (OpenStreetMap)', () => {
     expect(r.ok).toBe(true);
     expect(r.bbox).toBeNull();
     const searches = urls.filter(x => !/India$/.test(new URL(x).searchParams.get('q') || ''));
-    expect(searches.map(x => new URL(x).searchParams.get('q'))).toEqual(['hospital in Kurnool, Andhra Pradesh', 'government hospital in Kurnool, Andhra Pradesh', 'primary health centre in Kurnool, Andhra Pradesh']);
+    expect(searches.map(x => new URL(x).searchParams.get('q'))).toEqual(['hospital in Kurnool, Andhra Pradesh', 'government hospital in Kurnool, Andhra Pradesh', 'municipal hospital in Kurnool, Andhra Pradesh', 'primary health centre in Kurnool, Andhra Pradesh']);
     searches.forEach(x => expect(new URL(x).searchParams.get('viewbox')).toBeNull());
   });
 

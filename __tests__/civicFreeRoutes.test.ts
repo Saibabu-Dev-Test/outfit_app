@@ -334,7 +334,7 @@ describe('Hospitals from free sources (no AI)', () => {
     const nomCalls = calls.filter(c => c.url.includes('nominatim'));
     expect(nomCalls.every(c => !/India$/.test(new URL(c.url).searchParams.get('q') || ''))).toBe(true);
     expect(nomCalls).toHaveLength(hosp.HOSP_QUERIES.length);
-    expect(gaps).toEqual([1100, 1100]); // 1 req/s between searches, none before the first
+    expect(gaps).toEqual(hosp.HOSP_QUERIES.slice(1).map(() => 1100)); // 1 req/s between searches, none before the first
   });
 
   it('AI paused: hospitals still ready from free sources (never paused)', async () => {
